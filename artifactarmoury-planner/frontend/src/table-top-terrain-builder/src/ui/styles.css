@@ -1,0 +1,44 @@
+.tb-root {
+  --tb-bg: #0b0f14;
+  --tb-panel: #101721;
+  --tb-text: #e6eef7;
+  --tb-border: #1b2532;
+  --tb-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  background: var(--tb-bg);
+  color: var(--tb-text);
+  font-family: var(--tb-font);
+  overflow: hidden;
+}
+
+.tb-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  padding: 18px;
+  background: var(--tb-panel);
+  border-right: 1px solid var(--tb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.tb-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #06090d;
+}
+
+.tb-canvas-wrap {
+  position: absolute;
+  inset: 72px 0 0 0;
+}
+
+.tb-stage header {
+  z-index: 5;
+}
