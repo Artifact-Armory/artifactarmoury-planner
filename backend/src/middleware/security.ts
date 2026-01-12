@@ -165,13 +165,16 @@ export const generalRateLimit = rateLimit({
  */
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 15),
   skipSuccessfulRequests: true,
   message: 'Too many login attempts, please try again later',
   handler: rateLimitHandler,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => `ip:${req.ip}`,
+  skip: (req) =>
+    process.env.NODE_ENV === 'development' ||
+    process.env.DISABLE_AUTH_RATE_LIMIT === 'true',
   ...(redisClient && {
     store: new RedisStore({
       // @ts-expect-error

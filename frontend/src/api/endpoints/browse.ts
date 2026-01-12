@@ -1,169 +1,94 @@
-import apiClient from '../client';
-import { 
-  ApiResponse, 
+import apiClient from '../client'
+import {
   Category,
   Tag,
   SearchFilters,
   SearchResponse,
-  TerrainModel
-} from '../types';
+  TerrainModel,
+  Pagination,
+} from '../types'
+import { mapModelRecord } from '../transformers'
 
-const BASE_URL = '/api/browse';
+const BASE_URL = '/api/browse'
+
+const toPagination = (raw?: Record<string, any>): Pagination => ({
+  page: Number(raw?.page ?? 1),
+  limit: Number(raw?.limit ?? 0),
+  totalItems: Number(raw?.total ?? raw?.totalItems ?? 0),
+  totalPages: Number(raw?.totalPages ?? raw?.pages ?? 0),
+})
+
+const parseModelList = (rows: any[] | undefined): TerrainModel[] =>
+  (rows ?? []).map((model) => mapModelRecord(model))
+
+const buildSearchResponse = (payload: any): SearchResponse => ({
+  models: parseModelList(payload?.models),
+  pagination: toPagination(payload?.pagination),
+})
 
 export const browseApi = {
-  /**
-   * Search models with filters
-   */
-  searchModels: async (filters: SearchFilters): Promise<ApiResponse<SearchResponse>> => {
-    const response = await apiClient.get<ApiResponse<SearchResponse>>(`${BASE_URL}/search`, {
-      params: filters,
-    });
-    return response.data;
+  searchModels: async (filters: SearchFilters = {}): Promise<SearchResponse> => {
+    const response = await apiClient.get(`${BASE_URL}`, { params: filters })
+    return buildSearchResponse(response.data)
   },
 
-  /**
-   * Get featured models for homepage
-   */
-  getFeaturedModels: async (limit = 8): Promise<ApiResponse<TerrainModel[]>> => {
-    const response = await apiClient.get<ApiResponse<TerrainModel[]>>(`${BASE_URL}/featured`, {
-      params: { limit },
-    });
-    return response.data;
+  getFeaturedModels: async (limit = 8): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/featured`, { params: { limit } })
+    return parseModelList(response.data?.featured)
   },
 
-  /**
-   * Get newest models
-   */
-  getNewestModels: async (limit = 12): Promise<ApiResponse<TerrainModel[]>> => {
-    const response = await apiClient.get<ApiResponse<TerrainModel[]>>(`${BASE_URL}/newest`, {
-      params: { limit },
-    });
-    return response.data;
+  getNewArrivals: async (limit = 12): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/new`, { params: { limit } })
+    return parseModelList(response.data?.newArrivals)
   },
 
-  /**
-   * Get popular models
-   */
-  getPopularModels: async (limit = 12): Promise<ApiResponse<TerrainModel[]>> => {
-    const response = await apiClient.get<ApiResponse<TerrainModel[]>>(`${BASE_URL}/popular`, {
-      params: { limit },
-    });
-    return response.data;
+  getTrendingModels: async (limit = 12): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/trending`, { params: { limit } })
+    return parseModelList(response.data?.trending)
   },
 
-  /**
-   * Get all categories
-   */
-  getAllCategories: async (): Promise<ApiResponse<Category[]>> => {
-    const response = await apiClient.get<ApiResponse<Category[]>>(`${BASE_URL}/categories`);
-    return response.data;
+  getCategories: async (): Promise<Category[]> => {
+    const response = await apiClient.get(`${BASE_URL}/categories`)
+    return (response.data?.categories ?? []).map((category: any) => ({
+      id: category.category,
+      name: category.category,
+      category: category.category,
+      modelCount: Number(category.model_count ?? category.modelCount ?? 0),
+    }))
   },
 
-  /**
-   * Get a category by ID
-   */
-  getCategoryById: async (id: string): Promise<ApiResponse<Category>> => {
-    const response = await apiClient.get<ApiResponse<Category>>(`${BASE_URL}/categories/${id}`);
-    return response.data;
+  getTags: async (limit = 50): Promise<Tag[]> => {
+    const response = await apiClient.get(`${BASE_URL}/tags`, { params: { limit } })
+    return (response.data?.tags ?? []).map((tag: any) => ({
+      id: tag.tag,
+      tag: tag.tag,
+      usageCount: Number(tag.usage_count ?? tag.usageCount ?? 0),
+    }))
   },
 
-  /**
-   * Get models by category
-   */
+  getSuggestions: async (query: string, limit = 5): Promise<string[]> => {
+    if (!query) return []
+    const response = await apiClient.get(`${BASE_URL}/suggestions`, {
+      params: { q: query, limit },
+    })
+    return response.data?.suggestions ?? []
+  },
+
   getModelsByCategory: async (
-    categoryId: string, 
-    page = 1, 
+    categoryId: string,
+    page = 1,
     limit = 20,
-    sort: 'newest' | 'popular' | 'price_low' | 'price_high' = 'popular'
-  ): Promise<ApiResponse<SearchResponse>> => {
-    const response = await apiClient.get<ApiResponse<SearchResponse>>(
-      `${BASE_URL}/categories/${categoryId}/models`,
-      {
-        params: { page, limit, sort },
-      }
-    );
-    return response.data;
+    sortBy: SearchFilters['sortBy'] = 'popular',
+  ): Promise<SearchResponse> => {
+    return browseApi.searchModels({ category: categoryId, page, limit, sortBy })
   },
 
-  /**
-   * Get all tags
-   */
-  getAllTags: async (): Promise<ApiResponse<Tag[]>> => {
-    const response = await apiClient.get<ApiResponse<Tag[]>>(`${BASE_URL}/tags`);
-    return response.data;
-  },
-
-  /**
-   * Get popular tags
-   */
-  getPopularTags: async (limit = 20): Promise<ApiResponse<Tag[]>> => {
-    const response = await apiClient.get<ApiResponse<Tag[]>>(`${BASE_URL}/tags/popular`, {
-      params: { limit },
-    });
-    return response.data;
-  },
-
-  /**
-   * Get models by tag
-   */
   getModelsByTag: async (
-    tagId: string, 
-    page = 1, 
+    tag: string,
+    page = 1,
     limit = 20,
-    sort: 'newest' | 'popular' | 'price_low' | 'price_high' = 'popular'
-  ): Promise<ApiResponse<SearchResponse>> => {
-    const response = await apiClient.get<ApiResponse<SearchResponse>>(
-      `${BASE_URL}/tags/${tagId}/models`,
-      {
-        params: { page, limit, sort },
-      }
-    );
-    return response.data;
+    sortBy: SearchFilters['sortBy'] = 'popular',
+  ): Promise<SearchResponse> => {
+    return browseApi.searchModels({ tags: tag, page, limit, sortBy })
   },
-
-  /**
-   * Get models filtered by file format
-   */
-  getModelsByFileFormat: async (
-    format: 'obj' | 'fbx' | 'blend' | 'unity' | 'unreal',
-    page = 1, 
-    limit = 20,
-    sort: 'newest' | 'popular' | 'price_low' | 'price_high' = 'popular'
-  ): Promise<ApiResponse<SearchResponse>> => {
-    const response = await apiClient.get<ApiResponse<SearchResponse>>(
-      `${BASE_URL}/format/${format}`,
-      {
-        params: { page, limit, sort },
-      }
-    );
-    return response.data;
-  },
-
-  /**
-   * Get a specific tag by ID
-   */
-  getTagById: async (id: string): Promise<ApiResponse<Tag>> => {
-    const response = await apiClient.get<ApiResponse<Tag>>(`${BASE_URL}/tags/${id}`);
-    return response.data;
-  },
-
-  /**
-   * Search for tags by name (for autocomplete)
-   */
-  searchTags: async (query: string, limit = 10): Promise<ApiResponse<Tag[]>> => {
-    const response = await apiClient.get<ApiResponse<Tag[]>>(`${BASE_URL}/tags/search`, {
-      params: { query, limit },
-    });
-    return response.data;
-  },
-
-  /**
-   * Get suggested search terms (for autocomplete)
-   */
-  getSuggestedSearchTerms: async (query: string, limit = 5): Promise<ApiResponse<string[]>> => {
-    const response = await apiClient.get<ApiResponse<string[]>>(`${BASE_URL}/suggestions`, {
-      params: { query, limit },
-    });
-    return response.data;
-  },
-};
+}

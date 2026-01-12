@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
-import { Toaster } from 'react-hot-toast';
+import CartDrawer from '../cart/CartDrawer';
 
 const MainLayout: React.FC = () => {
   const location = useLocation();
@@ -21,30 +21,8 @@ const MainLayout: React.FC = () => {
       </main>
       
       <Footer />
-      
-      {/* Toast notifications */}
-      <Toaster 
-        position="top-center"
-        toastOptions={{
-          duration: 5000,
-          style: {
-            background: '#FFFFFF',
-            color: '#1F2937',
-          },
-          success: {
-            iconTheme: {
-              primary: '#10B981',
-              secondary: '#FFFFFF',
-            },
-          },
-          error: {
-            iconTheme: {
-              primary: '#EF4444',
-              secondary: '#FFFFFF',
-            },
-          },
-        }}
-      />
+
+      <CartDrawer />
     </div>
   );
 };

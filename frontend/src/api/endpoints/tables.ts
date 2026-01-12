@@ -1,213 +1,131 @@
-import apiClient from '../client';
-import { 
-  ApiResponse, 
-  TableLayout,
-  TableLayoutCreateRequest,
-  UploadResponse
-} from '../types';
+import apiClient from '../client'
+import { ApiResponse, SaveTablePayload, TableLayout } from '../types'
 
-const BASE_URL = '/api/tables';
+const BASE_URL = '/api/tables'
+
+const mapTable = (table: any): TableLayout => ({
+  id: table.id,
+  userId: table.user_id ?? null,
+  userEmail: table.user_email ?? table.userEmail ?? null,
+  name: table.name,
+  description: table.description ?? undefined,
+  tableConfig: table.table_config ?? {
+    width: table.width ?? 1200,
+    depth: table.depth ?? 900,
+    grid_size: table.table_config?.grid_size ?? 50,
+    background_color: table.table_config?.background_color,
+    grid_color: table.table_config?.grid_color
+  },
+  layoutData: table.layout_data ?? table.layout ?? { models: [] },
+  shareToken: table.share_token ?? table.shareCode,
+  shareCode: table.share_code ?? table.share_token,
+  isPublic: Boolean(table.is_public),
+  viewCount: table.view_count ?? 0,
+  cloneCount: table.clone_count ?? 0,
+  status: table.status ?? undefined,
+  plan: table.plan ?? undefined,
+  maxAssets: table.max_assets ?? undefined,
+  createdAt: table.created_at ?? table.createdAt,
+  updatedAt: table.updated_at ?? table.updatedAt
+})
+
+const toServerPayload = (payload: Partial<SaveTablePayload>) => ({
+  name: payload.name,
+  description: payload.description,
+  table_config: payload.tableConfig,
+  layout_data: payload.layoutData,
+  is_public: payload.isPublic,
+  user_id: payload.userId,
+  user_email: payload.userEmail,
+  session_id: payload.sessionId
+})
+
+const unwrap = <T>(response: ApiResponse<T> | T): T =>
+  (response && 'data' in response && response.data !== undefined ? response.data : response) as T
 
 export const tablesApi = {
-  /**
-   * Get a table layout by ID
-   */
-  getTableById: async (id: string): Promise<ApiResponse<TableLayout>> => {
-    const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`);
-    return response.data;
+  async getById(id: string, params?: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, {
+      params: {
+        user_id: params?.userId,
+        user_email: params?.userEmail
+      }
+    })
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Create a new table layout
-   */
-  createTable: async (data: TableLayoutCreateRequest): Promise<ApiResponse<TableLayout>> => {
-    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}`, data);
-    return response.data;
+  async getSharedTable(token: string) {
+    const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/shared/${token}`)
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Update an existing table layout
-   */
-  updateTable: async (id: string, data: Partial<TableLayoutCreateRequest>): Promise<ApiResponse<TableLayout>> => {
-    const response = await apiClient.put<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, data);
-    return response.data;
+  async getUserTables(identifier: string, page = 1, limit = 20) {
+    const response = await apiClient.get<ApiResponse<any>>(`${BASE_URL}/user/${identifier}`, {
+      params: { page, limit }
+    })
+    const payload = unwrap(response.data ?? (response as any)) as any
+    return {
+      tables: (payload.tables ?? payload.data ?? []).map(mapTable),
+      total: payload.total ?? payload.totalCount ?? 0,
+      page: payload.page ?? 1,
+      totalPages: payload.total_pages ?? payload.totalPages ?? 1
+    }
   },
 
-  /**
-   * Delete a table layout
-   */
-  deleteTable: async (id: string): Promise<ApiResponse<null>> => {
-    const response = await apiClient.delete<ApiResponse<null>>(`${BASE_URL}/${id}`);
-    return response.data;
-  },
-
-  /**
-   * Get public table layouts with pagination
-   */
-  getPublicTables: async (
-    page = 1, 
-    limit = 20,
-    sort: 'newest' | 'popular' = 'popular'
-  ): Promise<ApiResponse<{
-    tables: TableLayout[];
-    totalCount: number;
-    page: number;
-    totalPages: number;
-  }>> => {
-    const response = await apiClient.get<ApiResponse<{
-      tables: TableLayout[];
-      totalCount: number;
-      page: number;
-      totalPages: number;
-    }>>(`${BASE_URL}/public`, {
+  async getPublicTables(page = 1, limit = 20, sort: 'recent' | 'updated' = 'recent') {
+    const response = await apiClient.get<ApiResponse<any>>(`${BASE_URL}/public/list`, {
       params: { page, limit, sort }
-    });
-    return response.data;
+    })
+    const payload = unwrap(response.data ?? (response as any)) as any
+    return {
+      tables: (payload.tables ?? payload.data ?? []).map(mapTable),
+      total: payload.total ?? payload.totalCount ?? 0,
+      page: payload.page ?? 1,
+      totalPages: payload.total_pages ?? payload.totalPages ?? 1
+    }
   },
 
-  /**
-   * Get featured table layouts
-   */
-  getFeaturedTables: async (limit = 6): Promise<ApiResponse<TableLayout[]>> => {
-    const response = await apiClient.get<ApiResponse<TableLayout[]>>(`${BASE_URL}/featured`, {
-      params: { limit }
-    });
-    return response.data;
+  async createTable(payload: SaveTablePayload) {
+    const response = await apiClient.post<ApiResponse<TableLayout>>(BASE_URL, toServerPayload(payload))
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Get the current user's table layouts
-   */
-  getMyTables: async (
-    page = 1, 
-    limit = 20
-  ): Promise<ApiResponse<{
-    tables: TableLayout[];
-    totalCount: number;
-    page: number;
-    totalPages: number;
-  }>> => {
-    const response = await apiClient.get<ApiResponse<{
-      tables: TableLayout[];
-      totalCount: number;
-      page: number;
-      totalPages: number;
-    }>>(`${BASE_URL}/my`, {
-      params: { page, limit }
-    });
-    return response.data;
+  async updateTable(id: string, payload: Partial<SaveTablePayload>) {
+    const response = await apiClient.put<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, toServerPayload(payload))
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Get a user's public table layouts
-   */
-  getUserTables: async (
-    userId: string,
-    page = 1, 
-    limit = 20
-  ): Promise<ApiResponse<{
-    tables: TableLayout[];
-    totalCount: number;
-    page: number;
-    totalPages: number;
-  }>> => {
-    const response = await apiClient.get<ApiResponse<{
-      tables: TableLayout[];
-      totalCount: number;
-      page: number;
-      totalPages: number;
-    }>>(`${BASE_URL}/user/${userId}`, {
-      params: { page, limit }
-    });
-    return response.data;
-  },
-
-  /**
-   * Upload table layout thumbnail
-   */
-  uploadTableThumbnail: async (tableId: string, file: File): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post<ApiResponse<UploadResponse>>(
-      `${BASE_URL}/${tableId}/thumbnail`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+  async deleteTable(id: string, payload: { userId?: string; userEmail?: string }) {
+    await apiClient.delete(`${BASE_URL}/${id}`, {
+      data: {
+        user_id: payload.userId,
+        user_email: payload.userEmail
       }
-    );
-    return response.data;
+    })
   },
 
-  /**
-   * Upload table layout preview image
-   */
-  uploadTablePreviewImage: async (tableId: string, file: File): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post<ApiResponse<UploadResponse>>(
-      `${BASE_URL}/${tableId}/preview-images`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
-    );
-    return response.data;
+  async toggleVisibility(id: string, payload: { userId?: string; userEmail?: string; isPublic: boolean }) {
+    const response = await apiClient.patch<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/visibility`, {
+      user_id: payload.userId,
+      user_email: payload.userEmail,
+      is_public: payload.isPublic
+    })
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Like a table layout
-   */
-  likeTable: async (tableId: string): Promise<ApiResponse<null>> => {
-    const response = await apiClient.post<ApiResponse<null>>(`${BASE_URL}/${tableId}/like`);
-    return response.data;
+  async duplicate(id: string, payload: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/duplicate`, {
+      user_id: payload.userId,
+      user_email: payload.userEmail
+    })
+    return mapTable(unwrap(response.data ?? (response as any)))
   },
 
-  /**
-   * Unlike a table layout
-   */
-  unlikeTable: async (tableId: string): Promise<ApiResponse<null>> => {
-    const response = await apiClient.delete<ApiResponse<null>>(`${BASE_URL}/${tableId}/like`);
-    return response.data;
-  },
-
-  /**
-   * Check if user has liked a table layout
-   */
-  hasLikedTable: async (tableId: string): Promise<ApiResponse<{liked: boolean}>> => {
-    const response = await apiClient.get<ApiResponse<{liked: boolean}>>(`${BASE_URL}/${tableId}/like`);
-    return response.data;
-  },
-
-  /**
-   * Clone a public table layout
-   */
-  cloneTable: async (tableId: string, name?: string): Promise<ApiResponse<TableLayout>> => {
-    const response = await apiClient.post<ApiResponse<TableLayout>>(
-      `${BASE_URL}/${tableId}/clone`, 
-      { name }
-    );
-    return response.data;
-  },
-
-  /**
-   * Export a table layout to various formats
-   */
-  exportTable: async (
-    tableId: string, 
-    format: 'obj' | 'fbx' | 'glb' | 'unity' | 'unreal'
-  ): Promise<ApiResponse<{ exportUrl: string; expiresAt: number }>> => {
-    const response = await apiClient.get<ApiResponse<{ exportUrl: string; expiresAt: number }>>(
-      `${BASE_URL}/${tableId}/export`,
-      {
-        params: { format }
-      }
-    );
-    return response.data;
-  },
-};
+  async regenerateShareCode(id: string, payload: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/regenerate-token`, {
+      user_id: payload.userId,
+      user_email: payload.userEmail
+    })
+    return mapTable(unwrap(response.data ?? (response as any)))
+  }
+}

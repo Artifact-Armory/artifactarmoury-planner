@@ -3,12 +3,13 @@
 
 import { Router } from 'express';
 import { db } from '../db';
-import { logger } from '../utils/logger';
-import { 
-  authenticate, 
-  requireArtist, 
+import logger from '../utils/logger';
+import {
+  authenticate,
+  requireArtist,
   requireModelOwnership,
-  optionalAuth 
+  optionalAuth,
+  AuthRequest,
 } from '../middleware/auth';
 import { 
   uploadModelWithThumbnail, 
@@ -24,8 +25,19 @@ import { ValidationError, NotFoundError, AuthorizationError } from '../middlewar
 import { processSTL, generateGLB } from '../services/fileProcessor';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
+import {
+  MockModel,
+  addMockModel,
+  createMockModelId,
+  findMockModel,
+  updateMockModel,
+  listMockModels,
+} from '../mock/mockModels';
 
 const router = Router();
+const IS_MOCK_DB = process.env.DB_MOCK === 'true';
+
+const DEFAULT_LICENSE = 'standard';
 
 // ============================================================================
 // CREATE MODEL
@@ -78,11 +90,11 @@ router.post('/',
 
     try {
       // Process STL file
-      logger.info('Processing STL file', { userId: req.userId, filename: modelFile.filename });
+      logger.info('Processing STL file', { userId: (req as any).userId, filename: modelFile.filename });
       const stlData = await processSTL(modelFile.path);
 
       // Generate GLB for 3D preview
-      logger.info('Generating GLB preview', { userId: req.userId });
+      logger.info('Generating GLB preview', { userId: (req as any).userId });
       const glbPath = await generateGLB(modelFile.path);
 
       // Upload files to storage
@@ -96,9 +108,11 @@ router.post('/',
 
       // Estimate print cost
       const printEstimate = estimatePrintCost({
-        volume: stlData.volume,
-        surfaceArea: stlData.surfaceArea,
-        dimensions: stlData.dimensions
+        volume_mm3: stlData.volume,
+        surface_area_mm2: stlData.surfaceArea,
+        estimated_weight_g: undefined,
+        estimated_print_time_minutes: undefined,
+        triangle_count: undefined,
       });
 
       // Parse tags
@@ -109,6 +123,47 @@ router.post('/',
         } else if (Array.isArray(tags)) {
           tagsArray = tags;
         }
+      }
+
+      if (IS_MOCK_DB) {
+        const mockId = createMockModelId();
+        const createdAt = new Date().toISOString();
+        const mockEntry: MockModel = {
+          id: mockId,
+          name,
+          description: description || null,
+          category,
+          tags: tagsArray,
+          stlFilePath: stlStoragePath,
+          glbFilePath: glbStoragePath,
+          thumbnailPath: thumbnailStoragePath,
+          license: DEFAULT_LICENSE,
+          price,
+          createdAt,
+          status: 'draft',
+          visibility: 'private',
+          inLibrary: false,
+        };
+
+        const userId = (req as any).userId as string;
+        addMockModel(userId, mockEntry);
+
+        logger.info('Mock model created', {
+          userId,
+          modelId: mockId,
+          name,
+        });
+
+        res.status(201).json({
+          message: 'Model created successfully (mock mode)',
+          model: {
+            id: mockId,
+            name,
+            status: 'draft',
+            createdAt,
+          },
+        });
+        return;
       }
 
       // Create model in database
@@ -123,7 +178,7 @@ router.post('/',
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'draft')
         RETURNING id, name, created_at`,
         [
-          req.userId,
+          (req as any).userId,
           name,
           description || null,
           category,
@@ -135,8 +190,8 @@ router.post('/',
           stlData.dimensions.y,
           stlData.dimensions.z,
           price,
-          printEstimate.estimatedTime,
-          printEstimate.estimatedCost,
+          Math.round(printEstimate.estimated_time_hours * 60),
+          Number(printEstimate.total_cost.toFixed(2)),
           stlData.needsSupports,
           0.2, // Default layer height
           20,  // Default infill
@@ -149,11 +204,11 @@ router.post('/',
       await db.query(
         `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata)
          VALUES ($1, 'model.created', 'model', $2, $3)`,
-        [req.userId, model.id, JSON.stringify({ name: model.name })]
+        [(req as any).userId, model.id, JSON.stringify({ name: model.name })]
       );
 
       logger.info('Model created', { 
-        userId: req.userId, 
+        userId: (req as any).userId, 
         modelId: model.id, 
         name: model.name 
       });
@@ -173,7 +228,7 @@ router.post('/',
       await deleteUploadedFile(modelFile.path);
       if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
       
-      logger.error('Failed to create model', { error, userId: req.userId });
+      logger.error('Failed to create model', { error, userId: (req as any).userId });
       throw error;
     }
   }),
@@ -190,10 +245,57 @@ router.get('/my-models',
   asyncHandler(async (req, res) => {
     const { status, page = 1, limit = 20 } = req.query;
 
+    if (IS_MOCK_DB) {
+      const userId = (req as any).userId as string;
+      const allModels = listMockModels(userId);
+
+      const filtered = typeof status === 'string'
+        ? allModels.filter((model) => model.status === status)
+        : allModels;
+
+      const start = (Number(page) - 1) * Number(limit);
+      const paged = filtered.slice(start, start + Number(limit));
+
+      res.json({
+        models: paged.map((model) => ({
+          id: model.id,
+          artist_id: userId,
+          name: model.name,
+          description: model.description,
+          category: model.category,
+          tags: model.tags,
+          thumbnail_path: model.thumbnailPath,
+          glb_file_path: model.glbFilePath,
+          base_price: model.price,
+          status: model.status,
+          visibility: model.visibility,
+          in_library: model.inLibrary,
+          view_count: 0,
+          download_count: 0,
+          sale_count: 0,
+          width: null,
+          height: null,
+          depth: null,
+          created_at: model.createdAt,
+          updated_at: model.createdAt,
+          published_at: model.status === 'published' ? model.createdAt : null,
+          review_count: 0,
+          average_rating: 0,
+        })),
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total: filtered.length,
+          pages: Math.ceil(filtered.length / Number(limit)) || 1,
+        },
+      });
+      return;
+    }
+
     const offset = (Number(page) - 1) * Number(limit);
     
     let whereClause = 'WHERE artist_id = $1';
-    const params: any[] = [req.userId];
+    const params: any[] = [(req as any).userId];
 
     if (status) {
       whereClause += ' AND status = $2';
@@ -210,8 +312,9 @@ router.get('/my-models',
     // Get models
     const result = await db.query(
       `SELECT 
-        m.id, m.name, m.description, m.category, m.tags,
-        m.thumbnail_path, m.base_price, m.status, m.visibility,
+        m.id, m.artist_id, m.name, m.description, m.category, m.tags,
+        m.thumbnail_path, m.glb_file_path, m.base_price, m.status, m.visibility,
+        m.in_library,
         m.view_count, m.download_count, m.sale_count,
         m.width, m.height, m.depth,
         m.created_at, m.updated_at, m.published_at,
@@ -247,6 +350,49 @@ router.get('/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
+    if (IS_MOCK_DB) {
+      const userId = (req as any).userId as string | undefined;
+      const allModels = listMockModels();
+      const model = allModels.find((m) => m.id === id);
+
+      if (!model) {
+        throw new NotFoundError('Model');
+      }
+
+      if (model.status !== 'published') {
+        if (!userId) {
+          throw new NotFoundError('Model');
+        }
+        const owned = listMockModels(userId).some((m) => m.id === id);
+        const isAdmin = (req as any).user?.role === 'admin';
+        if (!owned && !isAdmin) {
+          throw new NotFoundError('Model');
+        }
+      }
+
+      res.json({
+        model: {
+          ...model,
+          stl_file_path: model.stlFilePath,
+          glb_file_path: model.glbFilePath,
+          thumbnail_path: model.thumbnailPath,
+          license: model.license,
+          visibility: model.visibility,
+          in_library: model.inLibrary,
+          images: [],
+          recentReviews: [],
+          artist_name: 'Mock Artist',
+          artist_bio: null,
+          artist_url: null,
+          creator_verified: true,
+          verification_badge: 'Mock',
+          review_count: 0,
+          average_rating: 0,
+        },
+      });
+      return;
+    }
+
     const result = await db.query(
       `SELECT 
         m.*,
@@ -269,7 +415,7 @@ router.get('/:id',
 
     // Check visibility permissions
     if (model.status !== 'published' || model.visibility !== 'public') {
-      if (!req.userId || (req.userId !== model.artist_id && req.user?.role !== 'admin')) {
+      if (!(req as any).userId || ((req as any).userId !== model.artist_id && (req as any).user?.role !== 'admin')) {
         throw new NotFoundError('Model');
       }
     }
@@ -357,7 +503,7 @@ router.patch('/:id',
       updateValues
     );
 
-    logger.info('Model updated', { userId: req.userId, modelId: id });
+    logger.info('Model updated', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model updated successfully',
@@ -376,6 +522,36 @@ router.post('/:id/publish',
   requireModelOwnership,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+
+    if (IS_MOCK_DB) {
+      const lookup = findMockModel(id);
+      if (!lookup) {
+        throw new NotFoundError('Model');
+      }
+
+      const { model } = lookup;
+
+      if (!model.thumbnailPath) {
+        throw new ValidationError('Model must have a thumbnail before publishing');
+      }
+
+      if (!model.description || model.description.length < 20) {
+        throw new ValidationError('Model must have a description (minimum 20 characters)');
+      }
+
+      updateMockModel(id, (draft) => {
+        draft.status = 'published';
+        draft.visibility = 'public';
+      });
+
+      logger.info('Mock model published', { userId: (req as any).userId, modelId: id });
+
+      res.json({
+        message: 'Model published successfully',
+        modelId: id,
+      });
+      return;
+    }
 
     // Verify model is complete enough to publish
     const modelResult = await db.query(
@@ -408,7 +584,7 @@ router.post('/:id/publish',
       [id]
     );
 
-    logger.info('Model published', { userId: req.userId, modelId: id });
+    logger.info('Model published', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model published successfully',
@@ -428,19 +604,260 @@ router.post('/:id/unpublish',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
+    if (IS_MOCK_DB) {
+      const updated = updateMockModel(id, (draft) => {
+        draft.status = 'draft';
+        draft.visibility = 'private';
+        draft.inLibrary = false;
+      });
+
+      if (!updated) {
+        throw new NotFoundError('Model');
+      }
+
+      logger.info('Mock model unpublished', { userId: (req as any).userId, modelId: id });
+
+      res.json({
+        message: 'Model unpublished successfully',
+        modelId: id,
+      });
+      return;
+    }
+
     await db.query(
       `UPDATE models 
-       SET status = 'draft', visibility = 'private'
+       SET status = 'draft', visibility = 'private', in_library = false
        WHERE id = $1`,
       [id]
     );
 
-    logger.info('Model unpublished', { userId: req.userId, modelId: id });
+    logger.info('Model unpublished', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model unpublished successfully',
       modelId: id
     });
+  })
+);
+
+// ============================================================================
+// ADD MODEL TO BUILDER LIBRARY
+// ============================================================================
+
+router.post('/:id/library',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { id } = req.params;
+
+    if (IS_MOCK_DB) {
+      const lookup = findMockModel(id);
+      if (!lookup) {
+        throw new NotFoundError('Model');
+      }
+
+      const { ownerId, model } = lookup;
+      const isOwner = req.userId === ownerId;
+      const isAdmin = req.user?.role === 'admin';
+      const isPublished = model.status === 'published' && model.visibility === 'public';
+
+      if (!isPublished && !isOwner && !isAdmin) {
+        throw new AuthorizationError('This model is not available in the public catalogue.');
+      }
+
+      if (!model.glbFilePath) {
+        throw new ValidationError('Generate a 3D preview before adding this model to the asset library');
+      }
+
+      if (model.inLibrary) {
+        res.json({
+          message: 'Model already available in the asset library',
+          asset: {
+            id: `mock-asset-${model.id}`,
+            status: 'published',
+            visibility: model.visibility,
+          },
+          alreadyInLibrary: true,
+          inLibrary: true,
+        });
+        return;
+      }
+
+      updateMockModel(id, (draft) => {
+        draft.inLibrary = true;
+      });
+
+      logger.info('Mock model added to asset library', {
+        userId: req.userId,
+        modelId: id,
+      });
+
+      res.status(200).json({
+        message: 'Model added to asset library (mock mode)',
+        asset: {
+          id: `mock-asset-${model.id}`,
+          status: 'published',
+          visibility: model.visibility,
+        },
+        alreadyInLibrary: false,
+        inLibrary: true,
+      });
+      return;
+    }
+
+    const result = await db.query(
+      `SELECT 
+         id,
+         artist_id,
+         name,
+         description,
+         category,
+         tags,
+         stl_file_path,
+         glb_file_path,
+         thumbnail_path,
+         base_price,
+         status,
+         visibility,
+         width,
+         depth,
+         height,
+         published_at,
+         in_library
+       FROM models
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Model');
+    }
+
+    const model = result.rows[0];
+
+    if (model.in_library) {
+      res.json({
+        message: 'Model already added to the asset library',
+        asset: { id, modelId: id },
+        alreadyInLibrary: true
+      });
+      return;
+    }
+
+    if (model.status !== 'published') {
+      throw new ValidationError('Publish the model before adding it to the asset library');
+    }
+
+    if (model.visibility !== 'public') {
+      throw new ValidationError('Model must be public to use it in the asset library');
+    }
+
+    if (!model.glb_file_path) {
+      throw new ValidationError('Generate a 3D preview before adding this model to the asset library');
+    }
+
+    const client = await db.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const publishedAt = model.published_at ?? new Date();
+
+      const assetResult = await client.query(
+        `INSERT INTO assets (
+           model_id,
+           artist_id,
+           name,
+           description,
+           category,
+           tags,
+           file_ref,
+           glb_file_path,
+           preview_url,
+           thumbnail_path,
+           base_price,
+           width,
+           depth,
+           height,
+           status,
+           visibility,
+           published_at
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'published', 'public', $15
+         )
+         ON CONFLICT (model_id) DO UPDATE SET
+           artist_id = EXCLUDED.artist_id,
+           name = EXCLUDED.name,
+           description = EXCLUDED.description,
+           category = EXCLUDED.category,
+           tags = EXCLUDED.tags,
+           file_ref = EXCLUDED.file_ref,
+           glb_file_path = EXCLUDED.glb_file_path,
+           preview_url = EXCLUDED.preview_url,
+           thumbnail_path = EXCLUDED.thumbnail_path,
+           base_price = EXCLUDED.base_price,
+           width = EXCLUDED.width,
+           depth = EXCLUDED.depth,
+           height = EXCLUDED.height,
+           status = EXCLUDED.status,
+           visibility = EXCLUDED.visibility,
+           published_at = EXCLUDED.published_at,
+           updated_at = CURRENT_TIMESTAMP
+         RETURNING id, status, visibility`,
+        [
+          id,
+          model.artist_id,
+          model.name,
+          model.description,
+          model.category,
+          model.tags,
+          model.stl_file_path,
+          model.glb_file_path,
+          model.glb_file_path,
+          model.thumbnail_path,
+          model.base_price,
+          model.width,
+          model.depth,
+          model.height,
+          publishedAt,
+        ]
+      );
+
+      const update = await client.query(
+        `UPDATE models
+         SET in_library = true,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING in_library`,
+        [id]
+      );
+
+      await client.query('COMMIT');
+
+      logger.info('Model added to asset library', {
+        userId: req.userId,
+        modelId: id,
+        assetId: assetResult.rows[0].id,
+      });
+
+      res.status(200).json({
+        message: 'Model added to asset library',
+        asset: {
+          id: assetResult.rows[0].id,
+          modelId: id,
+          status: assetResult.rows[0].status,
+          visibility: assetResult.rows[0].visibility,
+        },
+        alreadyInLibrary: false,
+        inLibrary: update.rows[0].in_library,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   })
 );
 
@@ -486,7 +903,7 @@ router.delete('/:id',
       );
     }
 
-    logger.info('Model deleted', { userId: req.userId, modelId: id });
+    logger.info('Model deleted', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model deleted successfully',
@@ -532,7 +949,7 @@ router.post('/:id/images',
       }
 
       logger.info('Model images uploaded', { 
-        userId: req.userId, 
+        userId: (req as any).userId, 
         modelId: id, 
         count: files.length 
       });
@@ -543,7 +960,7 @@ router.post('/:id/images',
       });
 
     } catch (error) {
-      logger.error('Failed to upload model images', { error, userId: req.userId });
+      logger.error('Failed to upload model images', { error, userId: (req as any).userId });
       throw error;
     }
   }),

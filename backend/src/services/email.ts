@@ -1,14 +1,33 @@
 // backend/src/services/email.ts
 import { Resend } from 'resend'
-import logger from '../utils/logger.js'
-import type { Order, Artist, Asset } from '../../../shared/types.js'
+import logger from '../utils/logger'
+
+// Minimal local types to avoid cross-package imports during build
+interface OrderLike {
+  id: string
+  order_number: string
+  created_at: string | number | Date
+  user_email?: string
+  pricing?: any
+  shipping_address?: any
+}
+
+interface ArtistLike {
+  email: string
+  name?: string
+}
+
+interface AssetLike {
+  name: string
+  base_price: number
+}
 
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@artifactarmoury.com'
+const FROM_EMAIL = process.env.EMAIL_FROM || process.env.FROM_EMAIL || 'noreply@artifactarmoury.com'
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
 
 let resend: Resend | null = null
@@ -26,7 +45,7 @@ const emailLogger = logger.child('EMAIL')
 // EMAIL SENDING
 // ============================================================================
 
-interface SendEmailParams {
+export interface SendEmailParams {
   to: string | string[]
   subject: string
   html: string
@@ -36,7 +55,7 @@ interface SendEmailParams {
 /**
  * Send email via Resend or log if not configured
  */
-async function sendEmail(params: SendEmailParams): Promise<void> {
+export async function sendEmail(params: SendEmailParams): Promise<void> {
   const { to, subject, html, text } = params
   
   try {
@@ -91,9 +110,9 @@ function stripHtml(html: string): string {
 // ============================================================================
 
 export interface OrderConfirmationParams {
-  order: Order
+  order: OrderLike
   items: Array<{
-    asset: Asset
+    asset: AssetLike
     quantity: number
   }>
 }
@@ -223,7 +242,7 @@ export async function sendOrderConfirmation(
 // ============================================================================
 
 export interface ShippingNotificationParams {
-  order: Order
+  order: OrderLike
   trackingNumber: string
   carrier?: string
 }
@@ -312,11 +331,11 @@ export async function sendShippingNotification(
 // ============================================================================
 
 export interface ArtistSaleNotificationParams {
-  artist: Artist
-  order: Order
+  artist: ArtistLike
+  order: OrderLike
   earnings: number
   items: Array<{
-    asset: Asset
+    asset: AssetLike
     quantity: number
   }>
 }
@@ -411,7 +430,7 @@ export async function sendArtistSaleNotification(
 /**
  * Send welcome email to new artist
  */
-export async function sendArtistWelcome(artist: Artist): Promise<void> {
+export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
   const html = `
 <!DOCTYPE html>
 <html>

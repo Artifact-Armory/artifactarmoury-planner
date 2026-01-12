@@ -95,6 +95,7 @@ CREATE TABLE models (
     -- Status & visibility
     status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived', 'flagged')),
     visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'unlisted')),
+    in_library BOOLEAN DEFAULT false,
     
     -- Stats
     view_count INTEGER DEFAULT 0,

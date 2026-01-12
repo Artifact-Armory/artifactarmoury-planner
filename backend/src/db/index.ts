@@ -3,9 +3,12 @@ import pg from 'pg'
 
 const { Pool } = pg
 
+// Allow mock DB for development without a live Postgres
+const DB_MOCK = process.env.DB_MOCK === 'true'
+
 // Environment validation
 const DATABASE_URL = process.env.DATABASE_URL
-if (!DATABASE_URL) {
+if (!DATABASE_URL && !DB_MOCK) {
   throw new Error('DATABASE_URL environment variable is required')
 }
 
@@ -26,8 +29,27 @@ const connectionConfig = {
   query_timeout: 30000,
 }
 
-// Create connection pool
-export const db = new Pool(connectionConfig)
+// Create connection pool (or mock implementation)
+export const db: any = DB_MOCK
+  ? {
+      async query(_text?: string, _params?: any[]) {
+        return { rows: [], rowCount: 0, command: 'SELECT', oid: 0, fields: [] }
+      },
+      async connect() {
+        return {
+          async query(_t?: string, _p?: any[]) {
+            return { rows: [], rowCount: 0, command: 'SELECT', oid: 0, fields: [] }
+          },
+          release() {}
+        }
+      },
+      on() {},
+      end() {},
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+    }
+  : new Pool(connectionConfig)
 
 // Connection error handling
 db.on('error', (err) => {
@@ -42,8 +64,15 @@ db.on('connect', () => {
   }
 })
 
+// Backward-compat helper for code expecting db.getClient()
+;(db as any).getClient = async () => await db.connect()
+
 // Test database connection
 export async function testConnection(): Promise<boolean> {
+  if (process.env.DB_MOCK === 'true') {
+    console.log('�o" DB_MOCK enabled; skipping connection test')
+    return true
+  }
   try {
     const result = await db.query('SELECT NOW() as now, version() as version')
     console.log('✓ Database connection successful')
@@ -62,6 +91,10 @@ export async function testConnection(): Promise<boolean> {
 
 // Initialize database (run migrations)
 export async function initializeDatabase(): Promise<void> {
+  if (process.env.DB_MOCK === 'true') {
+    console.log('DB_MOCK enabled; skipping initializeDatabase')
+    return
+  }
   const client = await db.connect()
   
   try {
@@ -70,11 +103,9 @@ export async function initializeDatabase(): Promise<void> {
     // Read schema file
     const fs = await import('fs/promises')
     const path = await import('path')
-    const { fileURLToPath } = await import('url')
     
-    const __filename = fileURLToPath(import.meta.url)
-    const __dirname = path.dirname(__filename)
-    const schemaPath = path.join(__dirname, 'schema.sql')
+    // Use process.cwd() instead of import.meta.url
+    const schemaPath = path.join(process.cwd(), 'src/db/schema.sql')
     
     const schema = await fs.readFile(schemaPath, 'utf-8')
     
@@ -109,6 +140,10 @@ export async function initializeDatabase(): Promise<void> {
 
 // Helper function to run migrations
 export async function runMigrations(): Promise<void> {
+  if (process.env.DB_MOCK === 'true') {
+    console.log('DB_MOCK enabled; skipping migrations')
+    return
+  }
   const client = await db.connect()
   
   try {
@@ -130,11 +165,9 @@ export async function runMigrations(): Promise<void> {
     // Read migrations directory
     const fs = await import('fs/promises')
     const path = await import('path')
-    const { fileURLToPath } = await import('url')
     
-    const __filename = fileURLToPath(import.meta.url)
-    const __dirname = path.dirname(__filename)
-    const migrationsDir = path.join(__dirname, 'migrations')
+    // Use process.cwd() instead of import.meta.url
+    const migrationsDir = path.join(process.cwd(), 'src/db/migrations')
     
     // Check if migrations directory exists
     try {
@@ -206,7 +239,7 @@ export async function query<T = any>(
   const start = Date.now()
   
   try {
-    const result = await db.query<T>(text, params)
+    const result = (await db.query(text, params)) as pg.QueryResult<T>
     const duration = Date.now() - start
     
     if (process.env.NODE_ENV === 'development' && duration > 1000) {

@@ -433,8 +433,11 @@ export function setupGracefulShutdown(server: any): void {
 
       try {
         // Close database connections
-        await require('../db').closePool();
-        logger.info('Database connections closed');
+        const dbMod = require('../db');
+        if (typeof dbMod.closeDatabase === 'function') {
+          await dbMod.closeDatabase();
+          logger.info('Database connections closed');
+        }
 
         // Additional cleanup can go here
         

@@ -1,15 +1,14 @@
 // backend/src/services/storage.ts
 import { promises as fs } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import crypto from 'crypto'
-import logger from '../utils/logger.js'
+import logger from '../utils/logger'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+// Use process.cwd() instead of import.meta.url
 
 // Storage configuration
-const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+// Prefer DEV_GUIDE's UPLOAD_DIR, fall back to STORAGE_ROOT, then ./uploads
+const STORAGE_ROOT = process.env.UPLOAD_DIR || process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '104857600') // 100MB default
 
 // Storage paths
@@ -250,7 +249,7 @@ export function getFileStream(filePath: string): NodeJS.ReadableStream {
  */
 export function getFileURL(relativePath: string): string {
   const baseURL = process.env.BASE_URL || 'http://localhost:3001'
-  return `${baseURL}/storage/${relativePath}`
+  return `${baseURL}/uploads/${relativePath}`
 }
 
 // ============================================================================
@@ -295,6 +294,22 @@ export async function deleteFiles(filePaths: string[]): Promise<void> {
       failed: failed.length 
     })
   }
+}
+
+// Compatibility helpers expected by some routes
+export async function uploadToStorage(tempPath: string, category: 'models' | 'previews' | 'thumbnails' | 'images'): Promise<string> {
+  // For 'previews', store under models by convention
+  const targetCategory = category === 'previews' ? 'models' : category
+  const filename = path.basename(tempPath)
+  const buffer = await fs.readFile(tempPath)
+  const saved = await saveFile({ originalName: filename, buffer, category: targetCategory as any })
+  // best-effort cleanup
+  try { await deleteFile(tempPath) } catch {}
+  return saved.relativePath
+}
+
+export async function deleteFromStorage(relativePath: string): Promise<void> {
+  await deleteFile(relativePath)
 }
 
 /**
@@ -461,6 +476,8 @@ export default {
   getFileURL,
   deleteFile,
   deleteFiles,
+  uploadToStorage,
+  deleteFromStorage,
   deleteAssetFiles,
   cleanupTempFiles,
   getStorageStats,

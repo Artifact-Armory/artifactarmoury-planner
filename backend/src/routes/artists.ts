@@ -1,8 +1,8 @@
 // backend/src/routes/artists.ts
 import express from 'express'
-import { db } from '../db/index.js'
-import logger from '../utils/logger.js'
-import { authMiddleware } from '../middleware/auth.js'
+import { db } from '../db'
+import logger from '../utils/logger'
+import { authenticate } from '../middleware/auth'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
@@ -20,51 +20,50 @@ router.get('/', async (req, res, next) => {
     } = req.query as Record<string, string>
 
     const pageNum = parseInt(page) || 1
-    const limitNum = Math.min(parseInt(limit) || 20, 50) // Max 50 per page
+    const limitNum = Math.min(parseInt(limit) || 20, 50)
     const offset = (pageNum - 1) * limitNum
 
-    // Build sort clause
-    let orderBy = 'created_at DESC'
+    let orderClause = 'model_count DESC'
     switch (sort) {
-      case 'popular':
-        orderBy = `(
-          SELECT COUNT(*) FROM assets 
-          WHERE artist_id = artists.id AND status = 'published'
-        ) DESC`
-        break
       case 'recent':
-        orderBy = 'created_at DESC'
+        orderClause = 'u.created_at DESC'
         break
       case 'name':
-        orderBy = 'name ASC'
+        orderClause = "COALESCE(u.artist_name, u.display_name) ASC"
         break
+      case 'popular':
       default:
-        orderBy = 'created_at DESC'
+        orderClause = 'model_count DESC'
     }
 
-    // Get total count
     const countResult = await db.query(
-      `SELECT COUNT(*) as total 
-       FROM artists 
-       WHERE status = 'active'`
+      `SELECT COUNT(*) AS total
+       FROM users
+       WHERE role = 'artist' AND account_status = 'active'`
     )
-    const total = parseInt(countResult.rows[0].total)
+    const total = parseInt(countResult.rows[0].total, 10)
 
-    // Get artists with model counts
     const result = await db.query(
       `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active'
-       GROUP BY a.id
-       ORDER BY ${orderBy}
+        u.id,
+        u.display_name,
+        u.artist_name,
+        u.artist_bio,
+        u.artist_url,
+        u.profile_image_url,
+        u.banner_image_url,
+        u.commission_rate,
+        u.stripe_account_id,
+        u.stripe_onboarding_complete,
+        u.created_at,
+        COUNT(m.id) FILTER (WHERE m.status = 'published') AS model_count,
+        COALESCE(SUM(m.view_count), 0) AS total_views,
+        COALESCE(SUM(m.sale_count), 0) AS total_sales
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id
+       ORDER BY ${orderClause}
        LIMIT $1 OFFSET $2`,
       [limitNum, offset]
     )
@@ -97,22 +96,26 @@ router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params
 
-    // Get artist with stats
     const result = await db.query(
       `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count,
-        COALESCE(SUM(ast.view_count), 0) as total_views,
-        COALESCE(SUM(ast.purchase_count), 0) as total_purchases
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.id = $1 AND a.status = 'active'
-       GROUP BY a.id`,
+        u.id,
+        u.display_name,
+        u.artist_name,
+        u.artist_bio,
+        u.artist_url,
+        u.profile_image_url,
+        u.banner_image_url,
+        u.commission_rate,
+        u.stripe_account_id,
+        u.stripe_onboarding_complete,
+        u.created_at,
+        COUNT(m.id) FILTER (WHERE m.status = 'published') AS model_count,
+        COALESCE(SUM(m.view_count), 0) AS total_views,
+        COALESCE(SUM(m.sale_count), 0) AS total_sales
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.id = $1 AND u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id`,
       [id]
     )
 
@@ -120,11 +123,9 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Artist not found' })
     }
 
-    const artist = result.rows[0]
-
     artistLogger.debug('Artist profile viewed', { artistId: id })
 
-    res.json({ artist })
+    res.json({ artist: result.rows[0] })
   } catch (error) {
     artistLogger.error('Get artist profile failed', { error, artistId: req.params.id })
     next(error)
@@ -148,9 +149,9 @@ router.get('/:id/models', async (req, res, next) => {
     const limitNum = Math.min(parseInt(limit) || 24, 100)
     const offset = (pageNum - 1) * limitNum
 
-    // Verify artist exists and is active
     const artistCheck = await db.query(
-      'SELECT id FROM artists WHERE id = $1 AND status = $\'active\'',
+      `SELECT id FROM users 
+       WHERE id = $1 AND role = 'artist' AND account_status = 'active'`,
       [id]
     )
 
@@ -179,16 +180,33 @@ router.get('/:id/models', async (req, res, next) => {
 
     // Get total count
     const countResult = await db.query(
-      `SELECT COUNT(*) as total 
-       FROM assets 
+      `SELECT COUNT(*) AS total 
+       FROM models 
        WHERE artist_id = $1 AND status = 'published'`,
       [id]
     )
-    const total = parseInt(countResult.rows[0].total)
+    const total = parseInt(countResult.rows[0].total, 10)
 
     // Get models
     const result = await db.query(
-      `SELECT * FROM assets
+      `SELECT 
+        id,
+        name,
+        description,
+        category,
+        tags,
+        thumbnail_path,
+        base_price,
+        width,
+        depth,
+        height,
+        status,
+        visibility,
+        view_count,
+        download_count,
+        sale_count,
+        created_at
+       FROM models
        WHERE artist_id = $1 AND status = 'published'
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
@@ -223,9 +241,9 @@ router.get('/:id/examples', async (req, res, next) => {
     const { id } = req.params
     const limit = Math.min(parseInt(req.query.limit as string) || 12, 50)
 
-    // Verify artist exists
     const artistCheck = await db.query(
-      'SELECT id FROM artists WHERE id = $1 AND status = $\'active\'',
+      `SELECT id FROM users 
+       WHERE id = $1 AND role = 'artist' AND account_status = 'active'`,
       [id]
     )
 
@@ -233,19 +251,28 @@ router.get('/:id/examples', async (req, res, next) => {
       return res.status(404).json({ error: 'Artist not found' })
     }
 
-    // Get example tables
     const result = await db.query(
       `SELECT 
-        et.*,
+        t.id,
+        t.name,
+        t.description,
+        t.width,
+        t.depth,
+        t.layout,
+        t.share_code,
+        t.view_count,
+        t.clone_count,
+        t.created_at,
         json_build_object(
-          'id', a.id,
-          'name', a.name,
-          'profile_image_url', a.profile_image_url
-        ) as artist
-       FROM example_tables et
-       JOIN artists a ON et.artist_id = a.id
-       WHERE et.artist_id = $1
-       ORDER BY et.is_featured DESC, et.view_count DESC, et.created_at DESC
+          'id', u.id,
+          'display_name', u.display_name,
+          'artist_name', u.artist_name,
+          'profile_image_url', u.profile_image_url
+        ) AS artist
+       FROM tables t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.user_id = $1 AND t.is_public = true
+       ORDER BY t.view_count DESC, t.created_at DESC
        LIMIT $2`,
       [id, limit]
     )
@@ -272,16 +299,17 @@ router.get('/:artistId/examples/:exampleId', async (req, res, next) => {
 
     const result = await db.query(
       `SELECT 
-        et.*,
+        t.*,
         json_build_object(
-          'id', a.id,
-          'name', a.name,
-          'bio', a.bio,
-          'profile_image_url', a.profile_image_url
-        ) as artist
-       FROM example_tables et
-       JOIN artists a ON et.artist_id = a.id
-       WHERE et.id = $1 AND et.artist_id = $2`,
+          'id', u.id,
+          'display_name', u.display_name,
+          'artist_name', u.artist_name,
+          'artist_bio', u.artist_bio,
+          'profile_image_url', u.profile_image_url
+        ) AS artist
+       FROM tables t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.id = $1 AND t.user_id = $2 AND t.is_public = true`,
       [exampleId, artistId]
     )
 
@@ -289,17 +317,14 @@ router.get('/:artistId/examples/:exampleId', async (req, res, next) => {
       return res.status(404).json({ error: 'Example table not found' })
     }
 
-    const example = result.rows[0]
-
-    // Increment view count (fire and forget)
     db.query(
-      'UPDATE example_tables SET view_count = view_count + 1 WHERE id = $1',
+      'UPDATE tables SET view_count = view_count + 1 WHERE id = $1',
       [exampleId]
     ).catch(err => artistLogger.error('Failed to increment example view count', { error: err }))
 
     artistLogger.debug('Example table viewed', { artistId, exampleId })
 
-    res.json({ example })
+    res.json({ example: result.rows[0] })
   } catch (error) {
     artistLogger.error('Get example table failed', { error, params: req.params })
     next(error)
@@ -316,23 +341,24 @@ router.get('/featured/list', async (req, res, next) => {
 
     const result = await db.query(
       `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count,
-        COALESCE(SUM(ast.view_count), 0) as total_views,
-        COALESCE(SUM(ast.purchase_count), 0) as total_purchases
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active'
-       GROUP BY a.id
-       HAVING COUNT(ast.id) FILTER (WHERE ast.status = 'published') > 0
+        u.id,
+        u.display_name,
+        u.artist_name,
+        u.artist_bio,
+        u.profile_image_url,
+        u.banner_image_url,
+        u.created_at,
+        COUNT(m.id) FILTER (WHERE m.status = 'published') AS model_count,
+        COALESCE(SUM(m.view_count), 0) AS total_views,
+        COALESCE(SUM(m.sale_count), 0) AS total_sales
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id
+       HAVING COUNT(m.id) FILTER (WHERE m.status = 'published') > 0
        ORDER BY 
-         (COALESCE(SUM(ast.view_count), 0) * 0.3 + 
-          COALESCE(SUM(ast.purchase_count), 0) * 0.7) DESC
+         (COALESCE(SUM(m.view_count), 0) * 0.3 + 
+          COALESCE(SUM(m.sale_count), 0) * 0.7) DESC
        LIMIT $1`,
       [limit]
     )
@@ -358,34 +384,38 @@ router.get('/search/query', async (req, res, next) => {
       return res.json({ artists: [] })
     }
 
-    const searchTerm = q.trim()
+    const wildcard = `%${q.trim()}%`
+    const startsWith = `${q.trim()}%`
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50)
 
     const result = await db.query(
       `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active' 
+        u.id,
+        u.display_name,
+        u.artist_name,
+        u.artist_bio,
+        u.profile_image_url,
+        u.created_at,
+        COUNT(m.id) FILTER (WHERE m.status = 'published') AS model_count
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist'
+         AND u.account_status = 'active'
          AND (
-           a.name ILIKE $1 OR
-           a.bio ILIKE $1
+           u.display_name ILIKE $1 OR
+           u.artist_name ILIKE $1 OR
+           u.artist_bio ILIKE $1
          )
-       GROUP BY a.id
+       GROUP BY u.id
        ORDER BY 
-         CASE WHEN a.name ILIKE $2 THEN 0 ELSE 1 END,
+         CASE WHEN u.artist_name ILIKE $2 OR u.display_name ILIKE $2 THEN 0 ELSE 1 END,
          model_count DESC
        LIMIT $3`,
-      [`%${searchTerm}%`, `${searchTerm}%`, limit]
+      [wildcard, startsWith, limit]
     )
 
     artistLogger.debug('Artist search executed', {
-      query: searchTerm,
+      query: q.trim(),
       count: result.rows.length
     })
 
@@ -400,80 +430,74 @@ router.get('/search/query', async (req, res, next) => {
 // GET ARTIST ANALYTICS (protected - own data only)
 // ============================================================================
 
-router.get('/:id/analytics', authMiddleware(), async (req, res, next) => {
+router.get('/:id/analytics', authenticate, async (req, res, next) => {
   try {
     const { id } = req.params
 
     // Ensure artist can only access their own analytics
-    if (req.artistId !== id && req.artistRole !== 'admin') {
+    if ((req as any).userId !== id && (req as any).user?.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
     // Get comprehensive analytics
     const statsResult = await db.query(
       `SELECT 
-        COUNT(ast.id) as total_models,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as published_models,
-        COALESCE(SUM(ast.view_count), 0) as total_views,
-        COALESCE(SUM(ast.purchase_count), 0) as total_purchases
-       FROM assets ast
-       WHERE ast.artist_id = $1`,
+        COUNT(m.id) AS total_models,
+        COUNT(m.id) FILTER (WHERE m.status = 'published') AS published_models,
+        COALESCE(SUM(m.view_count), 0) AS total_views,
+        COALESCE(SUM(m.sale_count), 0) AS total_sales
+       FROM models m
+       WHERE m.artist_id = $1`,
       [id]
     )
-
     const stats = statsResult.rows[0]
 
-    // Get revenue data
     const revenueResult = await db.query(
       `SELECT 
-        COALESCE(SUM(st.amount), 0) as total_revenue,
-        COALESCE(SUM(st.amount) FILTER (WHERE st.status = 'pending'), 0) as pending_payout
-       FROM stripe_transfers st
-       WHERE st.artist_id = $1`,
+        COALESCE(SUM(p.amount), 0) AS total_revenue,
+        COALESCE(SUM(p.amount) FILTER (WHERE p.status = 'pending'), 0) AS pending_payout
+       FROM payments p
+       WHERE p.artist_id = $1`,
       [id]
     )
-
     const revenue = revenueResult.rows[0]
 
-    // Get recent orders
     const ordersResult = await db.query(
       `SELECT DISTINCT ON (o.id)
         o.id,
         o.order_number,
-        o.user_email,
-        o.status,
-        o.pricing,
+        o.customer_email,
+        o.payment_status,
+        o.total,
         o.created_at
        FROM orders o
-       CROSS JOIN LATERAL jsonb_array_elements(o.items) AS item
-       JOIN assets ast ON (item->>'asset_id')::uuid = ast.id
-       WHERE ast.artist_id = $1
+       JOIN order_items oi ON oi.order_id = o.id
+       WHERE oi.artist_id = $1
        ORDER BY o.id, o.created_at DESC
        LIMIT 10`,
       [id]
     )
 
-    // Get top models
     const topModelsResult = await db.query(
       `SELECT 
         id,
         name,
         base_price,
         view_count,
-        purchase_count,
-        (base_price * purchase_count) as revenue
-       FROM assets
+        sale_count,
+        (base_price * sale_count) AS revenue
+       FROM models
        WHERE artist_id = $1 AND status = 'published'
-       ORDER BY purchase_count DESC, view_count DESC
+       ORDER BY sale_count DESC, view_count DESC
        LIMIT 5`,
       [id]
     )
 
     const analytics = {
-      total_models: parseInt(stats.total_models),
-      published_models: parseInt(stats.published_models),
-      total_views: parseInt(stats.total_views),
-      total_purchases: parseInt(stats.total_purchases),
+      total_models: parseInt(stats.total_models, 10),
+      published_models: parseInt(stats.published_models, 10),
+      total_views: parseInt(stats.total_views, 10),
+      total_purchases: parseInt(stats.total_sales, 10),
       total_revenue: parseFloat(revenue.total_revenue),
       pending_payout: parseFloat(revenue.pending_payout),
       recent_orders: ordersResult.rows,
@@ -493,27 +517,45 @@ router.get('/:id/analytics', authMiddleware(), async (req, res, next) => {
 // UPDATE ARTIST PROFILE (protected)
 // ============================================================================
 
-router.put('/:id/profile', authMiddleware(), async (req, res, next) => {
+router.put('/:id/profile', authenticate, async (req, res, next) => {
   try {
     const { id } = req.params
 
-    // Ensure artist can only update their own profile
-    if (req.artistId !== id && req.artistRole !== 'admin') {
+    if ((req as any).userId !== id && (req as any).user?.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    const { name, bio, profile_image_url, banner_image_url } = req.body
+    const {
+      display_name,
+      name,
+      artist_name,
+      bio,
+      artist_bio,
+      artist_url,
+      profile_image_url,
+      banner_image_url
+    } = req.body
 
     const result = await db.query(
-      `UPDATE artists SET
-        name = COALESCE($1, name),
-        bio = COALESCE($2, bio),
-        profile_image_url = COALESCE($3, profile_image_url),
-        banner_image_url = COALESCE($4, banner_image_url),
+      `UPDATE users SET
+        display_name = COALESCE($1, display_name),
+        artist_name = COALESCE($2, artist_name),
+        artist_bio = COALESCE($3, artist_bio),
+        artist_url = COALESCE($4, artist_url),
+        profile_image_url = COALESCE($5, profile_image_url),
+        banner_image_url = COALESCE($6, banner_image_url),
         updated_at = NOW()
-       WHERE id = $5
-       RETURNING id, name, bio, profile_image_url, banner_image_url, created_at`,
-      [name, bio, profile_image_url, banner_image_url, id]
+       WHERE id = $7 AND role = 'artist'
+       RETURNING id, display_name, artist_name, artist_bio, artist_url, profile_image_url, banner_image_url, created_at`,
+      [
+        display_name,
+        artist_name ?? name ?? null,
+        artist_bio ?? bio ?? null,
+        artist_url ?? null,
+        profile_image_url ?? null,
+        banner_image_url ?? null,
+        id
+      ]
     )
 
     if (result.rows.length === 0) {

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useAuthStore } from './store/authStore';
 import { authApi } from './api/endpoints/auth';
+import { Toaster } from 'react-hot-toast';
 
 // Layouts
 import MainLayout from './components/layout/MainLayout';
@@ -32,6 +33,8 @@ import NotFound from './pages/NotFound';
 import PrivacyPolicy from './pages/legal/PrivacyPolicy';
 import TermsOfService from './pages/legal/TermsOfService';
 import Checkout from './pages/Checkout';
+import GlobalLibrary from './pages/GlobalLibrary';
+import TableLibrary from './pages/TableLibrary';
 
 // User Dashboard Pages
 import Dashboard from './pages/dashboard/Dashboard';
@@ -62,7 +65,6 @@ import AdminReports from './pages/admin/AdminReports';
 
 // Error Boundary
 import ErrorBoundary from './components/common/ErrorBoundary';
-import { Toaster } from 'react-hot-toast';
 
 // Create QueryClient
 const queryClient = new QueryClient({
@@ -76,34 +78,65 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  const { setUser, setLoading, isAuthenticated, token } = useAuthStore();
+  const { setUser, setLoading, isAuthenticated, token, clearAuth } = useAuthStore();
 
   // Fetch user profile if authenticated
   useEffect(() => {
     const fetchUserProfile = async () => {
-      if (token && isAuthenticated) {
-        try {
-          setLoading(true);
-          const response = await authApi.getCurrentUser();
-          if (response.success) {
-            setUser(response.data);
-          }
-        } catch (error) {
-          console.error('Error fetching user profile:', error);
-        } finally {
-          setLoading(false);
-        }
+      if (!token || !isAuthenticated) {
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const user = await authApi.getProfile();
+        setUser(user);
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+        clearAuth();
+      } finally {
+        setLoading(false);
       }
     };
 
     fetchUserProfile();
-  }, [token, isAuthenticated, setUser, setLoading]);
+  }, [token, isAuthenticated, setUser, setLoading, clearAuth]);
+
+  useEffect(() => {
+    const handleExternalLogout = () => {
+      clearAuth();
+    };
+
+    window.addEventListener('terrain_builder_logout', handleExternalLogout);
+    return () => window.removeEventListener('terrain_builder_logout', handleExternalLogout);
+  }, [clearAuth]);
 
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <Toaster position="top-center" />
+          <Toaster
+            position="top-center"
+            toastOptions={{
+              duration: 5000,
+              style: {
+                background: '#FFFFFF',
+                color: '#1F2937',
+              },
+              success: {
+                iconTheme: {
+                  primary: '#10B981',
+                  secondary: '#FFFFFF',
+                },
+              },
+              error: {
+                iconTheme: {
+                  primary: '#EF4444',
+                  secondary: '#FFFFFF',
+                },
+              },
+            }}
+          />
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<MainLayout />}>
@@ -137,6 +170,9 @@ function App() {
                 } 
               />
             </Route>
+
+            <Route path="/library/browse/:tableId" element={<GlobalLibrary />} />
+            <Route path="/library/manage/:tableId" element={<TableLibrary />} />
 
             {/* User Dashboard Routes */}
             <Route 

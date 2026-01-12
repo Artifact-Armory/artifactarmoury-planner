@@ -1,6 +1,6 @@
 // backend/src/services/printEstimator.ts
-import logger from '../utils/logger.js'
-import type { PrintOptions, PrintStats } from '../../../shared/types.js'
+import logger from '../utils/logger'
+import type { PrintOptions, PrintStats } from '../types/shared'
 
 // ============================================================================
 // PRICING CONSTANTS

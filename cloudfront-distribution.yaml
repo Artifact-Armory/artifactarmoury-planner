@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFront CDN Distribution for Artifact Armoury Planner'
+
+Parameters:
+  OriginBucket:
+    Type: String
+    Description: S3 bucket name for CloudFront origin
+    Default: artifactarmoury-cdn-origin
+  
+  DomainName:
+    Type: String
+    Description: Custom domain name for CloudFront (e.g., cdn.artifactarmoury.com)
+    Default: cdn.artifactarmoury.com
+  
+  AcmCertificateArn:
+    Type: String
+    Description: ARN of ACM certificate for custom domain (must be in us-east-1)
+    Default: ''
+  
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref AcmCertificateArn, '']]
+
+Resources:
+  # ============================================================================
+  # ORIGIN ACCESS IDENTITY
+  # ============================================================================
+  
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'OAI for Artifact Armoury CDN - ${Environment}'
+
+  # ============================================================================
+  # S3 BUCKET POLICY
+  # ============================================================================
+  
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OriginBucket
+      PolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::cloudfront:user/${OriginAccessIdentity}'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${OriginBucket}/*'
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::cloudfront:user/${OriginAccessIdentity}'
+            Action: 's3:ListBucket'
+            Resource: !Sub 'arn:aws:s3:::${OriginBucket}'
+
+  # ============================================================================
+  # CLOUDFRONT DISTRIBUTION
+  # ============================================================================
+  
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2and3
+        Comment: !Sub 'Artifact Armoury CDN - ${Environment}'
+        
+        # ====================================================================
+        # ORIGINS
+        # ====================================================================
+        Origins:
+          - Id: S3Origin
+            DomainName: !Sub '${OriginBucket}.s3.${AWS::Region}.amazonaws.com'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${OriginAccessIdentity}'
+            OriginShield:
+              Enabled: true
+              OriginShieldRegion: !Ref AWS::Region
+        
+        # ====================================================================
+        # DEFAULT CACHE BEHAVIOR (Static Assets)
+        # ====================================================================
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ViewerProtocolPolicy: redirect-to-https
+          TargetOriginId: S3Origin
+          
+          # Cache policy for static assets
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+          
+          # Security headers
+          ResponseHeadersPolicyId: efc63b51-395f-45e7-9675-021797e2fb94  # Managed-SecurityHeadersPolicy
+          
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+            Headers:
+              - Origin
+              - Access-Control-Request-Headers
+              - Access-Control-Request-Method
+        
+        # ====================================================================
+        # CACHE BEHAVIORS (3D Models)
+        # ====================================================================
+        CacheBehaviors:
+          # 3D Models (GLB, STL) - Versioned files with long cache
+          - PathPattern: 'models/*'
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ViewerProtocolPolicy: https-only
+            TargetOriginId: S3Origin
+            # Custom cache policy for GLB files with proper headers
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            ResponseHeadersPolicyId: efc63b51-395f-45e7-9675-021797e2fb94  # Managed-SecurityHeadersPolicy
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: none
+              Headers:
+                - Accept-Encoding
+                - Origin
+                - Access-Control-Request-Headers
+                - Access-Control-Request-Method
+          
+          # Images
+          - PathPattern: 'images/*'
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ViewerProtocolPolicy: https-only
+            TargetOriginId: S3Origin
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            ForwardedValues:
+              QueryString: false
+              Cookies:
+                Forward: none
+          
+          # Thumbnails
+          - PathPattern: 'thumbnails/*'
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ViewerProtocolPolicy: https-only
+            TargetOriginId: S3Origin
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            ForwardedValues:
+              QueryString: false
+              Cookies:
+                Forward: none
+        
+        # ====================================================================
+        # VIEWER PROTOCOL POLICY
+        # ====================================================================
+        ViewerProtocolPolicy: redirect-to-https
+        
+        # ====================================================================
+        # CUSTOM DOMAIN (Optional)
+        # ====================================================================
+        Aliases: !If
+          - HasCustomDomain
+          - [!Ref DomainName]
+          - !Ref AWS::NoValue
+        
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        
+        # ====================================================================
+        # LOGGING
+        # ====================================================================
+        Logging:
+          Bucket: !Sub '${OriginBucket}-logs.s3.${AWS::Region}.amazonaws.com'
+          Prefix: cloudfront-logs/
+          IncludeCookies: false
+        
+        # ====================================================================
+        # RESTRICTIONS
+        # ====================================================================
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+Outputs:
+  DistributionId:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
+  
+  DistributionDomain:
+    Description: CloudFront Distribution Domain Name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionDomain'
+  
+  OriginAccessIdentityId:
+    Description: Origin Access Identity ID
+    Value: !Ref OriginAccessIdentity
+    Export:
+      Name: !Sub '${AWS::StackName}-OAI'
+  
+  CustomDomain:
+    Description: Custom Domain Name
+    Value: !If [HasCustomDomain, !Ref DomainName, 'Not configured']
+    Export:
+      Name: !Sub '${AWS::StackName}-CustomDomain'
+

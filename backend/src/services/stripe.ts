@@ -1,7 +1,7 @@
 // backend/src/services/stripe.ts
 import Stripe from 'stripe'
-import logger from '../utils/logger.js'
-import { db } from '../db/index.js'
+import logger from '../utils/logger'
+import { db } from '../db'
 
 // ============================================================================
 // INITIALIZATION
@@ -9,15 +9,19 @@ import { db } from '../db/index.js'
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
+const STRIPE_MOCK = (process.env.STRIPE_MOCK === 'true') || (process.env.PAYMENTS_MOCK === 'true') || (process.env.PAYMENTS_ENABLED === 'false')
 
-if (!STRIPE_SECRET_KEY) {
+if (!STRIPE_MOCK && !STRIPE_SECRET_KEY) {
   throw new Error('STRIPE_SECRET_KEY environment variable is required')
 }
 
-export const stripe = new Stripe(STRIPE_SECRET_KEY, {
-  apiVersion: '2024-12-18.acacia',
-  typescript: true
-})
+export const stripe: Stripe = STRIPE_MOCK
+  // In mock mode, stripe SDK is not used
+  ? (undefined as unknown as Stripe)
+  : new Stripe(STRIPE_SECRET_KEY!, {
+      apiVersion: '2023-10-16',
+      typescript: true
+    })
 
 const stripeLogger = logger.child('STRIPE')
 
@@ -39,6 +43,12 @@ export async function createConnectAccount(
   returnUrl: string,
   refreshUrl: string
 ): Promise<CreateConnectAccountResult> {
+  if (STRIPE_MOCK) {
+    return {
+      account_id: `acct_mock_${Date.now()}`,
+      onboarding_url: returnUrl,
+    }
+  }
   try {
     stripeLogger.info('Creating Stripe Connect account', { artistId, email })
     
@@ -90,6 +100,7 @@ export async function createConnectAccount(
  * Check if artist has completed Stripe onboarding
  */
 export async function checkOnboardingStatus(accountId: string): Promise<boolean> {
+  if (STRIPE_MOCK) return true
   try {
     const account = await stripe.accounts.retrieve(accountId)
     
@@ -137,6 +148,7 @@ export async function createOnboardingLink(
   returnUrl: string,
   refreshUrl: string
 ): Promise<string> {
+  if (STRIPE_MOCK) return returnUrl
   try {
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
@@ -175,6 +187,14 @@ export interface CreatePaymentIntentResult {
 export async function createPaymentIntent(
   params: CreatePaymentIntentParams
 ): Promise<CreatePaymentIntentResult> {
+  if (STRIPE_MOCK) {
+    const amount = Math.round((params.amount || 0) * 100) / 100
+    return {
+      payment_intent_id: `pi_mock_${Date.now()}`,
+      client_secret: `cs_mock_${Math.random().toString(36).slice(2)}`,
+      amount,
+    }
+  }
   try {
     const { amount, currency = 'gbp', metadata, description } = params
     
@@ -220,6 +240,16 @@ export async function createPaymentIntent(
 export async function getPaymentIntent(
   paymentIntentId: string
 ): Promise<Stripe.PaymentIntent> {
+  if (STRIPE_MOCK) {
+    return {
+      id: paymentIntentId,
+      object: 'payment_intent',
+      amount: 100,
+      currency: 'gbp',
+      status: 'succeeded',
+      metadata: {},
+    } as unknown as Stripe.PaymentIntent
+  }
   try {
     return await stripe.paymentIntents.retrieve(paymentIntentId)
   } catch (error) {
@@ -237,6 +267,7 @@ export async function getPaymentIntent(
 export async function cancelPaymentIntent(
   paymentIntentId: string
 ): Promise<void> {
+  if (STRIPE_MOCK) return
   try {
     await stripe.paymentIntents.cancel(paymentIntentId)
     stripeLogger.info('Payment intent cancelled', { paymentIntentId })
@@ -414,10 +445,17 @@ export function constructWebhookEvent(
   payload: string | Buffer,
   signature: string
 ): Stripe.Event {
+  if (STRIPE_MOCK) {
+    try {
+      const parsed = typeof payload === 'string' ? JSON.parse(payload) : JSON.parse((payload as Buffer).toString('utf8'))
+      return (parsed as Stripe.Event) || ({ id: `evt_mock_${Date.now()}`, type: 'payment_intent.succeeded', data: { object: { id: 'pi_mock', amount: 100 } } } as any)
+    } catch {
+      return { id: `evt_mock_${Date.now()}`, type: 'payment_intent.succeeded', data: { object: { id: 'pi_mock', amount: 100 } } } as any
+    }
+  }
   if (!STRIPE_WEBHOOK_SECRET) {
     throw new Error('STRIPE_WEBHOOK_SECRET not configured')
   }
-  
   try {
     return stripe.webhooks.constructEvent(
       payload,
@@ -434,37 +472,30 @@ export function constructWebhookEvent(
  * Handle webhook event
  */
 export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
+  if (STRIPE_MOCK) {
+    stripeLogger.info('Mock webhook event received', { type: event?.type })
+    return
+  }
   stripeLogger.info('Processing webhook event', {
     type: event.type,
     id: event.id
   })
-  
+
   try {
-    switch (event.type) {
-      case 'payment_intent.succeeded':
-        await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent)
-        break
-      
-      case 'payment_intent.payment_failed':
-        await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent)
-        break
-      
-      case 'account.updated':
-        await handleAccountUpdated(event.data.object as Stripe.Account)
-        break
-      
-      case 'transfer.created':
-        stripeLogger.info('Transfer created', {
-          transferId: (event.data.object as Stripe.Transfer).id
-        })
-        break
-      
-      case 'transfer.failed':
-        await handleTransferFailed(event.data.object as Stripe.Transfer)
-        break
-      
-      default:
-        stripeLogger.debug('Unhandled webhook event type', { type: event.type })
+    if (event.type === 'payment_intent.succeeded') {
+      await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent)
+    } else if (event.type === 'payment_intent.payment_failed') {
+      await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent)
+    } else if (event.type === 'account.updated') {
+      await handleAccountUpdated(event.data.object as Stripe.Account)
+    } else if (event.type === 'transfer.created') {
+      stripeLogger.info('Transfer created', {
+        transferId: (event.data.object as Stripe.Transfer).id
+      })
+    } else if ((event.type as string) === 'transfer.failed') {
+      await handleTransferFailed(event.data.object as Stripe.Transfer)
+    } else {
+      stripeLogger.debug('Unhandled webhook event type', { type: event.type })
     }
   } catch (error) {
     stripeLogger.error('Error handling webhook event', {
@@ -479,6 +510,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
 async function handlePaymentIntentSucceeded(
   paymentIntent: Stripe.PaymentIntent
 ): Promise<void> {
+  if (STRIPE_MOCK) return
   stripeLogger.info('Payment succeeded', {
     paymentIntentId: paymentIntent.id,
     amount: paymentIntent.amount / 100
@@ -505,6 +537,7 @@ async function handlePaymentIntentSucceeded(
 async function handlePaymentIntentFailed(
   paymentIntent: Stripe.PaymentIntent
 ): Promise<void> {
+  if (STRIPE_MOCK) return
   stripeLogger.warn('Payment failed', {
     paymentIntentId: paymentIntent.id,
     error: paymentIntent.last_payment_error?.message
@@ -523,6 +556,7 @@ async function handlePaymentIntentFailed(
 }
 
 async function handleAccountUpdated(account: Stripe.Account): Promise<void> {
+  if (STRIPE_MOCK) return
   const artistId = account.metadata.artist_id
   
   if (artistId) {
@@ -531,6 +565,7 @@ async function handleAccountUpdated(account: Stripe.Account): Promise<void> {
 }
 
 async function handleTransferFailed(transfer: Stripe.Transfer): Promise<void> {
+  if (STRIPE_MOCK) return
   stripeLogger.error('Transfer failed', {
     transferId: transfer.id,
     orderId: transfer.metadata.order_id,
@@ -558,6 +593,9 @@ export async function createRefund(
   amount?: number, // In pounds, optional for partial refund
   reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer'
 ): Promise<string> {
+  if (STRIPE_MOCK) {
+    return `re_mock_${Date.now()}`
+  }
   try {
     stripeLogger.info('Creating refund', {
       paymentIntentId,

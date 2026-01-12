@@ -3,9 +3,9 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { readFile, writeFile } from 'fs/promises'
 import path from 'path'
-import logger from '../utils/logger.js'
-import { saveFile, STORAGE_PATHS } from './storage.js'
-import type { AABB, Footprint, PrintStats, FilePaths, Vector3 } from '../../../shared/types.js'
+import logger from '../utils/logger'
+import { saveFile, STORAGE_PATHS } from './storage'
+import type { AABB, Footprint, PrintStats, FilePaths, Vector3 } from '../types/shared'
 
 const execAsync = promisify(exec)
 
@@ -556,6 +556,35 @@ export async function processSTLFile(
   }
 }
 
+// Backward-compatible helpers expected by some routes
+export async function processSTL(stlPath: string): Promise<{
+  volume: number
+  surfaceArea: number
+  dimensions: { x: number; y: number; z: number }
+  needsSupports: boolean
+}> {
+  const stl = await parseSTL(stlPath)
+  const aabb = calculateAABB(stl)
+  const footprint = calculateFootprint(aabb)
+  const stats = calculatePrintStats(stl, aabb)
+  return {
+    volume: stats.volume_mm3 ?? 0,
+    surfaceArea: stats.surface_area_mm2 ?? 0,
+    dimensions: { x: footprint.width, y: footprint.depth, z: footprint.height },
+    needsSupports: false,
+  }
+}
+
+export async function generateGLB(stlPath: string): Promise<string> {
+  const out = stlPath.replace(/\.stl$/i, '.glb')
+  try {
+    await convertSTLtoGLB(stlPath, out)
+  } catch {
+    // If conversion fails, return path anyway; caller may handle absence
+  }
+  return out
+}
+
 // ============================================================================
 // EXPORTS
 // ============================================================================
@@ -566,6 +595,8 @@ export default {
   calculateFootprint,
   calculatePrintStats,
   convertSTLtoGLB,
+  processSTL,
+  generateGLB,
   generateThumbnail,
   processSTLFile
 }

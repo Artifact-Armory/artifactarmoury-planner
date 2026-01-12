@@ -17,6 +17,7 @@ import {
   handleUncaughtException,
   setupGracefulShutdown
 } from './middleware/error';
+import sessionRouter from './middleware/session';
 
 // Routes
 import authRoutes from './routes/auth';
@@ -26,6 +27,10 @@ import artistsRoutes from './routes/artists';
 import tablesRoutes from './routes/tables';
 import ordersRoutes from './routes/orders';
 import adminRoutes from './routes/admin';
+import webhookRoutes from './routes/webhooks';
+import libraryRoutes from './routes/library';
+import tableLibraryRoutes from './routes/table-library';
+import { initializeMockData } from './mock/mockModels';
 
 // ============================================================================
 // CONFIGURATION
@@ -33,12 +38,18 @@ import adminRoutes from './routes/admin';
 
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const IS_MOCK_DB = process.env.DB_MOCK === 'true';
 
 // ============================================================================
 // INITIALIZE APP
 // ============================================================================
 
 const app = express();
+
+// Initialize mock data if using mock database
+if (IS_MOCK_DB) {
+  initializeMockData();
+}
 
 // ============================================================================
 // GLOBAL MIDDLEWARE
@@ -50,12 +61,19 @@ app.use(helmetConfig);
 // CORS
 app.use(cors(corsOptions));
 
+// Stripe webhook must be mounted BEFORE JSON parser to keep raw body
+const API_PREFIX = '/api';
+app.use(`${API_PREFIX}/webhooks`, webhookRoutes);
+
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request context & logging
 app.use(addRequestContext);
+
+// Anonymous + authenticated session handling
+app.use(sessionRouter);
 
 // Rate limiting
 app.use(generalRateLimit);
@@ -88,15 +106,15 @@ app.get('/health', async (req, res) => {
 // API ROUTES
 // ============================================================================
 
-const API_PREFIX = '/api';
-
 app.use(`${API_PREFIX}/auth`, authRoutes);
 app.use(`${API_PREFIX}/models`, modelsRoutes);
 app.use(`${API_PREFIX}/browse`, browseRoutes);
 app.use(`${API_PREFIX}/artists`, artistsRoutes);
+app.use(`${API_PREFIX}/tables`, tableLibraryRoutes);
 app.use(`${API_PREFIX}/tables`, tablesRoutes);
 app.use(`${API_PREFIX}/orders`, ordersRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
+app.use(`${API_PREFIX}/library`, libraryRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {

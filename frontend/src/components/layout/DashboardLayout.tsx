@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
+import CartDrawer from '../cart/CartDrawer';
+import { authApi } from '../../api/endpoints/auth';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -51,7 +53,13 @@ const DashboardLayout: React.FC = () => {
   }, []);
   
   // Handle logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      console.error('Failed to log out', error);
+    }
+
     logout();
     navigate('/');
   };
@@ -75,7 +83,8 @@ const DashboardLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <>
+      <div className="min-h-screen bg-gray-100">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div 
@@ -445,7 +454,9 @@ const DashboardLayout: React.FC = () => {
           &copy; {new Date().getFullYear()} Terrain Builder. All rights reserved.
         </footer>
       </div>
-    </div>
+      </div>
+      <CartDrawer />
+    </>
   );
 };
 

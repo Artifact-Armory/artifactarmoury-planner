@@ -1,0 +1,207 @@
+# ============================================================================
+# CloudFront CDN Configuration
+# ============================================================================
+
+# ============================================================================
+# CLOUDFRONT SETTINGS
+# ============================================================================
+
+# Enable CloudFront CDN
+CDN_ENABLED=true
+
+# CloudFront distribution domain (use one of these)
+# Option 1: Custom domain (recommended)
+CDN_URL=https://cdn.artifactarmoury.com
+
+# Option 2: CloudFront default domain
+# CDN_URL=https://d123abc456.cloudfront.net
+
+# CloudFront distribution ID (for invalidations)
+CLOUDFRONT_DISTRIBUTION_ID=E123ABC456
+
+# ============================================================================
+# AWS CREDENTIALS (for CloudFront management)
+# ============================================================================
+
+# AWS region (must be us-east-1 for CloudFront)
+AWS_REGION=us-east-1
+
+# AWS access key ID
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+
+# AWS secret access key
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# ============================================================================
+# S3 ORIGIN BUCKET (for CloudFront origin)
+# ============================================================================
+
+# S3 bucket name (CloudFront origin)
+S3_ORIGIN_BUCKET=artifactarmoury-cdn-origin
+
+# S3 region for origin bucket
+S3_ORIGIN_REGION=us-east-1
+
+# ============================================================================
+# STORAGE CONFIGURATION
+# ============================================================================
+
+# Storage mode: 'local', 's3', or 'hybrid'
+STORAGE_MODE=s3
+
+# Backblaze B2 Configuration (for primary storage)
+S3_ENDPOINT=https://eu-central-003.backblazeb2.com
+S3_REGION=eu-central-003
+S3_BUCKET=artifactbuilder
+S3_KEY_ID=003516a6cf37b870000000001
+S3_APPLICATION_KEY=K003Mz5Rzp7zvqbEKnSPqgYtIKbs9A4
+
+# ============================================================================
+# CACHING CONFIGURATION
+# ============================================================================
+
+# Cache TTL for static assets (in seconds)
+CACHE_TTL_STATIC=31536000  # 1 year
+
+# Cache TTL for 3D models (in seconds)
+CACHE_TTL_MODELS=2592000   # 30 days
+
+# Cache TTL for images (in seconds)
+CACHE_TTL_IMAGES=2592000   # 30 days
+
+# Cache TTL for thumbnails (in seconds)
+CACHE_TTL_THUMBNAILS=2592000  # 30 days
+
+# Enable compression
+CACHE_COMPRESS=true
+
+# ============================================================================
+# INVALIDATION CONFIGURATION
+# ============================================================================
+
+# Enable automatic invalidation on file changes
+AUTO_INVALIDATE=false
+
+# Batch invalidation requests (to reduce costs)
+BATCH_INVALIDATE=true
+
+# Maximum files per invalidation request
+MAX_INVALIDATE_BATCH=3000
+
+# ============================================================================
+# MONITORING CONFIGURATION
+# ============================================================================
+
+# Enable CloudWatch monitoring
+CLOUDWATCH_ENABLED=true
+
+# CloudWatch log group name
+CLOUDWATCH_LOG_GROUP=/aws/cloudfront/artifactarmoury
+
+# Enable CloudFront logging to S3
+CLOUDFRONT_LOGGING_ENABLED=true
+
+# S3 bucket for CloudFront logs
+CLOUDFRONT_LOGS_BUCKET=artifactarmoury-cdn-logs
+
+# CloudFront logs prefix
+CLOUDFRONT_LOGS_PREFIX=cloudfront-logs/
+
+# ============================================================================
+# PERFORMANCE CONFIGURATION
+# ============================================================================
+
+# Enable Origin Shield (additional caching layer)
+ORIGIN_SHIELD_ENABLED=true
+
+# Origin Shield region
+ORIGIN_SHIELD_REGION=us-east-1
+
+# Enable HTTP/2
+HTTP2_ENABLED=true
+
+# Enable HTTP/3 (QUIC)
+HTTP3_ENABLED=true
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+
+# Minimum TLS version
+MIN_TLS_VERSION=TLSv1.2_2021
+
+# Enable HTTPS redirect
+HTTPS_REDIRECT=true
+
+# Custom SSL certificate ARN (optional)
+# ACM_CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012
+
+# ============================================================================
+# CUSTOM DOMAIN CONFIGURATION
+# ============================================================================
+
+# Custom domain name
+CUSTOM_DOMAIN=cdn.artifactarmoury.com
+
+# Enable custom domain
+CUSTOM_DOMAIN_ENABLED=true
+
+# ============================================================================
+# ENVIRONMENT
+# ============================================================================
+
+# Environment: development, staging, production
+ENVIRONMENT=production
+
+# Node environment
+NODE_ENV=production
+
+# ============================================================================
+# DEPLOYMENT CONFIGURATION
+# ============================================================================
+
+# CloudFormation stack name
+CLOUDFORMATION_STACK_NAME=artifactarmoury-cdn
+
+# Terraform state bucket (if using Terraform)
+TERRAFORM_STATE_BUCKET=artifactarmoury-terraform-state
+
+# Terraform state key
+TERRAFORM_STATE_KEY=cloudfront/terraform.tfstate
+
+# ============================================================================
+# COST OPTIMIZATION
+# ============================================================================
+
+# Enable cost optimization features
+COST_OPTIMIZATION_ENABLED=true
+
+# Target cache hit rate (%)
+TARGET_CACHE_HIT_RATE=80
+
+# Enable data transfer optimization
+DATA_TRANSFER_OPTIMIZATION=true
+
+# ============================================================================
+# DEVELOPMENT CONFIGURATION
+# ============================================================================
+
+# Disable CDN in development (optional)
+# CDN_ENABLED=false
+
+# Use local storage in development
+# STORAGE_MODE=local
+
+# ============================================================================
+# NOTES
+# ============================================================================
+
+# 1. Replace all EXAMPLE values with your actual AWS credentials
+# 2. Keep AWS credentials secure - use AWS Secrets Manager in production
+# 3. Ensure ACM certificate is in us-east-1 region
+# 4. CloudFront distribution ID is available in AWS Console
+# 5. Test configuration before deploying to production
+# 6. Monitor costs in AWS Cost Explorer
+# 7. Set up CloudWatch alarms for monitoring
+# 8. Review caching strategy based on your content types
+
