@@ -13,7 +13,7 @@
 // 1-year immutable Cache-Control is safe.
 
 import {
-  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand,
+  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import logger from '../utils/logger'
@@ -77,6 +77,21 @@ export async function uploadObject(
   return publicUrl(k)
 }
 
+/** Download an object's bytes into memory (used by the async upload processor). */
+export async function downloadObject(key: string): Promise<Buffer> {
+  const res = await client().send(new GetObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+  const body = res.Body as unknown as AsyncIterable<Uint8Array> | undefined
+  if (!body) throw new Error(`R2 object has no body: ${key}`)
+  const chunks: Uint8Array[] = []
+  for await (const chunk of body) chunks.push(chunk)
+  return Buffer.concat(chunks)
+}
+
+/** Delete an object (e.g. clearing a rejected/quarantined raw upload). */
+export async function deleteObject(key: string): Promise<void> {
+  await client().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+}
+
 /** Does an object already exist? (used by the migration script to skip re-uploads) */
 export async function objectExists(key: string): Promise<boolean> {
   try {
@@ -97,9 +112,12 @@ export async function presignUpload(
   expiresInSeconds = 300,
 ): Promise<{ uploadUrl: string; publicUrl: string; key: string }> {
   const k = normalizeKey(key)
+  // Only sign Content-Type (not Cache-Control): every signed header must be
+  // reproduced exactly by the browser's PUT or R2 rejects it with 403. Derived
+  // public assets get their immutable cache header via uploadObject instead.
   const uploadUrl = await getSignedUrl(
     client(),
-    new PutObjectCommand({ Bucket: BUCKET, Key: k, ContentType: contentType, CacheControl: IMMUTABLE_CACHE }),
+    new PutObjectCommand({ Bucket: BUCKET, Key: k, ContentType: contentType }),
     { expiresIn: expiresInSeconds },
   )
   return { uploadUrl, publicUrl: publicUrl(k), key: k }

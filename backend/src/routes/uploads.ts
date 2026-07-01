@@ -12,7 +12,9 @@ import { contentTypeFor } from '../services/storage'
 
 const router = Router()
 
-const SAFE_PREFIXES = ['models', 'thumbnails', 'images', 'textures', 'maps']
+// `raw` is the quarantine prefix for un-processed seller uploads (content-hashed,
+// unguessable keys). Everything else is derived/public asset storage.
+const SAFE_PREFIXES = ['raw', 'models', 'thumbnails', 'images', 'textures', 'maps']
 
 /**
  * POST /api/uploads/presign  { filename, prefix }

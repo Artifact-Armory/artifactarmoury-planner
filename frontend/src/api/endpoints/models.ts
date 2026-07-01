@@ -23,6 +23,40 @@ export const modelsApi = {
   },
 
   /**
+   * Create a model from a file already uploaded directly to R2 (presigned).
+   * The API processes it in the background; poll getProcessingStatus for progress.
+   */
+  createFromUpload: async (data: {
+    rawKey: string
+    filename: string
+    name: string
+    description?: string
+    category: string
+    tags?: string
+    basePrice: number
+    fulfillmentType: 'stl' | 'print'
+    thumbnailKey?: string
+  }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/from-upload`, data);
+    return response.data.model;
+  },
+
+  /**
+   * Poll the background-processing state of a model the caller owns.
+   */
+  getProcessingStatus: async (
+    id: string,
+  ): Promise<{ processingStatus: string; processingError: string | null; status: string }> => {
+    const response = await apiClient.get(`${BASE_URL}/${id}`);
+    const m = response.data?.model ?? response.data;
+    return {
+      processingStatus: m.processing_status ?? m.processingStatus ?? 'ready',
+      processingError: m.processing_error ?? m.processingError ?? null,
+      status: m.status,
+    };
+  },
+
+  /**
    * Update an existing terrain model (requires ownership or admin role)
    */
   updateModel: async (id: string, data: Partial<ModelUploadRequest>): Promise<ApiResponse<TerrainModel>> => {

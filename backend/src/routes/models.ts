@@ -23,10 +23,23 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
 import { processSTL, generateGLB, computeFileHash } from '../services/fileProcessor';
 import { readFile as fsReadFile } from 'fs/promises';
+import { promises as fsp } from 'fs';
+import os from 'os';
+import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
+import { isR2Enabled, objectExists, downloadObject, deleteObject } from '../services/r2';
 
 const router = Router();
+
+const VALID_CATEGORIES = ['buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other'];
+
+function parseTags(tags: unknown): string[] {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags.map((t) => String(t).trim()).filter(Boolean);
+  if (typeof tags === 'string') return tags.split(',').map((t) => t.trim()).filter(Boolean);
+  return [];
+}
 
 // ============================================================================
 // CREATE MODEL
@@ -193,6 +206,85 @@ router.post('/',
     }
   }),
   cleanupOnError
+);
+
+// ============================================================================
+// CREATE MODEL FROM A DIRECT R2 UPLOAD (better path: bytes never touch the app)
+// ============================================================================
+// The browser presigns + PUTs the raw STL straight to R2 under the `raw/`
+// quarantine prefix, then calls this with the returned key. We create the row
+// in `processing` state and hand off to a background job, so the seller gets an
+// instant response and the request thread isn't blocked on GLB generation.
+
+router.post('/from-upload',
+  authenticate,
+  requireArtist,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+
+    const { rawKey, filename, name, description, category, tags, basePrice, fulfillmentType, thumbnailKey } = req.body ?? {};
+
+    if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
+      throw new ValidationError('rawKey (an uploaded raw/ object) is required');
+    }
+    if (thumbnailKey != null && (typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/'))) {
+      throw new ValidationError('thumbnailKey must be an uploaded thumbnails/ object');
+    }
+    if (!name || !category || basePrice == null) {
+      throw new ValidationError('Name, category, and base price are required');
+    }
+    if (!VALID_CATEGORIES.includes(category)) {
+      throw new ValidationError('Invalid category');
+    }
+    const price = parseFloat(basePrice);
+    if (isNaN(price) || price < 0) {
+      throw new ValidationError('Invalid base price');
+    }
+    // Confirm the object actually landed in R2 before we create a row for it.
+    if (!(await objectExists(rawKey))) {
+      throw new ValidationError('Uploaded file not found in storage — retry the upload');
+    }
+
+    const fulfillment = (fulfillmentType === 'stl' || fulfillmentType === 'print') ? fulfillmentType : 'print';
+    const userId = (req as any).userId;
+
+    const result = await db.query(
+      `INSERT INTO models (
+        artist_id, name, description, category, tags,
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', 'processing')
+      RETURNING id, name, created_at`,
+      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price, fulfillment]
+    );
+    const model = result.rows[0];
+
+    await db.query(
+      `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata)
+       VALUES ($1, 'model.created', 'model', $2, $3)`,
+      [userId, model.id, JSON.stringify({ name: model.name, via: 'direct-upload' })]
+    ).catch((err) => logger.error('activity_log insert failed', { error: err }));
+
+    // Fire-and-forget: process in the background, seller polls GET /:id.
+    processUploadedModel(model.id, rawKey, filename).catch((err) =>
+      logger.error('Async model processing crashed', { error: err, modelId: model.id })
+    );
+
+    logger.info('Model upload accepted for processing', { userId, modelId: model.id });
+
+    res.status(202).json({
+      message: 'Upload received — processing',
+      model: {
+        id: model.id,
+        name: model.name,
+        status: 'draft',
+        processingStatus: 'processing',
+        createdAt: model.created_at,
+      },
+    });
+  })
 );
 
 // ============================================================================
@@ -642,5 +734,86 @@ router.get('/:id/stats',
     });
   })
 );
+
+// ============================================================================
+// BACKGROUND PROCESSING for direct (R2) uploads
+// ============================================================================
+// NOTE: this runs in-process (fits Railway's single service). If the process
+// restarts mid-job the row is left in 'processing'; a future reaper/retry can
+// pick those up. For higher volume, move this to a real job queue.
+
+async function processUploadedModel(modelId: string, rawKey: string, filename?: string): Promise<void> {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-model-'));
+  const ext = (path.extname(filename || rawKey) || '.stl').toLowerCase();
+  const stlTmp = path.join(tmpDir, `model${ext}`);
+
+  try {
+    // 1. Pull the raw bytes from R2 to a temp file (processors work on paths).
+    const buffer = await downloadObject(rawKey);
+    await fsp.writeFile(stlTmp, buffer);
+
+    // 2. Reject exact-duplicate uploads (by content hash), excluding this row.
+    const fileHash = computeFileHash(buffer);
+    const dup = await db.query('SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2', [fileHash, modelId]);
+    if (dup.rows.length > 0) {
+      await markModelFailed(modelId, `This model file has already been uploaded (matches "${dup.rows[0].name}")`);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+
+    // 3. Analyse geometry + generate the GLB preview.
+    const stlData = await processSTL(stlTmp);
+    const glbPath = await generateGLB(stlTmp);
+    const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+
+    const printEstimate = estimatePrintCost({
+      volume_mm3: stlData.volume,
+      surface_area_mm2: stlData.surfaceArea,
+      estimated_weight_g: undefined,
+      estimated_print_time_minutes: undefined,
+      triangle_count: undefined,
+    });
+
+    // 4. Fill in the derived fields and flip to ready (still 'draft' for moderation).
+    await db.query(
+      `UPDATE models SET
+         glb_file_path = $1,
+         width = $2, depth = $3, height = $4,
+         estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
+         recommended_layer_height = 0.2, recommended_infill = 20,
+         file_hash = $8,
+         processing_status = 'ready', processing_error = NULL,
+         updated_at = NOW()
+       WHERE id = $9`,
+      [
+        glbStoragePath,
+        stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
+        Math.round(printEstimate.estimated_time_hours * 60),
+        Number(printEstimate.total_cost.toFixed(2)),
+        stlData.needsSupports,
+        fileHash,
+        modelId,
+      ]
+    );
+
+    logger.info('Model processed successfully', { modelId });
+  } catch (error) {
+    logger.error('Model processing failed', { error, modelId });
+    await markModelFailed(modelId, (error as Error)?.message?.slice(0, 500) || 'Processing failed');
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function markModelFailed(modelId: string, reason: string): Promise<void> {
+  await db.query(
+    `UPDATE models SET processing_status = 'failed', processing_error = $1, updated_at = NOW() WHERE id = $2`,
+    [reason, modelId]
+  ).catch((err) => logger.error('Failed to mark model as failed', { error: err, modelId }));
+}
+
+async function safeDeleteObject(key: string): Promise<void> {
+  try { await deleteObject(key); } catch (err) { logger.warn('Failed to delete quarantined object', { error: err, key }); }
+}
 
 export default router;
