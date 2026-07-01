@@ -3,9 +3,11 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { readFile, writeFile } from 'fs/promises'
 import path from 'path'
-import logger from '../utils/logger.js'
-import { saveFile, STORAGE_PATHS } from './storage.js'
-import type { AABB, Footprint, PrintStats, FilePaths, Vector3 } from '../../../shared/types.js'
+import crypto from 'crypto'
+import { Document, NodeIO } from '@gltf-transform/core'
+import logger from '../utils/logger'
+import { saveFile, STORAGE_PATHS } from './storage'
+import type { AABB, Footprint, PrintStats, FilePaths, Vector3 } from '../types/shared'
 
 const execAsync = promisify(exec)
 
@@ -13,34 +15,32 @@ const execAsync = promisify(exec)
 // CONFIGURATION
 // ============================================================================
 
-// Check if required tools are available
 let BLENDER_PATH = process.env.BLENDER_PATH || 'blender'
-let MESHLAB_PATH = process.env.MESHLAB_PATH || 'meshlabserver'
 let HAS_BLENDER = false
-let HAS_MESHLAB = false
 
-// Test tool availability on startup
 async function checkTools() {
   try {
     await execAsync(`${BLENDER_PATH} --version`)
     HAS_BLENDER = true
-    logger.info('✓ Blender found')
+    logger.info('✓ Blender found (optional, pure-Node GLB conversion active)')
   } catch {
-    logger.warn('Blender not found - STL to GLB conversion will be limited')
-  }
-  
-  try {
-    await execAsync(`${MESHLAB_PATH} --version`)
-    HAS_MESHLAB = true
-    logger.info('✓ MeshLab found')
-  } catch {
-    logger.warn('MeshLab not found - using fallback mesh analysis')
+    logger.info('Blender not found — using pure-Node STL→GLB conversion')
   }
 }
 
-// Run check on module load (but not in test environment)
 if (process.env.NODE_ENV !== 'test') {
   checkTools().catch(err => logger.error('Tool check failed', { error: err }))
+}
+
+// ============================================================================
+// FINGERPRINTING
+// ============================================================================
+
+/**
+ * Compute SHA-256 digest of a file buffer for duplicate detection.
+ */
+export function computeFileHash(buffer: Buffer): string {
+  return crypto.createHash('sha256').update(buffer).digest('hex')
 }
 
 // ============================================================================
@@ -314,81 +314,91 @@ export function calculatePrintStats(stl: ParsedSTL, aabb: AABB): PrintStats {
 // ============================================================================
 
 /**
- * Convert STL to GLB using Blender
+ * Convert parsed STL geometry to a GLB binary using @gltf-transform/core.
+ * No external tools required — runs entirely in Node.js.
  */
-export async function convertSTLtoGLB(
-  stlPath: string,
-  outputPath: string
-): Promise<void> {
-  if (!HAS_BLENDER) {
-    throw new Error('Blender is not available for STL to GLB conversion')
+async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<void> {
+  const positions: number[] = []
+  const normals: number[] = []
+
+  for (const tri of stl.triangles) {
+    for (const v of tri.vertices) {
+      positions.push(v.x, v.y, v.z)
+    }
+    // Repeat the face normal for each of the 3 vertices (flat shading)
+    for (let i = 0; i < 3; i++) {
+      normals.push(tri.normal.x, tri.normal.y, tri.normal.z)
+    }
   }
-  
-  try {
-    // Create Blender Python script for conversion
-    const script = `
-import bpy
-import sys
 
-# Clear default scene
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
+  const doc = new Document()
+  const buf = doc.createBuffer()
 
-# Import STL
-bpy.ops.import_mesh.stl(filepath="${stlPath}")
+  const posAccessor = doc.createAccessor()
+    .setType('VEC3')
+    .setArray(new Float32Array(positions))
+    .setBuffer(buf)
 
-# Select imported object
-obj = bpy.context.selected_objects[0]
-bpy.context.view_layer.objects.active = obj
+  const normAccessor = doc.createAccessor()
+    .setType('VEC3')
+    .setArray(new Float32Array(normals))
+    .setBuffer(buf)
 
-# Center to origin
-bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
-obj.location = (0, 0, 0)
+  const prim = doc.createPrimitive()
+    .setAttribute('POSITION', posAccessor)
+    .setAttribute('NORMAL', normAccessor)
 
-# Export as GLB
-bpy.ops.export_scene.gltf(
-    filepath="${outputPath}",
-    export_format='GLB',
-    use_selection=True,
-    export_apply=True
-)
+  const mesh = doc.createMesh('mesh').addPrimitive(prim)
+  const node = doc.createNode('node').setMesh(mesh)
+  const scene = doc.createScene('scene').addChild(node)
+  doc.getRoot().setDefaultScene(scene)
 
-print("Conversion successful")
-sys.exit(0)
-`
-    
-    const scriptPath = path.join(STORAGE_PATHS.temp, `convert_${Date.now()}.py`)
-    await writeFile(scriptPath, script)
-    
-    // Run Blender in background
-    const { stdout, stderr } = await execAsync(
-      `${BLENDER_PATH} --background --python "${scriptPath}"`,
-      { timeout: 60000 } // 60 second timeout
-    )
-    
-    logger.debug('Blender conversion output', { stdout, stderr })
-    
-    // Clean up script
-    await execAsync(`rm "${scriptPath}"`)
-    
-    logger.info('STL to GLB conversion successful', { stlPath, outputPath })
-  } catch (error) {
-    logger.error('STL to GLB conversion failed', { error, stlPath })
-    throw new Error('Failed to convert STL to GLB')
-  }
+  const io = new NodeIO()
+  const glbBytes = await io.writeBinary(doc)
+
+  await writeFile(outputPath, Buffer.from(glbBytes))
+  logger.info('STL→GLB conversion complete (pure Node)', { outputPath, triangles: stl.triangleCount })
 }
 
 /**
- * Fallback: Create simple GLB from STL data (basic conversion without Blender)
+ * Convert STL file to GLB. Tries pure Node.js conversion first;
+ * falls back to Blender CLI if available and pure conversion fails.
  */
-async function createBasicGLB(stl: ParsedSTL, outputPath: string): Promise<void> {
-  // This is a simplified GLB creation - in production you'd want a proper library
-  // For now, we'll just copy the STL and rename it (not ideal but works as fallback)
-  logger.warn('Using fallback GLB conversion - results may be limited')
-  
-  // In a real implementation, you'd use a library like gltf-transform or three.js
-  // to properly create a GLB file from the STL geometry
-  throw new Error('Fallback GLB conversion not yet implemented - Blender required')
+export async function convertSTLtoGLB(stlPath: string, outputPath: string): Promise<void> {
+  try {
+    const stl = await parseSTL(stlPath)
+    await convertSTLtoGLBPure(stl, outputPath)
+    return
+  } catch (pureError) {
+    logger.warn('Pure Node STL→GLB failed, trying Blender', { error: pureError })
+  }
+
+  if (!HAS_BLENDER) {
+    throw new Error('STL→GLB conversion failed: pure Node conversion failed and Blender is not available')
+  }
+
+  try {
+    const script = `
+import bpy, sys
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+bpy.ops.import_mesh.stl(filepath="${stlPath.replace(/\\/g, '/')}")
+obj = bpy.context.selected_objects[0]
+bpy.context.view_layer.objects.active = obj
+bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+obj.location = (0, 0, 0)
+bpy.ops.export_scene.gltf(filepath="${outputPath.replace(/\\/g, '/')}", export_format='GLB', use_selection=True, export_apply=True)
+sys.exit(0)
+`
+    const scriptPath = path.join(STORAGE_PATHS.temp, `convert_${Date.now()}.py`)
+    await writeFile(scriptPath, script)
+    await execAsync(`"${BLENDER_PATH}" --background --python "${scriptPath}"`, { timeout: 60000 })
+    try { await execAsync(`del "${scriptPath}"`) } catch {}
+    logger.info('STL→GLB conversion complete (Blender)', { outputPath })
+  } catch (blenderError) {
+    logger.error('Blender STL→GLB conversion failed', { error: blenderError, stlPath })
+    throw new Error('Failed to convert STL to GLB')
+  }
 }
 
 // ============================================================================
@@ -473,6 +483,7 @@ sys.exit(0)
 
 export interface ProcessFileResult {
   success: boolean
+  file_hash?: string
   file_paths?: FilePaths
   aabb?: AABB
   footprint?: Footprint
@@ -489,22 +500,27 @@ export async function processSTLFile(
   assetId: string
 ): Promise<ProcessFileResult> {
   const processingLogger = logger.child('FILE_PROCESSOR')
-  
+
   try {
     processingLogger.info('Starting STL processing', { stlPath, artistId, assetId })
-    
-    // 1. Parse STL
+
+    // 1. Hash raw bytes for duplicate detection
+    const rawBuffer = await readFile(stlPath)
+    const file_hash = computeFileHash(rawBuffer)
+    processingLogger.debug('File hash computed', { file_hash })
+
+    // 2. Parse STL
     processingLogger.debug('Parsing STL...')
     const stl = await parseSTL(stlPath)
     processingLogger.debug(`Parsed ${stl.triangleCount} triangles`)
     
-    // 2. Calculate geometry
+    // 3. Calculate geometry
     processingLogger.debug('Calculating geometry...')
     const aabb = calculateAABB(stl)
     const footprint = calculateFootprint(aabb)
     const printStats = calculatePrintStats(stl, aabb)
     
-    // 3. Convert to GLB
+    // 4. Convert to GLB
     processingLogger.debug('Converting to GLB...')
     const glbFilename = `${assetId}.glb`
     const glbPath = path.join(STORAGE_PATHS.models, artistId, assetId, glbFilename)
@@ -515,7 +531,7 @@ export async function processSTLFile(
       processingLogger.warn('GLB conversion failed, will use STL as fallback', { error })
     }
     
-    // 4. Generate thumbnail
+    // 5. Generate thumbnail
     processingLogger.debug('Generating thumbnail...')
     const thumbFilename = `${assetId}_thumb.png`
     const thumbPath = path.join(STORAGE_PATHS.thumbnails, artistId, assetId, thumbFilename)
@@ -526,7 +542,7 @@ export async function processSTLFile(
       processingLogger.warn('Thumbnail generation failed', { error })
     }
     
-    // 5. Build file paths
+    // 6. Build file paths
     const filePaths: FilePaths = {
       stl: path.relative(STORAGE_PATHS.models, stlPath),
       glb: path.relative(STORAGE_PATHS.models, glbPath),
@@ -541,6 +557,7 @@ export async function processSTLFile(
     
     return {
       success: true,
+      file_hash,
       file_paths: filePaths,
       aabb,
       footprint,
@@ -556,6 +573,31 @@ export async function processSTLFile(
   }
 }
 
+// Backward-compatible helpers expected by some routes
+export async function processSTL(stlPath: string): Promise<{
+  volume: number
+  surfaceArea: number
+  dimensions: { x: number; y: number; z: number }
+  needsSupports: boolean
+}> {
+  const stl = await parseSTL(stlPath)
+  const aabb = calculateAABB(stl)
+  const footprint = calculateFootprint(aabb)
+  const stats = calculatePrintStats(stl, aabb)
+  return {
+    volume: stats.volume_mm3 ?? 0,
+    surfaceArea: stats.surface_area_mm2 ?? 0,
+    dimensions: { x: footprint.width, y: footprint.depth, z: footprint.height },
+    needsSupports: false,
+  }
+}
+
+export async function generateGLB(stlPath: string): Promise<string> {
+  const out = stlPath.replace(/\.stl$/i, '.glb')
+  await convertSTLtoGLB(stlPath, out) // throws on failure — caller handles
+  return out
+}
+
 // ============================================================================
 // EXPORTS
 // ============================================================================
@@ -566,6 +608,8 @@ export default {
   calculateFootprint,
   calculatePrintStats,
   convertSTLtoGLB,
+  processSTL,
+  generateGLB,
   generateThumbnail,
   processSTLFile
 }

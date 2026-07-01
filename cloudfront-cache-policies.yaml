@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFront Custom Cache Policies for GLB and Static Assets'
+
+Resources:
+  # ============================================================================
+  # CUSTOM CACHE POLICY FOR GLB FILES
+  # ============================================================================
+  
+  GLBCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: GLBModelsCachePolicy
+        Comment: 'Cache policy optimized for GLB 3D model files'
+        DefaultTTL: 2592000  # 30 days
+        MaxTTL: 31536000    # 1 year
+        MinTTL: 1           # 1 second
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: all  # Cache based on query strings (for versioning)
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - Accept-Encoding
+              - Origin
+              - Access-Control-Request-Headers
+              - Access-Control-Request-Method
+          CookiesConfig:
+            CookieBehavior: none
+
+  # ============================================================================
+  # CUSTOM CACHE POLICY FOR STATIC ASSETS
+  # ============================================================================
+  
+  StaticAssetsCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: StaticAssetsCachePolicy
+        Comment: 'Cache policy for static assets (CSS, JS, images)'
+        DefaultTTL: 86400      # 1 day
+        MaxTTL: 31536000      # 1 year
+        MinTTL: 1             # 1 second
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          CookiesConfig:
+            CookieBehavior: none
+
+  # ============================================================================
+  # CUSTOM CACHE POLICY FOR THUMBNAILS
+  # ============================================================================
+  
+  ThumbnailsCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: ThumbnailsCachePolicy
+        Comment: 'Cache policy for thumbnail images'
+        DefaultTTL: 604800    # 7 days
+        MaxTTL: 31536000     # 1 year
+        MinTTL: 1            # 1 second
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          CookiesConfig:
+            CookieBehavior: none
+
+  # ============================================================================
+  # CUSTOM RESPONSE HEADERS POLICY FOR GLB FILES
+  # ============================================================================
+  
+  GLBResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: GLBResponseHeadersPolicy
+        Comment: 'Response headers policy for GLB 3D model files'
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          XSSProtection:
+            ModeBlock: true
+            Protection: true
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            # Cache control headers for GLB files
+            - Header: Cache-Control
+              Value: 'public, max-age=2592000, immutable'
+              Override: true
+            # CORS headers for 3D model access
+            - Header: Access-Control-Allow-Origin
+              Value: '*'
+              Override: true
+            - Header: Access-Control-Allow-Methods
+              Value: 'GET, HEAD, OPTIONS'
+              Override: true
+            - Header: Access-Control-Allow-Headers
+              Value: 'Content-Type, Accept-Encoding'
+              Override: true
+            # Content type for GLB
+            - Header: Content-Type
+              Value: 'model/gltf-binary'
+              Override: false
+            # Disable caching for non-versioned requests
+            - Header: X-Content-Type-Options
+              Value: 'nosniff'
+              Override: true
+
+  # ============================================================================
+  # CUSTOM RESPONSE HEADERS POLICY FOR STATIC ASSETS
+  # ============================================================================
+  
+  StaticAssetsResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: StaticAssetsResponseHeadersPolicy
+        Comment: 'Response headers policy for static assets'
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            # Long cache for versioned assets
+            - Header: Cache-Control
+              Value: 'public, max-age=31536000, immutable'
+              Override: true
+            - Header: X-Content-Type-Options
+              Value: 'nosniff'
+              Override: true
+
+Outputs:
+  GLBCachePolicyId:
+    Description: Cache Policy ID for GLB files
+    Value: !Ref GLBCachePolicy
+    Export:
+      Name: GLBCachePolicyId
+
+  StaticAssetsCachePolicyId:
+    Description: Cache Policy ID for static assets
+    Value: !Ref StaticAssetsCachePolicy
+    Export:
+      Name: StaticAssetsCachePolicyId
+
+  ThumbnailsCachePolicyId:
+    Description: Cache Policy ID for thumbnails
+    Value: !Ref ThumbnailsCachePolicy
+    Export:
+      Name: ThumbnailsCachePolicyId
+
+  GLBResponseHeadersPolicyId:
+    Description: Response Headers Policy ID for GLB files
+    Value: !Ref GLBResponseHeadersPolicy
+    Export:
+      Name: GLBResponseHeadersPolicyId
+
+  StaticAssetsResponseHeadersPolicyId:
+    Description: Response Headers Policy ID for static assets
+    Value: !Ref StaticAssetsResponseHeadersPolicy
+    Export:
+      Name: StaticAssetsResponseHeadersPolicyId
+

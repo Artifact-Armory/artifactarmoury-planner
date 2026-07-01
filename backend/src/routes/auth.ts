@@ -4,8 +4,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { db } from '../db';
-import { logger } from '../utils/logger';
-import { validateEmail, validatePassword, sanitizeInput } from '../utils/validation';
+import logger from '../utils/logger';
+import { validateEmail, validatePassword, sanitizeString } from '../utils/validation';
 import { 
   generateToken, 
   generateRefreshToken, 
@@ -32,16 +32,8 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
     throw new ValidationError('Email, password, and display name are required');
   }
 
-  if (!validateEmail(email)) {
-    throw new ValidationError('Invalid email address');
-  }
-
-  const passwordValidation = validatePassword(password);
-  if (!passwordValidation.isValid) {
-    throw new ValidationError('Password does not meet requirements', {
-      requirements: passwordValidation.errors
-    });
-  }
+  validateEmail(email);
+  validatePassword(password);
 
   if (displayName.length < 2 || displayName.length > 100) {
     throw new ValidationError('Display name must be between 2 and 100 characters');
@@ -58,7 +50,7 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
   }
 
   // Hash password
-  const saltRounds = 10;
+  const saltRounds = 12;
   const passwordHash = await bcrypt.hash(password, saltRounds);
 
   // Create user
@@ -66,7 +58,7 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
     `INSERT INTO users (email, password_hash, display_name, role)
      VALUES ($1, $2, $3, 'customer')
      RETURNING id, email, display_name, role, created_at`,
-    [email.toLowerCase(), passwordHash, sanitizeInput(displayName)]
+    [email.toLowerCase(), passwordHash, sanitizeString(displayName)]
   );
 
   const user = result.rows[0];
@@ -88,10 +80,7 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
   sendEmail({
     to: user.email,
     subject: 'Welcome to Terrain Builder',
-    template: 'welcome',
-    data: {
-      displayName: user.display_name
-    }
+    html: `<p>Hi ${user.display_name}, welcome to Terrain Builder!</p>`
   }).catch(err => logger.error('Failed to send welcome email', { error: err }));
 
   res.status(201).json({
@@ -119,16 +108,8 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
     throw new ValidationError('All fields are required including invite code');
   }
 
-  if (!validateEmail(email)) {
-    throw new ValidationError('Invalid email address');
-  }
-
-  const passwordValidation = validatePassword(password);
-  if (!passwordValidation.isValid) {
-    throw new ValidationError('Password does not meet requirements', {
-      requirements: passwordValidation.errors
-    });
-  }
+  validateEmail(email);
+  validatePassword(password);
 
   // Validate invite code
   const inviteResult = await db.query(
@@ -163,10 +144,10 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
   }
 
   // Hash password
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, 12);
 
   // Create artist user (with transaction)
-  const client = await db.getClient();
+  const client = await (db as any).getClient?.() ?? await db.connect();
   
   try {
     await client.query('BEGIN');
@@ -176,7 +157,7 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
       `INSERT INTO users (email, password_hash, display_name, role, artist_name)
        VALUES ($1, $2, $3, 'artist', $4)
        RETURNING id, email, display_name, role, artist_name, created_at`,
-      [email.toLowerCase(), passwordHash, sanitizeInput(displayName), sanitizeInput(artistName)]
+      [email.toLowerCase(), passwordHash, sanitizeString(displayName), sanitizeString(artistName)]
     );
 
     const user = userResult.rows[0];
@@ -208,11 +189,7 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
     sendEmail({
       to: user.email,
       subject: 'Welcome to Terrain Builder - Artist Account',
-      template: 'artist-welcome',
-      data: {
-        displayName: user.display_name,
-        artistName: user.artist_name
-      }
+      html: `<p>Hi ${user.display_name}, your artist account (${user.artist_name}) is ready.</p>`
     }).catch(err => logger.error('Failed to send artist welcome email', { error: err }));
 
     res.status(201).json({
@@ -331,10 +308,10 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
   await db.query(
     `INSERT INTO activity_log (user_id, action, resource_type, ip_address)
      VALUES ($1, 'user.logout', 'user', $2)`,
-    [req.userId, req.ip]
+    [(req as any).userId, req.ip]
   );
 
-  logger.info('User logged out', { userId: req.userId });
+  logger.info('User logged out', { userId: (req as any).userId });
 
   res.json({ message: 'Logged out successfully' });
 }));
@@ -351,7 +328,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
             created_at, updated_at
      FROM users 
      WHERE id = $1`,
-    [req.userId]
+    [(req as any).userId]
   );
 
   if (result.rows.length === 0) {
@@ -384,9 +361,10 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
 router.post('/password-reset/request', emailRateLimit, asyncHandler(async (req, res) => {
   const { email } = req.body;
 
-  if (!email || !validateEmail(email)) {
+  if (!email) {
     throw new ValidationError('Valid email address is required');
   }
+  validateEmail(email);
 
   // Find user
   const result = await db.query(
@@ -422,12 +400,7 @@ router.post('/password-reset/request', emailRateLimit, asyncHandler(async (req, 
   await sendEmail({
     to: user.email,
     subject: 'Password Reset Request',
-    template: 'password-reset',
-    data: {
-      displayName: user.display_name,
-      resetUrl,
-      expiryMinutes: 60
-    }
+    html: `<p>Hi ${user.display_name}, reset your password using <a href="${resetUrl}">this link</a>. The link expires in 60 minutes.</p>`
   });
 
   logger.info('Password reset email sent', { userId: user.id, email: user.email });
@@ -446,12 +419,7 @@ router.post('/password-reset/confirm', authRateLimit, asyncHandler(async (req, r
     throw new ValidationError('Reset token and new password are required');
   }
 
-  const passwordValidation = validatePassword(newPassword);
-  if (!passwordValidation.isValid) {
-    throw new ValidationError('Password does not meet requirements', {
-      requirements: passwordValidation.errors
-    });
-  }
+  validatePassword(newPassword);
 
   // Hash the token to compare with stored hash
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
@@ -472,7 +440,7 @@ router.post('/password-reset/confirm', authRateLimit, asyncHandler(async (req, r
   const user = result.rows[0];
 
   // Hash new password
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
 
   // Update password and clear reset token
   await db.query(
@@ -497,10 +465,7 @@ router.post('/password-reset/confirm', authRateLimit, asyncHandler(async (req, r
   sendEmail({
     to: user.email,
     subject: 'Password Changed Successfully',
-    template: 'password-changed',
-    data: {
-      displayName: user.display_name
-    }
+    html: `<p>Hi ${user.display_name}, your password has been changed successfully.</p>`
   }).catch(err => logger.error('Failed to send password changed email', { error: err }));
 
   res.json({ message: 'Password has been reset successfully' });
@@ -517,17 +482,12 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
     throw new ValidationError('Current password and new password are required');
   }
 
-  const passwordValidation = validatePassword(newPassword);
-  if (!passwordValidation.isValid) {
-    throw new ValidationError('New password does not meet requirements', {
-      requirements: passwordValidation.errors
-    });
-  }
+  validatePassword(newPassword);
 
   // Get user's current password
   const result = await db.query(
     'SELECT password_hash FROM users WHERE id = $1',
-    [req.userId]
+    [(req as any).userId]
   );
 
   const user = result.rows[0];
@@ -540,22 +500,22 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
   }
 
   // Hash new password
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
 
   // Update password
   await db.query(
     'UPDATE users SET password_hash = $1 WHERE id = $2',
-    [passwordHash, req.userId]
+    [passwordHash, (req as any).userId]
   );
 
   // Log activity
   await db.query(
     `INSERT INTO activity_log (user_id, action, resource_type, ip_address)
      VALUES ($1, 'password.changed', 'user', $2)`,
-    [req.userId, req.ip]
+    [(req as any).userId, req.ip]
   );
 
-  logger.info('Password changed', { userId: req.userId });
+  logger.info('Password changed', { userId: (req as any).userId });
 
   res.json({ message: 'Password changed successfully' });
 }));

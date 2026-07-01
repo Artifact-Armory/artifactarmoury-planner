@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { db } from '../db';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 import { 
   authenticate, 
   requireArtist, 
@@ -21,7 +21,8 @@ import {
 import { uploadRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
-import { processSTL, generateGLB } from '../services/fileProcessor';
+import { processSTL, generateGLB, computeFileHash } from '../services/fileProcessor';
+import { readFile as fsReadFile } from 'fs/promises';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
 
@@ -47,7 +48,7 @@ router.post('/',
     const modelFile = files.model[0];
     const thumbnailFile = files.thumbnail?.[0];
 
-    const { name, description, category, tags, basePrice } = req.body;
+    const { name, description, category, tags, basePrice, fulfillmentType } = req.body;
 
     // Validate required fields
     if (!name || !category || !basePrice) {
@@ -77,12 +78,22 @@ router.post('/',
     }
 
     try {
+      // Fingerprint: compute SHA-256 and reject exact duplicates
+      const rawBuffer = await fsReadFile(modelFile.path);
+      const fileHash = computeFileHash(rawBuffer);
+      const dupCheck = await db.query('SELECT id, name FROM models WHERE file_hash = $1', [fileHash]);
+      if (dupCheck.rows.length > 0) {
+        await deleteUploadedFile(modelFile.path);
+        if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
+        throw new ValidationError(`This model file has already been uploaded (matches "${dupCheck.rows[0].name}")`);
+      }
+
       // Process STL file
-      logger.info('Processing STL file', { userId: req.userId, filename: modelFile.filename });
+      logger.info('Processing STL file', { userId: (req as any).userId, filename: modelFile.filename });
       const stlData = await processSTL(modelFile.path);
 
       // Generate GLB for 3D preview
-      logger.info('Generating GLB preview', { userId: req.userId });
+      logger.info('Generating GLB preview', { userId: (req as any).userId });
       const glbPath = await generateGLB(modelFile.path);
 
       // Upload files to storage
@@ -96,9 +107,11 @@ router.post('/',
 
       // Estimate print cost
       const printEstimate = estimatePrintCost({
-        volume: stlData.volume,
-        surfaceArea: stlData.surfaceArea,
-        dimensions: stlData.dimensions
+        volume_mm3: stlData.volume,
+        surface_area_mm2: stlData.surfaceArea,
+        estimated_weight_g: undefined,
+        estimated_print_time_minutes: undefined,
+        triangle_count: undefined,
       });
 
       // Parse tags
@@ -119,11 +132,11 @@ router.post('/',
           width, depth, height,
           base_price, estimated_print_time, estimated_material_cost,
           supports_required, recommended_layer_height, recommended_infill,
-          status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'draft')
+          file_hash, fulfillment_type, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'draft')
         RETURNING id, name, created_at`,
         [
-          req.userId,
+          (req as any).userId,
           name,
           description || null,
           category,
@@ -135,11 +148,13 @@ router.post('/',
           stlData.dimensions.y,
           stlData.dimensions.z,
           price,
-          printEstimate.estimatedTime,
-          printEstimate.estimatedCost,
+          Math.round(printEstimate.estimated_time_hours * 60),
+          Number(printEstimate.total_cost.toFixed(2)),
           stlData.needsSupports,
-          0.2, // Default layer height
-          20,  // Default infill
+          0.2,
+          20,
+          fileHash,
+          (fulfillmentType === 'stl' || fulfillmentType === 'print') ? fulfillmentType : 'print',
         ]
       );
 
@@ -149,11 +164,11 @@ router.post('/',
       await db.query(
         `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata)
          VALUES ($1, 'model.created', 'model', $2, $3)`,
-        [req.userId, model.id, JSON.stringify({ name: model.name })]
+        [(req as any).userId, model.id, JSON.stringify({ name: model.name })]
       );
 
       logger.info('Model created', { 
-        userId: req.userId, 
+        userId: (req as any).userId, 
         modelId: model.id, 
         name: model.name 
       });
@@ -173,7 +188,7 @@ router.post('/',
       await deleteUploadedFile(modelFile.path);
       if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
       
-      logger.error('Failed to create model', { error, userId: req.userId });
+      logger.error('Failed to create model', { error, userId: (req as any).userId });
       throw error;
     }
   }),
@@ -193,7 +208,7 @@ router.get('/my-models',
     const offset = (Number(page) - 1) * Number(limit);
     
     let whereClause = 'WHERE artist_id = $1';
-    const params: any[] = [req.userId];
+    const params: any[] = [(req as any).userId];
 
     if (status) {
       whereClause += ' AND status = $2';
@@ -269,7 +284,7 @@ router.get('/:id',
 
     // Check visibility permissions
     if (model.status !== 'published' || model.visibility !== 'public') {
-      if (!req.userId || (req.userId !== model.artist_id && req.user?.role !== 'admin')) {
+      if (!(req as any).userId || ((req as any).userId !== model.artist_id && (req as any).user?.role !== 'admin')) {
         throw new NotFoundError('Model');
       }
     }
@@ -357,7 +372,7 @@ router.patch('/:id',
       updateValues
     );
 
-    logger.info('Model updated', { userId: req.userId, modelId: id });
+    logger.info('Model updated', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model updated successfully',
@@ -408,7 +423,7 @@ router.post('/:id/publish',
       [id]
     );
 
-    logger.info('Model published', { userId: req.userId, modelId: id });
+    logger.info('Model published', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model published successfully',
@@ -435,7 +450,7 @@ router.post('/:id/unpublish',
       [id]
     );
 
-    logger.info('Model unpublished', { userId: req.userId, modelId: id });
+    logger.info('Model unpublished', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model unpublished successfully',
@@ -486,7 +501,7 @@ router.delete('/:id',
       );
     }
 
-    logger.info('Model deleted', { userId: req.userId, modelId: id });
+    logger.info('Model deleted', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model deleted successfully',
@@ -532,7 +547,7 @@ router.post('/:id/images',
       }
 
       logger.info('Model images uploaded', { 
-        userId: req.userId, 
+        userId: (req as any).userId, 
         modelId: id, 
         count: files.length 
       });
@@ -543,7 +558,7 @@ router.post('/:id/images',
       });
 
     } catch (error) {
-      logger.error('Failed to upload model images', { error, userId: req.userId });
+      logger.error('Failed to upload model images', { error, userId: (req as any).userId });
       throw error;
     }
   }),

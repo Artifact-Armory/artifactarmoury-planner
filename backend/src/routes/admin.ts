@@ -3,11 +3,12 @@
 
 import { Router } from 'express';
 import { db } from '../db';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError } from '../middleware/error';
 import crypto from 'crypto';
+import { deleteFromStorage } from '../services/storage';
 
 const router = Router();
 
@@ -187,7 +188,7 @@ router.patch('/users/:id/status',
     );
 
     logger.warn('User status changed by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       targetUserId: id,
       newStatus: status
     });
@@ -201,14 +202,14 @@ router.delete('/users/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    if (id === req.userId) {
+    if (id === (req as any).userId) {
       throw new ValidationError('Cannot delete your own account');
     }
 
     await db.query('DELETE FROM users WHERE id = $1', [id]);
 
     logger.warn('User deleted by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       deletedUserId: id
     });
 
@@ -255,11 +256,11 @@ router.post('/models/:id/flag',
            moderated_by = $2,
            moderated_at = CURRENT_TIMESTAMP
        WHERE id = $3`,
-      [reason, req.userId, id]
+      [reason, (req as any).userId, id]
     );
 
     logger.warn('Model flagged by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       modelId: id,
       reason
     });
@@ -280,11 +281,11 @@ router.post('/models/:id/approve',
            moderated_by = $1,
            moderated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
-      [req.userId, id]
+      [(req as any).userId, id]
     );
 
     logger.info('Model approved by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       modelId: id
     });
 
@@ -300,11 +301,84 @@ router.delete('/models/:id',
     await db.query('DELETE FROM models WHERE id = $1', [id]);
 
     logger.warn('Model deleted by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       modelId: id
     });
 
     res.json({ message: 'Model deleted successfully' });
+  })
+);
+
+// Delete all models
+router.delete('/models',
+  asyncHandler(async (req, res) => {
+    const client = await db.connect();
+
+    let modelRows: Array<{
+      stl_file_path: string | null;
+      glb_file_path: string | null;
+      thumbnail_path: string | null;
+    }> = [];
+    let imageRows: Array<{ image_path: string | null }> = [];
+
+    try {
+      await client.query('BEGIN');
+
+      const modelsResult = await client.query(
+        `SELECT stl_file_path, glb_file_path, thumbnail_path FROM models`
+      );
+      const imagesResult = await client.query(
+        `SELECT image_path FROM model_images`
+      );
+
+      modelRows = modelsResult.rows;
+      imageRows = imagesResult.rows;
+
+      await client.query('DELETE FROM models');
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const filePaths = new Set<string>();
+
+    for (const model of modelRows) {
+      if (model.stl_file_path) filePaths.add(model.stl_file_path);
+      if (model.glb_file_path) filePaths.add(model.glb_file_path);
+      if (model.thumbnail_path) filePaths.add(model.thumbnail_path);
+    }
+
+    for (const image of imageRows) {
+      if (image.image_path) filePaths.add(image.image_path);
+    }
+
+    if (filePaths.size > 0) {
+      const deleteResults = await Promise.allSettled(
+        Array.from(filePaths).map(filePath => deleteFromStorage(filePath))
+      );
+
+      const failed = deleteResults.filter(result => result.status === 'rejected');
+      if (failed.length > 0) {
+        logger.warn('Some model files failed to delete during bulk removal', {
+          totalFiles: filePaths.size,
+          failedCount: failed.length
+        });
+      }
+    }
+
+    logger.warn('All models purged by admin', {
+      adminId: (req as any).userId,
+      deletedCount: modelRows.length
+    });
+
+    res.json({
+      message: 'All models deleted successfully',
+      deletedCount: modelRows.length
+    });
   })
 );
 
@@ -352,11 +426,11 @@ router.post('/invites',
       `INSERT INTO invite_codes (code, created_by, max_uses, expires_at)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [code, req.userId, maxUses, expiresAt]
+      [code, (req as any).userId, maxUses, expiresAt]
     );
 
     logger.info('Invite code created', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       code,
       maxUses,
       expiresAt
@@ -377,7 +451,7 @@ router.delete('/invites/:id',
     await db.query('DELETE FROM invite_codes WHERE id = $1', [id]);
 
     logger.info('Invite code deleted', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       inviteId: id
     });
 
@@ -515,7 +589,7 @@ router.patch('/orders/:id/fulfillment',
     );
 
     logger.info('Order fulfillment updated by admin', {
-      adminId: req.userId,
+      adminId: (req as any).userId,
       orderId: id,
       status
     });

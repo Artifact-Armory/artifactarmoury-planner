@@ -268,21 +268,34 @@ export interface LayoutData {
 
 export interface UserTable {
   id: string
-  user_email: string
+  user_id: string | null
+  user_email?: string | null
   name: string
+  description?: string | null
   table_config: TableConfig
   layout_data: LayoutData
   share_token: string
+  share_code?: string
   is_public: boolean
+  view_count: number
+  clone_count: number
+  status?: string
+  plan?: string
+  max_assets?: number
+  session_id?: string | null
   created_at: string
   updated_at: string
 }
 
 export interface SaveTableRequest {
   name: string
+  description?: string
   table_config: TableConfig
   layout_data: LayoutData
   is_public?: boolean
+  user_id?: string
+  user_email?: string
+  session_id?: string
 }
 
 export interface ExampleTable {

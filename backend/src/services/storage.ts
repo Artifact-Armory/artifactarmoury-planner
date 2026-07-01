@@ -1,15 +1,30 @@
 // backend/src/services/storage.ts
 import { promises as fs } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import crypto from 'crypto'
-import logger from '../utils/logger.js'
+import logger from '../utils/logger'
+import { isR2Enabled, publicUrl as r2PublicUrl, uploadObject as r2Upload } from './r2'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+/** MIME type for a stored asset by extension (so R2 serves correct Content-Type). */
+export function contentTypeFor(filename: string): string {
+  const ext = path.extname(filename).toLowerCase()
+  switch (ext) {
+    case '.glb': return 'model/gltf-binary'
+    case '.gltf': return 'model/gltf+json'
+    case '.stl': return 'model/stl'
+    case '.png': return 'image/png'
+    case '.jpg': case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.json': return 'application/json'
+    default: return 'application/octet-stream'
+  }
+}
+
+// Use process.cwd() instead of import.meta.url
 
 // Storage configuration
-const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+// Prefer DEV_GUIDE's UPLOAD_DIR, fall back to STORAGE_ROOT, then ./uploads
+const STORAGE_ROOT = process.env.UPLOAD_DIR || process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '104857600') // 100MB default
 
 // Storage paths
@@ -249,8 +264,10 @@ export function getFileStream(filePath: string): NodeJS.ReadableStream {
  * Get file URL for public access
  */
 export function getFileURL(relativePath: string): string {
+  // Served from R2/Cloudflare CDN when configured; otherwise off the app's /uploads.
+  if (isR2Enabled()) return r2PublicUrl(relativePath)
   const baseURL = process.env.BASE_URL || 'http://localhost:3001'
-  return `${baseURL}/storage/${relativePath}`
+  return `${baseURL}/uploads/${relativePath}`
 }
 
 // ============================================================================
@@ -295,6 +312,30 @@ export async function deleteFiles(filePaths: string[]): Promise<void> {
       failed: failed.length 
     })
   }
+}
+
+// Compatibility helpers expected by some routes
+export async function uploadToStorage(tempPath: string, category: 'models' | 'previews' | 'thumbnails' | 'images'): Promise<string> {
+  // For 'previews', store under models by convention
+  const targetCategory = category === 'previews' ? 'models' : category
+  const filename = path.basename(tempPath)
+  const buffer = await fs.readFile(tempPath)
+  const saved = await saveFile({ originalName: filename, buffer, category: targetCategory as any })
+  // Mirror to R2 so the bytes are served from the CDN, not the Railway app.
+  if (isR2Enabled()) {
+    try {
+      await r2Upload(saved.relativePath, buffer, contentTypeFor(saved.relativePath), { immutable: true })
+    } catch (error) {
+      logger.error('R2 mirror upload failed (falling back to local serving)', { error, key: saved.relativePath })
+    }
+  }
+  // best-effort cleanup
+  try { await deleteFile(tempPath) } catch {}
+  return saved.relativePath
+}
+
+export async function deleteFromStorage(relativePath: string): Promise<void> {
+  await deleteFile(relativePath)
 }
 
 /**
@@ -461,6 +502,8 @@ export default {
   getFileURL,
   deleteFile,
   deleteFiles,
+  uploadToStorage,
+  deleteFromStorage,
   deleteAssetFiles,
   cleanupTempFiles,
   getStorageStats,

@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
-import Footer from './Footer';
+import Footer from './footer';
+import CartDrawer from '../cart/CartDrawer';
 import { Toaster } from 'react-hot-toast';
 
 const MainLayout: React.FC = () => {
@@ -21,6 +22,8 @@ const MainLayout: React.FC = () => {
       </main>
       
       <Footer />
+
+      <CartDrawer />
       
       {/* Toast notifications */}
       <Toaster 

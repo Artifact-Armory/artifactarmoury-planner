@@ -5,7 +5,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: 'user' | 'artist' | 'admin';
+  requiredRole?: 'customer' | 'artist' | 'admin';
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
@@ -25,8 +25,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         return isAdmin;
       case 'artist':
         return user.role === 'artist' || user.role === 'admin';
-      case 'user':
-        return true; // All authenticated users have 'user' role
+      case 'customer':
+        return true; // All authenticated users are at least customers
       default:
         return false;
     }
@@ -52,7 +52,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // If user doesn't have required role
   if (!hasRequiredRole()) {
     // Redirect to appropriate page based on role
-    if (requiredRole === 'artist' && user?.role === 'user') {
+    if (requiredRole === 'artist' && user?.role === 'customer') {
       return <Navigate to="/apply-artist" replace />;
     }
     

@@ -1,0 +1,70 @@
+{
+  "assets": [
+    {
+      "id": "barrel",
+      "name": "Barrel",
+      "tags": ["prop", "storage", "industrial", "cover"],
+      "aabb": { "x": 0.05, "z": 0.05, "y": 0.08 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 3.99,
+      "sku": "PROP-BARREL-01",
+      "model": "/assets/models/barrel.glb"
+    },
+    {
+      "id": "bottom",
+      "name": "Bottom",
+      "tags": ["building", "base", "terrain"],
+      "aabb": { "x": 0.15, "z": 0.10, "y": 0.08 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 12.99,
+      "sku": "BLDG-BOTTOM-01",
+      "model": "/assets/models/bottom.glb"
+    },
+    {
+      "id": "floor",
+      "name": "Floor",
+      "tags": ["building", "floor", "platform", "terrain"],
+      "aabb": { "x": 0.30, "z": 0.20, "y": 0.02 },
+      "footprint": { "cols": 2, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 8.99,
+      "sku": "BLDG-FLOOR-01",
+      "model": "/assets/models/floor.glb"
+    },
+    {
+      "id": "sandbags",
+      "name": "Sandbags",
+      "tags": ["cover", "fortification", "military", "terrain"],
+      "aabb": { "x": 0.12, "z": 0.06, "y": 0.04 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 5.99,
+      "sku": "PROP-SANDBAG-01",
+      "model": "/assets/models/sandbags.glb"
+    },
+    {
+      "id": "shutters",
+      "name": "Shutters",
+      "tags": ["building", "window", "detail", "urban"],
+      "aabb": { "x": 0.08, "z": 0.02, "y": 0.12 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 6.99,
+      "sku": "BLDG-SHUTTER-01",
+      "model": "/assets/models/shutters.glb"
+    },
+    {
+      "id": "top",
+      "name": "Top",
+      "tags": ["building", "roof", "upper", "terrain"],
+      "aabb": { "x": 0.20, "z": 0.15, "y": 0.12 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 15.99,
+      "sku": "BLDG-TOP-01",
+      "model": "/assets/models/top.glb"
+    }
+  ]
+}

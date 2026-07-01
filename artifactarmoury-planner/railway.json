@@ -1,0 +1,56 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "dockerfile",
+    "dockerfile": "Dockerfile"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "startCommand": "node backend/dist/index.js",
+    "restartPolicyMaxRetries": 10,
+    "restartPolicyWindowMs": 60000
+  },
+  "variables": {
+    "NODE_ENV": {
+      "description": "Node environment",
+      "value": "production"
+    },
+    "PORT": {
+      "description": "Server port",
+      "value": "3001"
+    },
+    "JWT_SECRET": {
+      "description": "JWT secret key (min 32 characters)",
+      "value": ""
+    },
+    "UPLOAD_DIR": {
+      "description": "Upload directory",
+      "value": "/app/uploads"
+    },
+    "FRONTEND_URL": {
+      "description": "Frontend URL",
+      "value": ""
+    },
+    "BASE_URL": {
+      "description": "Backend base URL",
+      "value": ""
+    },
+    "EMAIL_FROM": {
+      "description": "Email from address",
+      "value": "noreply@artifactarmoury.com"
+    },
+    "STRIPE_MOCK": {
+      "description": "Mock Stripe (set to false when ready for real payments)",
+      "value": "true"
+    },
+    "DB_POOL_MIN": {
+      "description": "Min database connections",
+      "value": "5"
+    },
+    "DB_POOL_MAX": {
+      "description": "Max database connections",
+      "value": "20"
+    }
+  }
+}
+

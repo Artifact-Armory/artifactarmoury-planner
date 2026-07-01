@@ -1,8 +1,8 @@
 // backend/src/routes/artists.ts
 import express from 'express'
-import { db } from '../db/index.js'
-import logger from '../utils/logger.js'
-import { authMiddleware } from '../middleware/auth.js'
+import { db } from '../db'
+import logger from '../utils/logger'
+import { authenticate } from '../middleware/auth'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
@@ -400,12 +400,12 @@ router.get('/search/query', async (req, res, next) => {
 // GET ARTIST ANALYTICS (protected - own data only)
 // ============================================================================
 
-router.get('/:id/analytics', authMiddleware(), async (req, res, next) => {
+router.get('/:id/analytics', authenticate, async (req, res, next) => {
   try {
     const { id } = req.params
 
     // Ensure artist can only access their own analytics
-    if (req.artistId !== id && req.artistRole !== 'admin') {
+    if ((req as any).userId !== id && (req as any).user?.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -493,12 +493,12 @@ router.get('/:id/analytics', authMiddleware(), async (req, res, next) => {
 // UPDATE ARTIST PROFILE (protected)
 // ============================================================================
 
-router.put('/:id/profile', authMiddleware(), async (req, res, next) => {
+router.put('/:id/profile', authenticate, async (req, res, next) => {
   try {
     const { id } = req.params
 
     // Ensure artist can only update their own profile
-    if (req.artistId !== id && req.artistRole !== 'admin') {
+    if ((req as any).userId !== id && (req as any).user?.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden' })
     }
 

@@ -1,0 +1,105 @@
+Artifact Armoury Planner — Build Overview
+=========================================
+
+Repository Layout
+-----------------
+- `backend/` — Node 18 + TypeScript Express API (`ts-node` in dev, `tsc` build). Key areas: `src/routes` (REST endpoints), `src/services` (file processing, watermarking, storage), `src/middleware` (auth, upload, security).
+- `frontend/` — React 18 + Vite SPA. State via Zustand, queries via @tanstack/react-query, forms via React Hook Form, Tailwind styling, lucide-react icons.
+- `shared/` — (currently JS/TS declaration bundle) shared type artefacts.
+- `docs/` — engineering notes (migration guide, watermarking playbook).
+- `uploads/` — local storage root for mock mode (STLs, GLBs, thumbnails).
+
+Current Runtime Configuration
+-----------------------------
+- Backend dev server: `npm run dev` (nodemon + ts-node).
+- Frontend dev server: `npm run dev` from `frontend/` (Vite proxying `/api` to backend).
+- `.env` (backend) currently has `DB_MOCK=true`, so all database calls use the in-memory stub; Postgres connectivity + migrations are bypassed. Other services (Stripe, email) are mocked (`STRIPE_MOCK=true`, `RESEND_API_KEY` unset).
+- Upload storage resolves to `./uploads` relative to repo root. Files are publicly served at `/uploads/*` by the Express app.
+
+Recent Feature Work
+-------------------
+1. **Watermarking & Anti-Piracy**
+   - Added `backend/src/services/watermark.ts` with:
+     - Invisible mesh watermarking (nudge ~8% of STL triangles by ±0.0008 mm deterministically from artist ID + watermark token).
+     - GLB metadata stamping via @gltf-transform `NodeIO` (extras set on the root).
+     - Preview watermarks: auto-generated PNG thumbnails + uploaded images are overlaid using `sharp` and `pngjs`.
+     - Feature-vector fingerprint (volume, surface area, dimension ratios, triangle count) for similarity matching.
+   - Model upload flow (`backend/src/routes/models.ts`) now:
+     - Generates a `watermarkPayload`.
+     - Watermarks STL + GLB + thumbnail before persisting to storage.
+     - Inserts a record into new `model_watermarks` table with feature vectors & hashes.
+     - Provides admin endpoint `GET /api/models/:id/similar` using cosine similarity.
+   - Documentation captured in `docs/watermarking.md`.
+
+2. **Licensing & Creator Trust**
+   - Models now require an explicit license string during upload (`standard-commercial`, `personal-use`, CC variants). Validated server-side; stored alongside model metadata.
+   - Artists gain optional verification flags (`creator_verified`, `verification_badge`) surfaced through API responses.
+   - Frontend features:
+     - Upload form (`CreateModel.tsx`) includes license selector (options defined in `frontend/src/utils/licenses.ts`).
+     - Model cards + detail pages display license badge and creator verification chip.
+     - Artist directory/profile highlight verification status.
+   - Backend browsing endpoints & artist APIs now include license + verification fields.
+
+3. **Supporting Tooling**
+   - Added `backend/src/services/modelSimilarity.ts` (feature vector matching).
+   - Introduced migration `006_model_license_creator_verification.sql` (adds new columns/indexes).
+   - Added `sharp` dependency (image watermarking).
+
+Current Limitations / Known Issues
+----------------------------------
+- **Mock DB Mode**: With `DB_MOCK=true`, database writes are stubs returning empty result sets. Consequences:
+  - Model uploads succeed in storage but do not persist metadata in Postgres.
+  - Watermark records insert attempts are no-ops.
+  - Admin similarity endpoint returns empty payloads.
+  - Artist verification and license info exist only in responses fabricated by mocks.
+- **Migrations Pending**: Postgres schema must be upgraded before disabling mock mode:
+  - `005_model_watermarks.sql` (added previously) and `006_model_license_creator_verification.sql` are unapplied.
+  - Attempting to run the backend against Postgres without these migrations produces column errors (observed earlier when login selected `creator_verified`/`verification_badge`).
+- **Image Watermarking**: `sharp` requires native bindings; ensure environment has prebuilt binaries (Node 18). Otherwise install build tools or pin to compatible version.
+- **GLB Metadata**: Current implementation only sets root extras. If richer metadata (asset extras) is required, upgrade @gltf-transform and adjust API accordingly.
+- **Similarity Scanner**: Only synchronous cosine comparison exists; no automated background scanning or external marketplace ingestion yet.
+
+Planned / Suggested Next Steps
+------------------------------
+1. **Transition Off Mock DB**
+   - Start Postgres locally (e.g., `docker run postgres:14`) and set `DB_MOCK=false`.
+   - Run `npm install` (backend) to ensure `sharp` deps are built.
+   - Execute migrations: `npm run migrate` (applies migrations 001–006).
+   - Seed data or create accounts through API/UI.
+2. **Verification Admin UX**
+   - Build tooling (API + admin UI) to toggle `creator_verified`/`verification_badge`.
+   - Record provenance (auditing) when staff issue badges.
+3. **Watermark Evidence Tools**
+   - CLI/API endpoint to extract watermark payload directly from stored STL/GLB.
+   - Background worker to compute similarity scores against scraped marketplaces.
+4. **Robust Storage**
+   - Replace local `./uploads` with S3 or minio for multi-host deployments.
+   - Add lifecycle policies/cleanup scripts for temp artifacts.
+5. **Testing & CI**
+   - Expand automated tests (none run yet); add coverage around upload pipeline, watermark hash generation, licensing validation.
+   - Integrate lint, type-check, and unit tests into CI.
+6. **Frontend Enhancements**
+   - Display license detail tooltips/modals referencing the selected license.
+   - Add report workflow leveraging watermark metadata (user-submitted takedown requests).
+
+Quick Reference Commands
+------------------------
+- Backend dev: `cd backend && npm run dev`
+- Backend build/test: `npm run build`, `npm test`
+- Apply migrations: `npm run migrate` (requires `DB_MOCK=false` and Postgres)
+- Frontend dev: `cd frontend && npm run dev`
+- Frontend build: `npm run build`
+
+Key Third-Party Dependencies
+----------------------------
+- `@gltf-transform/core/functions` for GLB conversion & optimization.
+- `sharp` + `pngjs` for image watermarking.
+- `multer` for upload handling.
+- `express-rate-limit` + optional Redis store.
+- React ecosystem libraries: @tanstack/react-query, react-hook-form, lucide-react, Zustand, Tailwind CSS, Vite.
+
+Contacts & Notes
+----------------
+- Default mock credentials: `demo@artifactarmoury.com` / `demo123`.
+- Ensure `UPLOAD_DIR` exists and is writable before running the backend.
+- To regenerate STL/GLB fingerprints, rerun the upload pipeline or implement a backfill script leveraging `processSTL` + `embedStlWatermark`.

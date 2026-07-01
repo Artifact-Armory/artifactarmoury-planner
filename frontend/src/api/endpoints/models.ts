@@ -1,22 +1,17 @@
-import apiClient from '../client';
-import { 
-  ApiResponse, 
-  TerrainModel,
-  ModelUploadRequest,
-  Review,
-  CreateReviewRequest,
-  UploadResponse
-} from '../types';
+import apiClient from '../client'
+import { ApiResponse, TerrainModel, ModelUploadRequest, Review, CreateReviewRequest, UploadResponse, Pagination } from '../types'
+import { mapModelRecord } from '../transformers'
 
-const BASE_URL = '/api/models';
+const BASE_URL = '/api/models'
 
 export const modelsApi = {
   /**
    * Get a specific model by ID
    */
-  getModelById: async (id: string): Promise<ApiResponse<TerrainModel>> => {
-    const response = await apiClient.get<ApiResponse<TerrainModel>>(`${BASE_URL}/${id}`);
-    return response.data;
+  getModelById: async (id: string): Promise<TerrainModel> => {
+    const response = await apiClient.get(`${BASE_URL}/${id}`)
+    const payload = response.data?.model ?? response.data?.data ?? response.data
+    return mapModelRecord(payload)
   },
 
   /**
@@ -166,14 +161,12 @@ export const modelsApi = {
   /**
    * Get related models
    */
-  getRelatedModels: async (modelId: string, limit = 6): Promise<ApiResponse<TerrainModel[]>> => {
-    const response = await apiClient.get<ApiResponse<TerrainModel[]>>(
-      `${BASE_URL}/${modelId}/related`,
-      {
-        params: { limit }
-      }
-    );
-    return response.data;
+  getRelatedModels: async (modelId: string, limit = 6): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/${modelId}/related`, {
+      params: { limit },
+    })
+    const related = response.data?.related ?? response.data?.models ?? []
+    return related.map((model: any) => mapModelRecord(model))
   },
 
   /**
@@ -195,21 +188,27 @@ export const modelsApi = {
   /**
    * Get user's wishlist
    */
-  getWishlist: async (page = 1, limit = 20): Promise<ApiResponse<{
-    models: TerrainModel[];
-    totalCount: number;
-    page: number;
-    totalPages: number;
-  }>> => {
-    const response = await apiClient.get<ApiResponse<{
-      models: TerrainModel[];
-      totalCount: number;
-      page: number;
-      totalPages: number;
-    }>>(`${BASE_URL}/wishlist`, {
-      params: { page, limit }
-    });
-    return response.data;
+  getWishlist: async (
+    page = 1,
+    limit = 20,
+  ): Promise<{ models: TerrainModel[]; pagination: Pagination | null }> => {
+    const response = await apiClient.get(`${BASE_URL}/wishlist`, {
+      params: { page, limit },
+    })
+    const payload = response.data ?? {}
+    const models = (payload.models ?? payload.data?.models ?? []).map((model: any) => mapModelRecord(model))
+    const paginationRaw = payload.pagination ?? payload.data?.pagination ?? null
+    return {
+      models,
+      pagination: paginationRaw
+        ? {
+            page: Number(paginationRaw.page ?? page),
+            limit: Number(paginationRaw.limit ?? limit),
+            totalItems: Number(paginationRaw.total ?? paginationRaw.totalItems ?? models.length),
+            totalPages: Number(paginationRaw.totalPages ?? paginationRaw.pages ?? 1),
+          }
+        : null,
+    }
   },
 
   /**

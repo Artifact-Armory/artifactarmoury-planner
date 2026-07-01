@@ -1,15 +1,28 @@
 // src/api/types.ts
 
-// User & Auth
-export interface User {
+export type AuthRole = 'customer' | 'artist' | 'admin'
+export type AccountStatus = 'active' | 'suspended' | 'banned'
+
+export interface ApiUser {
   id: string
   email: string
+  displayName: string
+  role: AuthRole
+  artistName?: string
+  artistBio?: string
+  artistUrl?: string
+  accountStatus?: AccountStatus
+  stripeOnboardingComplete?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface User extends ApiUser {
   name: string
-  role: 'artist' | 'user' | 'admin'
-  artistId?: string
   profileImage?: string
-  verified: boolean
-  createdAt: string
+  avatar?: string
+  verified?: boolean
+  artistId?: string
 }
 
 export interface LoginRequest {
@@ -20,91 +33,161 @@ export interface LoginRequest {
 export interface RegisterRequest {
   email: string
   password: string
-  name: string
-  isArtist?: boolean
+  displayName: string
   artistName?: string
-  bio?: string
+  inviteCode?: string
 }
 
 export interface AuthResponse {
-  token: string
+  message?: string
   user: User
+  accessToken: string
+  refreshToken: string
 }
 
-// Models
-export interface Model {
+export interface ApiResponse<T = unknown> {
+  data?: T
+  message?: string
+  success?: boolean
+  pagination?: Pagination
+  [key: string]: unknown
+}
+
+export interface Pagination {
+  page: number
+  limit: number
+  totalItems: number
+  totalPages: number
+  pages?: number
+}
+
+export interface Category {
+  id?: string
+  name?: string
+  category?: string
+  modelCount: number
+}
+
+export interface Tag {
+  id?: string
+  tag: string
+  usageCount: number
+}
+
+export interface TerrainModel {
   id: string
-  artistId: string
-  artistName: string
   name: string
-  description: string
-  basePrice: number
-  genre?: string
-  categories: string[]
+  description?: string
+  category: string
   tags: string[]
-  status: 'pending' | 'processing' | 'active' | 'rejected'
-  fileUrl?: string
-  previewImages: string[]
-  printRecommendations?: {
-    layerHeight?: string
-    infill?: string
-    supports?: boolean
-    notes?: string
-  }
-  downloads: number
-  rating: number
-  reviews: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ModelUpload {
-  name: string
-  description: string
   basePrice: number
-  genre?: string
-  categories?: string[]
-  tags?: string[]
-  printRecommendations?: {
-    layerHeight?: string
-    infill?: string
-    supports?: boolean
-    notes?: string
+  fulfillmentType?: 'stl' | 'print'
+  thumbnailUrl?: string
+  glbUrl?: string
+  previewImages?: string[]
+  artistName: string
+  artistUrl?: string
+  artistId?: string
+  artistBio?: string
+  width?: number
+  height?: number
+  depth?: number
+  printStats?: {
+    estimatedWeightG?: number
+    estimatedPrintTimeMinutes?: number
+    volumeMm3?: number
   }
+  viewCount?: number
+  saleCount?: number
+  reviewCount?: number
+  averageRating?: number
+  isFavorited?: boolean
+  publishedAt?: string
+  createdAt?: string
+  updatedAt?: string
+  images?: Array<{
+    id: string
+    imagePath?: string
+    imageUrl?: string
+    caption?: string
+    displayOrder?: number
+  }>
+  recentReviews?: Array<{
+    id: string
+    rating: number
+    comment?: string
+    title?: string
+    reviewerName?: string
+    createdAt: string
+  }>
 }
 
-// Browse & Search
-export interface BrowseFilters {
+export interface SearchFilters {
   search?: string
-  genre?: string
-  categories?: string[]
+  category?: string
+  tags?: string[] | string
   minPrice?: number
   maxPrice?: number
-  sortBy?: 'newest' | 'popular' | 'price_asc' | 'price_desc' | 'rating'
+  sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
+  page?: number
   limit?: number
-  offset?: number
 }
 
-export interface BrowseResponse {
-  models: Model[]
-  total: number
-  limit: number
-  offset: number
+export interface SearchResponse {
+  models: TerrainModel[]
+  pagination: Pagination
 }
 
-// Artists
-export interface Artist {
-  id: string
-  userId: string
+export interface ModelUploadRequest {
   name: string
-  bio: string
-  profileImage?: string
-  bannerImage?: string
-  verified: boolean
+  description?: string
+  category: string
+  tags?: string[]
+  basePrice: number
+  visibility?: 'public' | 'private' | 'unlisted'
+  draft?: boolean
+  width?: number
+  height?: number
+  depth?: number
+}
+
+export interface UploadResponse {
+  url: string
+  message?: string
+}
+
+export interface Review {
+  id: string
+  modelId: string
+  userId: string
   rating: number
-  totalSales: number
-  totalModels: number
-  joinedAt: string
+  comment?: string
+  createdAt: string
+  updatedAt: string
+  userDisplayName?: string
+}
+
+export interface CreateReviewRequest {
+  modelId: string
+  rating: number
+  comment?: string
+}
+
+export interface ArtistSummary {
+  id: string
+  name: string
+  bio?: string
+  profileImageUrl?: string
+  bannerImageUrl?: string
+  totalModels?: number
+  totalSales?: number
+  totalViews?: number
+  rating?: number
+  createdAt?: string
+}
+
+export interface ArtistDetail extends ArtistSummary {
+  totalPurchases?: number
 }
 
 export interface ArtistStats {
@@ -115,37 +198,72 @@ export interface ArtistStats {
   activeModels: number
 }
 
-// Tables
-export interface TableLayout {
-  id: string
-  userId: string
-  name: string
-  description?: string
-  models: {
+export interface TableConfig {
+  width: number
+  depth: number
+  grid_size?: number
+  background_color?: string
+  grid_color?: string
+}
+
+export interface TableLayoutData {
+  models: Array<{
     modelId: string
-    position: { x: number; y: number }
+    position: { x: number; y: number; z?: number }
     rotation?: number
     scale?: number
-  }[]
+  }>
+}
+
+export interface TableLayout {
+  id: string
+  userId: string | null
+  userEmail?: string | null
+  name: string
+  description?: string
+  tableConfig: TableConfig
+  layoutData: TableLayoutData
+  shareToken?: string
+  shareCode?: string
   isPublic: boolean
-  views: number
-  likes: number
+  viewCount: number
+  cloneCount: number
+  status?: string
+  plan?: string
+  maxAssets?: number
   createdAt: string
   updatedAt: string
 }
 
-// Orders
-export interface Order {
+export interface SaveTablePayload {
+  name: string
+  description?: string
+  tableConfig: TableConfig
+  layoutData: TableLayoutData
+  isPublic?: boolean
+  userId?: string
+  userEmail?: string
+  sessionId?: string
+}
+
+export interface PaymentIntentResponse {
+  clientSecret: string
+  paymentIntentId?: string
+  amount?: number
+  currency?: string
+}
+
+export interface ArtistProfile {
   id: string
-  userId: string
-  stripeSessionId: string
-  status: 'pending' | 'processing' | 'completed' | 'failed'
-  items: OrderItem[]
-  subtotal: number
-  platformFee: number
-  total: number
-  createdAt: string
-  updatedAt: string
+  name?: string
+  displayName?: string
+  email?: string
+  artistName?: string
+  bio?: string
+  profileImageUrl?: string
+  totalSales?: number
+  totalRevenue?: number
+  createdAt?: string
 }
 
 export interface OrderItem {
@@ -158,6 +276,32 @@ export interface OrderItem {
   downloadUrl?: string
 }
 
+export interface Order {
+  id: string
+  userId: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  items: OrderItem[]
+  subtotal: number
+  platformFee: number
+  total: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OrderSummary {
+  id: string
+  orderNumber: string
+  total: number
+  paymentStatus: string
+  fulfillmentStatus: string
+  trackingNumber?: string
+  trackingUrl?: string
+  createdAt: string
+  paidAt?: string
+  shippedAt?: string
+  itemCount: number
+}
+
 export interface CreateOrderRequest {
   items: {
     modelId: string
@@ -165,7 +309,6 @@ export interface CreateOrderRequest {
   }[]
 }
 
-// Admin
 export interface AdminStats {
   totalUsers: number
   totalArtists: number
@@ -180,11 +323,4 @@ export interface QueueHealth {
   active: number
   completed: number
   failed: number
-}
-
-// API Response wrapper
-export interface ApiResponse<T = any> {
-  data?: T
-  error?: string
-  message?: string
 }

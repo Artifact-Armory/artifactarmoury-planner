@@ -1,10 +1,10 @@
 // backend/src/routes/tables.ts
 import express from 'express'
 import crypto from 'crypto'
-import { db } from '../db/index.js'
-import logger from '../utils/logger.js'
-import { validateString } from '../utils/validation.js'
-import type { SaveTableRequest, UserTable } from '../../../shared/types.js'
+import { db } from '../db'
+import logger from '../utils/logger'
+import { validateString } from '../utils/validation'
+// Using untyped request body locally to avoid cross-package imports during build
 
 const router = express.Router()
 const tablesLogger = logger.child('TABLES')
@@ -21,7 +21,7 @@ router.post('/', async (req, res, next) => {
       table_config,
       layout_data,
       is_public = false
-    } = req.body as SaveTableRequest & { user_email: string }
+    } = req.body as any
 
     // Validate required fields
     validateString(user_email, 'user_email', { maxLength: 255 })

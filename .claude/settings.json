@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx vite *)",
+      "Bash(python -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(p.get\\('devDependencies', {}\\).get\\('vite', 'NOT FOUND'\\)\\); print\\(p.get\\('scripts', {}\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm ls *)",
+      "Bash(npm rebuild *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 28004 /F)",
+      "PowerShell(Stop-Process -Id 28004 -Force -ErrorAction SilentlyContinue)",
+      "Bash(curl -s http://127.0.0.1:3001/health)",
+      "Bash(curl -s http://127.0.0.1:6080)",
+      "Bash(npx playwright *)",
+      "Read(//c/Users/callu/AppData/Local/Temp/**)",
+      "Bash(npm init *)",
+      "Bash(node screenshot.mjs)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
+    ]
+  }
+}

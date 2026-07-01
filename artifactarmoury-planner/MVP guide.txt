@@ -1,0 +1,384 @@
+Project Overview
+Tabletop Terrain Builder is a 3D terrain marketplace for tabletop gaming. Users can browse models, plan layouts on a virtual 3D table, and purchase STL files for printing. Artists can upload models and earn commissions via Stripe Connect.
+Tech Stack
+
+Backend: Node.js 18+ with TypeScript, Express.js, PostgreSQL (with mock mode)
+Authentication: JWT with bcrypt
+Payments: Stripe + Stripe Connect (with mock mode)
+File Storage: Local disk
+File Processing: STL parsing, GLB conversion
+Frontend: React 18 + TypeScript, Vite, React Router v6
+State Management: Zustand
+Styling: Tailwind CSS
+3D Rendering: Three.js
+HTTP Client: Axios
+
+Project Structure
+The scaffold has been set up with the following structure:
+
+Backend: Express API with routes for auth, models, browse, artists
+Frontend: React app with components for VirtualTable, artists, auth, models
+
+MVP Implementation Tasks
+1. Project Setup & Configuration
+
+Set up backend environment (.env with mock mode)
+Set up frontend environment (.env pointing to local backend)
+Create uploads directory and verify file permissions
+Run database migrations (or use mock mode)
+Seed development data
+
+2. Authentication System
+
+Implement login/register pages in frontend
+Connect to existing auth API endpoints
+Add protected route system for artists/admin areas
+Implement JWT validation middleware
+Add user context to store authenticated user data
+
+3. Model Browsing & Filtering
+
+Implement model card component for displaying models
+Create browse page with grid layout
+Add filtering by category, price range
+Implement search functionality
+Add pagination for browsing large collections
+
+4. 3D Model Viewer Component
+
+Implement Three.js viewer component
+Create model loading service for GLB files
+Add controls for rotation and zoom
+Implement loading indicators
+Add fallback for models without GLB preview
+
+5. Model Detail Page
+
+Create detailed model view component
+Integrate 3D viewer component
+Display model information (name, description, dimensions)
+Show pricing and print specifications
+Add "Add to Cart" button with quantity selector
+
+6. Shopping Cart & Checkout
+
+Implement cart store with Zustand
+Create cart UI component with item list
+Build checkout form for user details
+Integrate Stripe mock payment flow
+Create order summary and confirmation pages
+
+7. Artist Dashboard
+
+Build model upload form with file dropzone
+Create model management interface (edit, delete, publish)
+Implement basic sales analytics display
+Add artist profile settings
+
+8. Basic Table Builder
+
+Implement 3D table scene with Three.js
+Create grid system for model placement
+Add drag and drop functionality for models
+Implement rotation and scaling controls
+Add save/load functionality for layouts
+Create share functionality with unique links
+
+9. Order Processing
+
+Implement order creation API
+Add Stripe webhook handler for payment completion
+Create order history view for users
+Implement download access for purchased models
+Add email notifications for order status updates
+
+10. Testing & Validation
+
+Test registration and login flow
+Verify model browsing and filtering
+Test checkout process with Stripe test cards
+Validate table builder functionality
+Ensure file uploads and downloads work correctly
+
+Implementation Details
+Backend API Endpoints to Implement/Complete
+// Auth Routes
+POST /api/auth/register - User registration
+POST /api/auth/login - User login
+POST /api/auth/refresh - Refresh JWT token
+GET /api/auth/me - Get current user
+
+// Models Routes
+GET /api/models - List models
+GET /api/models/:id - Get model details
+POST /api/models - Create model (protected, artist only)
+PUT /api/models/:id - Update model (protected, artist only)
+DELETE /api/models/:id - Delete model (protected, artist only)
+
+// Browse Routes
+GET /api/browse - Browse models with filters
+GET /api/browse/categories - Get all categories
+GET /api/browse/featured - Get featured models
+
+// Cart/Orders Routes
+POST /api/orders - Create new order
+GET /api/orders/:id - Get order details
+POST /api/orders/:id/confirm - Confirm payment
+GET /api/orders/history - Get user order history
+
+// Table Builder Routes
+POST /api/tables - Create new table layout
+GET /api/tables/:id - Get table layout
+PUT /api/tables/:id - Update table layout
+GET /api/tables/share/:code - Get shared table layout
+
+Frontend Components to Implement
+// Auth Components
+- LoginPage
+- RegisterPage
+- ForgotPasswordPage
+- ProfilePage
+
+// Model Components
+- ModelCard
+- ModelDetailPage
+- ModelFilterSidebar
+- ModelUploadForm
+- ModelEditForm
+
+// Cart/Checkout Components
+- CartDrawer
+- CheckoutPage
+- OrderConfirmationPage
+- OrderHistoryPage
+
+// Table Builder Components
+- TerrainBuilder
+- AssetDrawer
+- ControlPanel
+- SaveLayoutModal
+- ShareLayoutModal
+
+// 3D Components
+- ModelViewer
+- ThreeScene
+- ThreeControls
+- PlacementGrid
+
+Three.js Implementation for Model Viewer
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+const ModelViewer: React.FC<{modelUrl: string}> = ({ modelUrl }) => {
+  const mountRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (!mountRef.current) return;
+    
+    // Setup scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+    
+    // Setup camera
+    const camera = new THREE.PerspectiveCamera(75, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 1000);
+    camera.position.z = 5;
+    
+    // Setup renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    mountRef.current.appendChild(renderer.domElement);
+    
+    // Add controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    
+    // Add lights
+    const ambientLight = new THREE.AmbientLight(0x404040, 2);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
+    
+    // Load model
+    const loader = new GLTFLoader();
+    loader.load(
+      modelUrl,
+      (gltf) => {
+        // Center model
+        const box = new THREE.Box3().setFromObject(gltf.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        gltf.scene.position.sub(center);
+        
+        scene.add(gltf.scene);
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading model:', error);
+      }
+    );
+    
+    // Animation loop
+    const animate = () => {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    };
+    
+    animate();
+    
+    // Handle resize
+    const handleResize = () => {
+      if (!mountRef.current) return;
+      camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      mountRef.current?.removeChild(renderer.domElement);
+    };
+  }, [modelUrl]);
+  
+  return <div ref={mountRef} style={{ width: '100%', height: '400px' }} />;
+};
+
+
+Zustand Store Implementation for Cart
+import create from 'zustand';
+
+interface CartItem {
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  thumbnailUrl: string;
+}
+
+interface CartStore {
+  items: CartItem[];
+  addItem: (item: CartItem) => void;
+  removeItem: (id: string) => void;
+  updateQuantity: (id: string, quantity: number) => void;
+  clearCart: () => void;
+  getTotal: () => number;
+}
+
+export const useCartStore = create<CartStore>((set, get) => ({
+  items: [],
+  
+  addItem: (item) => set((state) => {
+    const existingItem = state.items.find((i) => i.id === item.id);
+    if (existingItem) {
+      return {
+        items: state.items.map((i) => 
+          i.id === item.id 
+            ? { ...i, quantity: i.quantity + item.quantity }
+            : i
+        )
+      };
+    }
+    return { items: [...state.items, item] };
+  }),
+  
+  removeItem: (id) => set((state) => ({
+    items: state.items.filter((i) => i.id !== id)
+  })),
+  
+  updateQuantity: (id, quantity) => set((state) => ({
+    items: state.items.map((i) => 
+      i.id === id ? { ...i, quantity } : i
+    )
+  })),
+  
+  clearCart: () => set({ items: [] }),
+  
+  getTotal: () => {
+    return get().items.reduce((total, item) => total + (item.price * item.quantity), 0);
+  }
+}));
+
+Table Builder Core Logic
+// Table state
+interface TableState {
+  width: number; // in mm
+  depth: number; // in mm
+  gridSize: number; // in mm
+  instances: ModelInstance[];
+}
+
+// Placed model instance
+interface ModelInstance {
+  id: string;
+  modelId: string;
+  position: { x: number, z: number };
+  rotationDeg: number;
+  scale: number;
+}
+
+// Helper functions for the table builder
+function snapToGrid(value: number, gridSize: number): number {
+  return Math.round(value / gridSize) * gridSize;
+}
+
+function checkCollision(instance: ModelInstance, allInstances: ModelInstance[], models: Model[]): boolean {
+  // Implementation for collision detection between models
+  // Based on bounding boxes and grid positions
+}
+
+// Functions to convert between world coordinates and grid coordinates
+function worldToGrid(valueM: number, gridSizeM: number): number {
+  if (gridSizeM <= 0) return 0;
+  return Math.round(valueM / gridSizeM);
+}
+
+function gridToWorld(cell: number, gridSizeM: number): number {
+  return cell * gridSizeM;
+}
+
+
+Development Workflow
+
+Setup environment and verify connectivity
+Implement authentication and protected routes
+Build model browsing and detail pages
+Create 3D model viewer component
+Implement shopping cart and checkout flow
+Build artist dashboard and model management
+Implement table builder with 3D placement
+Add order processing and download access
+Test all core user flows
+Deploy MVP
+
+Mock Mode Instructions
+For development, use mock mode to avoid external dependencies:
+
+Set DB_MOCK=true to use in-memory database
+Set STRIPE_MOCK=true to bypass real payments
+All uploads will be stored in local UPLOAD_DIR
+
+This allows rapid development without requiring external services setup.
+Testing Credentials
+Use these credentials for testing:
+
+Admin: admin@terrainbuilder.com / password123
+Artist: artist@example.com / password123
+Customer: user@example.com / password123
+
+Critical MVP Features Checklist
+
+ User authentication (register/login)
+ Model browsing with filters
+ Model detail page with 3D preview
+ Shopping cart functionality
+ Checkout process with mock payments
+ Model upload for artists
+ Basic table builder with model placement
+ Save/load table layouts
+ Order history and model downloads
+ Simple artist dashboard
+</artifact>

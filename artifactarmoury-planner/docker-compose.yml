@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: artifact-postgres
+    environment:
+      POSTGRES_USER: artifact
+      POSTGRES_PASSWORD: artifact_dev_password
+      POSTGRES_DB: artifact_armoury
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artifact"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - artifact-network
+
+  # Redis (optional, for rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: artifact-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - artifact-network
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artifact-backend
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://artifact:artifact_dev_password@postgres:5432/artifact_armoury
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-this-in-production-min-32-chars
+      UPLOAD_DIR: /app/uploads
+      FRONTEND_URL: http://localhost:3000
+      BASE_URL: http://localhost:3001
+      STRIPE_MOCK: "true"
+      RESEND_API_KEY: ""
+      EMAIL_FROM: noreply@artifactarmoury.com
+      DB_POOL_MIN: "5"
+      DB_POOL_MAX: "20"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backend/src:/app/backend/src
+    networks:
+      - artifact-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  artifact-network:
+    driver: bridge
+

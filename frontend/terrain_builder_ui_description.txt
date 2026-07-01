@@ -1,0 +1,64 @@
+Terrain Builder UI Overview
+===========================
+
+Layout
+------
+- Fullscreen immersive 3D table stage occupies the entire viewport background.
+- Semi-transparent overlay panels float above the stage; no native scrollbars on the main canvas.
+
+Left Sidebar (Terrain Library)
+------------------------------
+- Collapsible panel anchored top-left with 20% opacity slate backdrop and blur.
+- Expanded width ~320px; collapsed to vertical icon rail with ShoppingBag (Marketplace) and FolderOpen (Collection) icons.
+- Header: “Artifact Armoury / Terrain Library”.
+- Table Setup form (react-hook-form): width, height, grid size numeric inputs, unit selector (m, cm, ft, in), “Update & Fit View” button.
+- Marketplace tab:
+  - Search input with inline icon; sort dropdown (Popular/New/Price).
+  - Cards show model initials thumbnail, title, mock creator + verification, price badge, “Basket” pill, and “Place on Table” CTA with Layers footprint info.
+  - Skeleton loaders and empty-state message.
+- My Collection tab:
+  - Search filter, list of purchased/placed assets.
+  - Each entry draggable with hint text and “Select” button (sets active placement).
+
+Top-Right Basket Pill
+---------------------
+- Floating rounded pill with cart icon badge (count & £ subtotal).
+- Click reveals dropdown detailing basket items with price breakdown, remove controls, subtotal row, and “Checkout” button.
+
+Bottom Toolbar
+--------------
+- Centered rounded bar with toggles:
+  - Grid visibility, Snap-to-grid, measurement tool.
+  - Camera mode buttons: Top, Side (isometric), Perspective plus Fit View.
+  - Clear Table button (red tone) to remove all instances.
+
+Quick Stats Badge
+-----------------
+- Bottom-left pill showing model count, table dimensions in active units, and live measurement distance when tool active.
+
+Keyboard Shortcuts
+------------------
+- Bottom-right “Shortcuts” pill opens full-screen modal listing actions:
+  - Delete, custom rotation increments (15/25/90/180), Duplicate (Ctrl/Cmd+D), Toggle Grid (G), Undo/Redo, etc.
+  - Modal closable via X or Escape.
+
+Context Menu
+------------
+- Right-click on table/selection opens floating context menu:
+  - Rotate (quick buttons +15°, +25°, +90°, +180°).
+  - Duplicate selection.
+  - Remove selection (danger styling).
+
+3D Interaction Layer
+--------------------
+- Ghost placement follows cursor when an asset is primed (via sidebar or drag & drop).
+- Drag & drop from Collection places model with snap awareness and collision validation.
+- TransformControls allow translate/rotate; shift disables snap during rotation; multi-select highlight color (sky blue).
+- Measurement tool toggled via toolbar: first click marks start, second marks end; distance shown in Quick Stats and line overlay rendered on scene.
+- Basket auto-syncs with instances; toasts confirm placements or basket additions.
+
+Visual Style Notes
+------------------
+- Tailwind-driven slate/sky palette, ample blur and shadow for floating UI.
+- Accent color sky-500 (#0EA5E9) for CTAs and highlights, emerald for positive badges.
+- Typography: Inter-esque, medium to semibold for headings, uppercase microcopy on pills.

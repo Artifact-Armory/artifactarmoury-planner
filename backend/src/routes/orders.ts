@@ -3,15 +3,15 @@
 
 import { Router } from 'express';
 import { db } from '../db';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 import { authenticate, optionalAuth } from '../middleware/auth';
 import { paymentRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, PaymentError } from '../middleware/error';
-import { validateEmail, sanitizeInput } from '../utils/validation';
-import { createPaymentIntent, confirmPayment } from '../services/stripe';
+import { validateEmail, sanitizeString } from '../utils/validation';
+import { createPaymentIntent, getPaymentIntent } from '../services/stripe';
 import { submitPrintJob } from '../services/printFarm';
-import { sendEmail } from '../services/email';
+import { sendOrderConfirmation } from '../services/email';
 
 const router = Router();
 
@@ -45,12 +45,11 @@ router.post('/',
     }
 
     // Validate email
-    const email = customerEmail || req.user?.email;
-    if (!email || !validateEmail(email)) {
-      throw new ValidationError('Valid email address is required');
-    }
+    const email = customerEmail || (req as any).user?.email;
+    if (!email) { throw new ValidationError('Valid email address is required'); }
+    validateEmail(email);
 
-    const client = await db.getClient();
+    const client = await (db as any).getClient?.() ?? await db.connect();
     
     try {
       await client.query('BEGIN');
@@ -135,14 +134,14 @@ router.post('/',
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'stripe', 'pending', 'pending')
         RETURNING id, order_number`,
         [
-          req.userId || null,
+          (req as any).userId || null,
           email,
-          sanitizeInput(shipping.name),
-          sanitizeInput(shipping.line1),
-          shipping.line2 ? sanitizeInput(shipping.line2) : null,
-          sanitizeInput(shipping.city),
-          shipping.state ? sanitizeInput(shipping.state) : null,
-          sanitizeInput(shipping.postalCode),
+          sanitizeString(shipping.name),
+          sanitizeString(shipping.line1),
+          shipping.line2 ? sanitizeString(shipping.line2) : null,
+          sanitizeString(shipping.city),
+          shipping.state ? sanitizeString(shipping.state) : null,
+          sanitizeString(shipping.postalCode),
           shipping.country,
           subtotal,
           shippingCost,
@@ -184,21 +183,20 @@ router.post('/',
 
       // Create Stripe payment intent
       const paymentIntent = await createPaymentIntent({
-        amount: Math.round(total * 100), // Convert to cents
-        currency: 'usd',
-        orderId: order.id,
-        orderNumber: order.order_number,
-        customerEmail: email,
+        amount: total,
+        currency: 'gbp',
         metadata: {
-          orderId: order.id,
-          orderNumber: order.order_number
-        }
+          order_id: String(order.id),
+          order_number: order.order_number,
+          customer_email: email
+        },
+        description: `Order ${order.order_number}`
       });
 
       // Store payment intent ID
       await client.query(
         `UPDATE orders SET payment_intent_id = $1 WHERE id = $2`,
-        [paymentIntent.id, order.id]
+        [paymentIntent.payment_intent_id, order.id]
       );
 
       await client.query('COMMIT');
@@ -254,7 +252,7 @@ router.post('/:id/confirm',
     const order = orderResult.rows[0];
 
     // Verify payment with Stripe
-    const payment = await confirmPayment(paymentIntentId);
+    const payment = await getPaymentIntent(paymentIntentId);
 
     if (payment.status !== 'succeeded') {
       throw new PaymentError('Payment not completed');
@@ -313,15 +311,23 @@ router.post('/:id/confirm',
     });
 
     // Send confirmation email
-    sendEmail({
-      to: order.customer_email,
-      subject: `Order Confirmation - ${order.order_number}`,
-      template: 'order-confirmation',
-      data: {
-        orderNumber: order.order_number,
-        total: order.total,
-        items: itemsResult.rows
-      }
+    sendOrderConfirmation({
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        created_at: order.created_at,
+        user_email: order.customer_email,
+        pricing: { total: order.total, model_subtotal: 0, print_subtotal: 0, shipping: order.shipping_cost },
+        shipping_address: {
+          name: order.shipping_name,
+          line1: order.shipping_address_line1,
+          line2: order.shipping_address_line2,
+          city: order.shipping_city,
+          postal_code: order.shipping_postal_code,
+          country: order.shipping_country,
+        },
+      } as any,
+      items: itemsResult.rows.map((r: any) => ({ asset: { name: r.model_name, base_price: Number(r.unit_price) } as any, quantity: Number(r.quantity) }))
     }).catch(err => logger.error('Failed to send confirmation email', { error: err }));
 
     // Increment model sale counts
@@ -383,7 +389,7 @@ router.get('/:id',
     const order = result.rows[0];
 
     // Check permissions
-    if (!req.userId || (req.userId !== order.user_id && req.user?.role !== 'admin')) {
+    if (!(req as any).userId || ((req as any).userId !== order.user_id && (req as any).user?.role !== 'admin')) {
       // Allow access with order number + email for guest orders
       const { email } = req.query;
       if (!email || email !== order.customer_email) {
@@ -411,7 +417,7 @@ router.get('/user/orders',
     // Get total count
     const countResult = await db.query(
       `SELECT COUNT(*) FROM orders WHERE user_id = $1`,
-      [req.userId]
+      [(req as any).userId]
     );
     const totalCount = parseInt(countResult.rows[0].count);
 
@@ -429,7 +435,7 @@ router.get('/user/orders',
        GROUP BY o.id
        ORDER BY o.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [req.userId, Number(limit), offset]
+      [(req as any).userId, Number(limit), offset]
     );
 
     res.json({

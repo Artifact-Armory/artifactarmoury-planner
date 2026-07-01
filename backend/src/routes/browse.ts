@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { db } from '../db';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 import { optionalAuth } from '../middleware/auth';
 import { searchRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
@@ -110,13 +110,13 @@ router.get('/',
        WHERE ${whereClause}`,
       params
     );
-    const totalCount = parseInt(countResult.rows[0].count);
+    const totalCount = parseInt(countResult.rows[0]?.count ?? '0', 10) || 0;
 
     // Get models with artist info
     const result = await db.query(
-      `SELECT 
+      `SELECT
         m.id, m.name, m.description, m.category, m.tags,
-        m.thumbnail_path, m.base_price,
+        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth,
         m.view_count, m.sale_count,
         m.published_at,
@@ -131,10 +131,10 @@ router.get('/',
        JOIN users u ON m.artist_id = u.id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        WHERE ${whereClause}
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, m.glb_file_path, u.artist_name, u.artist_url
        ORDER BY ${orderBy}
        LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}`,
-      [...params, req.userId || null, Number(limit), offset]
+      [...params, (req as any).userId || null, Number(limit), offset]
     );
 
     res.json({
@@ -217,7 +217,7 @@ router.get('/featured',
     const result = await db.query(
       `SELECT 
         m.id, m.name, m.description, m.category,
-        m.thumbnail_path, m.base_price,
+        m.thumbnail_path, m.base_price, m.fulfillment_type,
         u.artist_name, u.artist_url,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
@@ -236,7 +236,7 @@ router.get('/featured',
        HAVING COUNT(DISTINCT r.id) >= 3 AND AVG(r.rating) >= 4.0
        ORDER BY (AVG(r.rating) * 0.6 + (m.sale_count / 100.0) * 0.4) DESC
        LIMIT $2`,
-      [req.userId || null, Number(limit)]
+      [(req as any).userId || null, Number(limit)]
     );
 
     res.json({
@@ -273,7 +273,7 @@ router.get('/new',
        GROUP BY m.id, u.artist_name, u.artist_url
        ORDER BY m.published_at DESC
        LIMIT $2`,
-      [req.userId || null, Number(limit)]
+      [(req as any).userId || null, Number(limit)]
     );
 
     res.json({
@@ -313,7 +313,7 @@ router.get('/trending',
        GROUP BY m.id, u.artist_name, u.artist_url
        ORDER BY m.view_count DESC
        LIMIT $2`,
-      [req.userId || null, Number(limit)]
+      [(req as any).userId || null, Number(limit)]
     );
 
     res.json({
@@ -400,7 +400,7 @@ router.get('/:id/related',
     const result = await db.query(
       `SELECT 
         m.id, m.name, m.description, m.category,
-        m.thumbnail_path, m.base_price,
+        m.thumbnail_path, m.base_price, m.fulfillment_type,
         u.artist_name, u.artist_url,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
@@ -426,7 +426,7 @@ router.get('/:id/related',
        GROUP BY m.id, u.artist_name, u.artist_url
        ORDER BY relevance_score DESC, m.view_count DESC
        LIMIT $5`,
-      [req.userId || null, category, tags || [], id, Number(limit)]
+      [(req as any).userId || null, category, tags || [], id, Number(limit)]
     );
 
     res.json({
@@ -450,11 +450,12 @@ router.get('/price-range',
        WHERE status = 'published' AND visibility = 'public'`
     );
 
+    const row = result.rows[0] ?? {};
     res.json({
       priceRange: {
-        min: parseFloat(result.rows[0].min_price || 0),
-        max: parseFloat(result.rows[0].max_price || 100),
-        avg: parseFloat(result.rows[0].avg_price || 20)
+        min: parseFloat(row.min_price ?? 0) || 0,
+        max: parseFloat(row.max_price ?? 100) || 100,
+        avg: parseFloat(row.avg_price ?? 20) || 20
       }
     });
   })

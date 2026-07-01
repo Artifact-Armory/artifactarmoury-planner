@@ -1,0 +1,128 @@
+{
+  "assets": [
+    {
+      "id": "barrel",
+      "name": "Barrel",
+      "tags": ["prop", "storage", "industrial", "cover"],
+      "aabb": { "x": 0.05, "z": 0.05, "y": 0.08 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 3.99,
+      "fulfillment": "stl",
+      "sku": "PROP-BARREL-01",
+      "model": "/assets/models/barrel.glb"
+    },
+    {
+      "id": "bottom",
+      "name": "Bottom",
+      "tags": ["building", "base", "terrain"],
+      "aabb": { "x": 0.15, "z": 0.10, "y": 0.08 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 12.99,
+      "fulfillment": "print",
+      "sku": "BLDG-BOTTOM-01",
+      "model": "/assets/models/bottom.glb"
+    },
+    {
+      "id": "floor",
+      "name": "Floor",
+      "tags": ["building", "floor", "platform", "terrain"],
+      "aabb": { "x": 0.30, "z": 0.20, "y": 0.02 },
+      "footprint": { "cols": 2, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 8.99,
+      "fulfillment": "print",
+      "sku": "BLDG-FLOOR-01",
+      "model": "/assets/models/floor.glb"
+    },
+    {
+      "id": "sandbags",
+      "name": "Sandbags",
+      "tags": ["cover", "fortification", "military", "terrain"],
+      "aabb": { "x": 0.12, "z": 0.06, "y": 0.04 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 5.99,
+      "fulfillment": "stl",
+      "sku": "PROP-SANDBAG-01",
+      "model": "/assets/models/sandbags.glb"
+    },
+    {
+      "id": "shutters",
+      "name": "Shutters",
+      "tags": ["building", "window", "detail", "urban"],
+      "aabb": { "x": 0.08, "z": 0.02, "y": 0.12 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 6.99,
+      "fulfillment": "print",
+      "sku": "BLDG-SHUTTER-01",
+      "model": "/assets/models/shutters.glb"
+    },
+    {
+      "id": "top",
+      "name": "Top",
+      "tags": ["building", "roof", "upper", "terrain"],
+      "aabb": { "x": 0.20, "z": 0.15, "y": 0.12 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 15.99,
+      "fulfillment": "print",
+      "sku": "BLDG-TOP-01",
+      "model": "/assets/models/top.glb"
+    },
+    {
+      "id": "hill-block",
+      "name": "Hill Block",
+      "tags": ["elevation", "hill", "terrain", "level"],
+      "category": "Elevation",
+      "aabb": { "x": 0.0254, "z": 0.0254, "y": 0.0254 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 2.49,
+      "fulfillment": "print",
+      "sku": "ELEV-BLOCK-1x1",
+      "elevation": { "heightUnits": 2 }
+    },
+    {
+      "id": "hill-half",
+      "name": "Half Block",
+      "tags": ["elevation", "hill", "terrain", "level", "step"],
+      "category": "Elevation",
+      "aabb": { "x": 0.0254, "z": 0.0254, "y": 0.0127 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 1.99,
+      "fulfillment": "print",
+      "sku": "ELEV-HALF-1x1",
+      "elevation": { "heightUnits": 1 }
+    },
+    {
+      "id": "hill-block-2x2",
+      "name": "Plateau 2×2",
+      "tags": ["elevation", "hill", "plateau", "terrain", "level"],
+      "category": "Elevation",
+      "aabb": { "x": 0.0508, "z": 0.0508, "y": 0.0254 },
+      "footprint": { "cols": 2, "rows": 2 },
+      "rotationStepDeg": 90,
+      "price": 7.99,
+      "fulfillment": "print",
+      "sku": "ELEV-BLOCK-2x2",
+      "elevation": { "heightUnits": 2 }
+    },
+    {
+      "id": "hill-ramp",
+      "name": "Ramp",
+      "tags": ["elevation", "ramp", "slope", "terrain"],
+      "category": "Elevation",
+      "aabb": { "x": 0.0254, "z": 0.0254, "y": 0.0254 },
+      "footprint": { "cols": 1, "rows": 1 },
+      "rotationStepDeg": 90,
+      "price": 3.49,
+      "fulfillment": "print",
+      "sku": "ELEV-RAMP-1x1",
+      "elevation": { "heightUnits": 2, "ramp": { "dir": "N" } }
+    }
+  ]
+}

@@ -82,6 +82,9 @@ CREATE TABLE models (
     depth DECIMAL(10,2),
     height DECIMAL(10,2),
     
+    -- Fulfillment
+    fulfillment_type VARCHAR(10) NOT NULL DEFAULT 'print' CHECK (fulfillment_type IN ('stl', 'print')),
+
     -- Pricing
     base_price DECIMAL(10,2) NOT NULL, -- Base price in USD
     
@@ -95,17 +98,21 @@ CREATE TABLE models (
     -- Status & visibility
     status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived', 'flagged')),
     visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'unlisted')),
+    in_library BOOLEAN DEFAULT false,
     
     -- Stats
     view_count INTEGER DEFAULT 0,
     download_count INTEGER DEFAULT 0,
     sale_count INTEGER DEFAULT 0,
     
+    -- Duplicate prevention
+    file_hash VARCHAR(64) UNIQUE, -- SHA-256 of original STL bytes
+
     -- Moderation
     flagged_reason TEXT,
     moderated_by UUID REFERENCES users(id),
     moderated_at TIMESTAMP,
-    
+
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -118,6 +125,7 @@ CREATE INDEX idx_models_status ON models(status);
 CREATE INDEX idx_models_visibility ON models(visibility);
 CREATE INDEX idx_models_tags ON models USING GIN(tags);
 CREATE INDEX idx_models_created ON models(created_at DESC);
+CREATE INDEX idx_models_file_hash ON models(file_hash);
 
 -- ============================================================================
 -- MODEL IMAGES (Additional photos)
