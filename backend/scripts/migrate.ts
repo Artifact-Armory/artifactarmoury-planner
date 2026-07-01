@@ -1,7 +1,6 @@
 import { Pool } from 'pg'
 import * as fs from 'fs'
 import * as path from 'path'
-import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 
 dotenv.config()
@@ -21,8 +20,8 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
 })
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+// __dirname is already provided by CommonJS (module: "commonjs"); the ESM
+// import.meta.url form was invalid here and broke `npm run migrate`.
 
 interface MigrationFile {
   version: number
