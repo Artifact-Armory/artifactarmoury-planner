@@ -16,6 +16,7 @@ import {
   S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { Readable } from 'stream'
 import logger from '../utils/logger'
 
 const ACCOUNT_ID = process.env.R2_ACCOUNT_ID
@@ -75,6 +76,13 @@ export async function uploadObject(
   }))
   logger.debug('R2 upload complete', { key: k, contentType })
   return publicUrl(k)
+}
+
+/** Stream an object from R2 (used to watermark large STLs without buffering). */
+export async function getObjectStream(key: string): Promise<{ stream: Readable; size: number }> {
+  const res = await client().send(new GetObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+  if (!res.Body) throw new Error(`R2 object has no body: ${key}`)
+  return { stream: res.Body as Readable, size: Number(res.ContentLength ?? 0) }
 }
 
 /** Download an object's bytes into memory (used by the async upload processor). */

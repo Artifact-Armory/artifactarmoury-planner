@@ -28,8 +28,10 @@ import os from 'os';
 import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
-import { isR2Enabled, objectExists, downloadObject, deleteObject } from '../services/r2';
+import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, type GeometryFingerprint } from '../services/fingerprint';
+import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
+import type { Response } from 'express';
 
 const router = Router();
 
@@ -747,6 +749,54 @@ router.get('/:id/stats',
 );
 
 // ============================================================================
+// DOWNLOAD PURCHASED STL (watermarked per buyer, streamed from R2)
+// ============================================================================
+
+router.get('/:id/download',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+
+    const model = (await db.query(
+      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status
+       FROM models WHERE id = $1`,
+      [id]
+    )).rows[0];
+    if (!model) throw new NotFoundError('Model');
+    if (model.processing_status && model.processing_status !== 'ready') {
+      throw new ValidationError('This model is still processing');
+    }
+    if (!model.stl_file_path) throw new NotFoundError('STL file');
+    if (!isR2Enabled()) throw new ValidationError('Downloads are not configured (R2 disabled)');
+
+    // Entitlement: the artist, or a buyer with a succeeded order for this model.
+    const isArtist = model.artist_id === userId;
+    let orderId = WATERMARK_ZERO_ORDER;
+    if (!isArtist) {
+      const ent = (await db.query(
+        `SELECT o.id FROM order_items oi
+         JOIN orders o ON oi.order_id = o.id
+         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded'
+         ORDER BY o.created_at DESC LIMIT 1`,
+        [id, userId]
+      )).rows[0];
+      if (!ent) throw new AuthorizationError('You have not purchased this model');
+      orderId = ent.id;
+    }
+
+    const safeName = String(model.name || 'model').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
+    res.setHeader('Content-Type', 'model/stl');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.stl"`);
+
+    await streamWatermarkedSTL(model.stl_file_path, { modelId: id, buyerId: userId, orderId }, res);
+
+    db.query('UPDATE models SET download_count = download_count + 1 WHERE id = $1', [id])
+      .catch((err) => logger.error('download_count bump failed', { error: err, id }));
+  })
+);
+
+// ============================================================================
 // BACKGROUND PROCESSING for direct (R2) uploads
 // ============================================================================
 // NOTE: this runs in-process (fits Railway's single service). If the process
@@ -848,6 +898,47 @@ async function findGeometryDuplicate(
     }
   }
   return null;
+}
+
+/**
+ * Stream an STL from R2 to the client, stamping the encrypted watermark header
+ * on the fly. Backpressure-aware and only buffers the 84-byte head, so a 100MB+
+ * STL never sits in memory.
+ */
+async function streamWatermarkedSTL(stlKey: string, payload: WatermarkPayload, res: Response): Promise<void> {
+  const { stream, size } = await getObjectStream(stlKey);
+  const write = (buf: Buffer) =>
+    new Promise<void>((resolve, reject) => {
+      const ok = res.write(buf, (err?: Error | null) => { if (err) reject(err); });
+      if (ok) resolve();
+      else res.once('drain', resolve);
+    });
+
+  const iter = stream[Symbol.asyncIterator]();
+  const chunks: Buffer[] = [];
+  let head = Buffer.alloc(0);
+  while (head.length < 84) {
+    const { value, done } = await iter.next();
+    if (done) break;
+    chunks.push(value as Buffer);
+    head = Buffer.concat(chunks);
+  }
+
+  if (isBinarySTL(size, head)) {
+    // Overwrite the ignored 80-byte header; keep everything from byte 80 on.
+    await write(buildWatermarkHeader(payload));
+    if (head.length > 80) await write(head.subarray(80));
+    for (let r = await iter.next(); !r.done; r = await iter.next()) await write(r.value as Buffer);
+  } else {
+    // Not a recognised binary STL: assemble it, watermark ASCII if possible,
+    // otherwise serve it unchanged (never corrupt a buyer's file).
+    const parts: Buffer[] = [head];
+    for (let r = await iter.next(); !r.done; r = await iter.next()) parts.push(r.value as Buffer);
+    const full = Buffer.concat(parts);
+    const isAscii = full.subarray(0, 5).toString('ascii').toLowerCase() === 'solid';
+    await write(isAscii ? watermarkAsciiSTL(full, payload) : full);
+  }
+  res.end();
 }
 
 async function markModelFailed(modelId: string, reason: string): Promise<void> {
