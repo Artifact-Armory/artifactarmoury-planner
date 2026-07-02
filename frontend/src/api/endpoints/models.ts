@@ -183,13 +183,28 @@ export const modelsApi = {
   },
 
   /**
-   * Get presigned download URL for a purchased model
+   * Download a purchased model's STL. The file is watermarked per-buyer and
+   * streamed through the API (it can't be a plain CDN link), so we fetch it as a
+   * blob with the auth header and trigger a browser save.
    */
-  getDownloadUrl: async (modelId: string): Promise<ApiResponse<{ downloadUrl: string; expiresAt: number }>> => {
-    const response = await apiClient.get<ApiResponse<{ downloadUrl: string; expiresAt: number }>>(
-      `${BASE_URL}/${modelId}/download`
-    );
-    return response.data;
+  downloadModelStl: async (modelId: string, fallbackName = 'model'): Promise<void> => {
+    const response = await apiClient.get(`${BASE_URL}/${modelId}/download`, {
+      responseType: 'blob',
+      timeout: 600000, // large STLs can take a while
+    });
+    // Prefer the server-provided filename from Content-Disposition.
+    const cd = String(response.headers?.['content-disposition'] ?? '');
+    const match = cd.match(/filename="?([^"]+)"?/i);
+    const filename = match?.[1] || `${fallbackName.replace(/[^a-z0-9._-]+/gi, '_')}.stl`;
+
+    const url = window.URL.createObjectURL(response.data as Blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   /**

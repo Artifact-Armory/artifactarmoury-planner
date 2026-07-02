@@ -1,7 +1,7 @@
 import React from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ShoppingCart } from 'lucide-react'
+import { ShoppingCart, Download } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
@@ -29,6 +29,9 @@ const ModelDetails: React.FC = () => {
 
   const model = modelQuery.data
 
+  const [downloading, setDownloading] = React.useState(false)
+  const [downloadError, setDownloadError] = React.useState<string | null>(null)
+
   const handleAddToCart = () => {
     if (!model) return
     addItem({
@@ -39,6 +42,26 @@ const ModelDetails: React.FC = () => {
       imageUrl: model.thumbnailUrl,
     })
     openCart()
+  }
+
+  const handleDownload = async () => {
+    if (!model) return
+    setDownloading(true)
+    setDownloadError(null)
+    try {
+      await modelsApi.downloadModelStl(model.id, model.name)
+    } catch (err: any) {
+      const status = err?.response?.status
+      setDownloadError(
+        status === 401
+          ? 'Please sign in to download.'
+          : status === 403
+            ? 'Purchase this model first to download the STL.'
+            : 'Download failed — please try again.',
+      )
+    } finally {
+      setDownloading(false)
+    }
   }
 
   if (modelQuery.isLoading) {
@@ -137,6 +160,21 @@ const ModelDetails: React.FC = () => {
             <Button className="mt-6 w-full" onClick={handleAddToCart} leftIcon={<ShoppingCart size={16} />}>
               Add to cart
             </Button>
+
+            {model.fulfillmentType === 'stl' && (
+              <>
+                <Button
+                  variant="outline"
+                  className="mt-3 w-full"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  leftIcon={<Download size={16} />}
+                >
+                  {downloading ? 'Preparing…' : 'Download STL'}
+                </Button>
+                {downloadError && <p className="mt-2 text-xs text-red-600">{downloadError}</p>}
+              </>
+            )}
 
             <ul className="mt-6 space-y-2 text-sm text-gray-600">
               <li>Category: {model.category}</li>
