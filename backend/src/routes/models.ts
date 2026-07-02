@@ -29,6 +29,7 @@ import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject } from '../services/r2';
+import { computeGeometryFingerprint, isLikelyDuplicate, type GeometryFingerprint } from '../services/fingerprint';
 
 const router = Router();
 
@@ -101,6 +102,15 @@ router.post('/',
         throw new ValidationError(`This model file has already been uploaded (matches "${dupCheck.rows[0].name}")`);
       }
 
+      // Geometry fingerprint — reject re-uploads even when re-exported to beat the hash.
+      const fingerprint = await computeGeometryFingerprint(modelFile.path);
+      const geoDup = await findGeometryDuplicate(fingerprint, '00000000-0000-0000-0000-000000000000');
+      if (geoDup) {
+        await deleteUploadedFile(modelFile.path);
+        if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
+        throw new ValidationError(`This model appears to be a copy of an existing model ("${geoDup.name}")`);
+      }
+
       // Process STL file
       logger.info('Processing STL file', { userId: (req as any).userId, filename: modelFile.filename });
       const stlData = await processSTL(modelFile.path);
@@ -145,8 +155,8 @@ router.post('/',
           width, depth, height,
           base_price, estimated_print_time, estimated_material_cost,
           supports_required, recommended_layer_height, recommended_infill,
-          file_hash, fulfillment_type, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'draft')
+          file_hash, fulfillment_type, geometry_fingerprint, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'draft')
         RETURNING id, name, created_at`,
         [
           (req as any).userId,
@@ -168,6 +178,7 @@ router.post('/',
           20,
           fileHash,
           (fulfillmentType === 'stl' || fulfillmentType === 'print') ? fulfillmentType : 'print',
+          JSON.stringify(fingerprint),
         ]
       );
 
@@ -761,7 +772,17 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       return;
     }
 
-    // 3. Analyse geometry + generate the GLB preview.
+    // 3. Geometry fingerprint — catches re-uploads even if the file was
+    //    re-exported/rotated/rescaled to dodge the exact-hash check above.
+    const fingerprint = await computeGeometryFingerprint(stlTmp);
+    const geoDup = await findGeometryDuplicate(fingerprint, modelId);
+    if (geoDup) {
+      await markModelFailed(modelId, `This model appears to be a copy of an existing model ("${geoDup.name}")`);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+
+    // 4. Analyse geometry + generate the GLB preview.
     const stlData = await processSTL(stlTmp);
     const glbPath = await generateGLB(stlTmp);
     const glbStoragePath = await uploadToStorage(glbPath, 'previews');
@@ -782,9 +803,10 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
          estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
          recommended_layer_height = 0.2, recommended_infill = 20,
          file_hash = $8,
+         geometry_fingerprint = $9,
          processing_status = 'ready', processing_error = NULL,
          updated_at = NOW()
-       WHERE id = $9`,
+       WHERE id = $10`,
       [
         glbStoragePath,
         stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
@@ -792,6 +814,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         Number(printEstimate.total_cost.toFixed(2)),
         stlData.needsSupports,
         fileHash,
+        JSON.stringify(fingerprint),
         modelId,
       ]
     );
@@ -803,6 +826,28 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
   } finally {
     await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Compare a fingerprint against every stored model's fingerprint and return the
+ * first likely match (a re-upload), or null. O(N) — fine at this scale; swap for
+ * a vector index if the catalogue grows large.
+ */
+async function findGeometryDuplicate(
+  fingerprint: GeometryFingerprint,
+  excludeId: string,
+): Promise<{ id: string; name: string } | null> {
+  const { rows } = await db.query(
+    `SELECT id, name, geometry_fingerprint FROM models
+     WHERE geometry_fingerprint IS NOT NULL AND id <> $1`,
+    [excludeId]
+  );
+  for (const row of rows) {
+    if (isLikelyDuplicate(fingerprint, row.geometry_fingerprint as GeometryFingerprint)) {
+      return { id: row.id, name: row.name };
+    }
+  }
+  return null;
 }
 
 async function markModelFailed(modelId: string, reason: string): Promise<void> {
