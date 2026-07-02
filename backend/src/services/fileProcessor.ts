@@ -4,12 +4,19 @@ import { promisify } from 'util'
 import { readFile, writeFile } from 'fs/promises'
 import path from 'path'
 import crypto from 'crypto'
-import { Document, NodeIO } from '@gltf-transform/core'
 import logger from '../utils/logger'
 import { saveFile, STORAGE_PATHS } from './storage'
 import type { AABB, Footprint, PrintStats, FilePaths, Vector3 } from '../types/shared'
 
 const execAsync = promisify(exec)
+
+// @gltf-transform/core is ESM-only (its `property-graph` dependency ships as
+// .mjs), so a static import compiles to require() and throws ERR_REQUIRE_ESM
+// under our CommonJS build. Load it via a genuine dynamic import() — wrapped in
+// `new Function` so TypeScript doesn't downlevel it back into require().
+const importESM = new Function('specifier', 'return import(specifier)') as <T = any>(
+  specifier: string,
+) => Promise<T>
 
 // ============================================================================
 // CONFIGURATION
@@ -318,6 +325,8 @@ export function calculatePrintStats(stl: ParsedSTL, aabb: AABB): PrintStats {
  * No external tools required — runs entirely in Node.js.
  */
 async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<void> {
+  const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
+
   const positions: number[] = []
   const normals: number[] = []
 
