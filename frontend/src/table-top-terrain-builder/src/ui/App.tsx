@@ -233,7 +233,7 @@ export default function App() {
           )}
           {selectedAssetId && (
             <span className="tb-level" data-manual={placementManual}>
-              Level {placementLevel}
+              Level {Math.round(placementLevel)}
               <span className="tb-small">· {placementManual ? 'manual (PgUp/PgDn)' : 'on surface'}</span>
             </span>
           )}

@@ -1,5 +1,6 @@
 import React from 'react'
 import { useForm } from 'react-hook-form'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { authApi } from '../../api/endpoints/auth'
 import { useAuthStore } from '../../store/authStore'
@@ -9,6 +10,7 @@ import Button from '../../components/ui/Button'
 type FormValues = { email: string; password: string }
 
 const Login: React.FC = () => {
+  const navigate = useNavigate()
   const { register, handleSubmit, formState } = useForm<FormValues>()
   const { setAuth, setLoading } = useAuthStore()
 
@@ -18,6 +20,7 @@ const Login: React.FC = () => {
       const res = await authApi.login(values)
       setAuth({ user: res.user, token: res.accessToken, refreshToken: res.refreshToken })
       toast.success('Logged in successfully')
+      navigate('/')
     } catch (e: any) {
       const message = e?.response?.data?.message || 'Unable to login'
       toast.error(message)

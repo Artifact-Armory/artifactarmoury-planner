@@ -213,6 +213,23 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   `assets.ts loadGLTFScene` (bare loader, no Draco) is dead code. Existing models
   need a **re-upload** to regenerate the optimised GLB (same re-upload also fixes
   orientation). Tune via `PREVIEW_TARGET_TRIS`.
+- **Model stacking (planner):** the planner already auto-rests pieces on the surface
+  under the cursor, but `surfaceTop` only counted modular tiles with
+  `elevation.heightUnits` — uploaded models (no metadata) contributed 0, so they
+  never stacked. Added `surfaceUnits(asset)` in `core/elevation.ts` that falls back
+  to real height (`aabb.y / LEVEL_HEIGHT`, fractional) for models without metadata;
+  `surfaceTop`/`occupyUnits` use it. Now placing a model over another auto-stacks on
+  its **exact** top (base level is fractional → `levelToY` gives the exact Y; only the
+  collision grid rounds, so visuals are pixel-perfect). Side-by-side / open-corner
+  placement is unaffected (different footprint cells). To bury/intersect instead,
+  PageDown (+ hold Alt to permit overlap). `placementLevel` badge now rounds.
+- **Login fixes:** `Login.tsx` never redirected after a successful sign-in (Register
+  did) — added `navigate('/')`. And there were **two `<Toaster>`s** (app.tsx root +
+  MainLayout) — duplicate react-hot-toast Toasters run conflicting dismiss timers so
+  toasts wouldn't auto-dismiss; removed the MainLayout one (keep exactly one at the
+  app root). (The planner-footprint "can't place inside an L-corner" request was
+  dropped — holding **Alt** already allows free/overlapping placement; it's a
+  tutorial/discoverability gap, not a bug.)
 - **Still-latent frontend bug (NOT fixed):** `modelsApi.uploadThumbnail` and
   `uploadModelFile` POST to `/models/:id/thumbnail` and `/models/:id/file`, but those
   routes **don't exist** (only `POST /models/:id/images`). So a draft with no

@@ -3,7 +3,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import Footer from './footer';
 import CartDrawer from '../cart/CartDrawer';
-import { Toaster } from 'react-hot-toast';
 
 const MainLayout: React.FC = () => {
   const location = useLocation();
@@ -24,30 +23,8 @@ const MainLayout: React.FC = () => {
       <Footer />
 
       <CartDrawer />
-      
-      {/* Toast notifications */}
-      <Toaster 
-        position="top-center"
-        toastOptions={{
-          duration: 5000,
-          style: {
-            background: '#FFFFFF',
-            color: '#1F2937',
-          },
-          success: {
-            iconTheme: {
-              primary: '#10B981',
-              secondary: '#FFFFFF',
-            },
-          },
-          error: {
-            iconTheme: {
-              primary: '#EF4444',
-              secondary: '#FFFFFF',
-            },
-          },
-        }}
-      />
+      {/* Toaster lives once at the app root (app.tsx) — a second one here caused
+          toasts to double up and not auto-dismiss. */}
     </div>
   );
 };
