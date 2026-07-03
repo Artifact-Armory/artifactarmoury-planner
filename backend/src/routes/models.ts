@@ -332,6 +332,7 @@ router.get('/my-models',
       `SELECT 
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, m.base_price, m.status, m.visibility,
+        m.processing_status, m.processing_error,
         m.view_count, m.download_count, m.sale_count,
         m.width, m.height, m.depth,
         m.created_at, m.updated_at, m.published_at,

@@ -48,6 +48,11 @@ export const mapModelRecord = (model: any): TerrainModel => ({
       ? Number(model.average_rating ?? model.averageRating)
       : undefined,
   isFavorited: model.is_favorited ?? model.isFavorited ?? false,
+  status: model.status ?? undefined,
+  visibility: model.visibility ?? undefined,
+  processingStatus: model.processing_status ?? model.processingStatus ?? undefined,
+  processingError: model.processing_error ?? model.processingError ?? null,
+  downloadCount: model.download_count ?? model.downloadCount ?? undefined,
   publishedAt: model.published_at ?? model.publishedAt,
   createdAt: model.created_at ?? model.createdAt,
   updatedAt: model.updated_at ?? model.updatedAt,

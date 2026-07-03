@@ -57,10 +57,57 @@ export const modelsApi = {
   },
 
   /**
-   * Update an existing terrain model (requires ownership or admin role)
+   * List the signed-in artist's own models (all statuses, incl. drafts and
+   * still-processing/failed ones — unlike the public catalogue).
    */
-  updateModel: async (id: string, data: Partial<ModelUploadRequest>): Promise<ApiResponse<TerrainModel>> => {
-    const response = await apiClient.put<ApiResponse<TerrainModel>>(`${BASE_URL}/${id}`, data);
+  getMyModels: async (
+    params: { status?: string; page?: number; limit?: number } = {},
+  ): Promise<{ models: TerrainModel[]; pagination: Pagination }> => {
+    const response = await apiClient.get(`${BASE_URL}/my-models`, { params });
+    const payload = response.data ?? {};
+    const models = (payload.models ?? []).map((m: any) => mapModelRecord(m));
+    const p = payload.pagination ?? {};
+    return {
+      models,
+      pagination: {
+        page: Number(p.page ?? params.page ?? 1),
+        limit: Number(p.limit ?? params.limit ?? models.length),
+        totalItems: Number(p.total ?? p.totalItems ?? models.length),
+        totalPages: Number(p.pages ?? p.totalPages ?? 1),
+      },
+    };
+  },
+
+  /**
+   * Update an existing terrain model (requires ownership or admin role).
+   * The API route is PATCH and reads snake_case fields, so map from camelCase.
+   */
+  updateModel: async (
+    id: string,
+    data: Partial<Pick<ModelUploadRequest, 'name' | 'description' | 'category' | 'tags' | 'basePrice'>>,
+  ): Promise<{ id: string; name: string }> => {
+    const body: Record<string, unknown> = {};
+    if (data.name !== undefined) body.name = data.name;
+    if (data.description !== undefined) body.description = data.description;
+    if (data.category !== undefined) body.category = data.category;
+    if (data.tags !== undefined) body.tags = data.tags;
+    if (data.basePrice !== undefined) body.base_price = data.basePrice;
+    const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
+    return response.data?.model ?? response.data;
+  },
+
+  /**
+   * Publish a draft model so it appears in the marketplace. The API enforces a
+   * thumbnail and a >=20-char description and returns a 400 if either is missing.
+   */
+  publishModel: async (id: string): Promise<{ modelId: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/publish`);
+    return response.data;
+  },
+
+  /** Take a published model back off the marketplace (revert to draft). */
+  unpublishModel: async (id: string): Promise<{ modelId: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/unpublish`);
     return response.data;
   },
 

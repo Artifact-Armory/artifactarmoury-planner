@@ -281,7 +281,9 @@ router.post('/:id/confirm',
       items: itemsResult.rows.map(item => ({
         itemId: item.id,
         modelName: item.model_name,
-        stlFilePath: JSON.parse(item.model_snapshot).stl_file_path,
+        // model_snapshot is a JSONB column — pg returns it already parsed as an
+        // object; only JSON.parse it on the off chance a driver hands back text.
+        stlFilePath: (typeof item.model_snapshot === 'string' ? JSON.parse(item.model_snapshot) : item.model_snapshot)?.stl_file_path,
         quantity: item.quantity,
         color: item.print_color,
         material: item.print_material,

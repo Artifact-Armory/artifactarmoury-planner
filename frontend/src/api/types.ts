@@ -102,6 +102,11 @@ export interface TerrainModel {
   reviewCount?: number
   averageRating?: number
   isFavorited?: boolean
+  status?: 'draft' | 'published' | 'archived' | string
+  visibility?: 'public' | 'private' | 'unlisted'
+  processingStatus?: 'processing' | 'ready' | 'failed' | string
+  processingError?: string | null
+  downloadCount?: number
   publishedAt?: string
   createdAt?: string
   updatedAt?: string

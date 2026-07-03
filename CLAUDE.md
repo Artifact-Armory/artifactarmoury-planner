@@ -107,9 +107,51 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   Railway Postgres). A fresh DB has no artists/admins.
 - Verified working live: registration/login (after the `forwardRef` fix), upload →
   processing → `ready`, model view (after the numeric-coercion fix).
-- **Remaining to test:** download the watermarked STL → decode its header to prove
-  buyer-tracing → re-upload the downloaded STL and confirm the **fingerprint
-  rejects it**. Then the buyer purchase→download path with a second account.
+- **Anti-theft proven end-to-end (automated, `npm run test:stage4`):** against real
+  binary STLs, using the exact production service fns, all pass —
+  (1) watermark adds 0 bytes / leaves geometry byte-identical / header decodes to
+  the issued buyer+order / a tampered header fails the GCM tag; (2) re-uploading the
+  *downloaded* file matches the original fingerprint (distance 0.0000 → rejected);
+  (3) stripped-header thief: trace fails but the fingerprint still catches it;
+  (4) an unrelated model doesn't match (0.39, no false positive). Script:
+  `backend/scripts/test-stage4-e2e.ts`.
+- **Stage 4 PROVEN LIVE (2026-07-03) ✅ — full chain end-to-end on production:**
+  (a) artist self-download traced (buyer=artist id, order=`0000…` sentinel);
+  (b) a real *buyer* purchase→download→trace: buyer `callumjwhite95@hotmail.co.uk`
+  (id `ea58abec…`, role `customer`) bought model "Gothic Ruin Corner"
+  (`eaa273ff…`) and the trace of their downloaded STL decoded to
+  buyer=`ea58abec…`, order=`9edeff99…` (a real non-zero order) — the watermark
+  traces a leaked file to the exact buyer+purchase. The anti-theft feature is done.
+- **Bug found & fixed during the test:** `POST /orders/:id/confirm` 500'd because it
+  `JSON.parse()`d the **JSONB** `model_snapshot` column (pg already returns it
+  parsed). Fixed in `routes/orders.ts` (parse only if it's a string). The crash was
+  cosmetic — it fired *after* the `payment_status='succeeded'` commit — but it broke
+  print-job submission for every order. **Push this fix.**
+- **New tooling (this session):** `npm run db:query -- "<SQL>"`
+  (`scripts/db-query.ts`) runs one-off SQL on prod from a laptop **without psql**
+  (uses pg + `DATABASE_PUBLIC_URL`; run `railway run` linked to the **Postgres**
+  service). This is the preferred one-off-SQL path now.
+- **Checkout caveat:** the frontend checkout page is still a stub
+  ("Stripe UI integration coming soon"), so the purchase above was driven by
+  calling `POST /api/orders` + `/confirm` directly with the buyer's JWT (the mock
+  `getPaymentIntent` returns `succeeded` for any id). The backend order flow works;
+  only the checkout **UI** is unbuilt.
+- **Artist "My Models" dashboard BUILT (2026-07-03):** `ArtistModels.tsx` and
+  `EditModel.tsx` were empty stubs — now real. My Models lists all of the artist's
+  models incl. **drafts** and still-processing/failed ones (via new
+  `modelsApi.getMyModels` → `GET /models/my-models`), with status/processing badges
+  and **Publish / Unpublish / Edit** actions; Publish is disabled with an inline
+  reason until the model is ready + has a thumbnail + a ≥20-char description. Edit
+  page loads the model, edits name/desc/category/tags/price (PATCH `/models/:id` —
+  fixed `updateModel` from a wrong `PUT`), shows a live 0/20 description counter, and
+  has **Save & publish**. Backend `my-models` query now also selects
+  `processing_status`/`processing_error`; `mapModelRecord` now maps
+  `status`/`visibility`/`processingStatus`/`downloadCount`.
+- **Still-latent frontend bug (NOT fixed):** `modelsApi.uploadThumbnail` and
+  `uploadModelFile` POST to `/models/:id/thumbnail` and `/models/:id/file`, but those
+  routes **don't exist** (only `POST /models/:id/images`). So a draft with no
+  thumbnail currently can't get one via the UI — publish will be blocked. Add the
+  routes (or point the client at `/images`) before that path matters.
 - **Known unfinished polish:** the demo starter models (`floor/bottom/top/…glb`,
   git-ignored, 100MB+ raw) aren't hosted, so the planner opens with grey **box
   fallbacks**. To fix: Draco-compress + upload to R2 at `assets/models/`.
