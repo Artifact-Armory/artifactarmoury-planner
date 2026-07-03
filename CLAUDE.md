@@ -147,6 +147,23 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   has **Save & publish**. Backend `my-models` query now also selects
   `processing_status`/`processing_error`; `mapModelRecord` now maps
   `status`/`visibility`/`processingStatus`/`downloadCount`.
+- **Artist can now DELETE a model** (My Models → Delete, with a confirm). Hits the
+  existing hard-`DELETE /models/:id`, which removes the row — and therefore its
+  `geometry_fingerprint` + `file_hash` — so the artist can **re-upload the same
+  model later** without the dedup blocking it. Caveat baked into the confirm text:
+  it also deletes the R2 files and, via `order_items.model_id ON DELETE SET NULL`,
+  any buyer who purchased it loses download access (their order row survives).
+- **Planner "can't place a marketplace model" — FIXED (root cause):** the palette is
+  built from the API catalogue (`loadAssetsFromAPI` → `store().assets`), but the
+  scene's ghost/placement code resolved assets via `getAssetById`, which only knew
+  the **local demo manifest**. So an API model highlighted on click but produced no
+  ghost and couldn't be placed. Fix: `loadAssetsFromAPI` now calls a new
+  `registerAssets()` (`core/assets.ts`) that merges the API assets into the by-id
+  lookup. NOTE the two separate carts remain by design: the **shop basket**
+  (`store/cartStore.ts`, `cart-storage`) vs the **planner** (its palette + its own
+  table-derived basket). Flow is planner→cart (`addLayoutToShopCart`); shop-basket
+  items do NOT appear on the planner table. That disconnect still confuses users —
+  a UI clarification is a good follow-up.
 - **Still-latent frontend bug (NOT fixed):** `modelsApi.uploadThumbnail` and
   `uploadModelFile` POST to `/models/:id/thumbnail` and `/models/:id/file`, but those
   routes **don't exist** (only `POST /models/:id/images`). So a draft with no

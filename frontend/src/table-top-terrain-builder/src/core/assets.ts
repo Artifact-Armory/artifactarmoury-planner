@@ -65,6 +65,18 @@ export function getAssetById(id: string): Asset | undefined {
   return _byId!.get(id)
 }
 
+/**
+ * Merge extra assets (e.g. the marketplace catalogue from the API) into the
+ * by-id lookup so getAssetById resolves them too. Without this, an API-only
+ * model can be selected in the palette but has no ghost and can't be placed,
+ * because the scene's placement code resolves assets via getAssetById.
+ * Local manifest entries (used by the starter layout) are kept.
+ */
+export function registerAssets(assets: Asset[]): void {
+  if (!_byId) loadAssets() // seed the manifest entries first
+  for (const a of assets) _byId!.set(a.id, a)
+}
+
 export function searchAssets(query: string): Asset[] {
   const q = query.trim().toLowerCase()
   const list = loadAssets()
@@ -141,7 +153,7 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
       return loadAssets()
     }
 
-    return models
+    const mapped = models
       .filter((m) => m.glbUrl) // only include models with a GLB preview
       .map((m) => {
         // Backend stores dimensions in mm; planner needs metres
@@ -166,6 +178,11 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
           thumbnail: m.thumbnailUrl,
         } satisfies Asset
       })
+
+    // Make these resolvable by getAssetById (used by the scene's ghost +
+    // placement code), otherwise a palette model can't be placed on the table.
+    registerAssets(mapped)
+    return mapped
   } catch {
     // API unreachable (dev without backend running) — use local manifest
     console.warn('[planner] API unavailable, falling back to local asset manifest')

@@ -100,6 +100,25 @@ const ArtistModels: React.FC = () => {
     }
   }
 
+  async function handleDelete(m: TerrainModel) {
+    const ok = window.confirm(
+      `Delete “${m.name}”?\n\nThis permanently removes the model, its files and its ` +
+        `re-upload block (its geometry fingerprint), so you can upload it again later. ` +
+        `Anyone who has purchased it will lose access. This cannot be undone.`,
+    )
+    if (!ok) return
+    setBusyId(m.id)
+    setRowError((r) => ({ ...r, [m.id]: '' }))
+    try {
+      await modelsApi.deleteModel(m.id)
+      setModels((list) => list.filter((x) => x.id !== m.id))
+    } catch (err) {
+      setRowError((r) => ({ ...r, [m.id]: errMessage(err, 'Delete failed') }))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div className="px-4 py-10 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
@@ -191,6 +210,13 @@ const ArtistModels: React.FC = () => {
                       {busy ? 'Working…' : 'Unpublish'}
                     </button>
                   )}
+                  <button
+                    className="px-3 py-1.5 rounded border border-red-300 text-red-700 text-sm disabled:opacity-50"
+                    onClick={() => handleDelete(m)}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
                 </div>
               </li>
             )
