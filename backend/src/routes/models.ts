@@ -31,7 +31,13 @@ import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
+import type { Archiver } from 'archiver';
 import type { Response } from 'express';
+
+// The installed @types/archiver omits the factory's call signature, so require
+// the real factory and type it via the Archiver class.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const createArchive: (format: string, options?: any) => Archiver = require('archiver');
 
 const router = Router();
 
@@ -239,7 +245,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -262,23 +268,51 @@ router.post('/from-upload',
       throw new ValidationError('Uploaded file not found in storage — retry the upload');
     }
 
+    // Optional extra STL parts (multi-part "set" models). Each must be its own
+    // raw/ upload; they're processed alongside the primary in the background.
+    const extraParts: Array<{ rawKey: string; filename?: string; name?: string }> = [];
+    if (parts != null) {
+      if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
+      if (parts.length > 20) throw new ValidationError('A set can have at most 20 extra parts');
+      for (const p of parts) {
+        if (!p?.rawKey || typeof p.rawKey !== 'string' || !p.rawKey.startsWith('raw/')) {
+          throw new ValidationError('Each part needs an uploaded raw/ object');
+        }
+        if (!(await objectExists(p.rawKey))) {
+          throw new ValidationError('A part file was not found in storage — retry the upload');
+        }
+        extraParts.push({ rawKey: p.rawKey, filename: p.filename, name: p.name });
+      }
+    }
+    const partCount = 1 + extraParts.length;
+
     // Digital STL sales only for now — fulfilment is always 'stl'.
     const userId = (req as any).userId;
 
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', 'draft', 'processing')
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price]
+      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price, partCount]
     );
     const model = result.rows[0];
+
+    // Insert a row per extra part (processed in the background job).
+    for (let i = 0; i < extraParts.length; i++) {
+      const p = extraParts[i];
+      await db.query(
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, processing_status)
+         VALUES ($1, $2, $3, $4, 'processing')`,
+        [model.id, p.name || `Part ${i + 2}`, p.rawKey, i + 1]
+      );
+    }
 
     await db.query(
       `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata)
        VALUES ($1, 'model.created', 'model', $2, $3)`,
-      [userId, model.id, JSON.stringify({ name: model.name, via: 'direct-upload' })]
+      [userId, model.id, JSON.stringify({ name: model.name, via: 'direct-upload', partCount })]
     ).catch((err) => logger.error('activity_log insert failed', { error: err }));
 
     // Fire-and-forget: process in the background, seller polls GET /:id.
@@ -333,7 +367,7 @@ router.get('/my-models',
       `SELECT 
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, m.base_price, m.status, m.visibility,
-        m.processing_status, m.processing_error,
+        m.processing_status, m.processing_error, m.part_count,
         m.view_count, m.download_count, m.sale_count,
         m.width, m.height, m.depth,
         m.created_at, m.updated_at, m.published_at,
@@ -357,6 +391,50 @@ router.get('/my-models',
         pages: Math.ceil(totalCount / Number(limit))
       }
     });
+  })
+);
+
+// ============================================================================
+// GET SETS (published multi-part models + their parts) — for the planner
+// ============================================================================
+// Each part is its own placeable asset in the planner; the primary STL is part
+// 1 (on the model row), extras come from model_parts.
+
+router.get('/sets',
+  optionalAuth,
+  asyncHandler(async (_req, res) => {
+    const models = (await db.query(
+      `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.artist_id,
+              m.glb_file_path, m.width, m.depth, m.height
+       FROM models m
+       WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
+       ORDER BY m.created_at DESC`
+    )).rows;
+
+    const sets = await Promise.all(models.map(async (m: any) => {
+      const extra = (await db.query(
+        `SELECT id, name, glb_file_path, width, depth, height
+         FROM model_parts
+         WHERE model_id = $1 AND processing_status = 'ready'
+         ORDER BY display_order ASC`,
+        [m.id]
+      )).rows;
+      const parts = [
+        // Primary part (part 1) lives on the model row; its asset id is the modelId.
+        { id: m.id, name: 'Part 1', glb_file_path: m.glb_file_path, width: m.width, depth: m.depth, height: m.height },
+        ...extra.map((p: any) => ({ id: p.id, name: p.name, glb_file_path: p.glb_file_path, width: p.width, depth: p.depth, height: p.height })),
+      ].filter((p) => p.glb_file_path);
+      return {
+        id: m.id,
+        name: m.name,
+        price: m.base_price,
+        thumbnail_path: m.thumbnail_path,
+        artist_id: m.artist_id,
+        parts,
+      };
+    }));
+
+    res.json({ sets });
   })
 );
 
@@ -426,11 +504,22 @@ router.get('/:id',
       [id]
     );
 
+    // Multi-part "set" — the extra STL parts (primary is part 1 on the model row).
+    let parts: any[] = [];
+    if ((model.part_count ?? 1) > 1) {
+      parts = (await db.query(
+        `SELECT id, name, glb_file_path, width, depth, height, processing_status, display_order
+         FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+        [id]
+      )).rows;
+    }
+
     res.json({
       model: {
         ...model,
         images: imagesResult.rows,
-        recentReviews: reviewsResult.rows
+        recentReviews: reviewsResult.rows,
+        parts,
       }
     });
   })
@@ -761,7 +850,7 @@ router.get('/:id/download',
     const userId = (req as any).userId;
 
     const model = (await db.query(
-      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status
+      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status, part_count
        FROM models WHERE id = $1`,
       [id]
     )).rows[0];
@@ -788,10 +877,27 @@ router.get('/:id/download',
     }
 
     const safeName = String(model.name || 'model').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
-    res.setHeader('Content-Type', 'model/stl');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.stl"`);
+    const payload = { modelId: id, buyerId: userId, orderId } as WatermarkPayload;
 
-    await streamWatermarkedSTL(model.stl_file_path, { modelId: id, buyerId: userId, orderId }, res);
+    if ((model.part_count ?? 1) > 1) {
+      // Multi-part "set": deliver every part as one watermarked ZIP.
+      const parts = (await db.query(
+        `SELECT name, stl_file_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+        [id]
+      )).rows;
+      const files: Array<{ name: string; key: string }> = [
+        { name: `${safeName}-part-1.stl`, key: model.stl_file_path },
+        ...parts.map((p: any, i: number) => ({
+          name: `${String(p.name || `part-${i + 2}`).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60)}.stl`,
+          key: p.stl_file_path as string,
+        })),
+      ];
+      await streamWatermarkedZip(files, payload, safeName, res);
+    } else {
+      res.setHeader('Content-Type', 'model/stl');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.stl"`);
+      await streamWatermarkedSTL(model.stl_file_path, payload, res);
+    }
 
     db.query('UPDATE models SET download_count = download_count + 1 WHERE id = $1', [id])
       .catch((err) => logger.error('download_count bump failed', { error: err, id }));
@@ -847,7 +953,13 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       triangle_count: undefined,
     });
 
-    // 4. Fill in the derived fields and flip to ready (still 'draft' for moderation).
+    // Multi-part models have extra parts still to process — stay 'processing'
+    // until they're all done so the poller never briefly sees a premature 'ready'.
+    const hasParts = (await db.query(
+      'SELECT 1 FROM model_parts WHERE model_id = $1 LIMIT 1', [modelId]
+    )).rows.length > 0;
+
+    // 4. Fill in the derived fields (still 'draft' for moderation).
     await db.query(
       `UPDATE models SET
          glb_file_path = $1,
@@ -856,9 +968,9 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
          recommended_layer_height = 0.2, recommended_infill = 20,
          file_hash = $8,
          geometry_fingerprint = $9,
-         processing_status = 'ready', processing_error = NULL,
+         processing_status = $10, processing_error = NULL,
          updated_at = NOW()
-       WHERE id = $10`,
+       WHERE id = $11`,
       [
         glbStoragePath,
         stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
@@ -867,16 +979,75 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         stlData.needsSupports,
         fileHash,
         JSON.stringify(fingerprint),
+        hasParts ? 'processing' : 'ready',
         modelId,
       ]
     );
 
-    logger.info('Model processed successfully', { modelId });
+    // 5. Extra STL parts (multi-part "set"). On success, flip the model to ready.
+    if (hasParts) {
+      await processModelParts(modelId);
+      await db.query(
+        `UPDATE models SET processing_status = 'ready', processing_error = NULL, updated_at = NOW()
+         WHERE id = $1 AND processing_status = 'processing'`,
+        [modelId]
+      );
+    }
+
+    logger.info('Model processed successfully', { modelId, hasParts });
   } catch (error) {
     logger.error('Model processing failed', { error, modelId });
     await markModelFailed(modelId, (error as Error)?.message?.slice(0, 500) || 'Processing failed');
   } finally {
     await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Process every extra STL part of a multi-part ("set") model: dedup, per-part GLB
+ * preview, dimensions + fingerprint. Throws (after marking the model failed) if any
+ * part can't be processed, so the caller leaves the model in 'failed'.
+ */
+async function processModelParts(modelId: string): Promise<void> {
+  const { rows: parts } = await db.query(
+    `SELECT id, name, stl_file_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+    [modelId]
+  );
+
+  for (const part of parts) {
+    const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-part-'));
+    const stlTmp = path.join(tmpDir, 'part.stl');
+    try {
+      const buffer = await downloadObject(part.stl_file_path);
+      await fsp.writeFile(stlTmp, buffer);
+
+      // Dedup each part against every other model + part (not this model's own).
+      const fileHash = computeFileHash(buffer);
+      const fingerprint = await computeGeometryFingerprint(stlTmp);
+      const geoDup = await findGeometryDuplicate(fingerprint, modelId);
+      if (geoDup) {
+        const reason = `Part "${part.name}" appears to be a copy of an existing model ("${geoDup.name}")`;
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+        await markModelFailed(modelId, reason);
+        await safeDeleteObject(part.stl_file_path);
+        throw new Error(reason);
+      }
+
+      const stlData = await processSTL(stlTmp);
+      const glbPath = await generateGLB(stlTmp);
+      const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+
+      await db.query(
+        `UPDATE model_parts SET
+           glb_file_path = $1, width = $2, depth = $3, height = $4,
+           file_hash = $5, geometry_fingerprint = $6,
+           processing_status = 'ready', processing_error = NULL
+         WHERE id = $7`,
+        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), part.id]
+      );
+    } finally {
+      await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
@@ -889,11 +1060,21 @@ async function findGeometryDuplicate(
   fingerprint: GeometryFingerprint,
   excludeId: string,
 ): Promise<{ id: string; name: string } | null> {
-  const { rows } = await db.query(
+  // Scan both whole models and individual set parts (excluding the model being
+  // processed and its own parts), so a stolen file re-uploaded as a "part" is
+  // still caught.
+  const { rows: modelRows } = await db.query(
     `SELECT id, name, geometry_fingerprint FROM models
      WHERE geometry_fingerprint IS NOT NULL AND id <> $1`,
     [excludeId]
   );
+  const { rows: partRows } = await db.query(
+    `SELECT mp.model_id AS id, COALESCE(m.name, mp.name) AS name, mp.geometry_fingerprint
+     FROM model_parts mp JOIN models m ON m.id = mp.model_id
+     WHERE mp.geometry_fingerprint IS NOT NULL AND mp.model_id <> $1`,
+    [excludeId]
+  );
+  const rows = [...modelRows, ...partRows];
   let match: { id: string; name: string } | null = null;
   // Track the closest candidate so a false positive / near-miss is diagnosable
   // in the logs (compare against FINGERPRINT_MATCH_THRESHOLD).
@@ -955,6 +1136,39 @@ async function streamWatermarkedSTL(stlKey: string, payload: WatermarkPayload, r
     await write(isAscii ? watermarkAsciiSTL(full, payload) : full);
   }
   res.end();
+}
+
+/** Download an STL from R2 and return it with the buyer's watermark applied. */
+async function watermarkedSTLBuffer(key: string, payload: WatermarkPayload): Promise<Buffer> {
+  const buf = await downloadObject(key);
+  if (isBinarySTL(buf.length, buf)) {
+    // Overwrite the ignored 80-byte header; geometry bytes 80+ are untouched.
+    return Buffer.concat([buildWatermarkHeader(payload), buf.subarray(80)]);
+  }
+  const isAscii = buf.subarray(0, 5).toString('ascii').toLowerCase() === 'solid';
+  return isAscii ? watermarkAsciiSTL(buf, payload) : buf;
+}
+
+/** Stream a ZIP of watermarked STL parts (multi-part "set" download). */
+async function streamWatermarkedZip(
+  files: Array<{ name: string; key: string }>,
+  payload: WatermarkPayload,
+  zipName: string,
+  res: Response,
+): Promise<void> {
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${zipName}.zip"`);
+  const archive = createArchive('zip', { zlib: { level: 6 } });
+  archive.on('error', (err: Error) => {
+    logger.error('ZIP stream error', { error: err });
+    res.destroy(err);
+  });
+  archive.pipe(res);
+  for (const f of files) {
+    const buf = await watermarkedSTLBuffer(f.key, payload);
+    archive.append(buf, { name: f.name });
+  }
+  await archive.finalize();
 }
 
 async function markModelFailed(modelId: string, reason: string): Promise<void> {

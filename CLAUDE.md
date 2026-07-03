@@ -137,6 +137,36 @@ later feature). Consequences, all built this session (migration **008**):
   `tb-palette-tabs`/`tb-tab`/`tb-bundle`/`tb-chev`/`tb-pill.bundle`. `getEntitlements` now
   returns `{models,bundles}` Sets — `ModelDetails`/`BundleDetails` updated accordingly.
 
+## Multi-part "set" models (built 2026-07-03, migration 009)
+A single piece of terrain can be **several STL files** (e.g. Gothic Ruin = 4 parts, or
+one STL per floor). A model now optionally carries **extra parts**: **one listing, one
+price, one purchase**, download = a **ZIP of all parts** (each watermarked), and in the
+planner **each part is individually placeable**, grouped under a **SET** tile (reusing the
+bundle group UI). Distinct from a **bundle** (which groups *independently-listed* models).
+- **Schema (009 + schema.sql):** `models.part_count` (1 = ordinary model); the model's own
+  `stl_file_path`/`glb_file_path`/dims are **part 1 (primary)**; extra parts live in new
+  `model_parts` (per-part stl/glb/dims/file_hash/geometry_fingerprint/status/order).
+- **Upload:** `POST /from-upload` accepts `parts:[{rawKey,filename,name?}]` (each its own
+  presigned `raw/` upload); `processUploadedModel` processes the primary then
+  `processModelParts` (per-part GLB via `convertSTLtoGLBPure` + fingerprint dedup + dims).
+  The model stays `processing` until **all** parts are ready. `findGeometryDuplicate` now
+  scans **`model_parts` too**, so a stolen file re-uploaded as a "part" is still caught.
+  CreateModel.tsx has an "Extra parts (optional)" multi-file input.
+- **Download (`GET /:id/download`):** if `part_count>1` → streams a **ZIP** (`archiver` dep,
+  added) of the primary + each part, each run through `watermarkedSTLBuffer`. Single-STL
+  models unchanged. Entitlement is still per **model**.
+- **Marketplace:** `GET /:id` returns `part_count` + a `parts` array; `ModelDetails.tsx`
+  shows a **"SET · N parts"** badge, the part list, and a "Download ZIP (N parts)" button.
+  `browse.searchModels` exposes `part_count`. Multi-part models still show as one product card.
+- **Planner:** new `GET /api/models/sets` → published multi-part models + parts. The planner
+  **excludes multi-part models from the flat Catalogue** (`loadAssetsFromAPI` filters
+  `partCount>1`) and instead `loadSetsFromAPI` (`core/assets.ts`) registers **each part as a
+  placeable asset** (primary asset id = modelId; extras = `part:<partId>`; mm→m aabb,
+  `scaleToFit`). Store holds `sets`/`setPartAssets`; "My items" renders bundles + sets as one
+  expandable group list (`SET` vs `BUNDLE` pill), gated on the parent **model** owned/in-basket/own.
+  Placing a part → `addPlacedModelToShopCart` adds the **parent model** once (buy-once). Only
+  the **primary** part carries the price so the "Your build" total counts a set once (extras £0).
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,

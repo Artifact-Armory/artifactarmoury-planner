@@ -71,6 +71,18 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     reviewerName: review.reviewer_name ?? review.reviewerName,
     createdAt: review.created_at ?? review.createdAt,
   })),
+  // Multi-part ("set") models: number of STL files + the extra parts.
+  partCount: Number(model.part_count ?? model.partCount ?? 1),
+  parts: model.parts?.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    thumbnailUrl: p.thumbnail_url || p.thumbnailUrl || assetUrl(p.thumbnail_path),
+    glbUrl: p.glb_url || p.glbUrl || assetUrl(p.glb_file_path),
+    width: p.width ?? undefined,
+    depth: p.depth ?? undefined,
+    height: p.height ?? undefined,
+    processingStatus: p.processing_status ?? p.processingStatus ?? undefined,
+  })),
 })
 
 export const mapArtistSummary = (artist: any): ArtistSummary => ({

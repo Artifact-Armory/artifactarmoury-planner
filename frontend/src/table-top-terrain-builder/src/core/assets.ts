@@ -4,6 +4,8 @@ import manifest from '@data/assets.manifest.json'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import * as THREE from 'three'
 import { browseApi } from '@/api/endpoints/browse'
+import { modelsApi } from '@/api/endpoints/models'
+import { assetUrl } from '@/api/transformers'
 
 export const AssetSchema = z.object({
   id: z.string().min(1),
@@ -140,7 +142,7 @@ export function deriveFootprint(aabb: {x:number; z:number}, gridSize: number) {
 }
 
 // Default grid size in metres (1 inch ≈ 0.0254m, 1 ft = 0.3048m)
-const DEFAULT_GRID_SIZE = 0.3048
+export const DEFAULT_GRID_SIZE = 0.3048
 
 /**
  * Load the asset catalogue from the backend browse API.
@@ -158,7 +160,9 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
     }
 
     const mapped = models
-      .filter((m) => m.glbUrl) // only include models with a GLB preview
+      // Only single-STL models with a GLB preview. Multi-part "set" models are
+      // surfaced via their individually-placeable parts (see loadSetsFromAPI).
+      .filter((m) => m.glbUrl && (m.partCount ?? 1) === 1)
       .map((m) => {
         // Backend stores dimensions in mm; planner needs metres
         const wM = m.width != null ? m.width / 1000 : 0.15
@@ -192,5 +196,72 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
     // API unreachable (dev without backend running) — use local manifest
     console.warn('[planner] API unavailable, falling back to local asset manifest')
     return loadAssets()
+  }
+}
+
+// A multi-part "set": each part is a placeable asset, grouped under the set.
+export interface PlannerSetData {
+  id: string          // the parent model id (purchase/ownership unit)
+  name: string
+  thumbnail?: string
+  price: number
+  artistId: string
+  partAssetIds: string[]
+}
+
+/**
+ * Load published multi-part ("set") models and register each of their parts as
+ * an individually-placeable asset. Returns the set groupings + the part assets
+ * (kept off the flat catalogue so they only appear under their set tile).
+ */
+export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partAssets: Asset[] }> {
+  try {
+    const apiSets = await modelsApi.getSets()
+    const partAssets: Asset[] = []
+    const sets: PlannerSetData[] = []
+
+    for (const s of apiSets) {
+      const partAssetIds: string[] = []
+      for (const part of s.parts) {
+        if (!part.glbPath) continue
+        // The primary part's asset id IS the model id; extras get a namespaced id.
+        const assetId = part.id === s.id ? s.id : `part:${part.id}`
+        const wM = part.width != null ? part.width / 1000 : 0.15
+        const dM = part.depth != null ? part.depth / 1000 : 0.15
+        const hM = part.height != null ? part.height / 1000 : 0.15
+        const aabb = { x: wM, z: dM, y: hM }
+        partAssets.push({
+          id: assetId,
+          name: `${s.name} — ${part.name}`,
+          tags: [],
+          aabb,
+          footprint: deriveFootprint(aabb, DEFAULT_GRID_SIZE),
+          rotationStepDeg: 90,
+          // A set is one purchase: only the primary part carries the price so the
+          // planner's "Your build" total counts the set once (not per part).
+          price: assetId === s.id ? s.price : 0,
+          fulfillment: 'stl',
+          model: assetUrl(part.glbPath) ?? undefined,
+          thumbnail: assetUrl(s.thumbnailPath ?? undefined),
+          scaleToFit: true,
+        } satisfies Asset)
+        partAssetIds.push(assetId)
+      }
+      if (partAssetIds.length === 0) continue
+      sets.push({
+        id: s.id,
+        name: s.name,
+        thumbnail: assetUrl(s.thumbnailPath ?? undefined),
+        price: s.price,
+        artistId: s.artistId,
+        partAssetIds,
+      })
+    }
+
+    // Resolvable by the scene for ghost/placement, like catalogue assets.
+    registerAssets(partAssets)
+    return { sets, partAssets }
+  } catch {
+    return { sets: [], partAssets: [] }
   }
 }

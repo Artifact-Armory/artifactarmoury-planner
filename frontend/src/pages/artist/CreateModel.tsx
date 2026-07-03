@@ -24,6 +24,8 @@ const CreateModel: React.FC = () => {
   const [basePrice, setBasePrice] = React.useState('')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
+  // Extra STL parts for a multi-part "set" model (the main file above is part 1).
+  const [partFiles, setPartFiles] = React.useState<File[]>([])
 
   const [phase, setPhase] = React.useState<Phase>('form')
   const [progress, setProgress] = React.useState(0)
@@ -49,6 +51,7 @@ const CreateModel: React.FC = () => {
 
     if (!stlFile) { setError('Choose an STL file to upload'); return }
     if (!/\.stl$/i.test(stlFile.name)) { setError('The model file must be an .stl'); return }
+    if (partFiles.some((f) => !/\.stl$/i.test(f.name))) { setError('Every part must be an .stl file'); return }
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
     if (isNaN(price) || price < 0) { setError('Enter a valid base price'); return }
@@ -60,14 +63,22 @@ const CreateModel: React.FC = () => {
       // 1. Raw STL straight to R2 (quarantine prefix), with progress.
       const { key: rawKey } = await uploadsApi.uploadDirect(stlFile, 'raw', setProgress)
 
-      // 2. Optional thumbnail, also direct to R2.
+      // 2. Extra parts (multi-part set) — each straight to R2.
+      const parts: Array<{ rawKey: string; filename: string; name: string }> = []
+      for (let i = 0; i < partFiles.length; i++) {
+        const f = partFiles[i]
+        const p = await uploadsApi.uploadDirect(f, 'raw')
+        parts.push({ rawKey: p.key, filename: f.name, name: f.name.replace(/\.stl$/i, '') })
+      }
+
+      // 3. Optional thumbnail, also direct to R2.
       let thumbnailKey: string | undefined
       if (thumbFile) {
         const t = await uploadsApi.uploadDirect(thumbFile, 'thumbnails')
         thumbnailKey = t.key
       }
 
-      // 3. Create the model row; the API processes it in the background.
+      // 4. Create the model row; the API processes it (+ all parts) in the background.
       const created = await modelsApi.createFromUpload({
         rawKey,
         filename: stlFile.name,
@@ -77,6 +88,7 @@ const CreateModel: React.FC = () => {
         tags: tags.trim() || undefined,
         basePrice: price,
         thumbnailKey,
+        parts: parts.length ? parts : undefined,
       })
       setModelId(created.id)
 
@@ -111,7 +123,7 @@ const CreateModel: React.FC = () => {
             className="px-4 py-2 rounded border"
             onClick={() => {
               setPhase('form'); setName(''); setDescription(''); setTags(''); setBasePrice('')
-              setStlFile(null); setThumbFile(null); setProgress(0); setModelId(null); setError(null)
+              setStlFile(null); setThumbFile(null); setPartFiles([]); setProgress(0); setModelId(null); setError(null)
             }}
           >
             Upload another
@@ -159,6 +171,42 @@ const CreateModel: React.FC = () => {
           <label className="block text-sm font-medium mb-1">Model file (.stl)</label>
           <input type="file" accept=".stl" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
           {stlFile && <p className="text-sm text-gray-500 mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
+        </div>
+
+        <div className="rounded border border-dashed p-3">
+          <label className="block text-sm font-medium mb-1">Extra parts (optional — makes this a “set”)</label>
+          <p className="text-xs text-gray-500 mb-2">
+            Add more STL files if this piece comes in several parts (e.g. separate floors). Buyers
+            pay once, download all parts as a ZIP, and can place each part in the planner.
+          </p>
+          {partFiles.length > 0 && (
+            <ul className="mb-2 space-y-1">
+              {partFiles.map((f, i) => (
+                <li key={i} className="flex items-center justify-between text-sm">
+                  <span className="truncate">Part {i + 2}: {f.name}</span>
+                  <button
+                    type="button"
+                    className="text-red-600 text-xs ml-2 disabled:opacity-50"
+                    onClick={() => setPartFiles((list) => list.filter((_, idx) => idx !== i))}
+                    disabled={busy}
+                  >
+                    remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <input
+            type="file"
+            accept=".stl"
+            multiple
+            disabled={busy}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? [])
+              if (files.length) setPartFiles((list) => [...list, ...files])
+              e.target.value = '' // allow re-selecting the same file
+            }}
+          />
         </div>
 
         <div>

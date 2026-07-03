@@ -117,7 +117,7 @@ router.get('/',
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
-        m.width, m.height, m.depth,
+        m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count,
         m.published_at,
         u.artist_name, u.artist_url,

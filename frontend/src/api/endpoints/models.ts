@@ -35,9 +35,41 @@ export const modelsApi = {
     tags?: string
     basePrice: number
     thumbnailKey?: string
+    /** Extra STL parts for a multi-part "set" model (primary is the main rawKey). */
+    parts?: Array<{ rawKey: string; filename?: string; name?: string }>
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
     const response = await apiClient.post(`${BASE_URL}/from-upload`, data);
     return response.data.model;
+  },
+
+  /**
+   * Published multi-part ("set") models with their parts — for the planner, where
+   * each part is an individually placeable asset grouped under the set.
+   */
+  getSets: async (): Promise<Array<{
+    id: string
+    name: string
+    price: number
+    thumbnailPath: string | null
+    artistId: string
+    parts: Array<{ id: string; name: string; glbPath: string | null; width: number | null; depth: number | null; height: number | null }>
+  }>> => {
+    const response = await apiClient.get(`${BASE_URL}/sets`)
+    return (response.data?.sets ?? []).map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      price: Number(s.price ?? 0),
+      thumbnailPath: s.thumbnail_path ?? null,
+      artistId: s.artist_id,
+      parts: (s.parts ?? []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        glbPath: p.glb_file_path ?? null,
+        width: p.width != null ? Number(p.width) : null,
+        depth: p.depth != null ? Number(p.depth) : null,
+        height: p.height != null ? Number(p.height) : null,
+      })),
+    }))
   },
 
   /**

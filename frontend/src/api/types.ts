@@ -110,6 +110,19 @@ export interface TerrainModel {
   publishedAt?: string
   createdAt?: string
   updatedAt?: string
+  // Multi-part ("set") models: 1 = ordinary single-STL model; >1 = a set whose
+  // extra STL parts are listed in `parts`.
+  partCount?: number
+  parts?: Array<{
+    id: string
+    name?: string
+    thumbnailUrl?: string
+    glbUrl?: string
+    width?: number
+    depth?: number
+    height?: number
+    processingStatus?: string
+  }>
   images?: Array<{
     id: string
     imagePath?: string

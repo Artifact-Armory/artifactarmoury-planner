@@ -44,6 +44,8 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
 
   const assets = useAppStore((s) => s.assets)
   const bundles = useAppStore((s) => s.bundles)
+  const sets = useAppStore((s) => s.sets)
+  const setPartAssets = useAppStore((s) => s.setPartAssets)
   const ownedModelIds = useAppStore((s) => s.ownedModelIds)
   const ownedBundleIds = useAppStore((s) => s.ownedBundleIds)
   const cartItems = useCartStore((s) => s.items)
@@ -184,24 +186,49 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
     )
   }, [filtered])
 
-  const assetsById = React.useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
+  // Part assets (from "set" models) are resolvable for tiles but kept OFF the
+  // flat catalogue — merge them here only for lookups.
+  const assetsById = React.useMemo(
+    () => new Map([...assets, ...setPartAssets].map((a) => [a.id, a])),
+    [assets, setPartAssets],
+  )
 
-  // "My items" tab: the bundles + models the user owns or has in their basket.
-  // Bundles render as expandable group tiles; their members aren't repeated as
-  // standalone tiles.
+  // "My items" tab: the bundles + sets + models the user owns or has in their
+  // basket. Bundles and sets render as expandable group tiles; their members
+  // aren't repeated as standalone tiles.
   const myItems = React.useMemo(() => {
     const cartModelIds = new Set(cartItems.filter((i) => i.kind === 'model').map((i) => i.id))
     const cartBundleIds = new Set(cartItems.filter((i) => i.kind === 'bundle').map((i) => i.id))
-    const showBundleIds = new Set<string>([...ownedBundleIds, ...cartBundleIds])
-    // An artist also sees their own published bundles here (they authored them).
-    const displayBundles = bundles.filter((b) => showBundleIds.has(b.id) || (user?.id && b.artistId === user.id))
+
+    // Bundles: shown when owned / in-basket / your own.
+    const bundleGroups = bundles
+      .filter((b) => ownedBundleIds.has(b.id) || cartBundleIds.has(b.id) || (user?.id && b.artistId === user.id))
+      .map((b) => ({
+        key: `bundle:${b.id}`, kind: 'bundle' as const, id: b.id, name: b.name,
+        thumbnail: b.thumbnail, price: b.price, owned: ownedBundleIds.has(b.id),
+        memberIds: b.modelIds,
+      }))
+    // Sets: ownership is on the parent MODEL (owned / in-basket / your own).
+    const setGroups = sets
+      .filter((s) => ownedModelIds.has(s.id) || cartModelIds.has(s.id) || (user?.id && s.artistId === user.id))
+      .map((s) => ({
+        key: `set:${s.id}`, kind: 'set' as const, id: s.id, name: s.name,
+        thumbnail: s.thumbnail, price: s.price, owned: ownedModelIds.has(s.id),
+        memberIds: s.partAssetIds,
+      }))
+    const groups = [...bundleGroups, ...setGroups]
+
+    // Models already shown inside a group tile aren't repeated as standalone tiles.
     const memberIds = new Set<string>()
-    displayBundles.forEach((b) => b.modelIds.forEach((id) => memberIds.add(id)))
+    groups.forEach((g) => g.memberIds.forEach((id) => memberIds.add(id)))
+    const setModelIds = new Set(sets.map((s) => s.id)) // a set's parent model is its tile
     const modelIds = new Set<string>([...ownedModelIds, ...cartModelIds])
-    const displayModels = [...modelIds].filter((id) => !memberIds.has(id) && assetsById.has(id))
-    const count = displayBundles.length + displayModels.length
-    return { displayBundles, displayModels, cartModelIds, count }
-  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, assetsById, user?.id])
+    const displayModels = [...modelIds].filter(
+      (id) => !memberIds.has(id) && !setModelIds.has(id) && assetsById.has(id),
+    )
+    const count = groups.length + displayModels.length
+    return { groups, displayModels, count }
+  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, sets, assetsById, user?.id])
 
   const toggleBundleExpanded = (id: string) =>
     setExpandedBundles((s) => {
@@ -490,31 +517,30 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
               <div className="tb-palette-scroll">
                 {myItems.count === 0 && (
                   <div className="tb-small" style={{ padding: 8 }}>
-                    Nothing yet. Place models from the Catalogue (they’re added to your basket) or buy a bundle — they’ll appear here.
+                    Nothing yet. Place models from the Catalogue (they’re added to your basket), or buy a bundle / multi-part set — they’ll appear here.
                   </div>
                 )}
 
-                {myItems.displayBundles.map((b) => {
-                  const expanded = expandedBundles.has(b.id)
-                  const owned = ownedBundleIds.has(b.id)
+                {myItems.groups.map((g) => {
+                  const expanded = expandedBundles.has(g.key)
                   return (
-                    <div key={b.id} className="tb-bundle">
-                      <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(b.id)}>
+                    <div key={g.key} className="tb-bundle">
+                      <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(g.key)}>
                         <div className="tb-thumb sm">
-                          {b.thumbnail ? <img src={b.thumbnail} alt="" /> : <Box size={16} />}
+                          {g.thumbnail ? <img src={g.thumbnail} alt="" /> : <Box size={16} />}
                         </div>
                         <div className="tb-bundle-info">
-                          <div className="tb-tile-name">{b.name}</div>
+                          <div className="tb-tile-name">{g.name}</div>
                           <div className="tb-tile-meta">
-                            <span className="tb-pill bundle">BUNDLE · {b.modelIds.length}</span>
-                            <span>{owned ? 'Owned' : `£${b.price.toFixed(2)}`}</span>
+                            <span className="tb-pill bundle">{g.kind === 'set' ? 'SET' : 'BUNDLE'} · {g.memberIds.length}</span>
+                            <span>{g.owned ? 'Owned' : `£${g.price.toFixed(2)}`}</span>
                           </div>
                         </div>
                         <ChevronDown size={16} className={`tb-chev ${expanded ? 'is-open' : ''}`} />
                       </button>
                       {expanded && (
                         <div className="tb-palette-grid" style={{ marginTop: 8 }}>
-                          {b.modelIds.map((id) => renderModelTile(id, owned))}
+                          {g.memberIds.map((id) => renderModelTile(id, g.owned))}
                         </div>
                       )}
                     </div>

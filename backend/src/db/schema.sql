@@ -105,6 +105,10 @@ CREATE TABLE models (
     download_count INTEGER DEFAULT 0,
     sale_count INTEGER DEFAULT 0,
     
+    -- Multi-part ("set") models: number of STL files in the product (1 = ordinary
+    -- single-STL model; extra parts live in model_parts, this row is part 1).
+    part_count INTEGER NOT NULL DEFAULT 1,
+
     -- Duplicate prevention
     file_hash VARCHAR(64) UNIQUE, -- SHA-256 of original STL bytes
 
@@ -141,6 +145,27 @@ CREATE TABLE model_images (
 );
 
 CREATE INDEX idx_model_images_model ON model_images(model_id);
+
+-- ============================================================================
+-- MODEL PARTS (Multi-part "set" models — one product, several STL files)
+-- ============================================================================
+
+CREATE TABLE model_parts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    stl_file_path VARCHAR(500) NOT NULL,
+    glb_file_path VARCHAR(500),
+    width DECIMAL(10,2), depth DECIMAL(10,2), height DECIMAL(10,2), -- mm
+    file_hash VARCHAR(64),
+    geometry_fingerprint JSONB,
+    processing_status VARCHAR(20) DEFAULT 'processing',
+    processing_error TEXT,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_model_parts_model ON model_parts(model_id);
 
 -- ============================================================================
 -- BUNDLES (Several models grouped under one name + one price)

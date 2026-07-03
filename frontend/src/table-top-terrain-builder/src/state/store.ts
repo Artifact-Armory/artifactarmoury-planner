@@ -1,7 +1,7 @@
 // src/state/store.ts
 import { create } from 'zustand'
 import * as THREE from 'three'
-import { loadAssets, loadAssetsFromAPI, type Asset } from '../core/assets'
+import { loadAssets, loadAssetsFromAPI, loadSetsFromAPI, type Asset, type PlannerSetData } from '../core/assets'
 import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
@@ -60,6 +60,8 @@ interface AppState {
 
   assets: Asset[]
   bundles: PlannerBundle[]           // published bundles (palette grouping)
+  sets: PlannerSetData[]             // published multi-part "set" models (grouping)
+  setPartAssets: Asset[]             // the sets' part assets (kept off the catalogue)
   ownedModelIds: Set<string>         // models the signed-in user has purchased
   ownedBundleIds: Set<string>        // bundles the signed-in user has purchased
   selectedAssetId: string | null
@@ -172,6 +174,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   assets: [],
   bundles: [],
+  sets: [],
+  setPartAssets: [],
   ownedModelIds: new Set(),
   ownedBundleIds: new Set(),
   selectedAssetId: null,
@@ -247,6 +251,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         /* bundles are optional — ignore if unreachable */
       }
 
+      // Published multi-part "set" models: each part becomes a placeable asset,
+      // grouped under the set (kept off the flat catalogue).
+      try {
+        const { sets, partAssets } = await loadSetsFromAPI()
+        set({ sets, setPartAssets: partAssets })
+      } catch {
+        /* sets are optional — ignore if unreachable */
+      }
+
       // What the signed-in user already owns (guests get 401 → empty).
       try {
         const ent = await ordersApi.getEntitlements()
@@ -308,32 +321,35 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // Add a just-placed model to the shop cart unless it's already owned, in the
     // cart, or covered by an owned/in-cart bundle (bundle+standalone would clash
-    // at checkout). Does not pop the cart drawer open.
+    // at checkout). For a "set" part, the purchasable unit is the PARENT model.
+    // Does not pop the cart drawer open.
     addPlacedModelToShopCart: (assetId) => {
       const s = get()
-      const asset = s.assets.find(a => a.id === assetId)
-      if (!asset) return
-      if (s.ownedModelIds.has(assetId)) return
-      const inOwnedBundle = s.bundles.some(b => s.ownedBundleIds.has(b.id) && b.modelIds.includes(assetId))
+      // If the placed asset is a part of a set, buy the parent model (one purchase
+      // unlocks all parts).
+      const parentSet = s.sets.find(set => set.partAssetIds.includes(assetId))
+      const modelId = parentSet ? parentSet.id : assetId
+
+      if (s.ownedModelIds.has(modelId)) return
+      const inOwnedBundle = s.bundles.some(b => s.ownedBundleIds.has(b.id) && b.modelIds.includes(modelId))
       if (inOwnedBundle) return
 
       const cart = useCartStore.getState()
-      if (cart.hasItem('model', assetId)) return
+      if (cart.hasItem('model', modelId)) return
       const cartBundleIds = new Set(cart.items.filter(it => it.kind === 'bundle').map(it => it.id))
-      const inCartBundle = s.bundles.some(b => cartBundleIds.has(b.id) && b.modelIds.includes(assetId))
+      const inCartBundle = s.bundles.some(b => cartBundleIds.has(b.id) && b.modelIds.includes(modelId))
       if (inCartBundle) return
 
-      cart.addItem(
-        {
-          kind: 'model',
-          id: assetId,
-          name: asset.name,
-          artistName: asset.artistName ?? 'Artifact Armoury',
-          price: asset.price ?? 0,
-          imageUrl: asset.thumbnail,
-        },
-        false, // don't open the drawer over the planner
-      )
+      // Name/price/thumbnail come from the set (parent) or the placed asset.
+      let item
+      if (parentSet) {
+        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Armoury', price: parentSet.price, imageUrl: parentSet.thumbnail }
+      } else {
+        const asset = s.assets.find(a => a.id === assetId)
+        if (!asset) return
+        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Armoury', price: asset.price ?? 0, imageUrl: asset.thumbnail }
+      }
+      cart.addItem(item, false) // don't open the drawer over the planner
     },
     
     updateInstance: (id, patch) => {
