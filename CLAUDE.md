@@ -225,9 +225,22 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   full rectangle while the GLB loads or for degenerate masks. Validated on STLs:
   floor→full, barrel→filled disc (empty bbox corners), sandbags→solid. KNOWN cosmetic:
   the green/red `cellHi` placement highlight still draws the bbox square, not the mask
-  shape (follow-up). Next up per user: wire the 3D planner to the account-scoped tables
-  API (per-account + share-link→edit-a-copy) — currently `/planner` + EditTable both
-  ignore account/id and use `localStorage.terrain_layouts`.
+  shape (follow-up).
+- **Per-account + collaborative planner DONE (share-link → edit-a-copy):** the 3D
+  planner now loads/saves via the account-scoped **tables API** instead of
+  `localStorage`. `App.tsx` takes `{ tableId?, shareToken? }`; a load effect fetches
+  (`tablesApi.getById` / `getSharedTable`), maps the server shape via new
+  `state/tableMapping.ts` (`serializeLayout`/`deserializeLayout` ↔ `table_config` +
+  `layout_data.models`, incl. `pitchDeg`/`level`), and applies it via a new store
+  action `applyLayout`. **Save** (`handleSave`): guests → toast + `/login`; owner of a
+  loaded table → `updateTable`; new/scratch or a shared copy → `createTable` then
+  navigate to `/planner/t/:id` (and it becomes owned). Routes: `/planner` (scratch),
+  `/planner/t/:id` (edit own), `/planner/s/:token` (open a shared table as an editable
+  copy). `Planner.tsx` reads params→props; `EditTable` passes its `:id`. `MyTables.tsx`
+  now lists the user's server tables (Open → `/planner/t/:id`, **Share link** — makes it
+  public + copies `…/planner/s/:token`, Delete). Backend `user_tables` API is
+  **email-based** (trusts `user_email` in body/query — pre-existing; a JWT-auth
+  hardening is a good follow-up). Frontend typechecks clean.
 - **Model stacking (planner):** the planner already auto-rests pieces on the surface
   under the cursor, but `surfaceTop` only counted modular tiles with
   `elevation.heightUnits` — uploaded models (no metadata) contributed 0, so they

@@ -108,6 +108,8 @@ interface AppState {
     // Save/Load
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
+    /** Replace the whole scene from an external source (e.g. a server-saved table). */
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[] }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -467,6 +469,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           instances: JSON.parse(JSON.stringify(layout.instances)),
           selectedInstanceId: null 
         })
+      }))
+      get().actions.syncBasketWithTable()
+      get().actions.fitView()
+    },
+
+    applyLayout: ({ table, tableMaterial, instances }) => {
+      const clean: Instance[] = JSON.parse(JSON.stringify(instances))
+      set((s) => ({
+        table: { ...table },
+        tableMaterial: tableMaterial ?? s.tableMaterial,
+        instances: clean,
+        selectedInstanceId: null,
+        selectedInstanceIds: [],
+        ...saveHistory({ ...s, instances: clean, selectedInstanceId: null }),
       }))
       get().actions.syncBasketWithTable()
       get().actions.fitView()

@@ -245,6 +245,8 @@ function App() {
 
             {/* Table Planner — full-screen, no layout wrapper, open to guests */}
             <Route path="planner" element={<Planner />} />
+            <Route path="planner/t/:id" element={<Planner />} />
+            <Route path="planner/s/:token" element={<Planner />} />
 
             {/* 404 Not Found */}
             <Route path="404" element={<MainLayout />}>

@@ -1,7 +1,9 @@
 import React from 'react'
+import { useParams } from 'react-router-dom'
 import TerrainBuilder from '@ui/App'
 
 const EditTable: React.FC = () => {
+  const { id } = useParams<{ id?: string }>()
   return (
     <div className="space-y-6">
       <header className="space-y-2">
@@ -13,7 +15,7 @@ const EditTable: React.FC = () => {
 
       <div className="rounded-xl shadow-lg overflow-hidden bg-black/30 border border-gray-900/40">
         <div style={{ minHeight: '640px', height: 'calc(100vh - 280px)' }}>
-          <TerrainBuilder />
+          <TerrainBuilder tableId={id} />
         </div>
       </div>
     </div>

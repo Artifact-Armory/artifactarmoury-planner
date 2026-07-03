@@ -5,9 +5,12 @@ import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw,
 } from 'lucide-react'
+import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
+import { tablesApi } from '@/api/endpoints/tables'
+import { serializeLayout, deserializeLayout } from '@state/tableMapping'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
@@ -25,9 +28,18 @@ const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '6×3', w: 6, h: 3 },
 ]
 
-export default function App() {
+export default function App({ tableId, shareToken }: { tableId?: string; shareToken?: string } = {}) {
   const navigate = useNavigate()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const user = useAuthStore((s) => s.user)
+
+  // Server-table binding: which saved table (if any) this planner is editing.
+  const [savedTableId, setSavedTableId] = React.useState<string | null>(tableId ?? null)
+  const [savedTableName, setSavedTableName] = React.useState<string | null>(null)
+  // Loading a shared link gives you an editable copy — you don't own the original
+  // until you save it as your own (which flips this true).
+  const [isOwner, setIsOwner] = React.useState<boolean>(!shareToken)
+  const [saving, setSaving] = React.useState(false)
 
   const assets = useAppStore((s) => s.assets)
   const instances = useAppStore((s) => s.instances)
@@ -53,9 +65,9 @@ export default function App() {
   const fitView = useAppStore((s) => s.actions.fitView)
   const clearInstances = useAppStore((s) => s.actions.clearInstances)
   const addLayoutToShopCart = useAppStore((s) => s.actions.addLayoutToShopCart)
-  const saveLayout = useAppStore((s) => s.actions.saveLayout)
   const exportLayout = useAppStore((s) => s.actions.exportLayout)
   const importLayout = useAppStore((s) => s.actions.importLayout)
+  const applyLayout = useAppStore((s) => s.actions.applyLayout)
 
   const [query, setQuery] = React.useState('')
   const [uiHidden, setUiHidden] = React.useState(false)
@@ -100,6 +112,31 @@ export default function App() {
       setTimeout(() => fitView(), 50)
     }
   }, [assets.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load a server-saved table (own id or a shared token) into the planner.
+  React.useEffect(() => {
+    if (!tableId && !shareToken) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const t = shareToken
+          ? await tablesApi.getSharedTable(shareToken)
+          : await tablesApi.getById(tableId!, { userEmail: user?.email })
+        if (cancelled) return
+        const { table, tableMaterial, instances } = deserializeLayout(t.tableConfig, t.layoutData)
+        applyLayout({ table, tableMaterial, instances })
+        setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
+        if (!shareToken) {
+          setSavedTableId(t.id)
+          // Own it only if it's yours; otherwise Save makes a copy under your account.
+          setIsOwner(!!user?.email && t.userEmail === user.email)
+        }
+      } catch {
+        if (!cancelled) hotToast.error('Could not load that table')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [tableId, shareToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // global UI keys (scene keys are handled inside ThreeStage)
   React.useEffect(() => {
@@ -158,14 +195,45 @@ export default function App() {
     if (count > 0) setToast({ count })
   }
 
-  function handleSave() {
-    if (!isAuthenticated) {
-      // guests can still keep their design via Export
-      handleExport()
+  async function handleSave() {
+    if (!isAuthenticated || !user?.email) {
+      hotToast.error('Log in to save this table to your account')
+      navigate('/login')
       return
     }
-    const name = window.prompt('Name this map:', `Map ${new Date().toLocaleDateString()}`)
-    if (name) saveLayout(name)
+    if (saving) return
+
+    const s = useAppStore.getState()
+    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances)
+    const email = user.email
+
+    setSaving(true)
+    try {
+      if (savedTableId && isOwner) {
+        // Update the table you already own.
+        await tablesApi.updateTable(savedTableId, {
+          name: savedTableName ?? 'My table',
+          tableConfig: tableConfig as any,
+          layoutData: layoutData as any,
+          userEmail: email,
+        })
+        hotToast.success('Table saved')
+      } else {
+        // New table, or a copy of a shared one → create under your account.
+        const name = window.prompt('Name this table:', savedTableName ?? `Table ${new Date().toLocaleDateString()}`)
+        if (!name) { setSaving(false); return }
+        const created = await tablesApi.createTable({ name, tableConfig: tableConfig as any, layoutData: layoutData as any, userEmail: email })
+        setSavedTableId(created.id)
+        setSavedTableName(created.name)
+        setIsOwner(true)
+        hotToast.success('Saved to your tables')
+        navigate(`/planner/t/${created.id}`)
+      }
+    } catch {
+      hotToast.error('Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function handleExport() {
