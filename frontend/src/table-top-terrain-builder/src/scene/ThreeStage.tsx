@@ -58,7 +58,11 @@ export function ThreeStage() {
 
     // ---- renderer / scene / camera ----
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+    // Adaptive resolution: full-res when settled, lower while the camera moves so a
+    // heavy (print-resolution) mesh close to the camera doesn't tank the framerate.
+    const FULL_DPR = Math.min(devicePixelRatio, 2)
+    const LOW_DPR = Math.max(0.75, FULL_DPR * 0.55)
+    renderer.setPixelRatio(FULL_DPR)
     renderer.setSize(mount.clientWidth, mount.clientHeight)
     renderer.setClearColor(0x0b0f14)
     mount.appendChild(renderer.domElement)
@@ -74,6 +78,7 @@ export function ThreeStage() {
 
     // ---- on-demand rendering ----
     let renderRequested = false
+    let lowRes = false
     const requestRender = () => {
       if (renderRequested) return
       renderRequested = true
@@ -83,6 +88,14 @@ export function ThreeStage() {
       renderRequested = false
       const camMoving = cam.update()
       const sceneAnimating = inst.update()
+      // Render at reduced resolution while the camera is in motion, then snap back
+      // to full resolution for the settled frame (keeps interaction smooth without
+      // any lasting quality loss).
+      if (camMoving !== lowRes) {
+        lowRes = camMoving
+        renderer.setPixelRatio(camMoving ? LOW_DPR : FULL_DPR)
+        renderer.setSize(mount.clientWidth, mount.clientHeight, false)
+      }
       renderer.render(scene, camera)
       if (camMoving || sceneAnimating) requestRender()
     }
@@ -400,8 +413,9 @@ export function ThreeStage() {
         useAppStore.getState().setSelectedInstances([...inRect])
         inst.setSelection(inRect)
         requestRender()
-      } else if (overCanvas && !store().selectedAssetId) {
-        // hover highlight when idle
+      } else if (overCanvas && !store().selectedAssetId && e.buttons === 0) {
+        // hover highlight when idle — skip while any button is held (e.g. orbiting
+        // the camera), since raycasting a high-poly mesh every move is expensive.
         const pid = pickPiece(e)
         if (pid !== eng.hovered) {
           eng.hovered = pid

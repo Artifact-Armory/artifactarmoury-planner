@@ -200,9 +200,12 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
 - **Preview GLB optimisation DONE (decimate + Draco):** `convertSTLtoGLBPure` now
   builds the mesh **positions-only** (STL flat per-face normals were blocking
   welding/decimation — every edge a seam), then weld → **simplify** (meshopt, down
-  to `PREVIEW_TARGET_TRIS`=60k, error 0.005) → recompute **smooth** normals → dedup →
-  **Draco** compress. Verified: sandbags 307k→60k tris & 15MB→155KB; a ~690k-tri
-  model → 60k & tiny. New deps: `@gltf-transform/functions`+`/extensions`,
+  to `PREVIEW_TARGET_TRIS`=150k, error 0.004) → **crease-angle normals**
+  (`PREVIEW_CREASE_ANGLE`=45° — pure smooth normals over-softened models; crease
+  keeps hard edges crisp) → re-weld/dedup → **Draco** compress. (First pass used 60k
+  + smooth normals; user found it lost too much detail + too smooth, hence 150k +
+  crease.) sandbags 307k→150k tris (~3MB GLB). New deps:
+  `@gltf-transform/functions`+`/extensions`,
   `meshoptimizer`, `draco3dgltf`. The **STL buyers download/print is untouched** —
   only the preview changes (now smooth-shaded, slightly decimated). Draco is safe
   because the ONLY consumer of these GLBs is the planner's `loaders.ts` (DRACOLoader

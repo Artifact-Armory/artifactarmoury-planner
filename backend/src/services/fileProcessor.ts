@@ -373,32 +373,68 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
 }
 
 // Preview meshes above this get decimated down toward it (print STLs are often
-// 100k–1M+ triangles, which crush real-time rendering). Tunable.
-const TARGET_PREVIEW_TRIS = Number(process.env.PREVIEW_TARGET_TRIS ?? 60000)
+// 100k–1M+ triangles, which crush real-time rendering). Higher = more detail.
+const TARGET_PREVIEW_TRIS = Number(process.env.PREVIEW_TARGET_TRIS ?? 150000)
+// Edges sharper than this stay hard (crisp); smoother than this get smoothed.
+const CREASE_ANGLE_DEG = Number(process.env.PREVIEW_CREASE_ANGLE ?? 45)
 
-/** Recompute area-weighted smooth vertex normals for an indexed primitive. */
-function computeSmoothNormals(doc: any, prim: any): void {
-  const posArr: Float32Array = prim.getAttribute('POSITION').getArray()
+/**
+ * Rebuild an indexed primitive's normals using a crease angle: a vertex's normal
+ * averages only the incident faces within CREASE_ANGLE of that face, so sharp
+ * edges stay hard while curved/flat surfaces read smooth. Produces an expanded
+ * (per-corner) primitive; a following weld() re-indexes it, keeping crease seams.
+ */
+function applyCreaseNormals(doc: any, prim: any, angleDeg: number): void {
   const idxAcc = prim.getIndices()
   if (!idxAcc) return
+  const pos: Float32Array = prim.getAttribute('POSITION').getArray()
   const idx: ArrayLike<number> = idxAcc.getArray()
-  const nrm = new Float32Array(posArr.length)
-  for (let i = 0; i < idx.length; i += 3) {
-    const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3
-    const ux = posArr[b] - posArr[a], uy = posArr[b + 1] - posArr[a + 1], uz = posArr[b + 2] - posArr[a + 2]
-    const vx = posArr[c] - posArr[a], vy = posArr[c + 1] - posArr[a + 1], vz = posArr[c + 2] - posArr[a + 2]
-    // Cross product (not normalised → area-weighted accumulation).
-    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
-    nrm[a] += nx; nrm[a + 1] += ny; nrm[a + 2] += nz
-    nrm[b] += nx; nrm[b + 1] += ny; nrm[b + 2] += nz
-    nrm[c] += nx; nrm[c + 1] += ny; nrm[c + 2] += nz
+  const F = idx.length / 3
+
+  // Per-face unit normals.
+  const fN = new Float32Array(F * 3)
+  for (let f = 0; f < F; f++) {
+    const a = idx[f * 3] * 3, b = idx[f * 3 + 1] * 3, c = idx[f * 3 + 2] * 3
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2]
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2]
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
+    const l = Math.hypot(nx, ny, nz) || 1
+    fN[f * 3] = nx / l; fN[f * 3 + 1] = ny / l; fN[f * 3 + 2] = nz / l
   }
-  for (let o = 0; o < nrm.length; o += 3) {
-    const l = Math.hypot(nrm[o], nrm[o + 1], nrm[o + 2]) || 1
-    nrm[o] /= l; nrm[o + 1] /= l; nrm[o + 2] /= l
+
+  // Faces incident to each vertex.
+  const vFaces = new Map<number, number[]>()
+  for (let f = 0; f < F; f++) {
+    for (let k = 0; k < 3; k++) {
+      const v = idx[f * 3 + k]
+      const arr = vFaces.get(v)
+      if (arr) arr.push(f); else vFaces.set(v, [f])
+    }
   }
-  const acc = doc.createAccessor().setType('VEC3').setArray(nrm).setBuffer(doc.getRoot().listBuffers()[0])
-  prim.setAttribute('NORMAL', acc)
+
+  const cosT = Math.cos((angleDeg * Math.PI) / 180)
+  const outPos = new Float32Array(F * 9)
+  const outNrm = new Float32Array(F * 9)
+  for (let f = 0; f < F; f++) {
+    const fnx = fN[f * 3], fny = fN[f * 3 + 1], fnz = fN[f * 3 + 2]
+    for (let k = 0; k < 3; k++) {
+      const v = idx[f * 3 + k]
+      let nx = 0, ny = 0, nz = 0
+      for (const g of vFaces.get(v)!) {
+        const gx = fN[g * 3], gy = fN[g * 3 + 1], gz = fN[g * 3 + 2]
+        if (gx * fnx + gy * fny + gz * fnz >= cosT) { nx += gx; ny += gy; nz += gz }
+      }
+      const l = Math.hypot(nx, ny, nz) || 1
+      const o = (f * 3 + k) * 3
+      outPos[o] = pos[v * 3]; outPos[o + 1] = pos[v * 3 + 1]; outPos[o + 2] = pos[v * 3 + 2]
+      outNrm[o] = nx / l; outNrm[o + 1] = ny / l; outNrm[o + 2] = nz / l
+    }
+  }
+
+  const b = doc.getRoot().listBuffers()[0]
+  prim.setIndices(null)
+  prim.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(outPos).setBuffer(b))
+  prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(outNrm).setBuffer(b))
 }
 
 /**
@@ -420,17 +456,18 @@ async function optimizeAndBuildIO(NodeIO: any, doc: any, triangleCount: number):
   const transforms: any[] = [weld()]
   if (triangleCount > TARGET_PREVIEW_TRIS && MeshoptSimplifier) {
     transforms.push(
-      simplify({ simplifier: MeshoptSimplifier, ratio: TARGET_PREVIEW_TRIS / triangleCount, error: 0.005 }),
+      simplify({ simplifier: MeshoptSimplifier, ratio: TARGET_PREVIEW_TRIS / triangleCount, error: 0.004 }),
     )
   }
-  transforms.push(dedup())
   await doc.transform(...transforms)
 
-  // The mesh was built positions-only (to allow welding/decimation); give each
-  // welded/decimated primitive smooth vertex normals so it lights correctly.
+  // Rebuild normals with a crease angle so sharp edges stay crisp (pure smooth
+  // shading over-softened the models), then weld+dedup to re-index for Draco —
+  // crease seams keep distinct normals, so hard edges survive.
   for (const mesh of doc.getRoot().listMeshes()) {
-    for (const prim of mesh.listPrimitives()) computeSmoothNormals(doc, prim)
+    for (const prim of mesh.listPrimitives()) applyCreaseNormals(doc, prim, CREASE_ANGLE_DEG)
   }
+  await doc.transform(weld(), dedup())
 
   const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
     '@gltf-transform/extensions',
