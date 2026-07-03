@@ -1,16 +1,18 @@
-export const formatPrice = (value: number, currency: string = 'GBP'): string => {
-  if (Number.isNaN(value)) return '£0.00'
+export const formatPrice = (value: number | string, currency: string = 'GBP'): string => {
+  const n = Number(value)
+  if (Number.isNaN(n)) return '£0.00'
   return new Intl.NumberFormat('en-GB', {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
-  }).format(value)
+  }).format(n)
 }
 
-export const formatRating = (rating?: number): string => {
+export const formatRating = (rating?: number | string | null): string => {
   if (rating === undefined || rating === null) {
     return '—'
   }
-  return rating.toFixed(1)
+  const n = Number(rating)
+  return Number.isNaN(n) ? '—' : n.toFixed(1)
 }
 

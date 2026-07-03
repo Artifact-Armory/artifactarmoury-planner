@@ -38,8 +38,15 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   depth: model.depth ?? undefined,
   viewCount: model.view_count ?? model.viewCount ?? undefined,
   saleCount: model.sale_count ?? model.saleCount ?? undefined,
-  reviewCount: model.review_count ?? model.reviewCount ?? undefined,
-  averageRating: model.average_rating ?? model.averageRating ?? undefined,
+  reviewCount:
+    (model.review_count ?? model.reviewCount) != null
+      ? Number(model.review_count ?? model.reviewCount)
+      : undefined,
+  // Postgres returns AVG()/NUMERIC as a string — coerce or .toFixed() blows up.
+  averageRating:
+    (model.average_rating ?? model.averageRating) != null
+      ? Number(model.average_rating ?? model.averageRating)
+      : undefined,
   isFavorited: model.is_favorited ?? model.isFavorited ?? false,
   publishedAt: model.published_at ?? model.publishedAt,
   createdAt: model.created_at ?? model.createdAt,
