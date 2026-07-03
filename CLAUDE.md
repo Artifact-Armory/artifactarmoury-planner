@@ -169,6 +169,24 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   table-derived basket). Flow is planner→cart (`addLayoutToShopCart`); shop-basket
   items do NOT appear on the planner table. That disconnect still confuses users —
   a UI clarification is a good follow-up.
+- **Planner opens on a CLEAR table now:** the auto starter-layout was removed
+  (`App.tsx`) — it had been placing 5 copies of the first API asset (its demo ids
+  like `floor` aren't in the API catalogue, so `pick()` fell back to `assets[0]`).
+- **Models were rendering ON THEIR SIDE — fixed at source:** `convertSTLtoGLBPure`
+  copied STL verts straight through, but STL is **Z-up** and glTF is **Y-up**, so
+  every pure-Node GLB lay on its side (Blender's exporter converts; prod has no
+  Blender). Now rotates `(x,y,z)→(x,z,-y)` for positions + normals. **Only affects
+  GLBs generated after deploy** — existing models must be re-processed (delete +
+  re-upload) to get an upright GLB.
+- **Manual tilt/pitch control ADDED:** placed pieces now have an optional
+  `Instance.pitchDeg` (tilt about X, in addition to `rotationDeg` yaw). Tilt the
+  selection with **T** / **Shift+T** (±`rotationStep`, 90° in snap mode) or the
+  RotateCw/RotateCcw toolbar buttons that appear when pieces are selected.
+  `store.tiltSelected(deltaDeg)` patches via `updateInstances` (undoable);
+  `InstancedScene.composeMatrix` applies yaw×pitch about the base-centre. This is
+  the robust fallback for any model whose STL wasn't Z-up. (Known minor: the
+  selection outline stays upright; the ghost doesn't pitch — tilt is applied to
+  already-placed pieces.)
 - **Still-latent frontend bug (NOT fixed):** `modelsApi.uploadThumbnail` and
   `uploadModelFile` POST to `/models/:id/thumbnail` and `/models/:id/file`, but those
   routes **don't exist** (only `POST /models/:id/images`). So a draft with no

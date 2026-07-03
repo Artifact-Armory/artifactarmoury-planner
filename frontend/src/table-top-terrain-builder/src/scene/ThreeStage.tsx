@@ -559,6 +559,14 @@ export function ThreeStage() {
         return
       }
 
+      // Tilt the selected piece(s) about X (stand up / lay flat). Shift = opposite.
+      if (k === 't' && s.selectedInstanceIds.length) {
+        s.actions.tiltSelected(rotationStep() * (e.shiftKey ? -1 : 1))
+        inst.setSelection(new Set(s.selectedInstanceIds))
+        requestRender()
+        return
+      }
+
       if (k === 'g') { s.toggleSnapBaseline(); applySnapVisual(); return }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {

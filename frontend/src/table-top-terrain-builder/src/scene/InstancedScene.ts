@@ -20,7 +20,9 @@ const SELECT_GLOW = new THREE.Color(0x6cc4ff)
 const HOVER_GLOW = new THREE.Color(0x8aa0b8)
 
 const tmpQuat = new THREE.Quaternion()
+const tmpQuatPitch = new THREE.Quaternion()
 const tmpYAxis = new THREE.Vector3(0, 1, 0)
+const tmpXAxis = new THREE.Vector3(1, 0, 0)
 const tmpPos = new THREE.Vector3()
 const tmpScale = new THREE.Vector3()
 const tmpMat = new THREE.Matrix4()
@@ -212,7 +214,14 @@ export class InstancedScene {
       scale = 0.6 + 0.4 * easeOutBack(k)
     }
 
+    // yaw about Y, then tilt (pitch) about the model's local X so a piece can be
+    // stood upright / laid flat. Pivot is the base-centre (base sits on the table).
     tmpQuat.setFromAxisAngle(tmpYAxis, THREE.MathUtils.degToRad(rotDeg))
+    const pitchDeg = inst.pitchDeg ?? 0
+    if (pitchDeg) {
+      tmpQuatPitch.setFromAxisAngle(tmpXAxis, THREE.MathUtils.degToRad(pitchDeg))
+      tmpQuat.multiply(tmpQuatPitch)
+    }
     tmpPos.set(x, levelToY(inst.level ?? 0) + lift, z)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)

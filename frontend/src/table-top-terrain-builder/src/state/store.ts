@@ -21,7 +21,8 @@ export type Instance = {
   id: string
   assetId: string
   position: { x: number; z: number }
-  rotationDeg: number  // ← Change from: 0|90|180|270
+  rotationDeg: number  // yaw about the vertical (Y) axis
+  pitchDeg?: number    // tilt about the X axis (stand a model up / lay it flat); 0 = default
   level: number        // discrete elevation level of the piece's base (0 = table)
 }
 
@@ -89,6 +90,8 @@ interface AppState {
     addInstance: (i: Omit<Instance,'id'>) => string
     updateInstance: (id: string, patch: Partial<Omit<Instance,'id'|'assetId'>>) => void
     updateInstances: (patches: Array<{ id: string; patch: Partial<Omit<Instance,'id'|'assetId'>> }>) => void
+    /** Tilt the current selection by deltaDeg about X (e.g. ±90 to stand up / lay flat). */
+    tiltSelected: (deltaDeg: number) => void
     removeInstance: (id: string) => void
     removeInstances: (ids: string[]) => void
     clearInstances: () => void
@@ -268,6 +271,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     },
     
+    // Tilt every selected piece by deltaDeg about X, wrapped to [0,360). One
+    // undoable step (updateInstances saves history).
+    tiltSelected: (deltaDeg) => {
+      const ids = get().selectedInstanceIds
+      if (!ids.length) return
+      const byId = new Map(get().instances.map(i => [i.id, i]))
+      const patches = ids
+        .map(id => {
+          const i = byId.get(id)
+          if (!i) return null
+          const next = (((i.pitchDeg ?? 0) + deltaDeg) % 360 + 360) % 360
+          return { id, patch: { pitchDeg: next } }
+        })
+        .filter((p): p is { id: string; patch: { pitchDeg: number } } => p !== null)
+      get().actions.updateInstances(patches)
+    },
+
     removeInstance: (id) => {
       set(s => {
         const instances = s.instances.filter(i => i.id !== id)

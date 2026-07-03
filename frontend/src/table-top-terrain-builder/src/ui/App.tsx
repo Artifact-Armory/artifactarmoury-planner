@@ -3,7 +3,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
-  HelpCircle, Trash2, X, Search, Box, Home,
+  HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw,
 } from 'lucide-react'
 import { useAppStore } from '@state/store'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
@@ -31,6 +31,8 @@ export default function App() {
 
   const assets = useAppStore((s) => s.assets)
   const instances = useAppStore((s) => s.instances)
+  const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
+  const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
   const selectedAssetId = useAppStore((s) => s.selectedAssetId)
   const setSelectedAsset = useAppStore((s) => s.setSelectedAsset)
   const snapBaseline = useAppStore((s) => s.snapBaseline)
@@ -44,7 +46,6 @@ export default function App() {
   const setTable = useAppStore((s) => s.setTable)
 
   const loadCatalogue = useAppStore((s) => s.actions.loadAssetCatalogue)
-  const loadStarter = useAppStore((s) => s.actions.loadStarterLayout)
   const undo = useAppStore((s) => s.actions.undo)
   const redo = useAppStore((s) => s.actions.redo)
   const canUndo = useAppStore((s) => s.actions.canUndo())
@@ -88,14 +89,14 @@ export default function App() {
     return () => { unsub(); window.clearTimeout(settleTimer); window.clearTimeout(hard) }
   }, [])
 
-  // Load catalogue, then drop a tidy starter scene once (so we never open empty).
+  // Load the catalogue, then frame the (empty) table once it's ready. The planner
+  // opens on a clear table — the user places pieces themselves.
   React.useEffect(() => {
     loadCatalogue()
   }, [loadCatalogue])
   React.useEffect(() => {
-    if (assets.length && !startedRef.current && instances.length === 0) {
+    if (assets.length && !startedRef.current) {
       startedRef.current = true
-      loadStarter()
       setTimeout(() => fitView(), 50)
     }
   }, [assets.length]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -268,6 +269,25 @@ export default function App() {
             <button className="tb-icon" title="Fit view (F)" onClick={() => fitView()}>
               <Maximize2 size={18} />
             </button>
+            {selectedInstanceIds.length > 0 && (
+              <>
+                <div className="tb-sep" />
+                <button
+                  className="tb-icon"
+                  title="Tilt selection back 90° (T)"
+                  onClick={() => tiltSelected(90)}
+                >
+                  <RotateCw size={18} />
+                </button>
+                <button
+                  className="tb-icon"
+                  title="Tilt selection forward 90° (Shift+T)"
+                  onClick={() => tiltSelected(-90)}
+                >
+                  <RotateCcw size={18} />
+                </button>
+              </>
+            )}
             <div className="tb-sep" />
             <button className="tb-icon" title="Save map (Ctrl+S)" onClick={handleSave}>
               <Save size={18} />

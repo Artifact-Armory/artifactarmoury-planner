@@ -32,6 +32,8 @@ const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
       ['Add / remove from selection', 'Shift + click'],
       ['Box-select', 'Left-drag empty table'],
       ['Move', 'Left-drag a piece'],
+      ['Tilt upright / lay flat', 'T'],
+      ['Tilt the other way', 'Shift + T'],
       ['Duplicate', 'Ctrl + D'],
       ['Delete', 'Delete / Backspace'],
     ],
