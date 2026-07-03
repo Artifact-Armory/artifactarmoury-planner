@@ -213,6 +213,21 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   `assets.ts loadGLTFScene` (bare loader, no Draco) is dead code. Existing models
   need a **re-upload** to regenerate the optimised GLB (same re-upload also fixes
   orientation). Tune via `PREVIEW_TARGET_TRIS`.
+- **Per-model footprint mask (planner):** placement/stacking used each piece's
+  bounding-box rectangle, so placing a piece anywhere in a model's square (beside it,
+  or in an L-corner's opening) made it stack. Now `core/footprintMask.ts` rasterizes
+  each model's top-down silhouette into a 64² bitmap (computed from GLB geometry in
+  `loaders.ts` at load), derives a per-cell mask at the current grid size + rotation
+  (rotation is correct-by-construction: cell centres rotated by the same Y-matrix the
+  mesh uses; validated on an L-shape), and `footprintCellsFor()` returns only covered
+  cells (offsets cached per asset|grid|rot for perf). Wired into `placedCells`
+  (elevation → surfaceTop/collision) and `ghostCells` (ThreeStage). Falls back to the
+  full rectangle while the GLB loads or for degenerate masks. Validated on STLs:
+  floor→full, barrel→filled disc (empty bbox corners), sandbags→solid. KNOWN cosmetic:
+  the green/red `cellHi` placement highlight still draws the bbox square, not the mask
+  shape (follow-up). Next up per user: wire the 3D planner to the account-scoped tables
+  API (per-account + share-link→edit-a-copy) — currently `/planner` + EditTable both
+  ignore account/id and use `localStorage.terrain_layouts`.
 - **Model stacking (planner):** the planner already auto-rests pieces on the surface
   under the cursor, but `surfaceTop` only counted modular tiles with
   `elevation.heightUnits` — uploaded models (no metadata) contributed 0, so they

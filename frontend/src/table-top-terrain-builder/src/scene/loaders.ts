@@ -13,6 +13,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import type { Asset } from '@core/assets'
 import { assetLoadingManager } from './loadManager'
+import { computeFootprintBitmap, setFootprintBitmap } from '@core/footprintMask'
 
 // One decoder + loader shared process-wide.
 const dracoLoader = new DRACOLoader()
@@ -86,6 +87,24 @@ function fitToAABB(root: THREE.Object3D, target: { x: number; y: number; z: numb
     root.scale.multiplyScalar(s)
     root.updateMatrixWorld(true)
   }
+}
+
+/** Project all triangles to XZ (metres, bbox-centered) and rasterize a footprint bitmap. */
+function footprintBitmapFromParts(parts: AssetPart[], aabb: { x: number; y: number; z: number }): Uint8Array {
+  const xz: number[] = []
+  const v = new THREE.Vector3()
+  for (const part of parts) {
+    const pos = part.geometry.getAttribute('position') as THREE.BufferAttribute
+    if (!pos) continue
+    const index = part.geometry.getIndex()
+    const count = index ? index.count : pos.count
+    for (let i = 0; i < count; i++) {
+      const vi = index ? index.getX(i) : i
+      v.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi)).applyMatrix4(part.matrix)
+      xz.push(v.x, v.z)
+    }
+  }
+  return computeFootprintBitmap(new Float32Array(xz), aabb.x / 2, aabb.z / 2)
 }
 
 function flatten(root: THREE.Object3D): AssetPart[] {
@@ -170,6 +189,9 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
           resolve(fallbackTemplate(asset))
           return
         }
+        // Rasterize the real top-down silhouette so placement/stacking uses the
+        // model's actual footprint, not its bounding-box square.
+        try { setFootprintBitmap(asset.id, footprintBitmapFromParts(parts, aabb)) } catch { /* keep rectangle fallback */ }
         resolve({ parts, aabb, scene: root as THREE.Group, fallback: false })
       },
       undefined,

@@ -12,9 +12,10 @@
 import type { Asset } from './assets'
 import type { Table } from '../state/store'
 import {
-  worldToCell, aabbFootprint, footprintCells, snapRotationForFootprint,
+  worldToCell, snapRotationForFootprint,
   type Cell,
 } from './occupancy'
+import { footprintCellsFor } from './footprintMask'
 
 /** Metres per elevation level (a half-block step). A full 1-inch block is 2 levels. */
 export const LEVEL_HEIGHT = 0.0127
@@ -56,8 +57,7 @@ function placedCells(
   table: Table,
 ): Cell[] {
   const anchor = worldToCell(inst.position.x, inst.position.z, table)
-  const fp = aabbFootprint(asset, snapRotationForFootprint(inst.rotationDeg), table.gridSize)
-  return footprintCells(anchor, fp)
+  return footprintCellsFor(asset, anchor, snapRotationForFootprint(inst.rotationDeg), table.gridSize)
 }
 
 type PlacedInstance = {

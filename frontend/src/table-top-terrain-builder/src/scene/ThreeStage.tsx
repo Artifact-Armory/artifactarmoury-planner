@@ -9,9 +9,10 @@ import { Ghost } from './ghost'
 import { ensureTemplate } from './loaders'
 import { subscribeLoading } from './loadManager'
 import {
-  worldToCell, aabbFootprint, footprintCells,
+  worldToCell, aabbFootprint,
   inBounds, snapRotationForFootprint,
 } from '@core/occupancy'
+import { footprintCellsFor } from '@core/footprintMask'
 import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnits, levelToY,
 } from '@core/elevation'
@@ -254,8 +255,7 @@ export function ThreeStage() {
     function ghostCells(asset: Asset, x: number, z: number, rotDeg: number) {
       const t = store().table
       const anchor = worldToCell(x, z, t)
-      const fp = aabbFootprint(asset, snapRotationForFootprint(rotDeg), t.gridSize)
-      return footprintCells(anchor, fp)
+      return footprintCellsFor(asset, anchor, snapRotationForFootprint(rotDeg), t.gridSize)
     }
 
     // Validity at a specific elevation level (3D occupancy: cell × level slab).
