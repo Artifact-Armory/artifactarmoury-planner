@@ -15,6 +15,7 @@ export type PlannerBundle = {
   name: string
   thumbnail?: string
   price: number
+  artistId?: string
   artistName?: string
   modelIds: string[] // members that exist in the loaded catalogue
 }
@@ -237,6 +238,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           name: b.name,
           thumbnail: b.thumbnailUrl,
           price: b.price,
+          artistId: b.artistId,
           artistName: b.artistName,
           modelIds: b.models.map((m) => m.id).filter((id) => assetIds.has(id)),
         }))

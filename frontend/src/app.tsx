@@ -36,6 +36,7 @@ import Checkout from './pages/Checkout';
 import GlobalLibrary from './pages/GlobalLibrary';
 import TableLibrary from './pages/TableLibrary';
 import BundleDetails from './pages/BundleDetails';
+import Bundles from './pages/Bundles';
 
 // User Dashboard Pages
 import Dashboard from './pages/dashboard/Dashboard';
@@ -149,6 +150,7 @@ function App() {
             <Route path="/" element={<MainLayout />}>
               <Route index element={<Home />} />
               <Route path="browse" element={<Browse />} />
+              <Route path="bundles" element={<Bundles />} />
               <Route path="models/:id" element={<ModelDetails />} />
               <Route path="bundles/:id" element={<BundleDetails />} />
               <Route path="artists" element={<ArtistsList />} />

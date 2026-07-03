@@ -29,7 +29,7 @@ import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
-import { computeGeometryFingerprint, isLikelyDuplicate, type GeometryFingerprint } from '../services/fingerprint';
+import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import type { Response } from 'express';
 
@@ -894,12 +894,26 @@ async function findGeometryDuplicate(
      WHERE geometry_fingerprint IS NOT NULL AND id <> $1`,
     [excludeId]
   );
+  let match: { id: string; name: string } | null = null;
+  // Track the closest candidate so a false positive / near-miss is diagnosable
+  // in the logs (compare against FINGERPRINT_MATCH_THRESHOLD).
+  let best = { id: '', name: '', dist: Infinity };
   for (const row of rows) {
-    if (isLikelyDuplicate(fingerprint, row.geometry_fingerprint as GeometryFingerprint)) {
-      return { id: row.id, name: row.name };
+    const fp = row.geometry_fingerprint as GeometryFingerprint;
+    const dist = fingerprintDistance(fingerprint, fp);
+    if (dist < best.dist) best = { id: row.id, name: row.name, dist };
+    if (!match && isLikelyDuplicate(fingerprint, fp)) {
+      match = { id: row.id, name: row.name };
     }
   }
-  return null;
+  logger.info('Geometry dedup check', {
+    candidates: rows.length,
+    closest: best.name || null,
+    closestDistance: Number.isFinite(best.dist) ? Number(best.dist.toFixed(4)) : null,
+    threshold: MATCH_THRESHOLD,
+    matched: match?.name ?? null,
+  });
+  return match;
 }
 
 /**

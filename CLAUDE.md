@@ -56,7 +56,13 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
 2. **Geometry fingerprint** (`services/fingerprint.ts`): rotation/scale/
    tessellation-invariant D2 shape descriptor + compactness. Catches re-uploads
    even after re-export/rotate/rescale/reorder. Stored in `models.geometry_fingerprint` (JSONB).
-   Never modifies the file. Threshold `FINGERPRINT_MATCH_THRESHOLD` (default 0.2).
+   Never modifies the file. Threshold `FINGERPRINT_MATCH_THRESHOLD` (**default 0.08**
+   — was 0.2, which false-positived two different-but-similar models e.g. two houses;
+   real re-uploads score ~0.0–0.04 so 0.08 keeps them caught) + a compactness guard
+   `FINGERPRINT_COMPACTNESS_TOLERANCE` (default 0.10). `findGeometryDuplicate` logs
+   `Geometry dedup check {closestDistance, threshold, matched}` on every upload — check
+   Railway logs to tune. Failed dedup does **not** store a fingerprint, so rejected
+   uploads never become match candidates.
 3. **Watermark** (`services/watermark.ts`): AES-256-GCM payload (modelId+buyerId+
    orderId) written into the binary STL's ignored **80-byte header** — traces a
    leaked file to the exact buyer by decrypting the header alone; **geometry
@@ -102,8 +108,19 @@ later feature). Consequences, all built this session (migration **008**):
   (+ `BundleForm`, model multiselect, thumbnail via the presign path — avoids the latent
   `/models/:id/thumbnail` bug), public `pages/BundleDetails.tsx` at `/bundles/:id`,
   "My Bundles" nav in `DashboardLayout`, routes in `app.tsx`. Both projects typecheck clean.
-- **Not yet:** no public **bundles browse tab** (reach them via `/bundles/:id`; an artist
-  profile link is a good follow-up). Print-farm/"order a print" is deferred by design.
+- **Bundles marketplace + planner surfacing (built 2026-07-03):** a public **Bundles**
+  browse page at `/bundles` (`pages/Bundles.tsx`, grid of published bundles → `/bundles/:id`)
+  with a **"Bundles" nav link** in `Header` (desktop + mobile). Only **published** bundles
+  appear anywhere public — a draft bundle shows only in the artist's `/artist/bundles`. The
+  public `GET /api/bundles` list includes each bundle's members. In the **planner**, "My
+  items" now also shows an **artist's own** published bundles (compare `bundle.artistId` to
+  the signed-in user), on top of owned + basket ones — so a creator sees their bundle without
+  buying it. Print-farm/"order a print" is deferred by design.
+- **Planner price is buy-once (fixed 2026-07-03):** the "Your build" BOM used to multiply a
+  model's price by how many copies were on the table. Digital STLs are bought **once** (print
+  any number), so `bom.total` now sums each unique model's price a single time and each row
+  shows `£price` with `×N` as a piece count only (`ui/App.tsx`). (`core/pricing.ts` is legacy
+  print-cost maths and isn't used for this total.)
 - **Planner palette has TWO tabs now (built 2026-07-03):** *Catalogue* (all published
   models, as before) and ***My items*** = the models/bundles the user **owns or has in
   their shop basket**. Bundles render as **expandable group tiles** (click to reveal the

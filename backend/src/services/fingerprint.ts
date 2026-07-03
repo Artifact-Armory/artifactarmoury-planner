@@ -130,8 +130,17 @@ export function fingerprintDistance(a: GeometryFingerprint | null, b: GeometryFi
   return s
 }
 
-/** Match threshold (tunable): smaller = stricter. L1 over the D2 histogram. */
-export const MATCH_THRESHOLD = Number(process.env.FINGERPRINT_MATCH_THRESHOLD ?? 0.2)
+// Match threshold (tunable): smaller = stricter. L1 over the D2 histogram.
+// A genuine re-upload (re-exported/rotated/rescaled/re-meshed) scores ~0.0–0.04
+// because the descriptor is invariant to all of those; unrelated models sit well
+// above (~0.3+). Two *different but similar-shaped* models (e.g. two houses) can
+// land around 0.1–0.2, so 0.2 caused false positives — 0.08 keeps re-uploads
+// caught while letting similar-but-distinct models through. Override with
+// FINGERPRINT_MATCH_THRESHOLD if needed.
+export const MATCH_THRESHOLD = Number(process.env.FINGERPRINT_MATCH_THRESHOLD ?? 0.08)
+
+// Secondary guard: the two shapes' compactness must also be within this fraction.
+export const COMPACTNESS_TOLERANCE = Number(process.env.FINGERPRINT_COMPACTNESS_TOLERANCE ?? 0.1)
 
 /** True when two descriptors almost certainly describe the same shape. */
 export function isLikelyDuplicate(
@@ -144,6 +153,6 @@ export function isLikelyDuplicate(
   // Secondary guard: compactness must also be close (catches different shapes
   // whose distance histograms happen to look similar).
   const ca = a!.compactness, cb = b!.compactness
-  if (ca > 0 && cb > 0 && Math.abs(ca - cb) / Math.max(ca, cb) > 0.15) return false
+  if (ca > 0 && cb > 0 && Math.abs(ca - cb) / Math.max(ca, cb) > COMPACTNESS_TOLERANCE) return false
   return true
 }

@@ -193,14 +193,15 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
     const cartModelIds = new Set(cartItems.filter((i) => i.kind === 'model').map((i) => i.id))
     const cartBundleIds = new Set(cartItems.filter((i) => i.kind === 'bundle').map((i) => i.id))
     const showBundleIds = new Set<string>([...ownedBundleIds, ...cartBundleIds])
-    const displayBundles = bundles.filter((b) => showBundleIds.has(b.id))
+    // An artist also sees their own published bundles here (they authored them).
+    const displayBundles = bundles.filter((b) => showBundleIds.has(b.id) || (user?.id && b.artistId === user.id))
     const memberIds = new Set<string>()
     displayBundles.forEach((b) => b.modelIds.forEach((id) => memberIds.add(id)))
     const modelIds = new Set<string>([...ownedModelIds, ...cartModelIds])
     const displayModels = [...modelIds].filter((id) => !memberIds.has(id) && assetsById.has(id))
     const count = displayBundles.length + displayModels.length
     return { displayBundles, displayModels, cartModelIds, count }
-  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, assetsById])
+  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, assetsById, user?.id])
 
   const toggleBundleExpanded = (id: string) =>
     setExpandedBundles((s) => {
@@ -232,7 +233,9 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
     )
   }
 
-  // Bill of materials: tally by asset.
+  // Bill of materials: tally by asset. Digital STLs are bought once (print as
+  // many copies as you like), so the price counts each unique model a single
+  // time — qty is just how many are on the table.
   const bom = React.useMemo(() => {
     const counts = new Map<string, number>()
     for (const i of instances) counts.set(i.assetId, (counts.get(i.assetId) ?? 0) + 1)
@@ -240,7 +243,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
     const rows = [...counts.entries()]
       .map(([id, qty]) => ({ asset: byId.get(id), qty }))
       .filter((r) => r.asset)
-    const total = rows.reduce((sum, r) => sum + (r.asset!.price ?? 0) * r.qty, 0)
+    const total = rows.reduce((sum, r) => sum + (r.asset!.price ?? 0), 0)
     const pieceCount = instances.length
     return { rows, total, pieceCount }
   }, [instances, assets])
@@ -548,8 +551,8 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
                     {r.asset!.thumbnail ? <img src={r.asset!.thumbnail} alt="" /> : <Box size={16} />}
                   </div>
                   <div className="tb-bom-name">{r.asset!.name}</div>
-                  <div className="tb-bom-qty">×{r.qty}</div>
-                  <div className="tb-bom-price">£{((r.asset!.price ?? 0) * r.qty).toFixed(2)}</div>
+                  <div className="tb-bom-qty" title={`${r.qty} on the table — you only pay once`}>×{r.qty}</div>
+                  <div className="tb-bom-price">£{(r.asset!.price ?? 0).toFixed(2)}</div>
                 </div>
               ))}
             </div>

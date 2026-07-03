@@ -118,6 +118,18 @@ const Header: React.FC = () => {
               Browse
             </NavLink>
             <NavLink
+              to="/bundles"
+              className={({ isActive }) =>
+                `text-base font-medium ${
+                  isActive
+                    ? 'text-indigo-600'
+                    : 'text-gray-700 hover:text-indigo-500'
+                }`
+              }
+            >
+              Bundles
+            </NavLink>
+            <NavLink
               to="/artists"
               className={({ isActive }) =>
                 `text-base font-medium ${
@@ -402,6 +414,19 @@ const Header: React.FC = () => {
               }
             >
               Browse
+            </NavLink>
+            <NavLink
+              to="/bundles"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `block py-2 text-base font-medium ${
+                  isActive
+                    ? 'text-indigo-600'
+                    : 'text-gray-700 hover:text-indigo-500'
+                }`
+              }
+            >
+              Bundles
             </NavLink>
             <NavLink
               to="/artists"
