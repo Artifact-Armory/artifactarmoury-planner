@@ -33,6 +33,10 @@ export const AssetSchema = z.object({
   }).optional(),
   model: z.string().optional(),      // /assets/models/foo.glb
   thumbnail: z.string().optional(),  // optional thumbnail
+  // API models come from STLs authored in millimetres, so their GLB is ~1000x
+  // too big for the metre-scaled scene. When set, the loader uniformly rescales
+  // the GLB to the real-world `aabb` (dev-manifest GLBs are already in metres).
+  scaleToFit: z.boolean().optional(),
 })
 
 export const AssetManifestSchema = z.object({
@@ -176,6 +180,7 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
           artistName: m.artistName,
           model: m.glbUrl,
           thumbnail: m.thumbnailUrl,
+          scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
         } satisfies Asset
       })
 

@@ -159,7 +159,12 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   the **local demo manifest**. So an API model highlighted on click but produced no
   ghost and couldn't be placed. Fix: `loadAssetsFromAPI` now calls a new
   `registerAssets()` (`core/assets.ts`) that merges the API assets into the by-id
-  lookup. NOTE the two separate carts remain by design: the **shop basket**
+  lookup. **Second planner fix (scale):** API models come from mm-authored STLs, so
+  their GLB rendered ~1000x too big (mm treated as metres) — a piece filled the whole
+  screen. `loadAssetsFromAPI` now sets `scaleToFit: true` and `loaders.ts` uniformly
+  rescales the GLB to the model's real-world `aabb` (DB dims ÷ 1000); dev-manifest
+  GLBs (already metres) are untouched. NOTE the two separate carts remain by design:
+  the **shop basket**
   (`store/cartStore.ts`, `cart-storage`) vs the **planner** (its palette + its own
   table-derived basket). Flow is planner→cart (`addLayoutToShopCart`); shop-basket
   items do NOT appear on the planner table. That disconnect still confuses users —

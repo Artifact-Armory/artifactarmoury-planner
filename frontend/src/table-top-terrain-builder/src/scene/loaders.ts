@@ -71,6 +71,23 @@ function baseAlign(root: THREE.Object3D): { x: number; y: number; z: number } {
   return { x: size.x, y: size.y, z: size.z }
 }
 
+/**
+ * Uniformly rescale an object so its bounding box fits the target real-world
+ * size (metres), preserving aspect ratio. Used for API models whose GLB is in
+ * millimetres (~1000x too large for the metre-scaled scene).
+ */
+function fitToAABB(root: THREE.Object3D, target: { x: number; y: number; z: number }): void {
+  root.updateMatrixWorld(true)
+  const size = new THREE.Vector3()
+  new THREE.Box3().setFromObject(root).getSize(size)
+  if (size.x <= 0 || size.y <= 0 || size.z <= 0) return
+  const s = Math.min(target.x / size.x, target.y / size.y, target.z / size.z)
+  if (Number.isFinite(s) && s > 0) {
+    root.scale.multiplyScalar(s)
+    root.updateMatrixWorld(true)
+  }
+}
+
 function flatten(root: THREE.Object3D): AssetPart[] {
   const parts: AssetPart[] = []
   root.updateMatrixWorld(true)
@@ -146,6 +163,7 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
       resolveAssetUrl(asset.model!),
       (gltf) => {
         const root = gltf.scene
+        if (asset.scaleToFit && asset.aabb) fitToAABB(root, asset.aabb)
         const aabb = baseAlign(root)
         const parts = flatten(root)
         if (parts.length === 0) {
