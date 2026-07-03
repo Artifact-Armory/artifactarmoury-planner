@@ -328,15 +328,18 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
   const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
 
   const positions: number[] = []
-  const normals: number[] = []
 
+  // STL uses Z-up (the 3D-printing convention); glTF/GLB is Y-up. Without this
+  // conversion the model renders lying on its side. Rotate -90° about X so the
+  // STL's +Z becomes glTF's +Y:  (x, y, z) → (x, z, -y). (Blender's glTF exporter
+  // does the same; this keeps the pure-Node path consistent with it.)
+  //
+  // We deliberately do NOT emit the STL's flat per-face normals: they give every
+  // triangle its own normals, which blocks welding/decimation (every edge becomes
+  // a seam). We weld by position, decimate, then recompute smooth normals.
   for (const tri of stl.triangles) {
     for (const v of tri.vertices) {
-      positions.push(v.x, v.y, v.z)
-    }
-    // Repeat the face normal for each of the 3 vertices (flat shading)
-    for (let i = 0; i < 3; i++) {
-      normals.push(tri.normal.x, tri.normal.y, tri.normal.z)
+      positions.push(v.x, v.z, -v.y)
     }
   }
 
@@ -348,25 +351,97 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
     .setArray(new Float32Array(positions))
     .setBuffer(buf)
 
-  const normAccessor = doc.createAccessor()
-    .setType('VEC3')
-    .setArray(new Float32Array(normals))
-    .setBuffer(buf)
-
   const prim = doc.createPrimitive()
     .setAttribute('POSITION', posAccessor)
-    .setAttribute('NORMAL', normAccessor)
 
   const mesh = doc.createMesh('mesh').addPrimitive(prim)
   const node = doc.createNode('node').setMesh(mesh)
   const scene = doc.createScene('scene').addChild(node)
   doc.getRoot().setDefaultScene(scene)
 
-  const io = new NodeIO()
+  // Shrink the PREVIEW GLB (the STL that buyers download/print is never touched):
+  // weld+dedup, decimate to a triangle budget so the planner stays smooth on heavy
+  // print-resolution meshes, then Draco-compress (the planner's loader decodes it).
+  const io = await optimizeAndBuildIO(NodeIO, doc, stl.triangleCount)
   const glbBytes = await io.writeBinary(doc)
 
   await writeFile(outputPath, Buffer.from(glbBytes))
-  logger.info('STL→GLB conversion complete (pure Node)', { outputPath, triangles: stl.triangleCount })
+  logger.info('STL→GLB conversion complete (pure Node, optimised)', {
+    outputPath,
+    srcTriangles: stl.triangleCount,
+  })
+}
+
+// Preview meshes above this get decimated down toward it (print STLs are often
+// 100k–1M+ triangles, which crush real-time rendering). Tunable.
+const TARGET_PREVIEW_TRIS = Number(process.env.PREVIEW_TARGET_TRIS ?? 60000)
+
+/** Recompute area-weighted smooth vertex normals for an indexed primitive. */
+function computeSmoothNormals(doc: any, prim: any): void {
+  const posArr: Float32Array = prim.getAttribute('POSITION').getArray()
+  const idxAcc = prim.getIndices()
+  if (!idxAcc) return
+  const idx: ArrayLike<number> = idxAcc.getArray()
+  const nrm = new Float32Array(posArr.length)
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3
+    const ux = posArr[b] - posArr[a], uy = posArr[b + 1] - posArr[a + 1], uz = posArr[b + 2] - posArr[a + 2]
+    const vx = posArr[c] - posArr[a], vy = posArr[c + 1] - posArr[a + 1], vz = posArr[c + 2] - posArr[a + 2]
+    // Cross product (not normalised → area-weighted accumulation).
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
+    nrm[a] += nx; nrm[a + 1] += ny; nrm[a + 2] += nz
+    nrm[b] += nx; nrm[b + 1] += ny; nrm[b + 2] += nz
+    nrm[c] += nx; nrm[c + 1] += ny; nrm[c + 2] += nz
+  }
+  for (let o = 0; o < nrm.length; o += 3) {
+    const l = Math.hypot(nrm[o], nrm[o + 1], nrm[o + 2]) || 1
+    nrm[o] /= l; nrm[o + 1] /= l; nrm[o + 2] /= l
+  }
+  const acc = doc.createAccessor().setType('VEC3').setArray(nrm).setBuffer(doc.getRoot().listBuffers()[0])
+  prim.setAttribute('NORMAL', acc)
+}
+
+/**
+ * Run the lossy-but-near-identical preview optimisation on the document and
+ * return a NodeIO configured to write Draco-compressed GLB.
+ * - weld: index the mesh (STL verts are unshared) so it can be simplified.
+ * - simplify: decimate toward TARGET_PREVIEW_TRIS with a small error bound.
+ * - dedup: drop any duplicate accessors/meshes.
+ * - Draco: compress the geometry (KHRDracoMeshCompression; decoder is at /draco/).
+ */
+async function optimizeAndBuildIO(NodeIO: any, doc: any, triangleCount: number): Promise<any> {
+  const { weld, simplify, dedup } = await importESM<typeof import('@gltf-transform/functions')>(
+    '@gltf-transform/functions',
+  )
+  const meshopt: any = await importESM('meshoptimizer')
+  const MeshoptSimplifier = meshopt.MeshoptSimplifier ?? meshopt.default?.MeshoptSimplifier
+  if (MeshoptSimplifier?.ready) await MeshoptSimplifier.ready
+
+  const transforms: any[] = [weld()]
+  if (triangleCount > TARGET_PREVIEW_TRIS && MeshoptSimplifier) {
+    transforms.push(
+      simplify({ simplifier: MeshoptSimplifier, ratio: TARGET_PREVIEW_TRIS / triangleCount, error: 0.005 }),
+    )
+  }
+  transforms.push(dedup())
+  await doc.transform(...transforms)
+
+  // The mesh was built positions-only (to allow welding/decimation); give each
+  // welded/decimated primitive smooth vertex normals so it lights correctly.
+  for (const mesh of doc.getRoot().listMeshes()) {
+    for (const prim of mesh.listPrimitives()) computeSmoothNormals(doc, prim)
+  }
+
+  const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
+    '@gltf-transform/extensions',
+  )
+  doc.createExtension(KHRDracoMeshCompression).setRequired(true)
+
+  const draco3dMod: any = await importESM('draco3dgltf')
+  const draco3d = draco3dMod.default ?? draco3dMod
+  return new NodeIO()
+    .registerExtensions([KHRDracoMeshCompression])
+    .registerDependencies({ 'draco3d.encoder': await draco3d.createEncoderModule() })
 }
 
 /**

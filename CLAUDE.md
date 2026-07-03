@@ -187,6 +187,29 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   the robust fallback for any model whose STL wasn't Z-up. (Known minor: the
   selection outline stays upright; the ghost doesn't pitch — tilt is applied to
   already-placed pieces.)
+- **Planner FPS drop when close + moving camera — mitigated:** the render loop
+  continuously re-renders while the camera moves, so a heavy print-resolution GLB at
+  close range (max fill) tanked the framerate. Added **adaptive resolution**
+  (`ThreeStage` render loop: renders at `LOW_DPR` while `cam.update()` reports motion,
+  snaps back to `FULL_DPR` when settled) and skipped hover-raycasts while a mouse
+  button is held (camera orbit). ROOT CAUSE still open: `convertSTLtoGLBPure` keeps
+  every triangle of the raw STL un-indexed — the proper fix is **decimating the
+  preview GLB** on the backend (e.g. `@gltf-transform/functions` `simplify` +
+  meshopt) so heavy uploads aren't million-triangle previews. Draco alone won't help
+  render cost (same triangle count after decode); decimation reduces it.
+- **Preview GLB optimisation DONE (decimate + Draco):** `convertSTLtoGLBPure` now
+  builds the mesh **positions-only** (STL flat per-face normals were blocking
+  welding/decimation — every edge a seam), then weld → **simplify** (meshopt, down
+  to `PREVIEW_TARGET_TRIS`=60k, error 0.005) → recompute **smooth** normals → dedup →
+  **Draco** compress. Verified: sandbags 307k→60k tris & 15MB→155KB; a ~690k-tri
+  model → 60k & tiny. New deps: `@gltf-transform/functions`+`/extensions`,
+  `meshoptimizer`, `draco3dgltf`. The **STL buyers download/print is untouched** —
+  only the preview changes (now smooth-shaded, slightly decimated). Draco is safe
+  because the ONLY consumer of these GLBs is the planner's `loaders.ts` (DRACOLoader
+  wired, decoder at `/draco/`); marketplace pages use PNG thumbnails, and
+  `assets.ts loadGLTFScene` (bare loader, no Draco) is dead code. Existing models
+  need a **re-upload** to regenerate the optimised GLB (same re-upload also fixes
+  orientation). Tune via `PREVIEW_TARGET_TRIS`.
 - **Still-latent frontend bug (NOT fixed):** `modelsApi.uploadThumbnail` and
   `uploadModelFile` POST to `/models/:id/thumbnail` and `/models/:id/file`, but those
   routes **don't exist** (only `POST /models/:id/images`). So a draft with no
