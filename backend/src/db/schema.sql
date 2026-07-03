@@ -82,8 +82,8 @@ CREATE TABLE models (
     depth DECIMAL(10,2),
     height DECIMAL(10,2),
     
-    -- Fulfillment
-    fulfillment_type VARCHAR(10) NOT NULL DEFAULT 'print' CHECK (fulfillment_type IN ('stl', 'print')),
+    -- Fulfillment (digital STL only for now; print-and-ship comes later)
+    fulfillment_type VARCHAR(10) NOT NULL DEFAULT 'stl' CHECK (fulfillment_type IN ('stl', 'print')),
 
     -- Pricing
     base_price DECIMAL(10,2) NOT NULL, -- Base price in USD
@@ -143,6 +143,36 @@ CREATE TABLE model_images (
 CREATE INDEX idx_model_images_model ON model_images(model_id);
 
 -- ============================================================================
+-- BUNDLES (Several models grouped under one name + one price)
+-- ============================================================================
+
+CREATE TABLE bundles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    thumbnail_path VARCHAR(500),
+    price DECIMAL(10,2) NOT NULL,
+    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'unlisted')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP
+);
+
+CREATE INDEX idx_bundles_artist ON bundles(artist_id);
+CREATE INDEX idx_bundles_status ON bundles(status);
+
+CREATE TABLE bundle_items (
+    bundle_id UUID NOT NULL REFERENCES bundles(id) ON DELETE CASCADE,
+    model_id  UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    display_order INTEGER DEFAULT 0,
+    PRIMARY KEY (bundle_id, model_id)
+);
+
+CREATE INDEX idx_bundle_items_model ON bundle_items(model_id);
+
+-- ============================================================================
 -- TABLES (Saved Layouts)
 -- ============================================================================
 
@@ -190,14 +220,14 @@ CREATE TABLE orders (
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     customer_email VARCHAR(255) NOT NULL,
     
-    -- Shipping
-    shipping_name VARCHAR(255) NOT NULL,
-    shipping_address_line1 VARCHAR(255) NOT NULL,
+    -- Shipping (nullable — digital STL orders have no shipping address)
+    shipping_name VARCHAR(255),
+    shipping_address_line1 VARCHAR(255),
     shipping_address_line2 VARCHAR(255),
-    shipping_city VARCHAR(100) NOT NULL,
+    shipping_city VARCHAR(100),
     shipping_state VARCHAR(100),
-    shipping_postal_code VARCHAR(20) NOT NULL,
-    shipping_country VARCHAR(2) NOT NULL, -- ISO country code
+    shipping_postal_code VARCHAR(20),
+    shipping_country VARCHAR(2), -- ISO country code
     
     -- Pricing
     subtotal DECIMAL(10,2) NOT NULL,
@@ -252,7 +282,12 @@ CREATE TABLE order_items (
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     model_id UUID REFERENCES models(id) ON DELETE SET NULL, -- NULL if model deleted
     artist_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    
+
+    -- Bundle linkage: a bundle purchase creates one row per constituent model,
+    -- all tagged with the same bundle_id + a bundle_name snapshot.
+    bundle_id UUID REFERENCES bundles(id) ON DELETE SET NULL,
+    bundle_name VARCHAR(255),
+
     -- Item details (snapshot at time of purchase)
     model_name VARCHAR(255) NOT NULL,
     model_snapshot JSONB, -- Full model data at purchase time
@@ -418,6 +453,9 @@ CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_reviews_updated_at BEFORE UPDATE ON reviews
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_bundles_updated_at BEFORE UPDATE ON bundles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Generate order number

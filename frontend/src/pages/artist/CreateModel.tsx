@@ -22,7 +22,6 @@ const CreateModel: React.FC = () => {
   const [category, setCategory] = React.useState('buildings')
   const [tags, setTags] = React.useState('')
   const [basePrice, setBasePrice] = React.useState('')
-  const [fulfillmentType, setFulfillmentType] = React.useState<'print' | 'stl'>('print')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
 
@@ -77,7 +76,6 @@ const CreateModel: React.FC = () => {
         category,
         tags: tags.trim() || undefined,
         basePrice: price,
-        fulfillmentType,
         thumbnailKey,
       })
       setModelId(created.id)
@@ -139,20 +137,11 @@ const CreateModel: React.FC = () => {
           <textarea className="w-full border rounded px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
-            <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Fulfillment</label>
-            <select className="w-full border rounded px-3 py-2" value={fulfillmentType} onChange={(e) => setFulfillmentType(e.target.value as 'print' | 'stl')} disabled={busy}>
-              <option value="print">We print &amp; ship</option>
-              <option value="stl">STL download</option>
-            </select>
-          </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Category</label>
+          <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-4">

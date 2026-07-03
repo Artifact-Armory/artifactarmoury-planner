@@ -64,7 +64,7 @@ router.post('/',
     const modelFile = files.model[0];
     const thumbnailFile = files.thumbnail?.[0];
 
-    const { name, description, category, tags, basePrice, fulfillmentType } = req.body;
+    const { name, description, category, tags, basePrice } = req.body;
 
     // Validate required fields
     if (!name || !category || !basePrice) {
@@ -179,7 +179,8 @@ router.post('/',
           0.2,
           20,
           fileHash,
-          (fulfillmentType === 'stl' || fulfillmentType === 'print') ? fulfillmentType : 'print',
+          // Digital STL sales only for now — ignore any client-supplied fulfilment.
+          'stl',
           JSON.stringify(fingerprint),
         ]
       );
@@ -238,7 +239,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, fulfillmentType, thumbnailKey } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -261,16 +262,16 @@ router.post('/from-upload',
       throw new ValidationError('Uploaded file not found in storage — retry the upload');
     }
 
-    const fulfillment = (fulfillmentType === 'stl' || fulfillmentType === 'print') ? fulfillmentType : 'print';
+    // Digital STL sales only for now — fulfilment is always 'stl'.
     const userId = (req as any).userId;
 
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
         stl_file_path, thumbnail_path, base_price, fulfillment_type, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', 'processing')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price, fulfillment]
+      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price]
     );
     const model = result.rows[0];
 

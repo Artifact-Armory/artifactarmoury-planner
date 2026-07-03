@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { X, Trash2, Minus, Plus } from 'lucide-react'
+import { X, Trash2 } from 'lucide-react'
 import Button from '../ui/Button'
-import { useCartStore } from '../../store/cartStore'
+import { useCartStore, cartKey } from '../../store/cartStore'
 
 const CartDrawer: React.FC = () => {
   const {
@@ -13,7 +13,6 @@ const CartDrawer: React.FC = () => {
     totalItems,
     toggleCart,
     closeCart,
-    updateQuantity,
     removeItem,
   } = useCartStore()
   const navigate = useNavigate()
@@ -87,7 +86,7 @@ const CartDrawer: React.FC = () => {
           ) : (
             <ul className="space-y-4">
               {items.map((item) => (
-                <li key={item.modelId} className="flex items-start justify-between">
+                <li key={cartKey(item.kind, item.id)} className="flex items-start justify-between">
                   <div className="flex">
                     <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md bg-gray-100">
                       {item.imageUrl ? (
@@ -103,34 +102,23 @@ const CartDrawer: React.FC = () => {
                       )}
                     </div>
                     <div className="ml-4">
-                      <h3 className="text-sm font-medium text-gray-900">{item.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-medium text-gray-900">{item.name}</h3>
+                        {item.kind === 'bundle' && (
+                          <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                            BUNDLE
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">{item.artistName}</p>
                       <p className="mt-1 text-sm font-semibold text-gray-900">
                         £{item.price.toFixed(2)}
                       </p>
-
-                      <div className="mt-2 inline-flex items-center rounded-md border border-gray-200">
-                        <button
-                          className="px-2 py-1 text-gray-600 hover:bg-gray-50"
-                          onClick={() => updateQuantity(item.modelId, item.quantity - 1)}
-                          aria-label="Decrease quantity"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <span className="px-3 text-sm font-medium">{item.quantity}</span>
-                        <button
-                          className="px-2 py-1 text-gray-600 hover:bg-gray-50"
-                          onClick={() => updateQuantity(item.modelId, item.quantity + 1)}
-                          aria-label="Increase quantity"
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
                     </div>
                   </div>
 
                   <button
-                    onClick={() => removeItem(item.modelId)}
+                    onClick={() => removeItem(cartKey(item.kind, item.id))}
                     className="ml-4 rounded-full p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 focus:outline-none"
                     aria-label="Remove item"
                   >

@@ -34,7 +34,6 @@ export const modelsApi = {
     category: string
     tags?: string
     basePrice: number
-    fulfillmentType: 'stl' | 'print'
     thumbnailKey?: string
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
     const response = await apiClient.post(`${BASE_URL}/from-upload`, data);

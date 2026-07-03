@@ -1,11 +1,5 @@
 import apiClient from '../client'
-import type {
-  ApiResponse,
-  CreateOrderRequest,
-  Order,
-  OrderSummary,
-  PaymentIntentResponse,
-} from '../types'
+import type { OrderSummary } from '../types'
 
 const BASE_URL = '/api/orders'
 
@@ -16,53 +10,20 @@ type Pagination = {
   totalPages: number
 }
 
-type PurchasedModel = {
-  model: {
-    id: string
-    title: string
-    thumbnail: string
-    artist: {
-      id: string
-      name: string
-    }
-  }
-  purchasedAt: string
-  license: 'personal' | 'commercial' | 'enterprise'
-  orderId: string
-}
+// A cart line sent to the backend: either a single model or a bundle.
+export type OrderItemInput = { modelId: string } | { bundleId: string }
 
-type InvoiceDetails = {
-  invoiceNumber: string
-  invoiceDate: string
-  companyDetails: {
-    name: string
-    address: string
-    taxId?: string
-  }
-  customerDetails: {
-    name: string
-    email: string
-    address?: string
-  }
-  items: Array<{
-    description: string
-    quantity: number
-    unitPrice: number
-    total: number
-  }>
-  subtotal: number
-  tax: number
+export type CreatedOrder = {
+  id: string
+  orderNumber: string
   total: number
-  paymentMethod: string
-  paymentStatus: string
+  clientSecret?: string
+  paymentIntentId?: string
 }
 
 export const ordersApi = {
   async getMyOrders(page = 1, limit = 10): Promise<{ orders: OrderSummary[]; pagination: Pagination }> {
-    const response = await apiClient.get(`${BASE_URL}/user/orders`, {
-      params: { page, limit },
-    })
-
+    const response = await apiClient.get(`${BASE_URL}/user/orders`, { params: { page, limit } })
     const payload = response.data ?? {}
 
     const orders: OrderSummary[] = (payload.orders ?? []).map((order: any) => ({
@@ -80,7 +41,6 @@ export const ordersApi = {
     }))
 
     const paginationRaw = payload.pagination ?? {}
-
     return {
       orders,
       pagination: {
@@ -92,66 +52,27 @@ export const ordersApi = {
     }
   },
 
-  async getOrderById(id: string): Promise<ApiResponse<Order>> {
-    const response = await apiClient.get<ApiResponse<Order>>(`${BASE_URL}/${id}`)
-    return response.data
+  /** Create a digital order from cart items (models and/or bundles). */
+  async createOrder(items: OrderItemInput[], customerEmail?: string): Promise<CreatedOrder> {
+    const response = await apiClient.post(BASE_URL, { items, customerEmail })
+    const o = response.data?.order ?? response.data
+    return {
+      id: o.id,
+      orderNumber: o.orderNumber ?? o.order_number,
+      total: Number(o.total ?? 0),
+      clientSecret: o.clientSecret ?? o.client_secret,
+      paymentIntentId: o.paymentIntentId ?? o.payment_intent_id,
+    }
   },
 
-  async createOrder(data: CreateOrderRequest): Promise<ApiResponse<Order>> {
-    const response = await apiClient.post<ApiResponse<Order>>(BASE_URL, data)
-    return response.data
+  /** Confirm payment (mock Stripe returns 'succeeded'), unlocking downloads. */
+  async confirmOrder(orderId: string, paymentIntentId: string): Promise<void> {
+    await apiClient.post(`${BASE_URL}/${orderId}/confirm`, { paymentIntentId })
   },
 
-  async createPaymentIntent(orderId: string): Promise<ApiResponse<PaymentIntentResponse>> {
-    const response = await apiClient.post<ApiResponse<PaymentIntentResponse>>(
-      `${BASE_URL}/${orderId}/payment-intent`,
-    )
-    return response.data
-  },
-
-  async confirmPayment(orderId: string, paymentIntentId: string): Promise<ApiResponse<Order>> {
-    const response = await apiClient.post<ApiResponse<Order>>(
-      `${BASE_URL}/${orderId}/confirm-payment`,
-      { paymentIntentId },
-    )
-    return response.data
-  },
-
-  async cancelOrder(orderId: string): Promise<ApiResponse<Order>> {
-    const response = await apiClient.post<ApiResponse<Order>>(`${BASE_URL}/${orderId}/cancel`)
-    return response.data
-  },
-
-  async getOrderReceipt(orderId: string): Promise<ApiResponse<{ receiptUrl: string; expiresAt: number }>> {
-    const response = await apiClient.get<ApiResponse<{ receiptUrl: string; expiresAt: number }>>(
-      `${BASE_URL}/${orderId}/receipt`,
-    )
-    return response.data
-  },
-
-  async getPurchasedModels(
-    page = 1,
-    limit = 20,
-  ): Promise<ApiResponse<{ models: PurchasedModel[]; totalCount: number; page: number; totalPages: number }>> {
-    const response = await apiClient.get<
-      ApiResponse<{ models: PurchasedModel[]; totalCount: number; page: number; totalPages: number }>
-    >(`${BASE_URL}/purchased-models`, {
-      params: { page, limit },
-    })
-    return response.data
-  },
-
-  async checkPurchasedModel(
-    modelId: string,
-  ): Promise<ApiResponse<{ purchased: boolean; license?: PurchasedModel['license']; purchasedAt?: string }>> {
-    const response = await apiClient.get<
-      ApiResponse<{ purchased: boolean; license?: PurchasedModel['license']; purchasedAt?: string }>
-    >(`${BASE_URL}/purchased-models/${modelId}`)
-    return response.data
-  },
-
-  async getInvoiceDetails(orderId: string): Promise<ApiResponse<InvoiceDetails>> {
-    const response = await apiClient.get<ApiResponse<InvoiceDetails>>(`${BASE_URL}/${orderId}/invoice`)
-    return response.data
+  /** The set of model ids the signed-in user owns (drives Download vs Buy UI). */
+  async getEntitlements(): Promise<Set<string>> {
+    const response = await apiClient.get(`${BASE_URL}/entitlements`)
+    return new Set<string>(response.data?.modelIds ?? [])
   },
 }

@@ -25,7 +25,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   category: model.category,
   tags: Array.isArray(model.tags) ? model.tags : [],
   basePrice: Number(model.base_price ?? model.basePrice ?? 0),
-  fulfillmentType: (model.fulfillment_type ?? model.fulfillmentType ?? 'print') as 'stl' | 'print',
+  fulfillmentType: (model.fulfillment_type ?? model.fulfillmentType ?? 'stl') as 'stl' | 'print',
   thumbnailUrl: model.thumbnail_url || model.thumbnailUrl || assetUrl(model.thumbnail_path),
   glbUrl: model.glb_url || model.glbUrl || assetUrl(model.glb_file_path),
   previewImages: model.preview_images || model.previewImages || undefined,

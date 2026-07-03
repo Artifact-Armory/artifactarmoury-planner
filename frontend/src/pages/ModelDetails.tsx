@@ -3,9 +3,11 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ShoppingCart, Download } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
+import { ordersApi } from '../api/endpoints/orders'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import { useCartStore } from '../store/cartStore'
+import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
 
 const ModelDetails: React.FC = () => {
@@ -14,12 +16,22 @@ const ModelDetails: React.FC = () => {
     addItem: state.addItem,
     openCart: state.openCart,
   }))
+  const inCart = useCartStore((state) => state.hasItem('model', id ?? ''))
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
   const modelQuery = useQuery({
     queryKey: ['model', id],
     queryFn: () => modelsApi.getModelById(id as string),
     enabled: Boolean(id),
   })
+
+  const entitlementsQuery = useQuery({
+    queryKey: ['entitlements'],
+    queryFn: () => ordersApi.getEntitlements(),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  })
+  const owned = Boolean(id && entitlementsQuery.data?.has(id))
 
   const relatedQuery = useQuery({
     queryKey: ['related-models', id],
@@ -35,7 +47,8 @@ const ModelDetails: React.FC = () => {
   const handleAddToCart = () => {
     if (!model) return
     addItem({
-      modelId: model.id,
+      kind: 'model',
+      id: model.id,
       name: model.name,
       artistName: model.artistName,
       price: model.basePrice,
@@ -157,14 +170,12 @@ const ModelDetails: React.FC = () => {
               </span>
             </div>
 
-            <Button className="mt-6 w-full" onClick={handleAddToCart} leftIcon={<ShoppingCart size={16} />}>
-              Add to cart
-            </Button>
-
-            {model.fulfillmentType === 'stl' && (
+            {owned ? (
               <>
+                <p className="mt-6 rounded-md bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-800">
+                  You own this model
+                </p>
                 <Button
-                  variant="outline"
                   className="mt-3 w-full"
                   onClick={handleDownload}
                   disabled={downloading}
@@ -174,6 +185,14 @@ const ModelDetails: React.FC = () => {
                 </Button>
                 {downloadError && <p className="mt-2 text-xs text-red-600">{downloadError}</p>}
               </>
+            ) : inCart ? (
+              <Button className="mt-6 w-full" onClick={() => openCart()} variant="outline" leftIcon={<ShoppingCart size={16} />}>
+                In cart — view
+              </Button>
+            ) : (
+              <Button className="mt-6 w-full" onClick={handleAddToCart} leftIcon={<ShoppingCart size={16} />}>
+                Add to cart
+              </Button>
             )}
 
             <ul className="mt-6 space-y-2 text-sm text-gray-600">

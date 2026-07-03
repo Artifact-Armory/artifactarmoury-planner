@@ -35,6 +35,7 @@ import TermsOfService from './pages/legal/TermsOfService';
 import Checkout from './pages/Checkout';
 import GlobalLibrary from './pages/GlobalLibrary';
 import TableLibrary from './pages/TableLibrary';
+import BundleDetails from './pages/BundleDetails';
 
 // User Dashboard Pages
 import Dashboard from './pages/dashboard/Dashboard';
@@ -47,6 +48,9 @@ import EditTable from './pages/dashboard/EditTable';
 // Artist Pages
 import ArtistDashboard from './pages/artist/ArtistDashboard';
 import ArtistModels from './pages/artist/ArtistModels';
+import ArtistBundles from './pages/artist/ArtistBundles';
+import CreateBundle from './pages/artist/CreateBundle';
+import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
 import EditModel from './pages/artist/EditModel';
 import ArtistSales from './pages/artist/ArtistSales';
@@ -146,6 +150,7 @@ function App() {
               <Route index element={<Home />} />
               <Route path="browse" element={<Browse />} />
               <Route path="models/:id" element={<ModelDetails />} />
+              <Route path="bundles/:id" element={<BundleDetails />} />
               <Route path="artists" element={<ArtistsList />} />
               <Route path="artists/:id" element={<ArtistProfile />} />
               <Route path="categories/:id" element={<Category />} />
@@ -208,6 +213,9 @@ function App() {
               <Route path="models" element={<ArtistModels />} />
               <Route path="models/new" element={<CreateModel />} />
               <Route path="models/:id/edit" element={<EditModel />} />
+              <Route path="bundles" element={<ArtistBundles />} />
+              <Route path="bundles/new" element={<CreateBundle />} />
+              <Route path="bundles/:id/edit" element={<EditBundle />} />
               <Route path="sales" element={<ArtistSales />} />
               <Route path="settings" element={<ArtistSettings />} />
             </Route>

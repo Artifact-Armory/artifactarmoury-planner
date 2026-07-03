@@ -329,3 +329,30 @@ export interface QueueHealth {
   completed: number
   failed: number
 }
+
+// A model as referenced inside a bundle (lightweight projection).
+export interface BundleModelRef {
+  id: string
+  name: string
+  thumbnailUrl?: string
+  basePrice: number
+  status?: string
+  processingStatus?: string
+}
+
+// Several models grouped under one name + one price.
+export interface Bundle {
+  id: string
+  artistId?: string
+  artistName?: string
+  name: string
+  description?: string
+  price: number
+  thumbnailUrl?: string
+  status?: string
+  visibility?: string
+  modelCount: number
+  models: BundleModelRef[]
+  createdAt?: string
+  publishedAt?: string
+}

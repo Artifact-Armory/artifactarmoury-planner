@@ -25,6 +25,7 @@ import browseRoutes from './routes/browse';
 import artistsRoutes from './routes/artists';
 import tablesRoutes from './routes/tables';
 import ordersRoutes from './routes/orders';
+import bundlesRoutes from './routes/bundles';
 import adminRoutes from './routes/admin';
 import uploadsRoutes from './routes/uploads';
 import webhookRoutes from './routes/webhooks';
@@ -100,6 +101,7 @@ app.use(`${API_PREFIX}/browse`, browseRoutes);
 app.use(`${API_PREFIX}/artists`, artistsRoutes);
 app.use(`${API_PREFIX}/tables`, tablesRoutes);
 app.use(`${API_PREFIX}/orders`, ordersRoutes);
+app.use(`${API_PREFIX}/bundles`, bundlesRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
 app.use(`${API_PREFIX}/uploads`, uploadsRoutes);
 

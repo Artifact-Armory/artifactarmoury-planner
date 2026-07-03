@@ -8,9 +8,8 @@ import { authenticate, optionalAuth } from '../middleware/auth';
 import { paymentRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, PaymentError } from '../middleware/error';
-import { validateEmail, sanitizeString } from '../utils/validation';
+import { validateEmail } from '../utils/validation';
 import { createPaymentIntent, getPaymentIntent } from '../services/stripe';
-import { submitPrintJob } from '../services/printFarm';
 import { sendOrderConfirmation } from '../services/email';
 
 const router = Router();
@@ -24,8 +23,7 @@ router.post('/',
   paymentRateLimit,
   asyncHandler(async (req, res) => {
     const {
-      items, // [{ modelId, quantity, color, material, quality, specialInstructions }]
-      shipping,
+      items, // [{ modelId } | { bundleId }]
       customerEmail
     } = req.body;
 
@@ -33,61 +31,37 @@ router.post('/',
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new ValidationError('Order must contain at least one item');
     }
-
     if (items.length > 50) {
       throw new ValidationError('Maximum 50 items per order');
     }
 
-    // Validate shipping
-    if (!shipping || !shipping.name || !shipping.line1 || !shipping.city || 
-        !shipping.postalCode || !shipping.country) {
-      throw new ValidationError('Complete shipping address is required');
-    }
+    // Digital STL sales are tied to an account (that's how download entitlement
+    // and buy-once work), so a purchase requires a signed-in user.
+    const userId = (req as any).userId;
+    if (!userId) { throw new ValidationError('Please sign in to complete your purchase'); }
 
-    // Validate email
     const email = customerEmail || (req as any).user?.email;
     if (!email) { throw new ValidationError('Valid email address is required'); }
     validateEmail(email);
 
     const client = await (db as any).getClient?.() ?? await db.connect();
-    
+
     try {
       await client.query('BEGIN');
 
-      // Fetch model details and calculate totals
-      const orderItems = [];
+      // Each entry becomes one order_items row per model. A bundle expands into
+      // one row per constituent model (so per-model download entitlement + the
+      // per-buyer watermark path "just work").
+      const orderItems: Array<{
+        modelId: string; artistId: string; modelName: string; modelSnapshot: any;
+        unitPrice: number; commissionRate: number; commissionAmount: number;
+        bundleId: string | null; bundleName: string | null;
+      }> = [];
       let subtotal = 0;
 
-      for (const item of items) {
-        if (!item.modelId || !item.quantity || item.quantity < 1) {
-          throw new ValidationError('Invalid item data');
-        }
-
-        // Get model details
-        const modelResult = await client.query(
-          `SELECT m.*, u.commission_rate, u.stripe_account_id
-           FROM models m
-           JOIN users u ON m.artist_id = u.id
-           WHERE m.id = $1 AND m.status = 'published'`,
-          [item.modelId]
-        );
-
-        if (modelResult.rows.length === 0) {
-          throw new NotFoundError(`Model ${item.modelId}`);
-        }
-
-        const model = modelResult.rows[0];
-
-        // Calculate item price
-        const unitPrice = parseFloat(model.base_price);
-        const quantity = parseInt(item.quantity);
-        const totalPrice = unitPrice * quantity;
-        subtotal += totalPrice;
-
-        // Calculate artist commission
+      const pushModelRow = (model: any, price: number, bundleId: string | null, bundleName: string | null) => {
         const commissionRate = parseFloat(model.commission_rate);
-        const commissionAmount = (totalPrice * commissionRate) / 100;
-
+        const commissionAmount = Math.round(price * commissionRate) / 100;
         orderItems.push({
           modelId: model.id,
           artistId: model.artist_id,
@@ -97,103 +71,165 @@ router.post('/',
             name: model.name,
             description: model.description,
             stl_file_path: model.stl_file_path,
-            dimensions: {
-              width: model.width,
-              height: model.height,
-              depth: model.depth
-            }
+            dimensions: { width: model.width, height: model.height, depth: model.depth },
           },
-          quantity,
-          unitPrice,
-          totalPrice,
+          unitPrice: price,
           commissionRate,
           commissionAmount,
-          color: item.color || 'Gray',
-          material: item.material || 'PLA',
-          quality: item.quality || 'standard',
-          specialInstructions: item.specialInstructions || null
+          bundleId,
+          bundleName,
         });
+      };
+
+      for (const item of items) {
+        if (item?.bundleId) {
+          // --- Bundle: one price, split across its models -------------------
+          const bundleResult = await client.query(
+            `SELECT id, name, price FROM bundles WHERE id = $1 AND status = 'published'`,
+            [item.bundleId]
+          );
+          if (bundleResult.rows.length === 0) throw new NotFoundError(`Bundle ${item.bundleId}`);
+          const bundle = bundleResult.rows[0];
+
+          const modelsResult = await client.query(
+            `SELECT m.*, u.commission_rate
+             FROM bundle_items bi
+             JOIN models m ON bi.model_id = m.id
+             JOIN users u ON m.artist_id = u.id
+             WHERE bi.bundle_id = $1
+             ORDER BY bi.display_order ASC`,
+            [item.bundleId]
+          );
+          const bundleModels = modelsResult.rows;
+          if (bundleModels.length === 0) throw new ValidationError(`Bundle "${bundle.name}" has no models`);
+
+          const bundlePrice = Math.round(parseFloat(bundle.price) * 100); // pennies
+          const totalBase = bundleModels.reduce((s: number, m: any) => s + parseFloat(m.base_price), 0);
+          let allocated = 0;
+          bundleModels.forEach((m: any, idx: number) => {
+            let sharePence: number;
+            if (idx === bundleModels.length - 1) {
+              sharePence = bundlePrice - allocated; // last absorbs rounding remainder
+            } else if (totalBase > 0) {
+              sharePence = Math.round(bundlePrice * (parseFloat(m.base_price) / totalBase));
+            } else {
+              sharePence = Math.round(bundlePrice / bundleModels.length);
+            }
+            allocated += sharePence;
+            pushModelRow(m, sharePence / 100, bundle.id, bundle.name);
+          });
+          subtotal += bundlePrice / 100;
+        } else if (item?.modelId) {
+          // --- Single model -------------------------------------------------
+          const modelResult = await client.query(
+            `SELECT m.*, u.commission_rate
+             FROM models m JOIN users u ON m.artist_id = u.id
+             WHERE m.id = $1 AND m.status = 'published'`,
+            [item.modelId]
+          );
+          if (modelResult.rows.length === 0) throw new NotFoundError(`Model ${item.modelId}`);
+          const model = modelResult.rows[0];
+          const price = parseFloat(model.base_price);
+          pushModelRow(model, price, null, null);
+          subtotal += price;
+        } else {
+          throw new ValidationError('Each item must be a modelId or bundleId');
+        }
       }
 
-      // Calculate shipping (simple estimate for now)
-      const shippingCost = calculateShipping(orderItems, shipping);
+      // No model may appear twice across the order (e.g. added standalone AND
+      // via a bundle, or in two bundles).
+      const seen = new Set<string>();
+      for (const oi of orderItems) {
+        if (seen.has(oi.modelId)) {
+          throw new ValidationError(`"${oi.modelName}" appears more than once in your cart (it may be included in a bundle you also added)`);
+        }
+        seen.add(oi.modelId);
+      }
 
-      // Calculate tax (if applicable)
-      const tax = 0; // Implement tax calculation based on location
+      // Buy-once: fetch what the user already owns among these models.
+      const ownedRows = await client.query(
+        `SELECT DISTINCT oi.model_id
+         FROM order_items oi
+         JOIN orders o ON oi.order_id = o.id
+         WHERE oi.model_id = ANY($1::uuid[]) AND o.user_id = $2 AND o.payment_status = 'succeeded'`,
+        [[...seen], userId]
+      );
+      const ownedIds = new Set<string>(ownedRows.rows.map((r: any) => r.model_id));
 
+      // Reject re-buying a standalone model. For a bundle, only reject if the
+      // buyer already owns *every* model in it (otherwise they're buying it for
+      // the models they don't yet have).
+      const bundlesInOrder = new Map<string, { name: string; total: number; owned: number }>();
+      for (const oi of orderItems) {
+        if (!oi.bundleId) {
+          if (ownedIds.has(oi.modelId)) {
+            throw new ValidationError(`You already own "${oi.modelName}" — you only pay once per model`);
+          }
+        } else {
+          const b = bundlesInOrder.get(oi.bundleId) ?? { name: oi.bundleName || 'this bundle', total: 0, owned: 0 };
+          b.total += 1;
+          if (ownedIds.has(oi.modelId)) b.owned += 1;
+          bundlesInOrder.set(oi.bundleId, b);
+        }
+      }
+      for (const b of bundlesInOrder.values()) {
+        if (b.total > 0 && b.owned === b.total) {
+          throw new ValidationError(`You already own every model in "${b.name}"`);
+        }
+      }
+
+      const tax = 0;
+      const shippingCost = 0; // digital — no shipping
       const total = subtotal + shippingCost + tax;
 
-      // Create order
+      // Create order (no shipping address for digital STLs)
       const orderResult = await client.query(
         `INSERT INTO orders (
           user_id, customer_email,
-          shipping_name, shipping_address_line1, shipping_address_line2,
-          shipping_city, shipping_state, shipping_postal_code, shipping_country,
           subtotal, shipping_cost, tax, total,
           payment_method, payment_status, fulfillment_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'stripe', 'pending', 'pending')
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'stripe', 'pending', 'pending')
         RETURNING id, order_number`,
-        [
-          (req as any).userId || null,
-          email,
-          sanitizeString(shipping.name),
-          sanitizeString(shipping.line1),
-          shipping.line2 ? sanitizeString(shipping.line2) : null,
-          sanitizeString(shipping.city),
-          shipping.state ? sanitizeString(shipping.state) : null,
-          sanitizeString(shipping.postalCode),
-          shipping.country,
-          subtotal,
-          shippingCost,
-          tax,
-          total
-        ]
+        [userId, email, subtotal, shippingCost, tax, total]
       );
-
       const order = orderResult.rows[0];
 
-      // Create order items
       for (const item of orderItems) {
         await client.query(
           `INSERT INTO order_items (
-            order_id, model_id, artist_id,
+            order_id, model_id, artist_id, bundle_id, bundle_name,
             model_name, model_snapshot,
             quantity, unit_price, total_price,
-            artist_commission_rate, artist_commission_amount,
-            print_color, print_material, print_quality, special_instructions
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            artist_commission_rate, artist_commission_amount
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9, $10)`,
           [
             order.id,
             item.modelId,
             item.artistId,
+            item.bundleId,
+            item.bundleName,
             item.modelName,
             JSON.stringify(item.modelSnapshot),
-            item.quantity,
             item.unitPrice,
-            item.totalPrice,
             item.commissionRate,
             item.commissionAmount,
-            item.color,
-            item.material,
-            item.quality,
-            item.specialInstructions
           ]
         );
       }
 
-      // Create Stripe payment intent
+      // Mock/real Stripe payment intent
       const paymentIntent = await createPaymentIntent({
         amount: total,
         currency: 'gbp',
         metadata: {
           order_id: String(order.id),
           order_number: order.order_number,
-          customer_email: email
+          customer_email: email,
         },
-        description: `Order ${order.order_number}`
+        description: `Order ${order.order_number}`,
       });
 
-      // Store payment intent ID
       await client.query(
         `UPDATE orders SET payment_intent_id = $1 WHERE id = $2`,
         [paymentIntent.payment_intent_id, order.id]
@@ -201,11 +237,7 @@ router.post('/',
 
       await client.query('COMMIT');
 
-      logger.info('Order created', { 
-        orderId: order.id, 
-        orderNumber: order.order_number,
-        total 
-      });
+      logger.info('Order created', { orderId: order.id, orderNumber: order.order_number, total });
 
       res.status(201).json({
         message: 'Order created successfully',
@@ -213,8 +245,9 @@ router.post('/',
           id: order.id,
           orderNumber: order.order_number,
           total,
-          clientSecret: paymentIntent.client_secret
-        }
+          clientSecret: paymentIntent.client_secret,
+          paymentIntentId: paymentIntent.payment_intent_id,
+        },
       });
 
     } catch (error) {
@@ -258,59 +291,22 @@ router.post('/:id/confirm',
       throw new PaymentError('Payment not completed');
     }
 
-    // Update order status
+    // Digital STL orders are fulfilled instantly on payment — the buyer can
+    // download straight away (no print farm, no shipping).
     await db.query(
-      `UPDATE orders 
-       SET payment_status = 'succeeded', 
+      `UPDATE orders
+       SET payment_status = 'succeeded',
            paid_at = CURRENT_TIMESTAMP,
-           fulfillment_status = 'processing'
+           fulfillment_status = 'delivered'
        WHERE id = $1`,
       [id]
     );
 
-    // Get order items for print submission
+    // Get order items (for the confirmation email + sale counts)
     const itemsResult = await db.query(
       `SELECT * FROM order_items WHERE order_id = $1`,
       [id]
     );
-
-    // Submit to print farm (async)
-    submitPrintJob({
-      orderId: order.id,
-      orderNumber: order.order_number,
-      items: itemsResult.rows.map(item => ({
-        itemId: item.id,
-        modelName: item.model_name,
-        // model_snapshot is a JSONB column — pg returns it already parsed as an
-        // object; only JSON.parse it on the off chance a driver hands back text.
-        stlFilePath: (typeof item.model_snapshot === 'string' ? JSON.parse(item.model_snapshot) : item.model_snapshot)?.stl_file_path,
-        quantity: item.quantity,
-        color: item.print_color,
-        material: item.print_material,
-        quality: item.print_quality,
-        specialInstructions: item.special_instructions
-      })),
-      shipping: {
-        name: order.shipping_name,
-        line1: order.shipping_address_line1,
-        line2: order.shipping_address_line2,
-        city: order.shipping_city,
-        state: order.shipping_state,
-        postalCode: order.shipping_postal_code,
-        country: order.shipping_country
-      },
-      priority: 'standard'
-    }).then(printJob => {
-      // Update order with print job ID
-      db.query(
-        `UPDATE orders SET print_farm_job_id = $1 WHERE id = $2`,
-        [printJob.jobId, id]
-      );
-      
-      logger.info('Print job submitted', { orderId: id, jobId: printJob.jobId });
-    }).catch(err => {
-      logger.error('Failed to submit print job', { error: err, orderId: id });
-    });
 
     // Send confirmation email
     sendOrderConfirmation({
@@ -350,6 +346,24 @@ router.post('/:id/confirm',
         status: 'processing'
       }
     });
+  })
+);
+
+// ============================================================================
+// ENTITLEMENTS (which models the signed-in user owns → drives UI gating)
+// ============================================================================
+
+router.get('/entitlements',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const result = await db.query(
+      `SELECT DISTINCT oi.model_id
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL`,
+      [(req as any).userId]
+    );
+    res.json({ modelIds: result.rows.map((r: any) => r.model_id) });
   })
 );
 
@@ -483,26 +497,5 @@ router.post('/track',
     });
   })
 );
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-function calculateShipping(items: any[], destination: any): number {
-  // Simple flat rate for now
-  // In production, integrate with shipping API
-  const baseRate = 5.99;
-  const perItemRate = 1.50;
-  
-  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const total = baseRate + (itemCount * perItemRate);
-
-  // International shipping
-  if (destination.country !== 'US') {
-    return total * 2;
-  }
-
-  return Math.round(total * 100) / 100;
-}
 
 export default router;

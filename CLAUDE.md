@@ -68,6 +68,43 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
 5. **Purchase (mock):** `POST /orders` → `POST /orders/:id/confirm`; the Stripe
    mock returns `succeeded`, so a test purchase completes without real payment.
 
+## Pricing model — DIGITAL STL ONLY + BUNDLES (built 2026-07-03)
+The marketplace sells **digital STL downloads only** for now (print-and-ship is a
+later feature). Consequences, all built this session (migration **008**):
+- **Every model is `fulfillment_type='stl'`.** Default flipped to `'stl'` and all
+  existing rows migrated; the create-model form no longer asks (both create routes
+  in `routes/models.ts` hard-insert `'stl'`; the frontend fulfilment `<select>` is
+  gone). `transformers.ts` defaults to `'stl'`.
+- **Buy once per customer.** `POST /api/orders` now takes `items:[{modelId}|{bundleId}]`,
+  requires a signed-in user, has **no shipping** (order shipping_* columns made
+  nullable), sets `fulfillment_status='delivered'` on confirm and **does not** submit
+  to the print farm. It rejects re-buying a model you already own (a bundle is only
+  rejected if you own **every** model in it). New **`GET /api/orders/entitlements`**
+  → `{modelIds}` drives the UI (Download vs Add-to-cart). Download entitlement +
+  per-buyer watermark path are unchanged.
+- **Mock checkout is now real** (`pages/Checkout.tsx`, was a stub): cart → create
+  order → confirm (mock Stripe returns `succeeded`) → downloads unlock. `ordersApi`
+  was realigned to the actual backend routes (the old `/payment-intent`,
+  `/confirm-payment`, `/receipt`, `/invoice` calls were dead).
+- **Cart generalised** (`store/cartStore.ts`) to `{kind:'model'|'bundle', id, …}`,
+  **own-once (no quantity)**, dedupe key `kind:id`, persist **version 3** (migrates old
+  `{modelId,quantity}` lines). Updated `CartDrawer`, `ModelCard`, `ModelDetails`, and
+  the planner's `addLayoutToShopCart` (now adds each unique model once — you buy the
+  STL once and print any number).
+- **Bundles** = an artist groups several of **their own** models under one name + one
+  price; buying grants download of each STL. Tables `bundles` + `bundle_items`
+  (schema.sql + 008); `order_items` gained `bundle_id`/`bundle_name`. A bundle purchase
+  **expands into one `order_items` row per constituent model** (price split across
+  models proportional to `base_price`, remainder to the last), so per-model entitlement
+  + watermark "just work". Backend `routes/bundles.ts` (CRUD + publish/unpublish;
+  publish needs ≥2 models, thumbnail, desc≥20, price>0) mounted at `/api/bundles`.
+  Frontend: `api/endpoints/bundles.ts`, artist `ArtistBundles`/`CreateBundle`/`EditBundle`
+  (+ `BundleForm`, model multiselect, thumbnail via the presign path — avoids the latent
+  `/models/:id/thumbnail` bug), public `pages/BundleDetails.tsx` at `/bundles/:id`,
+  "My Bundles" nav in `DashboardLayout`, routes in `app.tsx`. Both projects typecheck clean.
+- **Not yet:** no public **bundles browse tab** (reach them via `/bundles/:id`; an artist
+  profile link is a good follow-up). Print-farm/"order a print" is deferred by design.
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,

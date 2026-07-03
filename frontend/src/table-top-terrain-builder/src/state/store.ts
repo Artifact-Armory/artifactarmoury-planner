@@ -374,28 +374,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     // The USP: push the whole tabletop design into the real shop cart in one click.
+    // Digital STLs are bought once (print as many copies as you like), so each
+    // unique model on the table is added to the cart a single time.
     addLayoutToShopCart: () => {
       const { instances, assets } = get()
-      const counts = new Map<string, number>()
-      instances.forEach(inst => counts.set(inst.assetId, (counts.get(inst.assetId) ?? 0) + 1))
+      const uniqueAssetIds = new Set(instances.map(inst => inst.assetId))
       const assetsById = new Map(assets.map(a => [a.id, a]))
 
       const cart = useCartStore.getState()
       let added = 0
-      counts.forEach((count, assetId) => {
+      uniqueAssetIds.forEach(assetId => {
         const asset = assetsById.get(assetId)
         if (!asset) return
-        const existing = cart.items.find(i => i.modelId === assetId)?.quantity ?? 0
-        // Ensure the line exists, then set the exact quantity (existing + this design).
+        if (cart.hasItem('model', assetId)) return // already in cart
         cart.addItem({
-          modelId: assetId,
+          kind: 'model',
+          id: assetId,
           name: asset.name,
           artistName: asset.artistName ?? 'Artifact Armoury',
           price: asset.price ?? 0,
           imageUrl: asset.thumbnail,
         })
-        cart.updateQuantity(assetId, existing + count)
-        added += count
+        added += 1
       })
       cart.openCart()
       return added

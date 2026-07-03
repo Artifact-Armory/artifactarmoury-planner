@@ -28,7 +28,8 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
     }
 
     addItem({
-      modelId: model.id,
+      kind: 'model',
+      id: model.id,
       name: model.name,
       artistName: model.artistName,
       price: model.basePrice,
