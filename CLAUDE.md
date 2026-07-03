@@ -114,6 +114,32 @@ and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PO
   git-ignored, 100MB+ raw) aren't hosted, so the planner opens with grey **box
   fallbacks**. To fix: Draco-compress + upload to R2 at `assets/models/`.
 
+## Operational how-tos
+**Run one-off SQL on production** (promote an artist, inspect data, etc.):
+- Railway → **Postgres** service → **Data**/**Query** tab → run SQL. Or via CLI:
+  ```
+  railway link              # select project, then the Postgres service
+  railway connect Postgres  # opens a psql shell
+  ```
+  The private `DATABASE_URL` is **not** reachable from a laptop directly — use
+  `railway connect` (or `DATABASE_PUBLIC_URL`), not a local `psql "$DATABASE_URL"`.
+  Example — promote the test artist:
+  ```sql
+  UPDATE users SET role='artist', email_verified=true WHERE email='firefox68@hotmail.co.uk';
+  ```
+  (Role is baked into the JWT, so the user must **log out/in** after promotion.)
+
+**Trace a downloaded STL's watermark** (identify which buyer a leaked file came
+from). Run via `railway run` so the production `WATERMARK_SECRET` is injected:
+  ```
+  cd backend
+  railway link    # link the backend service
+  railway run npm run trace:watermark -- "C:\path\to\downloaded.stl"
+  ```
+  Prints the model / buyer / order IDs, or "no valid watermark" if the header was
+  stripped — in which case the **geometry fingerprint** is the fallback proof
+  (it's already stored per model and rejects the re-upload automatically).
+
 ## Also see
 - `memory/MEMORY.md` (+ files) — persistent user prefs & project state, auto-loaded.
 - `RAILWAY_DEPLOYMENT_GUIDE.md`, `R2_SETUP.md`, `TABLE_TEXTURES.md` (older, partly

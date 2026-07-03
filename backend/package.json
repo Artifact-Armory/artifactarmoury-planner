@@ -14,6 +14,7 @@
     "migrate:models-to-assets": "node -r ts-node/register scripts/migrate-models-to-assets.ts",
     "upload:r2": "node -r ts-node/register scripts/upload-to-r2.ts",
     "optimize:textures": "node -r ts-node/register/transpile-only scripts/optimize-textures.ts",
+    "trace:watermark": "node -r ts-node/register/transpile-only scripts/trace-watermark.ts",
     "seed": "ts-node scripts/seed-dev-data.ts",
     "db:seed": "ts-node scripts/seed-dev-data.ts",
     "generate-invite": "ts-node scripts/generate-invite.ts",
