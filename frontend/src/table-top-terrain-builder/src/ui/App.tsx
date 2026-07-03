@@ -3,10 +3,11 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
-  HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw,
+  HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
 } from 'lucide-react'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
+import { useCartStore } from '@/store/cartStore'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
@@ -42,6 +43,10 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const [saving, setSaving] = React.useState(false)
 
   const assets = useAppStore((s) => s.assets)
+  const bundles = useAppStore((s) => s.bundles)
+  const ownedModelIds = useAppStore((s) => s.ownedModelIds)
+  const ownedBundleIds = useAppStore((s) => s.ownedBundleIds)
+  const cartItems = useCartStore((s) => s.items)
   const instances = useAppStore((s) => s.instances)
   const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
   const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
@@ -70,6 +75,8 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const applyLayout = useAppStore((s) => s.actions.applyLayout)
 
   const [query, setQuery] = React.useState('')
+  const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
+  const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
   const [showHelp, setShowHelp] = React.useState(false)
   const [toast, setToast] = React.useState<{ count: number } | null>(null)
@@ -176,6 +183,54 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
       x === 'Terrain' ? -1 : y === 'Terrain' ? 1 : x.localeCompare(y),
     )
   }, [filtered])
+
+  const assetsById = React.useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
+
+  // "My items" tab: the bundles + models the user owns or has in their basket.
+  // Bundles render as expandable group tiles; their members aren't repeated as
+  // standalone tiles.
+  const myItems = React.useMemo(() => {
+    const cartModelIds = new Set(cartItems.filter((i) => i.kind === 'model').map((i) => i.id))
+    const cartBundleIds = new Set(cartItems.filter((i) => i.kind === 'bundle').map((i) => i.id))
+    const showBundleIds = new Set<string>([...ownedBundleIds, ...cartBundleIds])
+    const displayBundles = bundles.filter((b) => showBundleIds.has(b.id))
+    const memberIds = new Set<string>()
+    displayBundles.forEach((b) => b.modelIds.forEach((id) => memberIds.add(id)))
+    const modelIds = new Set<string>([...ownedModelIds, ...cartModelIds])
+    const displayModels = [...modelIds].filter((id) => !memberIds.has(id) && assetsById.has(id))
+    const count = displayBundles.length + displayModels.length
+    return { displayBundles, displayModels, cartModelIds, count }
+  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, assetsById])
+
+  const toggleBundleExpanded = (id: string) =>
+    setExpandedBundles((s) => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  // A single placeable model tile (shared by the catalogue + "My items" tabs).
+  const renderModelTile = (id: string, ownedHint?: boolean) => {
+    const a = assetsById.get(id)
+    if (!a) return null
+    const owned = ownedHint ?? ownedModelIds.has(id)
+    return (
+      <button
+        key={id}
+        className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
+        onClick={() => setSelectedAsset(selectedAssetId === a.id ? null : a.id)}
+        title={`Place ${a.name}`}
+      >
+        <div className="tb-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}</div>
+        <div className="tb-tile-name">{a.name}</div>
+        <div className="tb-tile-meta">
+          <span className={`tb-pill ${a.fulfillment}`}>{a.fulfillment === 'stl' ? 'STL' : 'Print'}</span>
+          <span>{owned ? 'Owned' : 'In basket'}</span>
+        </div>
+      </button>
+    )
+  }
 
   // Bill of materials: tally by asset.
   const bom = React.useMemo(() => {
@@ -374,45 +429,105 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
 
           {/* Catalogue / palette */}
           <aside className="tb-palette">
-            <div className="tb-palette-head">
-              <strong>Terrain</strong>
-              <span className="tb-small">{filtered.length}</span>
+            <div className="tb-palette-tabs">
+              <button
+                className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
+                onClick={() => setPaletteTab('catalogue')}
+              >
+                Catalogue <span className="tb-small">{filtered.length}</span>
+              </button>
+              <button
+                className={`tb-tab ${paletteTab === 'mine' ? 'is-active' : ''}`}
+                onClick={() => setPaletteTab('mine')}
+                title="Models you own or have in your basket, including bundles"
+              >
+                My items <span className="tb-small">{myItems.count}</span>
+              </button>
             </div>
-            <div className="tb-searchbar">
-              <Search size={14} />
-              <input
-                placeholder="Search terrain…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <div className="tb-palette-scroll">
-              {paletteGroups.map(([cat, items]) => (
-                <div key={cat} className="tb-palette-section">
-                  <div className="tb-palette-cat">{cat === 'Elevation' ? 'Elevation / Hills' : cat}</div>
-                  <div className="tb-palette-grid">
-                    {items.map((a) => (
-                      <button
-                        key={a.id}
-                        className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
-                        onClick={() => setSelectedAsset(selectedAssetId === a.id ? null : a.id)}
-                        title={`Place ${a.name}`}
-                      >
-                        <div className="tb-thumb">
-                          {a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}
-                        </div>
-                        <div className="tb-tile-name">{a.name}</div>
-                        <div className="tb-tile-meta">
-                          <span className={`tb-pill ${a.fulfillment}`}>{a.fulfillment === 'stl' ? 'STL' : 'Print'}</span>
-                          {a.price != null && <span>£{a.price.toFixed(2)}</span>}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+
+            {paletteTab === 'catalogue' ? (
+              <>
+                <div className="tb-searchbar">
+                  <Search size={14} />
+                  <input
+                    placeholder="Search terrain…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
                 </div>
-              ))}
-              {filtered.length === 0 && <div className="tb-small" style={{ padding: 8 }}>No terrain matches.</div>}
-            </div>
+                <div className="tb-palette-scroll">
+                  {paletteGroups.map(([cat, items]) => (
+                    <div key={cat} className="tb-palette-section">
+                      <div className="tb-palette-cat">{cat === 'Elevation' ? 'Elevation / Hills' : cat}</div>
+                      <div className="tb-palette-grid">
+                        {items.map((a) => (
+                          <button
+                            key={a.id}
+                            className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
+                            onClick={() => setSelectedAsset(selectedAssetId === a.id ? null : a.id)}
+                            title={`Place ${a.name}`}
+                          >
+                            <div className="tb-thumb">
+                              {a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}
+                            </div>
+                            <div className="tb-tile-name">{a.name}</div>
+                            <div className="tb-tile-meta">
+                              <span className={`tb-pill ${a.fulfillment}`}>{a.fulfillment === 'stl' ? 'STL' : 'Print'}</span>
+                              {a.price != null && <span>£{a.price.toFixed(2)}</span>}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {filtered.length === 0 && <div className="tb-small" style={{ padding: 8 }}>No terrain matches.</div>}
+                </div>
+              </>
+            ) : (
+              <div className="tb-palette-scroll">
+                {myItems.count === 0 && (
+                  <div className="tb-small" style={{ padding: 8 }}>
+                    Nothing yet. Place models from the Catalogue (they’re added to your basket) or buy a bundle — they’ll appear here.
+                  </div>
+                )}
+
+                {myItems.displayBundles.map((b) => {
+                  const expanded = expandedBundles.has(b.id)
+                  const owned = ownedBundleIds.has(b.id)
+                  return (
+                    <div key={b.id} className="tb-bundle">
+                      <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(b.id)}>
+                        <div className="tb-thumb sm">
+                          {b.thumbnail ? <img src={b.thumbnail} alt="" /> : <Box size={16} />}
+                        </div>
+                        <div className="tb-bundle-info">
+                          <div className="tb-tile-name">{b.name}</div>
+                          <div className="tb-tile-meta">
+                            <span className="tb-pill bundle">BUNDLE · {b.modelIds.length}</span>
+                            <span>{owned ? 'Owned' : `£${b.price.toFixed(2)}`}</span>
+                          </div>
+                        </div>
+                        <ChevronDown size={16} className={`tb-chev ${expanded ? 'is-open' : ''}`} />
+                      </button>
+                      {expanded && (
+                        <div className="tb-palette-grid" style={{ marginTop: 8 }}>
+                          {b.modelIds.map((id) => renderModelTile(id, owned))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+
+                {myItems.displayModels.length > 0 && (
+                  <div className="tb-palette-section">
+                    <div className="tb-palette-cat">Individual models</div>
+                    <div className="tb-palette-grid">
+                      {myItems.displayModels.map((id) => renderModelTile(id))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </aside>
 
           {/* Bill of materials / cart */}

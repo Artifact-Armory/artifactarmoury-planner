@@ -70,9 +70,12 @@ export const ordersApi = {
     await apiClient.post(`${BASE_URL}/${orderId}/confirm`, { paymentIntentId })
   },
 
-  /** The set of model ids the signed-in user owns (drives Download vs Buy UI). */
-  async getEntitlements(): Promise<Set<string>> {
+  /** The models and bundles the signed-in user owns (drives Download vs Buy UI). */
+  async getEntitlements(): Promise<{ models: Set<string>; bundles: Set<string> }> {
     const response = await apiClient.get(`${BASE_URL}/entitlements`)
-    return new Set<string>(response.data?.modelIds ?? [])
+    return {
+      models: new Set<string>(response.data?.modelIds ?? []),
+      bundles: new Set<string>(response.data?.bundleIds ?? []),
+    }
   },
 }

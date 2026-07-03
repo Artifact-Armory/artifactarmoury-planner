@@ -356,14 +356,25 @@ router.post('/:id/confirm',
 router.get('/entitlements',
   authenticate,
   asyncHandler(async (req, res) => {
-    const result = await db.query(
+    const userId = (req as any).userId;
+    const models = await db.query(
       `SELECT DISTINCT oi.model_id
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
        WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL`,
-      [(req as any).userId]
+      [userId]
     );
-    res.json({ modelIds: result.rows.map((r: any) => r.model_id) });
+    const bundles = await db.query(
+      `SELECT DISTINCT oi.bundle_id
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.bundle_id IS NOT NULL`,
+      [userId]
+    );
+    res.json({
+      modelIds: models.rows.map((r: any) => r.model_id),
+      bundleIds: bundles.rows.map((r: any) => r.bundle_id),
+    });
   })
 );
 

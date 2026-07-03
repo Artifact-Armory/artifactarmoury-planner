@@ -24,7 +24,7 @@ interface CartState {
   totalItems: number
   isOpen: boolean
 
-  addItem: (item: CartItem) => void
+  addItem: (item: CartItem, openDrawer?: boolean) => void
   removeItem: (key: string) => void
   hasItem: (kind: CartItemKind, id: string) => boolean
   clearCart: () => void
@@ -48,14 +48,14 @@ export const useCartStore = create<CartState>()(
       totalItems: 0,
       isOpen: false,
 
-      addItem: (item) => {
+      addItem: (item, openDrawer = true) => {
         set((state) => {
           // Already own-once: if it's in the cart, don't duplicate — just open.
           if (state.items.some((i) => i.kind === item.kind && i.id === item.id)) {
-            return { isOpen: true }
+            return { isOpen: openDrawer ? true : state.isOpen }
           }
           const items = [...state.items, item]
-          return { items, ...calculateTotals(items), isOpen: true }
+          return { items, ...calculateTotals(items), isOpen: openDrawer ? true : state.isOpen }
         })
       },
 

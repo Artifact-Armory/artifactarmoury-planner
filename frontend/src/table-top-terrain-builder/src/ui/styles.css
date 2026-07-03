@@ -301,6 +301,55 @@
 }
 .tb-pill.stl { background: #0e3a1f; color: #3fbf5a; border: 1px solid #2d4a2d; }
 .tb-pill.print { background: #0e1a3a; color: #4da3ff; border: 1px solid #1d3060; }
+.tb-pill.bundle { background: #241a3a; color: #b493ff; border: 1px solid #3a2d60; }
+
+/* Palette tabs (Catalogue / My items) */
+.tb-palette-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--tb-border);
+}
+.tb-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--tb-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tb-tab:hover { color: var(--tb-text); background: #131c28; }
+.tb-tab.is-active { color: var(--tb-text); border-bottom-color: var(--tb-accent); }
+
+/* Bundle group tile (expandable) */
+.tb-bundle {
+  margin: 10px 0 4px;
+  padding: 8px;
+  background: #0c1119;
+  border: 1px solid var(--tb-border);
+  border-radius: 10px;
+}
+.tb-bundle-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--tb-text);
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+.tb-bundle-info { flex: 1; min-width: 0; }
+.tb-chev { color: var(--tb-muted); transition: transform 0.15s; flex: none; }
+.tb-chev.is-open { transform: rotate(180deg); }
 
 /* Bill of materials (right) */
 .tb-bom {

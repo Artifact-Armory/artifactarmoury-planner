@@ -4,8 +4,20 @@ import * as THREE from 'three'
 import { loadAssets, loadAssetsFromAPI, type Asset } from '../core/assets'
 import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
+import { bundlesApi } from '@/api/endpoints/bundles'
+import { ordersApi } from '@/api/endpoints/orders'
 
 export type SnapBaseline = 'snap' | 'free'
+
+/** A bundle as shown in the palette: a group tile that expands into its models. */
+export type PlannerBundle = {
+  id: string
+  name: string
+  thumbnail?: string
+  price: number
+  artistName?: string
+  modelIds: string[] // members that exist in the loaded catalogue
+}
 
 /** Camera controls owned by ThreeStage, exposed so UI buttons can drive them. */
 export interface CameraApi {
@@ -46,6 +58,9 @@ interface AppState {
   renderer: THREE.WebGLRenderer | null
 
   assets: Asset[]
+  bundles: PlannerBundle[]           // published bundles (palette grouping)
+  ownedModelIds: Set<string>         // models the signed-in user has purchased
+  ownedBundleIds: Set<string>        // bundles the signed-in user has purchased
   selectedAssetId: string | null
   instances: Instance[]
   selectedInstanceId: string | null
@@ -123,6 +138,8 @@ interface AppState {
     markAsPurchased: (assetIds: string[]) => void
     addLayoutToBasket: () => void
     syncBasketWithTable: () => void
+    /** Add a just-placed catalogue model to the shop cart (bundle-aware). */
+    addPlacedModelToShopCart: (assetId: string) => void
   }
 }
 
@@ -153,6 +170,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   renderer: null,
 
   assets: [],
+  bundles: [],
+  ownedModelIds: new Set(),
+  ownedBundleIds: new Set(),
   selectedAssetId: null,
   instances: [],
   selectedInstanceId: null,
@@ -199,11 +219,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
     
     loadAssetCatalogue: async () => {
+      let assets: Asset[]
       try {
-        const assets = await loadAssetsFromAPI()
+        assets = await loadAssetsFromAPI()
         set({ assets })
       } catch {
-        set({ assets: loadAssets() })
+        assets = loadAssets()
+        set({ assets })
+      }
+
+      // Published bundles → palette groups (members filtered to loaded catalogue).
+      try {
+        const assetIds = new Set(assets.map((a) => a.id))
+        const apiBundles = await bundlesApi.list()
+        const bundles: PlannerBundle[] = apiBundles.map((b) => ({
+          id: b.id,
+          name: b.name,
+          thumbnail: b.thumbnailUrl,
+          price: b.price,
+          artistName: b.artistName,
+          modelIds: b.models.map((m) => m.id).filter((id) => assetIds.has(id)),
+        }))
+        set({ bundles })
+      } catch {
+        /* bundles are optional — ignore if unreachable */
+      }
+
+      // What the signed-in user already owns (guests get 401 → empty).
+      try {
+        const ent = await ordersApi.getEntitlements()
+        set({ ownedModelIds: ent.models, ownedBundleIds: ent.bundles })
+      } catch {
+        set({ ownedModelIds: new Set(), ownedBundleIds: new Set() })
       }
     },
     
@@ -251,7 +298,40 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { instances, ...saveHistory({ ...s, instances }) }
       })
       get().actions.syncBasketWithTable()
+      // Placing a catalogue model you don't already own/have drops it into the
+      // shop basket, so it surfaces in the palette's "My items" tab.
+      get().actions.addPlacedModelToShopCart(i.assetId)
       return id
+    },
+
+    // Add a just-placed model to the shop cart unless it's already owned, in the
+    // cart, or covered by an owned/in-cart bundle (bundle+standalone would clash
+    // at checkout). Does not pop the cart drawer open.
+    addPlacedModelToShopCart: (assetId) => {
+      const s = get()
+      const asset = s.assets.find(a => a.id === assetId)
+      if (!asset) return
+      if (s.ownedModelIds.has(assetId)) return
+      const inOwnedBundle = s.bundles.some(b => s.ownedBundleIds.has(b.id) && b.modelIds.includes(assetId))
+      if (inOwnedBundle) return
+
+      const cart = useCartStore.getState()
+      if (cart.hasItem('model', assetId)) return
+      const cartBundleIds = new Set(cart.items.filter(it => it.kind === 'bundle').map(it => it.id))
+      const inCartBundle = s.bundles.some(b => cartBundleIds.has(b.id) && b.modelIds.includes(assetId))
+      if (inCartBundle) return
+
+      cart.addItem(
+        {
+          kind: 'model',
+          id: assetId,
+          name: asset.name,
+          artistName: asset.artistName ?? 'Artifact Armoury',
+          price: asset.price ?? 0,
+          imageUrl: asset.thumbnail,
+        },
+        false, // don't open the drawer over the planner
+      )
     },
     
     updateInstance: (id, patch) => {

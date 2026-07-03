@@ -33,8 +33,8 @@ const BundleDetails: React.FC = () => {
   const bundle = bundleQuery.data
   const owned =
     Boolean(bundle) &&
-    bundle!.models.length > 0 &&
-    bundle!.models.every((m) => entitlementsQuery.data?.has(m.id))
+    (entitlementsQuery.data?.bundles.has(bundle!.id) ||
+      (bundle!.models.length > 0 && bundle!.models.every((m) => entitlementsQuery.data?.models.has(m.id))))
 
   if (bundleQuery.isLoading) {
     return (

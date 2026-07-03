@@ -104,6 +104,21 @@ later feature). Consequences, all built this session (migration **008**):
   "My Bundles" nav in `DashboardLayout`, routes in `app.tsx`. Both projects typecheck clean.
 - **Not yet:** no public **bundles browse tab** (reach them via `/bundles/:id`; an artist
   profile link is a good follow-up). Print-farm/"order a print" is deferred by design.
+- **Planner palette has TWO tabs now (built 2026-07-03):** *Catalogue* (all published
+  models, as before) and ***My items*** = the models/bundles the user **owns or has in
+  their shop basket**. Bundles render as **expandable group tiles** (click to reveal the
+  member models, each individually placeable) so a buyer sees them grouped *and*
+  separately. **Placing a Catalogue model auto-adds it to the shop basket** (so it shows
+  under My items) via `store.addPlacedModelToShopCart(assetId)` called from `addInstance`
+  — it's **bundle-aware** (skips models you own, already have, or that are covered by an
+  owned/in-cart bundle, so checkout's "appears more than once" guard never trips) and adds
+  with `cartStore.addItem(item, /*openDrawer*/ false)` so the shop drawer doesn't pop over
+  the planner. Data: `loadAssetCatalogue` now also loads `bundlesApi.list()` (public list
+  now includes member `models`) + `ordersApi.getEntitlements()` (now returns
+  `{modelIds, bundleIds}`) into store `bundles`/`ownedModelIds`/`ownedBundleIds`.
+  UI in `ui/App.tsx` (`paletteTab`, `expandedBundles`, `renderModelTile`), styles
+  `tb-palette-tabs`/`tb-tab`/`tb-bundle`/`tb-chev`/`tb-pill.bundle`. `getEntitlements` now
+  returns `{models,bundles}` Sets — `ModelDetails`/`BundleDetails` updated accordingly.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as

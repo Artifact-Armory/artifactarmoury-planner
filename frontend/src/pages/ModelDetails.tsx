@@ -31,7 +31,7 @@ const ModelDetails: React.FC = () => {
     enabled: isAuthenticated,
     staleTime: 60_000,
   })
-  const owned = Boolean(id && entitlementsQuery.data?.has(id))
+  const owned = Boolean(id && entitlementsQuery.data?.models.has(id))
 
   const relatedQuery = useQuery({
     queryKey: ['related-models', id],

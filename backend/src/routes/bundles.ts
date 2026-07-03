@@ -125,7 +125,11 @@ router.get('/',
        LIMIT $1 OFFSET $2`,
       [Number(limit), offset]
     );
-    res.json({ bundles: bundles.rows });
+    // Attach members so the planner palette can expand a bundle into its models.
+    const withModels = await Promise.all(
+      bundles.rows.map(async (b: any) => ({ ...b, models: await loadBundleModels(b.id) }))
+    );
+    res.json({ bundles: withModels });
   })
 );
 
