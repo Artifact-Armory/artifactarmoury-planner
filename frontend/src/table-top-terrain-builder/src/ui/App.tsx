@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
-  Mountain, ArrowUp, ArrowDown, Waves, Square,
+  Mountain, ArrowUp, ArrowDown, Waves, Square, Download,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import hotToast from 'react-hot-toast'
@@ -86,6 +86,40 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const setBrush = useAppStore((s) => s.setBrush)
   const resetTerrain = useAppStore((s) => s.actions.resetTerrain)
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
+  const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
+  const [exportingTiles, setExportingTiles] = React.useState(false)
+
+  // Quote (tile count + price) for the saved table's sculpted surface. Reflects
+  // the last save — sculpt then Save (Ctrl+S) to refresh.
+  React.useEffect(() => {
+    if (!terrainPanelOpen || !savedTableId) { setTerrainQuote(null); return }
+    let cancelled = false
+    tablesApi.getTerrainQuote(savedTableId)
+      .then((q) => { if (!cancelled) setTerrainQuote(q.hasTerrain ? { tileCount: q.tileCount, price: q.price } : null) })
+      .catch(() => { if (!cancelled) setTerrainQuote(null) })
+    return () => { cancelled = true }
+  }, [terrainPanelOpen, savedTableId, savedTableName])
+
+  async function handleExportTiles() {
+    if (!savedTableId) {
+      hotToast.error('Save your table first, then export the tiles')
+      return
+    }
+    setExportingTiles(true)
+    try {
+      await tablesApi.downloadTerrainTiles(savedTableId, user?.email)
+      hotToast.success('Downloading printable tiles…')
+    } catch (e: any) {
+      const s = e?.response?.status
+      hotToast.error(
+        s === 400 ? 'Sculpt some terrain first, then save'
+          : s === 403 ? 'You can only export your own map'
+          : 'Tile export failed — try again',
+      )
+    } finally {
+      setExportingTiles(false)
+    }
+  }
 
   const [query, setQuery] = React.useState('')
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
@@ -538,9 +572,28 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
               >
                 <Trash2 size={14} /> Reset terrain
               </button>
+
+              <div className="tb-terrain-export">
+                <div className="tb-terrain-export-head">Printable tiles</div>
+                {terrainQuote ? (
+                  <p className="tb-small">
+                    {terrainQuote.tileCount} tile{terrainQuote.tileCount === 1 ? '' : 's'} · £{terrainQuote.price.toFixed(2)}
+                    <span className="tb-terrain-sub"> (reflects last save)</span>
+                  </p>
+                ) : (
+                  <p className="tb-small tb-terrain-sub">
+                    {savedTableId ? 'Sculpt, then Save (Ctrl+S) to price the tiles.' : 'Save your table to price & export tiles.'}
+                  </p>
+                )}
+                <button className="tb-terrain-tool tb-terrain-export-btn" disabled={exportingTiles} onClick={handleExportTiles}>
+                  <Download size={16} />
+                  <span>{exportingTiles ? 'Preparing…' : 'Download printable tiles'}</span>
+                </button>
+              </div>
+
               <p className="tb-small tb-terrain-hint">
-                Drag on the table to sculpt. Cliffs are steep slopes. Placed models don’t rest on
-                hills yet — printable tiles &amp; on-terrain placement are coming next.
+                Drag on the table to sculpt. Cliffs are steep slopes. Tiles are watertight shells —
+                print with normal infill. Placed models don’t rest on hills yet (coming next).
               </p>
             </div>
           )}

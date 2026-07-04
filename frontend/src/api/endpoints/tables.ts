@@ -134,5 +134,35 @@ export const tablesApi = {
       user_email: payload.userEmail
     })
     return mapTable(pickTable(response.data ?? response))
+  },
+
+  // ---- printable terrain tiles ----
+
+  async getTerrainQuote(id: string): Promise<{
+    hasTerrain: boolean
+    tileCount: number
+    tilesX?: number
+    tilesY?: number
+    price: number
+    pricePerTile: number
+  }> {
+    const response = await apiClient.get(`${BASE_URL}/${id}/terrain/quote`)
+    return response.data
+  },
+
+  async downloadTerrainTiles(id: string, userEmail?: string): Promise<void> {
+    const response = await apiClient.get(`${BASE_URL}/${id}/terrain/download`, {
+      params: { user_email: userEmail },
+      responseType: 'blob',
+      timeout: 300000,
+    })
+    const url = window.URL.createObjectURL(response.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'terrain-tiles.zip'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
   }
 }

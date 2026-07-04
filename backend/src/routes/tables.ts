@@ -4,10 +4,64 @@ import crypto from 'crypto'
 import { db } from '../db'
 import logger from '../utils/logger'
 import { validateString } from '../utils/validation'
+import { buildWatermarkHeader, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark'
+import { generateTerrainTiles, quoteTiles, type HeightField, type TileOptions, type TileQuote, type GeneratedTile } from '../services/terrainTiles'
+import type { Archiver } from 'archiver'
 // Using untyped request body locally to avoid cross-package imports during build
+const createArchive: (format: string, options?: any) => Archiver = require('archiver')
 
 const router = express.Router()
 const tablesLogger = logger.child('TABLES')
+
+/** Flat price per generated terrain tile (£). Overridable via env. */
+const TERRAIN_PRICE_PER_TILE = Number(process.env.TERRAIN_PRICE_PER_TILE ?? 1.5)
+
+/** pg returns JSONB parsed, but older rows/mocks may hand back a string. */
+function asObject(v: any): any {
+  return typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return null } })() : v
+}
+
+/** Extract the printable heightmap + physical size from a user_tables row. */
+function terrainFromTable(row: any): { field: HeightField; opts: TileOptions } | null {
+  const layout = asObject(row.layout_data)
+  const hm = layout?.heightmap
+  if (!hm || !Array.isArray(hm.mm) || !hm.cols || !hm.rows) return null
+  const cfg = asObject(row.table_config) ?? {}
+  const tableWidthMm = Number(cfg.width ?? 0) * 1000
+  const tableDepthMm = Number(cfg.height ?? 0) * 1000
+  if (!(tableWidthMm > 0 && tableDepthMm > 0)) return null
+  return {
+    field: { cols: Number(hm.cols), rows: Number(hm.rows), mm: hm.mm.map((n: any) => Number(n) || 0) },
+    opts: { tableWidthMm, tableDepthMm },
+  }
+}
+
+/** A human-readable assembly guide zipped alongside the tiles. */
+function assemblyReadme(q: TileQuote, tiles: GeneratedTile[]): string {
+  const present = new Set(tiles.map((t) => `${t.row},${t.col}`))
+  const grid: string[] = []
+  for (let r = 1; r <= q.tilesY; r++) {
+    grid.push(
+      Array.from({ length: q.tilesX }, (_, c) => (present.has(`${r},${c + 1}`) ? `r${r}c${c + 1}` : '  ·  ')).join('  '),
+    )
+  }
+  return [
+    'Artifact Planner — printable terrain tiles',
+    '==========================================',
+    '',
+    `Tiles: ${tiles.length} (only sculpted areas are printed; "·" = flat/untouched, no tile)`,
+    `Each tile is ~${Math.round(q.tileWidthMm)}mm x ${Math.round(q.tileDepthMm)}mm.`,
+    '',
+    'Printing: these are watertight shells. Slice with your normal settings and',
+    'use infill (e.g. 15% gyroid/honeycomb) — do NOT print 100% solid.',
+    '',
+    'Assembly grid (r = row/back-to-front, c = column/left-to-right):',
+    '',
+    ...grid,
+    '',
+    'Place r1c1 at the back-left; each tile butts flush against its neighbours.',
+  ].join('\n')
+}
 
 // ============================================================================
 // SAVE TABLE LAYOUT
@@ -525,6 +579,86 @@ router.post('/:id/regenerate-token', async (req, res, next) => {
     res.json({ table: result.rows[0] })
   } catch (error) {
     tablesLogger.error('Regenerate token failed', { error, tableId: req.params.id })
+    next(error)
+  }
+})
+
+// ============================================================================
+// TERRAIN TILES — sculpted surface → printable STL tiles
+// ============================================================================
+
+// Price + tile-count quote for a table's sculpted surface (no auth: read-only info).
+router.get('/:id/terrain/quote', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const result = await db.query('SELECT layout_data, table_config FROM user_tables WHERE id = $1', [id])
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Table not found' })
+
+    const terrain = terrainFromTable(result.rows[0])
+    if (!terrain) return res.json({ hasTerrain: false, tileCount: 0, price: 0, pricePerTile: TERRAIN_PRICE_PER_TILE })
+
+    const q = quoteTiles(terrain.field, terrain.opts)
+    res.json({
+      hasTerrain: true,
+      ...q,
+      pricePerTile: TERRAIN_PRICE_PER_TILE,
+      price: Number((q.tileCount * TERRAIN_PRICE_PER_TILE).toFixed(2)),
+    })
+  } catch (error) {
+    tablesLogger.error('Terrain quote failed', { error, tableId: req.params.id })
+    next(error)
+  }
+})
+
+// Generate + stream a ZIP of watermarked, printable terrain tiles.
+// NOTE: currently gated to the table owner (or a public table). The paid-purchase
+// gate for other buyers is Phase 2b.
+router.get('/:id/terrain/download', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { user_email } = req.query as { user_email?: string }
+
+    const result = await db.query('SELECT * FROM user_tables WHERE id = $1', [id])
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Table not found' })
+    const row = result.rows[0]
+    if (!row.is_public && row.user_email !== user_email) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const terrain = terrainFromTable(row)
+    if (!terrain) return res.status(400).json({ error: 'This table has no sculpted terrain to print' })
+
+    const tiles = generateTerrainTiles(terrain.field, terrain.opts)
+    if (tiles.length === 0) return res.status(400).json({ error: 'No printable tiles could be generated' })
+
+    // Watermark: modelId slot carries the map (table) id; buyer = the downloader.
+    let buyerId = WATERMARK_ZERO_ORDER
+    if (user_email) {
+      const u = await db.query('SELECT id FROM users WHERE email = $1', [user_email])
+      if (u.rows.length) buyerId = u.rows[0].id
+    }
+    const payload: WatermarkPayload = { modelId: id, buyerId, orderId: WATERMARK_ZERO_ORDER }
+
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', 'attachment; filename="terrain-tiles.zip"')
+    const archive = createArchive('zip', { zlib: { level: 6 } })
+    archive.on('error', (err: Error) => {
+      tablesLogger.error('Terrain ZIP error', { error: err })
+      res.destroy(err)
+    })
+    archive.pipe(res)
+
+    archive.append(assemblyReadme(quoteTiles(terrain.field, terrain.opts), tiles), { name: 'README.txt' })
+    for (const tile of tiles) {
+      // Stamp the encrypted watermark into the ignored 80-byte STL header.
+      const stamped = Buffer.concat([buildWatermarkHeader(payload), tile.stl.subarray(80)])
+      archive.append(stamped, { name: tile.name })
+    }
+    await archive.finalize()
+
+    tablesLogger.info('Terrain tiles downloaded', { tableId: id, tiles: tiles.length })
+  } catch (error) {
+    tablesLogger.error('Terrain download failed', { error, tableId: req.params.id })
     next(error)
   }
 })

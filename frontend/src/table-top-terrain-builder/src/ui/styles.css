@@ -682,3 +682,15 @@
 }
 .tb-terrain-reset:hover { background: rgba(60, 16, 16, 0.8); }
 .tb-terrain-hint { line-height: 1.4; }
+
+.tb-terrain-export {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tb-border);
+}
+.tb-terrain-export-head { font-size: 12px; font-weight: 600; color: var(--tb-text); }
+.tb-terrain-sub { color: var(--tb-muted); }
+.tb-terrain-export-btn { justify-content: center; }
+.tb-terrain-export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
