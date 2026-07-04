@@ -1,6 +1,6 @@
 // Quick manifold/watertightness check for the terrain tile generator.
 // Run: npx ts-node -r ts-node/register/transpile-only scripts/test-terrain-tiles.ts
-import { generateTerrainTiles, quoteTiles, HeightField } from '../src/services/terrainTiles'
+import { generateTerrainTiles, quoteTiles, HeightField, connectorPlan } from '../src/services/terrainTiles'
 
 function makeField(cols: number, rows: number, fn: (i: number, j: number) => number): HeightField {
   const mm: number[] = []
@@ -91,6 +91,34 @@ const hasConnectors = maxTris > minTris
 console.log(`\ntriangle range across tiles: ${minTris}..${maxTris}`)
 console.log(`${hasConnectors ? 'PASS' : 'FAIL'}  connectors add geometry (interior tiles heavier than edge tiles)`)
 allOk = hasConnectors && allOk
+
+// 3) Seam complementarity: the two edges of a shared seam must pick the SAME
+//    segments with OPPOSITE kinds, and alternate peg/hole within an edge.
+let seamOk = true
+for (let n = 2; n <= 12; n++) {
+  const east = connectorPlan(n, { connect: true, primary: 'peg' })
+  const west = connectorPlan(n, { connect: true, primary: 'hole' })
+  const ek = [...east.keys()].sort((a, b) => a - b)
+  const wk = [...west.keys()].sort((a, b) => a - b)
+  const sameSegs = ek.length === wk.length && ek.every((s, i) => s === wk[i])
+  const complementary = ek.every((s) => east.get(s) !== west.get(s))
+  // alternate within the east edge
+  let alt = true
+  for (let i = 1; i < ek.length; i++) if (east.get(ek[i]) === east.get(ek[i - 1])) alt = false
+  // no two connectors on adjacent segments (need a wall gap)
+  let gaps = true
+  for (let i = 1; i < ek.length; i++) if (ek[i] - ek[i - 1] < 2) gaps = false
+  const ok = sameSegs && complementary && alt && gaps
+  if (!ok) {
+    console.log(`FAIL  n=${n}: east=${ek.map((s) => `${s}:${east.get(s)}`).join(',')} west=${wk.map((s) => `${s}:${west.get(s)}`).join(',')}`)
+  }
+  seamOk = ok && seamOk
+}
+console.log(`${seamOk ? 'PASS' : 'FAIL'}  seams are complementary (peg↔hole), alternating, gap-separated`)
+allOk = seamOk && allOk
+// Show one example.
+const ex = connectorPlan(9, { connect: true, primary: 'peg' })
+console.log(`example n=9 east edge: ${[...ex.entries()].sort((a, b) => a[0] - b[0]).map(([s, k]) => `${s}:${k}`).join('  ')}`)
 
 console.log(`\n${allOk ? '✅ ALL CHECKS PASSED (watertight WITH connectors)' : '❌ SOME CHECKS FAILED'}`)
 process.exit(allOk ? 0 : 1)

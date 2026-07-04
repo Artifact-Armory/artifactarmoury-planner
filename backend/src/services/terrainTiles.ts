@@ -171,15 +171,18 @@ class STLBuilder {
 
 // ---- interlocking connectors ("lego"-style pegs + sockets) -----------------
 //
-// A tile gets a peg on its East + North walls and a matching socket on its West +
-// South walls, so a peg always meets a neighbour's socket along a shared seam. The
-// connectors live in a flat lower "band" of the wall (below the sculpted relief),
-// centred on an interior segment of the edge, so they can't fall on a corner. Peg
-// tips are inset by a clearance and slightly shallower than the socket, so they
-// physically slot together with a printable tolerance.
+// Each seam gets an ALTERNATING run of pegs and sockets (peg, hole, peg, hole…)
+// so every peg on one tile lands next to a socket on the same tile — a strong,
+// self-locating joint. The two edges of a shared seam are complementary: East/
+// North edges start with a peg on even slots, West/South start with a socket, so
+// at every slot a peg meets a hole. Connectors live in a flat lower "band" of the
+// wall (below the sculpted relief), on interior segments only (never a corner).
+// Peg tips are inset by a clearance and slightly shallower than the socket, so
+// they physically slot together with a printable tolerance.
 
-type ConnKind = 'peg' | 'hole' | null
-interface Connectors { south: ConnKind; north: ConnKind; west: ConnKind; east: ConnKind }
+export type ConnKind = 'peg' | 'hole'
+export interface EdgeSpec { connect: boolean; primary: ConnKind }
+interface Connectors { south: EdgeSpec; north: EdgeSpec; west: EdgeSpec; east: EdgeSpec }
 
 const CONN = {
   bandTopMm: 7,      // height of the flat lower wall band the connectors live in
@@ -188,7 +191,28 @@ const CONN = {
   pegDepthMm: 3.5,   // how far a peg sticks out
   holeDepthMm: 4.0,  // socket depth (deeper than peg → bottoming clearance)
   clearanceMm: 0.4,  // peg tip inset all round → fits the nominal socket
-  minSegments: 3,    // only add a connector on edges with >= this many segments
+  maxPerEdge: 4,     // up to this many connectors per edge (peg/hole/peg/hole)
+}
+
+const opposite = (k: ConnKind): ConnKind => (k === 'peg' ? 'hole' : 'peg')
+
+/**
+ * Which segments of an edge carry a connector, and its kind — alternating from the
+ * edge's `primary` type. Deterministic from the segment count, so the two edges of
+ * a shared seam (same length) pick the same segments with complementary kinds.
+ */
+export function connectorPlan(n: number, spec: EdgeSpec): Map<number, ConnKind> {
+  const plan = new Map<number, ConnKind>()
+  const interior = n - 2 // usable segments 1..n-2 (keep connectors off the corners)
+  if (!spec.connect || interior < 1) return plan
+  const maxFit = Math.floor((interior + 1) / 2) // every-other placement leaves a gap
+  const count = Math.min(CONN.maxPerEdge, maxFit)
+  const span = 2 * count - 1
+  const start = 1 + Math.floor((interior - span) / 2) // centre the run on the edge
+  for (let i = 0; i < count; i++) {
+    plan.set(start + 2 * i, i % 2 === 0 ? spec.primary : opposite(spec.primary))
+  }
+  return plan
 }
 
 const vadd = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
@@ -235,14 +259,14 @@ function buildEdge(
   b: STLBuilder,
   pts: Array<{ xy: [number, number]; tz: number }>,
   outward: V3,
-  kind: ConnKind,
+  spec: EdgeSpec,
   base: number,
 ) {
   const n = pts.length - 1
   const { bandTopMm: BAND, z0: CZ0, z1: CZ1 } = CONN
   const p = (k: number, z: number): V3 => [pts[k].xy[0], pts[k].xy[1], z]
   const tp = (k: number): V3 => [pts[k].xy[0], pts[k].xy[1], pts[k].tz]
-  const connSeg = kind && n >= CONN.minSegments ? Math.floor((n - 1) / 2) : -1
+  const plan = connectorPlan(n, spec)
 
   for (let k = 0; k < n; k++) {
     // Sculpted skirt: connector band top up to the terrain surface.
@@ -250,7 +274,8 @@ function buildEdge(
     // Lower band, split into z-strips so connector edges line up everywhere.
     b.quad(p(k, 0), p(k + 1, 0), p(k + 1, CZ0), p(k, CZ0), outward)          // below connector
     b.quad(p(k, CZ1), p(k + 1, CZ1), p(k + 1, BAND), p(k, BAND), outward)    // above connector
-    if (k === connSeg && kind) {
+    const kind = plan.get(k)
+    if (kind) {
       // Opening in the wall + the peg/socket box.
       addConnectorBox(b, [p(k, CZ0), p(k + 1, CZ0), p(k + 1, CZ1), p(k, CZ1)], outward, kind)
     } else {
@@ -315,13 +340,14 @@ export function generateTerrainTiles(field: HeightField, options: TileOptions): 
   const has = (row: number, col: number) => present.has(`${row},${col}`)
 
   return cells.map((c) => {
-    // Peg where a neighbour sits to the East/North; socket to the West/South — so
-    // every peg meets a socket and adjacent tiles pull together.
+    // Alternating peg/hole runs on any shared seam. East/North start with a peg,
+    // West/South with a socket, so a seam's two edges are complementary and every
+    // peg lands opposite a socket.
     const conn: Connectors = {
-      east: has(c.row, c.col + 1) ? 'peg' : null,
-      west: has(c.row, c.col - 1) ? 'hole' : null,
-      north: has(c.row + 1, c.col) ? 'peg' : null,
-      south: has(c.row - 1, c.col) ? 'hole' : null,
+      east: { connect: has(c.row, c.col + 1), primary: 'peg' },
+      west: { connect: has(c.row, c.col - 1), primary: 'hole' },
+      north: { connect: has(c.row + 1, c.col), primary: 'peg' },
+      south: { connect: has(c.row - 1, c.col), primary: 'hole' },
     }
     return {
       name: `tile_r${c.row}_c${c.col}.stl`,
