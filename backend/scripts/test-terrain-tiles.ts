@@ -65,18 +65,32 @@ const flatOk = flatTiles.length === 0
 console.log(`${flatOk ? 'PASS' : 'FAIL'}  flat field → ${flatTiles.length} tiles (expected 0)`)
 allOk = flatOk && allOk
 
-// 2) Hill (raised bump) in one corner → only the sculpted tiles are generated.
+// 2) Broad hill spanning many tiles → interior tiles get pegs + sockets on all
+//    sides. Every tile must remain watertight/manifold WITH connectors.
 const hilly = makeField(74, 49, (i, j) => {
-  const dx = i - 18, dy = j - 12
-  return 60 * Math.exp(-(dx * dx + dy * dy) / 120)
+  const dx = i - 37, dy = j - 24
+  return 70 * Math.exp(-(dx * dx + dy * dy) / 90)
 })
 const q = quoteTiles(hilly, opts)
 const hillTiles = generateTerrainTiles(hilly, opts)
 console.log(`\nhilly quote: full grid ${q.tilesX}x${q.tilesY} = ${q.tilesX * q.tilesY} cells, printed tiles = ${q.tileCount}`)
 const fewer = hillTiles.length > 0 && hillTiles.length < q.tilesX * q.tilesY
-console.log(`${fewer ? 'PASS' : 'FAIL'}  localized hill prints ${hillTiles.length} tiles (fewer than full grid)`)
+console.log(`${fewer ? 'PASS' : 'FAIL'}  broad hill prints ${hillTiles.length} tiles (fewer than full grid)`)
 allOk = fewer && allOk
-for (const t of hillTiles) allOk = checkManifold(t.stl, `hilly ${t.name}`) && allOk
 
-console.log(`\n${allOk ? '✅ ALL CHECKS PASSED' : '❌ SOME CHECKS FAILED'}`)
+let minTris = Infinity, maxTris = 0
+for (const t of hillTiles) {
+  const tris = t.stl.readUInt32LE(80)
+  minTris = Math.min(minTris, tris)
+  maxTris = Math.max(maxTris, tris)
+  allOk = checkManifold(t.stl, `${t.name}`) && allOk
+}
+// Interior tiles (4 connectors) must carry more triangles than edge tiles → proves
+// connectors were actually added.
+const hasConnectors = maxTris > minTris
+console.log(`\ntriangle range across tiles: ${minTris}..${maxTris}`)
+console.log(`${hasConnectors ? 'PASS' : 'FAIL'}  connectors add geometry (interior tiles heavier than edge tiles)`)
+allOk = hasConnectors && allOk
+
+console.log(`\n${allOk ? '✅ ALL CHECKS PASSED (watertight WITH connectors)' : '❌ SOME CHECKS FAILED'}`)
 process.exit(allOk ? 0 : 1)

@@ -55,11 +55,14 @@ function assemblyReadme(q: TileQuote, tiles: GeneratedTile[]): string {
     'Printing: these are watertight shells. Slice with your normal settings and',
     'use infill (e.g. 15% gyroid/honeycomb) — do NOT print 100% solid.',
     '',
+    'Each tile has interlocking pegs (East/North sides) and matching sockets',
+    '(West/South) near the base, so neighbours click together like brick studs.',
+    '',
     'Assembly grid (r = row/back-to-front, c = column/left-to-right):',
     '',
     ...grid,
     '',
-    'Place r1c1 at the back-left; each tile butts flush against its neighbours.',
+    'Place r1c1 at the back-left; push each tile\'s pegs into its neighbour\'s sockets.',
   ].join('\n')
 }
 

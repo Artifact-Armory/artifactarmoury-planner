@@ -46,7 +46,7 @@ export interface GeneratedTile {
 }
 
 const DEFAULT_BED_MM = 200
-const DEFAULT_BASE_MM = 3
+const DEFAULT_BASE_MM = 8 // tall enough to hold the interlocking connector band
 /** A tile with no point rising more than this above the map floor is untouched → skipped. */
 const RELIEF_EPS_MM = 0.5
 
@@ -169,6 +169,96 @@ class STLBuilder {
   }
 }
 
+// ---- interlocking connectors ("lego"-style pegs + sockets) -----------------
+//
+// A tile gets a peg on its East + North walls and a matching socket on its West +
+// South walls, so a peg always meets a neighbour's socket along a shared seam. The
+// connectors live in a flat lower "band" of the wall (below the sculpted relief),
+// centred on an interior segment of the edge, so they can't fall on a corner. Peg
+// tips are inset by a clearance and slightly shallower than the socket, so they
+// physically slot together with a printable tolerance.
+
+type ConnKind = 'peg' | 'hole' | null
+interface Connectors { south: ConnKind; north: ConnKind; west: ConnKind; east: ConnKind }
+
+const CONN = {
+  bandTopMm: 7,      // height of the flat lower wall band the connectors live in
+  z0: 2,             // connector bottom
+  z1: 6,             // connector top
+  pegDepthMm: 3.5,   // how far a peg sticks out
+  holeDepthMm: 4.0,  // socket depth (deeper than peg → bottoming clearance)
+  clearanceMm: 0.4,  // peg tip inset all round → fits the nominal socket
+  minSegments: 3,    // only add a connector on edges with >= this many segments
+}
+
+const vadd = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+const vsub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+const vscale = (a: V3, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s]
+const vnorm = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l] }
+const vavg = (pts: V3[]): V3 => vscale(pts.reduce((p, q) => vadd(p, q), [0, 0, 0] as V3), 1 / pts.length)
+
+/** A peg (protruding) or socket (recessed) box attached to a rectangular wall opening. */
+function addConnectorBox(b: STLBuilder, opening: [V3, V3, V3, V3], outward: V3, kind: 'peg' | 'hole') {
+  const peg = kind === 'peg'
+  const off = vscale(outward, peg ? CONN.pegDepthMm : -CONN.holeDepthMm)
+  let cap: V3[] = opening.map((o) => vadd(o, off))
+  if (peg) {
+    // Inset the tip toward the opening centre so it's smaller than the socket.
+    const u = vnorm(vsub(opening[1], opening[0])) // along the edge
+    const z: V3 = [0, 0, 1]
+    const c = CONN.clearanceMm
+    cap = [
+      vadd(cap[0], vadd(vscale(u, +c), vscale(z, +c))),
+      vadd(cap[1], vadd(vscale(u, -c), vscale(z, +c))),
+      vadd(cap[2], vadd(vscale(u, -c), vscale(z, -c))),
+      vadd(cap[3], vadd(vscale(u, +c), vscale(z, -c))),
+    ]
+  }
+  const centroid = vavg([...opening, ...cap])
+  const faces: Array<[V3, V3, V3, V3]> = [
+    [opening[0], opening[1], cap[1], cap[0]],
+    [opening[1], opening[2], cap[2], cap[1]],
+    [opening[2], opening[3], cap[3], cap[2]],
+    [opening[3], opening[0], cap[0], cap[3]],
+    [cap[0], cap[1], cap[2], cap[3]], // end cap / socket floor
+  ]
+  for (const f of faces) {
+    const fc = vavg(f)
+    // Peg faces point away from the box; socket faces point into the cavity.
+    const out = peg ? vsub(fc, centroid) : vsub(centroid, fc)
+    b.quad(f[0], f[1], f[2], f[3], vnorm(out))
+  }
+}
+
+/** One perimeter wall: sculpted skirt on top, flat connector band below. */
+function buildEdge(
+  b: STLBuilder,
+  pts: Array<{ xy: [number, number]; tz: number }>,
+  outward: V3,
+  kind: ConnKind,
+  base: number,
+) {
+  const n = pts.length - 1
+  const { bandTopMm: BAND, z0: CZ0, z1: CZ1 } = CONN
+  const p = (k: number, z: number): V3 => [pts[k].xy[0], pts[k].xy[1], z]
+  const tp = (k: number): V3 => [pts[k].xy[0], pts[k].xy[1], pts[k].tz]
+  const connSeg = kind && n >= CONN.minSegments ? Math.floor((n - 1) / 2) : -1
+
+  for (let k = 0; k < n; k++) {
+    // Sculpted skirt: connector band top up to the terrain surface.
+    b.quad(p(k, BAND), p(k + 1, BAND), tp(k + 1), tp(k), outward)
+    // Lower band, split into z-strips so connector edges line up everywhere.
+    b.quad(p(k, 0), p(k + 1, 0), p(k + 1, CZ0), p(k, CZ0), outward)          // below connector
+    b.quad(p(k, CZ1), p(k + 1, CZ1), p(k + 1, BAND), p(k, BAND), outward)    // above connector
+    if (k === connSeg && kind) {
+      // Opening in the wall + the peg/socket box.
+      addConnectorBox(b, [p(k, CZ0), p(k + 1, CZ0), p(k + 1, CZ1), p(k, CZ1)], outward, kind)
+    } else {
+      b.quad(p(k, CZ0), p(k + 1, CZ0), p(k + 1, CZ1), p(k, CZ1), outward)    // plain middle
+    }
+  }
+}
+
 /**
  * Build one printable tile covering vertex indices [ix0..ix1] × [iy0..iy1] of the
  * global field. `minMm` is the map-wide minimum height so all tiles share a floor.
@@ -178,42 +268,39 @@ function buildTile(
   ix0: number, ix1: number, iy0: number, iy1: number,
   spacingXmm: number, spacingYmm: number,
   minMm: number, baseMm: number,
+  conn: Connectors,
 ): Buffer {
   const b = new STLBuilder()
-  const ni = ix1 - ix0 + 1
-  const nj = iy1 - iy0 + 1
+  const base = Math.max(baseMm, CONN.bandTopMm + 1)
+  const cols = field.cols
 
-  // Local vertex positions (tile placed at its own origin for easy slicing).
-  const topZ = (i: number, j: number) => baseMm + (field.mm[j * field.cols + i] - minMm)
+  const topZ = (i: number, j: number) => base + (field.mm[j * cols + i] - minMm)
   const lx = (i: number) => (i - ix0) * spacingXmm
   const ly = (j: number) => (j - iy0) * spacingYmm
 
   const top = (i: number, j: number): V3 => [lx(i), ly(j), topZ(i, j)]
   const bot = (i: number, j: number): V3 => [lx(i), ly(j), 0]
-
   const UP: V3 = [0, 0, 1], DOWN: V3 = [0, 0, -1]
-  const PX: V3 = [1, 0, 0], NX: V3 = [-1, 0, 0], PY: V3 = [0, 1, 0], NY: V3 = [0, -1, 0]
 
   for (let j = iy0; j < iy1; j++) {
     for (let i = ix0; i < ix1; i++) {
-      // Top surface (up).
-      b.quad(top(i, j), top(i + 1, j), top(i + 1, j + 1), top(i, j + 1), UP)
-      // Flat bottom (down).
-      b.quad(bot(i, j), bot(i + 1, j), bot(i + 1, j + 1), bot(i, j + 1), DOWN)
+      b.quad(top(i, j), top(i + 1, j), top(i + 1, j + 1), top(i, j + 1), UP)   // sculpted top
+      b.quad(bot(i, j), bot(i + 1, j), bot(i + 1, j + 1), bot(i, j + 1), DOWN) // flat bottom
     }
   }
 
-  // Perimeter walls (top edge down to the flat base).
-  for (let i = ix0; i < ix1; i++) {
-    b.quad(top(i, iy0), top(i + 1, iy0), bot(i + 1, iy0), bot(i, iy0), NY)          // south
-    b.quad(top(i, iy1), top(i + 1, iy1), bot(i + 1, iy1), bot(i, iy1), PY)          // north
-  }
-  for (let j = iy0; j < iy1; j++) {
-    b.quad(top(ix0, j), top(ix0, j + 1), bot(ix0, j + 1), bot(ix0, j), NX)          // west
-    b.quad(top(ix1, j), top(ix1, j + 1), bot(ix1, j + 1), bot(ix1, j), PX)          // east
-  }
+  const rowX = (jy: number) => Array.from({ length: ix1 - ix0 + 1 }, (_, k) => ({
+    xy: [lx(ix0 + k), ly(jy)] as [number, number], tz: topZ(ix0 + k, jy),
+  }))
+  const colY = (ix: number) => Array.from({ length: iy1 - iy0 + 1 }, (_, k) => ({
+    xy: [lx(ix), ly(iy0 + k)] as [number, number], tz: topZ(ix, iy0 + k),
+  }))
 
-  void ni; void nj
+  buildEdge(b, rowX(iy0), [0, -1, 0], conn.south, base) // south (min Y)
+  buildEdge(b, rowX(iy1), [0, 1, 0], conn.north, base)  // north (max Y)
+  buildEdge(b, colY(ix0), [-1, 0, 0], conn.west, base)  // west  (min X)
+  buildEdge(b, colY(ix1), [1, 0, 0], conn.east, base)   // east  (max X)
+
   return b.toBuffer()
 }
 
@@ -224,10 +311,23 @@ export function generateTerrainTiles(field: HeightField, options: TileOptions): 
   const spacingYmm = options.tableDepthMm / (field.rows - 1)
 
   const { cells, minMm } = enumerateTiles(field, options)
-  return cells.map((c) => ({
-    name: `tile_r${c.row}_c${c.col}.stl`,
-    stl: buildTile(field, c.ix0, c.ix1, c.iy0, c.iy1, spacingXmm, spacingYmm, minMm, baseThicknessMm),
-    col: c.col,
-    row: c.row,
-  }))
+  const present = new Set(cells.map((c) => `${c.row},${c.col}`))
+  const has = (row: number, col: number) => present.has(`${row},${col}`)
+
+  return cells.map((c) => {
+    // Peg where a neighbour sits to the East/North; socket to the West/South — so
+    // every peg meets a socket and adjacent tiles pull together.
+    const conn: Connectors = {
+      east: has(c.row, c.col + 1) ? 'peg' : null,
+      west: has(c.row, c.col - 1) ? 'hole' : null,
+      north: has(c.row + 1, c.col) ? 'peg' : null,
+      south: has(c.row - 1, c.col) ? 'hole' : null,
+    }
+    return {
+      name: `tile_r${c.row}_c${c.col}.stl`,
+      stl: buildTile(field, c.ix0, c.ix1, c.iy0, c.iy1, spacingXmm, spacingYmm, minMm, baseThicknessMm, conn),
+      col: c.col,
+      row: c.row,
+    }
+  })
 }
