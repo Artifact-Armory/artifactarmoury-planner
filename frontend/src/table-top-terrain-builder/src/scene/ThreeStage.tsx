@@ -17,7 +17,7 @@ import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnits, levelToY,
 } from '@core/elevation'
 import { buildTableMaterial } from '@core/tableMaterials'
-import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable } from '@core/heightmap'
+import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight } from '@core/heightmap'
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
@@ -109,6 +109,12 @@ export function ThreeStage() {
       maxDistance: 20,
     })
 
+    // Terrain height (m) at a world (x,z) so placed pieces / the ghost ride the surface.
+    const terrainHeightAt = (x: number, z: number) => {
+      const s = store()
+      return sampleHeight(s.heightmap, s.table, x, z)
+    }
+
     // ---- instanced placed pieces ----
     const inst = new InstancedScene(() => {
       // a template finished loading — re-sync from current store
@@ -117,6 +123,7 @@ export function ThreeStage() {
       inst.setSelection(new Set(s.selectedInstanceIds))
       requestRender()
     })
+    inst.setHeightSampler(terrainHeightAt)
     scene.add(inst.group)
 
     // ---- ghost ----
@@ -362,7 +369,7 @@ export function ThreeStage() {
       const auto = surfaceTop(store().instances, assetMap(), t, cells)
       eng.lastAutoLevel = auto
       const base = eng.levelOverride != null ? eng.levelOverride : auto
-      const y = levelToY(base)
+      const y = levelToY(base) + terrainHeightAt(x, z)
 
       ghost.setTransform(x, z, eng.ghostRot, y)
       const valid = validAtLevel(asset, x, z, eng.ghostRot, base, new Set())
@@ -723,6 +730,7 @@ export function ThreeStage() {
       }
       if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap) {
         syncTerrain()
+        inst.refreshTransforms() // pieces ride the sculpted surface
       }
       if (s.terrainTool !== prev.terrainTool) {
         // Entering/leaving sculpt mode: hide the brush ring + set the cursor.

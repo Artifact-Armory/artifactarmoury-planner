@@ -48,10 +48,22 @@ export class InstancedScene {
   private hoverOutline: THREE.LineSegments | null = null
 
   private onNeedsTemplate: () => void
+  /** Terrain height (m) at a world (x,z) — set by the stage so pieces ride the surface. */
+  private heightAt: (x: number, z: number) => number = () => 0
 
   constructor(onNeedsTemplate: () => void) {
     this.onNeedsTemplate = onNeedsTemplate
     this.group.add(this.outlineGroup)
+  }
+
+  /** Provide a terrain-height sampler; call refreshTransforms() after a change. */
+  setHeightSampler(fn: (x: number, z: number) => number) {
+    this.heightAt = fn
+  }
+
+  /** Recompute instance matrices + outlines (e.g. after the terrain was sculpted). */
+  refreshTransforms() {
+    this.rebuildMatricesAndOutlines()
   }
 
   /** Structural sync: (re)build instanced meshes from the current instance set. */
@@ -115,7 +127,7 @@ export class InstancedScene {
       const z = t ? t.z : inst.position.z
       const a = asset.aabb ?? { x: 0.1, y: 0.1, z: 0.1 }
       const r = Math.max(a.x, a.z) / 2
-      const baseY = levelToY(inst.level ?? 0)
+      const baseY = levelToY(inst.level ?? 0) + this.heightAt(x, z)
       box.expandByPoint(new THREE.Vector3(x - r, baseY, z - r))
       box.expandByPoint(new THREE.Vector3(x + r, baseY + a.y, z + r))
     }
@@ -222,7 +234,7 @@ export class InstancedScene {
       tmpQuatPitch.setFromAxisAngle(tmpXAxis, THREE.MathUtils.degToRad(pitchDeg))
       tmpQuat.multiply(tmpQuatPitch)
     }
-    tmpPos.set(x, levelToY(inst.level ?? 0) + lift, z)
+    tmpPos.set(x, levelToY(inst.level ?? 0) + lift + this.heightAt(x, z), z)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
   }
@@ -324,7 +336,7 @@ export class InstancedScene {
     const x = t ? t.x : inst.position.x
     const z = t ? t.z : inst.position.z
     const rotDeg = t ? t.rotDeg : inst.rotationDeg
-    line.position.set(x, levelToY(inst.level ?? 0) + a.y / 2 + lift, z)
+    line.position.set(x, levelToY(inst.level ?? 0) + a.y / 2 + lift + this.heightAt(x, z), z)
     line.rotation.y = THREE.MathUtils.degToRad(rotDeg)
   }
 }

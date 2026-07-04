@@ -61,6 +61,29 @@ function vertZ(j: number, rows: number, table: Table) {
   return -table.height / 2 + (j / (rows - 1)) * table.height
 }
 
+/**
+ * Surface height (metres, 0 = table level) at an arbitrary world (x, z), bilinearly
+ * interpolated from the field. Used to sit placed models on the sculpted terrain.
+ */
+export function sampleHeight(hm: Heightmap | null | undefined, table: Table, x: number, z: number): number {
+  if (!hm || !hm.heights.length) return 0
+  const { cols, rows, heights } = hm
+  const gx = ((x + table.width / 2) / table.width) * (cols - 1)
+  const gz = ((z + table.height / 2) / table.height) * (rows - 1)
+  const i0 = Math.floor(gx), j0 = Math.floor(gz)
+  const ci0 = Math.max(0, Math.min(cols - 1, i0))
+  const cj0 = Math.max(0, Math.min(rows - 1, j0))
+  const ci1 = Math.min(cols - 1, ci0 + 1)
+  const cj1 = Math.min(rows - 1, cj0 + 1)
+  const fx = Math.max(0, Math.min(1, gx - i0))
+  const fz = Math.max(0, Math.min(1, gz - j0))
+  const h00 = heights[cj0 * cols + ci0], h10 = heights[cj0 * cols + ci1]
+  const h01 = heights[cj1 * cols + ci0], h11 = heights[cj1 * cols + ci1]
+  const a = h00 + (h10 - h00) * fx
+  const b = h01 + (h11 - h01) * fx
+  return a + (b - a) * fz
+}
+
 /** Build a fresh terrain mesh geometry from the height field. */
 export function buildTerrainGeometry(hm: Heightmap, table: Table): THREE.BufferGeometry {
   const { cols, rows } = hm
