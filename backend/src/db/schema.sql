@@ -234,6 +234,32 @@ CREATE INDEX idx_tables_share_code ON tables(share_code);
 CREATE INDEX idx_tables_public ON tables(is_public) WHERE is_public = true;
 
 -- ============================================================================
+-- USER TABLES (planner saves — used by routes/tables.ts at /api/tables)
+-- Email-based ownership; separate from the legacy `tables` table above.
+-- ============================================================================
+
+CREATE TABLE user_tables (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_email VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    table_config JSONB NOT NULL,
+    layout_data JSONB NOT NULL,
+    share_token VARCHAR(64) UNIQUE,
+    is_public BOOLEAN DEFAULT false,
+    is_artist_display BOOLEAN DEFAULT false,
+    view_count INTEGER DEFAULT 0,
+    clone_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_user_tables_email ON user_tables(user_email);
+CREATE INDEX idx_user_tables_share ON user_tables(share_token);
+CREATE INDEX idx_user_tables_public ON user_tables(is_public) WHERE is_public = true;
+CREATE INDEX idx_user_tables_artist_display ON user_tables(is_artist_display) WHERE is_artist_display = true;
+
+-- ============================================================================
 -- ORDERS
 -- ============================================================================
 

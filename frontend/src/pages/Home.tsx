@@ -30,7 +30,7 @@ const Home: React.FC = () => {
     <div className="mx-auto max-w-7xl px-4 py-10">
       <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-500 px-6 py-16 text-white shadow-lg sm:px-12">
         <div className="max-w-3xl">
-          <p className="text-sm uppercase tracking-widest text-indigo-200">Artifact Armoury</p>
+          <p className="text-sm uppercase tracking-widest text-indigo-200">Artifact Planner</p>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">Build immersive tabletop worlds with premium terrain</h1>
           <p className="mt-4 text-indigo-100">
             Discover artisan-crafted 3D models for your next campaign, customize layouts, and print with professional
@@ -59,22 +59,26 @@ const Home: React.FC = () => {
         </div>
       </section>
 
-      <section className="mt-10 overflow-hidden rounded-2xl bg-gray-900 px-6 py-10 sm:px-12">
-        <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="max-w-xl">
-            <h2 className="text-xl font-bold text-white sm:text-2xl">Plan your battlefield in 3D</h2>
-            <p className="mt-2 text-sm text-gray-400">
-              Drag and drop terrain models onto a virtual table, visualise your setup, and add everything you need
-              straight to your basket — no account required to start building.
-            </p>
+      <section className="mt-10 grid gap-5 sm:grid-cols-3">
+        {[
+          {
+            title: 'Design in 3D',
+            body: 'Sculpt hills, trenches and rivers, then drag artist-made terrain onto a virtual table — no account needed to start.',
+          },
+          {
+            title: 'Buy once, print forever',
+            body: 'Purchase an STL a single time and print as many copies as you like. No per-print fees, ever.',
+          },
+          {
+            title: 'Made by real artists',
+            body: 'Every model is uploaded by an independent creator, watermarked to protect their work, and ready to print.',
+          },
+        ].map((f) => (
+          <div key={f.title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+            <h3 className="text-base font-semibold text-gray-900">{f.title}</h3>
+            <p className="mt-2 text-sm text-gray-600">{f.body}</p>
           </div>
-          <Link
-            to="/planner"
-            className="shrink-0 inline-flex items-center justify-center rounded-md bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-indigo-500"
-          >
-            Open Table Builder →
-          </Link>
-        </div>
+        ))}
       </section>
 
       {categories?.length ? (

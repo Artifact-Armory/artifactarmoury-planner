@@ -4,7 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
+  Mountain, ArrowUp, ArrowDown, Waves, Square,
 } from 'lucide-react'
+import type { TerrainTool } from '@core/heightmap'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
 import { useCartStore } from '@/store/cartStore'
@@ -76,6 +78,15 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const importLayout = useAppStore((s) => s.actions.importLayout)
   const applyLayout = useAppStore((s) => s.actions.applyLayout)
 
+  // Terrain sculpting
+  const terrainTool = useAppStore((s) => s.terrainTool)
+  const brushRadius = useAppStore((s) => s.brushRadius)
+  const brushStrength = useAppStore((s) => s.brushStrength)
+  const setTerrainTool = useAppStore((s) => s.setTerrainTool)
+  const setBrush = useAppStore((s) => s.setBrush)
+  const resetTerrain = useAppStore((s) => s.actions.resetTerrain)
+  const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
+
   const [query, setQuery] = React.useState('')
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
@@ -123,8 +134,20 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   }, [assets.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load a server-saved table (own id or a shared token) into the planner.
+  // Re-runs when the signed-in user changes so swapping accounts never leaves the
+  // previous user's layout on the table.
   React.useEffect(() => {
-    if (!tableId && !shareToken) return
+    // Scratch mode (/planner): start from a clean table. This also clears a
+    // previously-loaded table when navigating /planner/t/:id → /planner, and
+    // resets the layout when a different user signs in.
+    if (!tableId && !shareToken) {
+      clearInstances()
+      useAppStore.getState().actions.resetTerrain()
+      setSavedTableId(null)
+      setSavedTableName(null)
+      setIsOwner(false)
+      return
+    }
     let cancelled = false
     ;(async () => {
       try {
@@ -132,8 +155,8 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
           ? await tablesApi.getSharedTable(shareToken)
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
-        const { table, tableMaterial, instances } = deserializeLayout(t.tableConfig, t.layoutData)
-        applyLayout({ table, tableMaterial, instances })
+        const { table, tableMaterial, instances, heightmap } = deserializeLayout(t.tableConfig, t.layoutData)
+        applyLayout({ table, tableMaterial, instances, heightmap })
         setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
         if (!shareToken) {
           setSavedTableId(t.id)
@@ -145,7 +168,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
       }
     })()
     return () => { cancelled = true }
-  }, [tableId, shareToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tableId, shareToken, user?.email]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // global UI keys (scene keys are handled inside ThreeStage)
   React.useEffect(() => {
@@ -289,7 +312,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
     if (saving) return
 
     const s = useAppStore.getState()
-    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances)
+    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, s.heightmap)
     const email = user.email
 
     setSaving(true)
@@ -422,6 +445,19 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
             <button className="tb-icon" title="Fit view (F)" onClick={() => fitView()}>
               <Maximize2 size={18} />
             </button>
+            <div className="tb-sep" />
+            <button
+              className={`tb-icon ${terrainPanelOpen || terrainTool !== 'none' ? 'is-active' : ''}`}
+              title="Sculpt the terrain (hills, cliffs, rivers, trenches)"
+              onClick={() => {
+                const open = !terrainPanelOpen
+                setTerrainPanelOpen(open)
+                if (open) setSelectedAsset(null)
+                else setTerrainTool('none')
+              }}
+            >
+              <Mountain size={18} />
+            </button>
             {selectedInstanceIds.length > 0 && (
               <>
                 <div className="tb-sep" />
@@ -456,6 +492,58 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
               <HelpCircle size={18} />
             </button>
           </div>
+
+          {/* Terrain sculpting panel */}
+          {terrainPanelOpen && (
+            <div className="tb-terrain">
+              <div className="tb-terrain-head">
+                <span><Mountain size={14} /> Terrain sculpt</span>
+                <button
+                  className="tb-icon"
+                  title="Close terrain tools"
+                  onClick={() => { setTerrainPanelOpen(false); setTerrainTool('none') }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="tb-terrain-tools">
+                {([
+                  { tool: 'raise', label: 'Raise', icon: <ArrowUp size={16} /> },
+                  { tool: 'lower', label: 'Lower', icon: <ArrowDown size={16} /> },
+                  { tool: 'smooth', label: 'Smooth', icon: <Waves size={16} /> },
+                  { tool: 'flatten', label: 'Flatten', icon: <Square size={16} /> },
+                ] as Array<{ tool: TerrainTool; label: string; icon: React.ReactNode }>).map((t) => (
+                  <button
+                    key={t.tool}
+                    className={`tb-terrain-tool ${terrainTool === t.tool ? 'is-active' : ''}`}
+                    onClick={() => setTerrainTool(terrainTool === t.tool ? 'none' : t.tool)}
+                  >
+                    {t.icon}<span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="tb-terrain-row">
+                <span>Brush size</span>
+                <input type="range" min={0.03} max={0.4} step={0.01} value={brushRadius}
+                  onChange={(e) => setBrush({ radius: parseFloat(e.target.value) })} />
+              </label>
+              <label className="tb-terrain-row">
+                <span>Strength</span>
+                <input type="range" min={0.05} max={1} step={0.05} value={brushStrength}
+                  onChange={(e) => setBrush({ strength: parseFloat(e.target.value) })} />
+              </label>
+              <button
+                className="tb-terrain-reset"
+                onClick={() => { if (window.confirm('Flatten all terrain edits on this table?')) resetTerrain() }}
+              >
+                <Trash2 size={14} /> Reset terrain
+              </button>
+              <p className="tb-small tb-terrain-hint">
+                Drag on the table to sculpt. Cliffs are steep slopes. Placed models don’t rest on
+                hills yet — printable tiles &amp; on-terrain placement are coming next.
+              </p>
+            </div>
+          )}
 
           {/* Catalogue / palette */}
           <aside className="tb-palette">

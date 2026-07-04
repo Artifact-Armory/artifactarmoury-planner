@@ -297,6 +297,22 @@ export const modelsApi = {
   },
 
   /**
+   * Like (favorite) a model — returns the updated like count.
+   */
+  likeModel: async (modelId: string): Promise<{ favorited: boolean; favoriteCount: number }> => {
+    const response = await apiClient.post(`${BASE_URL}/${modelId}/favorite`)
+    return response.data
+  },
+
+  /**
+   * Remove a like (unfavorite) — returns the updated like count.
+   */
+  unlikeModel: async (modelId: string): Promise<{ favorited: boolean; favoriteCount: number }> => {
+    const response = await apiClient.delete(`${BASE_URL}/${modelId}/favorite`)
+    return response.data
+  },
+
+  /**
    * Add a model to user's wishlist
    */
   addToWishlist: async (modelId: string): Promise<ApiResponse<null>> => {

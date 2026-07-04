@@ -1,17 +1,51 @@
 import React from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ShoppingCart, Download } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { ShoppingCart, Download, Heart, Share2 } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
+import { artistsApi } from '../api/endpoints/artists'
+import type { TerrainModel } from '../api/types'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
 
+/** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
+const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
+  if (!models.length) return null
+  return (
+    <section className="mt-10">
+      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
+        {models.map((m) => (
+          <Link
+            key={m.id}
+            to={`/models/${m.id}`}
+            className="group w-44 flex-shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-sm hover:border-indigo-200 hover:shadow"
+          >
+            <div className="h-32 w-full overflow-hidden rounded-lg bg-gray-100">
+              {m.thumbnailUrl ? (
+                <img src={m.thumbnailUrl} alt={m.name} className="h-full w-full object-cover transition group-hover:scale-105" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">No image</div>
+              )}
+            </div>
+            <p className="mt-2 truncate text-sm font-medium text-gray-900">{m.name}</p>
+            <p className="text-xs text-gray-500">{formatPrice(m.basePrice)}</p>
+            <p className="truncate text-xs text-gray-400">{m.artistName}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 const ModelDetails: React.FC = () => {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { addItem, openCart } = useCartStore((state) => ({
     addItem: state.addItem,
     openCart: state.openCart,
@@ -35,11 +69,73 @@ const ModelDetails: React.FC = () => {
 
   const relatedQuery = useQuery({
     queryKey: ['related-models', id],
-    queryFn: () => modelsApi.getRelatedModels(id as string, 4),
+    queryFn: () => modelsApi.getRelatedModels(id as string, 12),
     enabled: Boolean(id),
   })
 
   const model = modelQuery.data
+
+  // "Other models from the same artist" carousel (excludes the current model).
+  const artistModelsQuery = useQuery({
+    queryKey: ['artist-models', model?.artistId],
+    queryFn: () => artistsApi.getArtistModels(model!.artistId as string, { limit: 12 }),
+    enabled: Boolean(model?.artistId),
+  })
+  const sameArtistModels = (artistModelsQuery.data?.models ?? []).filter((m) => m.id !== id)
+
+  // Like (favorite) state — seeded from the model, then owned locally so the
+  // button feels instant.
+  const [liked, setLiked] = React.useState(false)
+  const [likeCount, setLikeCount] = React.useState(0)
+  const [likeBusy, setLikeBusy] = React.useState(false)
+  React.useEffect(() => {
+    if (model) {
+      setLiked(Boolean(model.isFavorited))
+      setLikeCount(model.favoriteCount ?? 0)
+    }
+  }, [model])
+
+  const handleLike = async () => {
+    if (!id) return
+    if (!isAuthenticated) {
+      toast.error('Sign in to like this model')
+      navigate('/login')
+      return
+    }
+    if (likeBusy) return
+    setLikeBusy(true)
+    // Optimistic toggle, reconciled with the server's authoritative count.
+    const next = !liked
+    setLiked(next)
+    setLikeCount((c) => c + (next ? 1 : -1))
+    try {
+      const res = next ? await modelsApi.likeModel(id) : await modelsApi.unlikeModel(id)
+      setLiked(res.favorited)
+      setLikeCount(res.favoriteCount)
+    } catch {
+      // Roll back on failure.
+      setLiked(!next)
+      setLikeCount((c) => c + (next ? -1 : 1))
+      toast.error('Could not update like')
+    } finally {
+      setLikeBusy(false)
+    }
+  }
+
+  const handleShare = async () => {
+    const url = window.location.href
+    const shareData = { title: model?.name ?? 'Artifact Planner model', url }
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData)
+      } else {
+        await navigator.clipboard.writeText(url)
+        toast.success('Link copied to clipboard')
+      }
+    } catch {
+      /* user cancelled the share sheet — no-op */
+    }
+  }
 
   const [downloading, setDownloading] = React.useState(false)
   const [downloadError, setDownloadError] = React.useState<string | null>(null)
@@ -188,13 +284,46 @@ const ModelDetails: React.FC = () => {
         <aside className="space-y-6">
           <section className="rounded-2xl bg-white p-6 shadow-md">
             <h1 className="text-2xl font-semibold text-gray-900">{model.name}</h1>
-            <p className="mt-2 text-sm text-gray-500">by {model.artistName}</p>
+            <p className="mt-2 text-sm text-gray-500">
+              by{' '}
+              {model.artistId ? (
+                <Link to={`/artists/${model.artistId}`} className="text-indigo-600 hover:text-indigo-700">
+                  {model.artistName}
+                </Link>
+              ) : (
+                model.artistName
+              )}
+            </p>
 
             <div className="mt-4 flex items-center gap-4">
               <span className="text-3xl font-bold text-gray-900">{formatPrice(model.basePrice)}</span>
               <span className="text-sm text-gray-500">
                 Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews
               </span>
+            </div>
+
+            {/* Like + share */}
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={handleLike}
+                disabled={likeBusy}
+                aria-pressed={liked}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                  liked
+                    ? 'border-rose-200 bg-rose-50 text-rose-600'
+                    : 'border-gray-200 text-gray-600 hover:border-rose-200 hover:text-rose-600'
+                }`}
+              >
+                <Heart size={16} className={liked ? 'fill-rose-500 text-rose-500' : ''} />
+                {likeCount}
+              </button>
+              <button
+                onClick={handleShare}
+                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:border-indigo-200 hover:text-indigo-600"
+              >
+                <Share2 size={16} />
+                Share
+              </button>
             </div>
 
             {owned ? (
@@ -229,33 +358,17 @@ const ModelDetails: React.FC = () => {
                   Dimensions: {model.width} × {model.depth} × {model.height} mm
                 </li>
               )}
+              <li>{model.saleCount ?? 0} purchases</li>
+              {model.downloadCount !== undefined && <li>{model.downloadCount} downloads</li>}
               {model.viewCount !== undefined && <li>{model.viewCount} total views</li>}
             </ul>
           </section>
-
-          {relatedQuery.data && relatedQuery.data.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-900">You might also like</h2>
-              <ul className="mt-4 space-y-3">
-                {relatedQuery.data.slice(0, 4).map((related) => (
-                  <li key={related.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-3 hover:border-indigo-200">
-                    <img
-                      src={related.thumbnailUrl ?? ''}
-                      alt={related.name}
-                      className="h-14 w-14 rounded-md object-cover"
-                    />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">{related.name}</p>
-                      <p className="text-xs text-gray-500">{formatPrice(related.basePrice)}</p>
-                      <p className="text-xs text-gray-400">{related.artistName}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
         </aside>
       </div>
+
+      {/* Discovery carousels */}
+      <ModelCarousel title="More like this" models={relatedQuery.data ?? []} />
+      <ModelCarousel title={`More from ${model.artistName}`} models={sameArtistModels} />
     </div>
   )
 }

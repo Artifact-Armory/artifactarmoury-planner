@@ -1,5 +1,5 @@
 // shared/types.ts
-// Shared TypeScript types for Artifact Armoury Terrain Builder
+// Shared TypeScript types for Artifact Planner Terrain Builder
 
 // ============================================================================
 // USER & AUTHENTICATION

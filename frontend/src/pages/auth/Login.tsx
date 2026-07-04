@@ -19,7 +19,7 @@ const Login: React.FC = () => {
       setLoading(true)
       const res = await authApi.login(values)
       setAuth({ user: res.user, token: res.accessToken, refreshToken: res.refreshToken })
-      toast.success('Logged in successfully')
+      toast.success('Logged in successfully', { duration: 3000 })
       navigate('/')
     } catch (e: any) {
       const message = e?.response?.data?.message || 'Unable to login'

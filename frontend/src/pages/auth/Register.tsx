@@ -48,7 +48,7 @@ const Register: React.FC = () => {
   return (
     <div className="max-w-md mx-auto px-4 py-10">
       <h1 className="text-2xl font-semibold text-gray-900">Create an account</h1>
-      <p className="mt-2 text-sm text-gray-500">Join Artifact Armoury to access premium 3D terrain.</p>
+      <p className="mt-2 text-sm text-gray-500">Join Artifact Planner to access premium 3D terrain.</p>
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
         <Input
           label="Display name"

@@ -5,11 +5,13 @@
 // store so the persistence format is explicit and versioned.
 
 import type { Table, Instance, Unit } from './store'
+import type { Heightmap } from '../core/heightmap'
+import { serializeHeightmap, deserializeHeightmap } from '../core/heightmap'
 
 const DEFAULT_TABLE: Table = { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0254 }
 
 /** Planner scene → server { tableConfig, layoutData }. */
-export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[]) {
+export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], heightmap?: Heightmap | null) {
   return {
     tableConfig: {
       width: table.width,
@@ -20,7 +22,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
     },
     // Backend requires layout_data.models to be an array.
     layoutData: {
-      version: 2,
+      version: 3,
       models: instances.map((i) => ({
         modelId: i.assetId,
         x: i.position.x,
@@ -29,6 +31,8 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
         pitchDeg: i.pitchDeg ?? 0,
         level: i.level ?? 0,
       })),
+      // Sculpted surface (null/omitted when the table is flat).
+      heightmap: serializeHeightmap(heightmap ?? null),
     },
   }
 }
@@ -37,7 +41,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
 export function deserializeLayout(
   tableConfig: any,
   layoutData: any,
-): { table: Table; tableMaterial?: string; instances: Instance[] } {
+): { table: Table; tableMaterial?: string; instances: Instance[]; heightmap: Heightmap | null } {
   const tc = tableConfig ?? {}
   const table: Table = {
     width: Number(tc.width ?? DEFAULT_TABLE.width) || DEFAULT_TABLE.width,
@@ -58,5 +62,7 @@ export function deserializeLayout(
     }))
     .filter((i: Instance) => i.assetId)
 
-  return { table, tableMaterial: tc.material, instances }
+  const heightmap = deserializeHeightmap(layoutData?.heightmap, table)
+
+  return { table, tableMaterial: tc.material, instances, heightmap }
 }

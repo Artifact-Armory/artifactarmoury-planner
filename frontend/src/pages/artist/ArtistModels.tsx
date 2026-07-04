@@ -17,7 +17,6 @@ function publishBlocker(m: TerrainModel): string | null {
       : 'Still processing…'
   }
   if (!m.thumbnailUrl) return 'Add a thumbnail before publishing'
-  if ((m.description?.trim().length ?? 0) < 20) return 'Needs a description of 20+ characters'
   return null
 }
 

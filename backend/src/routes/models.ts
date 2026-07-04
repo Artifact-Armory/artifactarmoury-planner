@@ -448,14 +448,16 @@ router.get('/:id',
     const { id } = req.params;
 
     const result = await db.query(
-      `SELECT 
+      `SELECT
         m.*,
         u.artist_name, u.artist_bio, u.artist_url,
         COUNT(DISTINCT r.id) as review_count,
-        COALESCE(AVG(r.rating), 0) as average_rating
+        COALESCE(AVG(r.rating), 0) as average_rating,
+        COUNT(DISTINCT f.id) as favorite_count
        FROM models m
        JOIN users u ON m.artist_id = u.id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
+       LEFT JOIN favorites f ON m.id = f.model_id
        WHERE m.id = $1
        GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url`,
       [id]
@@ -466,6 +468,18 @@ router.get('/:id',
     }
 
     const model = result.rows[0];
+
+    // Whether the signed-in user has liked (favorited) this model.
+    const viewerId = (req as any).userId;
+    if (viewerId) {
+      const fav = await db.query(
+        'SELECT 1 FROM favorites WHERE user_id = $1 AND model_id = $2',
+        [viewerId, id]
+      );
+      model.is_favorited = fav.rows.length > 0;
+    } else {
+      model.is_favorited = false;
+    }
 
     // Check visibility permissions
     if (model.status !== 'published' || model.visibility !== 'public') {
@@ -603,10 +617,6 @@ router.post('/:id/publish',
 
     if (!model.thumbnail_path) {
       throw new ValidationError('Model must have a thumbnail before publishing');
-    }
-
-    if (!model.description || model.description.length < 20) {
-      throw new ValidationError('Model must have a description (minimum 20 characters)');
     }
 
     // Publish model
@@ -836,6 +846,39 @@ router.get('/:id/stats',
     res.json({
       stats: result.rows[0]
     });
+  })
+);
+
+// ============================================================================
+// LIKE / UNLIKE A MODEL (favorites) — powers the like button + count
+// ============================================================================
+
+async function favoriteCount(id: string): Promise<number> {
+  const r = await db.query('SELECT COUNT(*)::int AS c FROM favorites WHERE model_id = $1', [id]);
+  return r.rows[0]?.c ?? 0;
+}
+
+router.post('/:id/favorite',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+    await db.query(
+      `INSERT INTO favorites (user_id, model_id) VALUES ($1, $2)
+       ON CONFLICT (user_id, model_id) DO NOTHING`,
+      [userId, id]
+    );
+    res.json({ favorited: true, favoriteCount: await favoriteCount(id) });
+  })
+);
+
+router.delete('/:id/favorite',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+    await db.query('DELETE FROM favorites WHERE user_id = $1 AND model_id = $2', [userId, id]);
+    res.json({ favorited: false, favoriteCount: await favoriteCount(id) });
   })
 );
 

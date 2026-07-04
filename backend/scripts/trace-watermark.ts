@@ -22,7 +22,7 @@ async function main() {
   const buf = await fs.readFile(file)
   const payload = readWatermarkHeader(buf.subarray(0, 80))
   if (!payload) {
-    console.log('No valid Artifact Armoury watermark found.')
+    console.log('No valid Artifact Planner watermark found.')
     console.log('(File is not watermarked, the header was stripped, or the key differs.)')
     return
   }

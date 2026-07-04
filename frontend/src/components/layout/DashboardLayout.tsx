@@ -235,6 +235,17 @@ const DashboardLayout: React.FC = () => {
                 My Bundles
               </NavLink>
               <NavLink
+                to="/artist/showcases"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  location.pathname.startsWith('/artist/showcases')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <List size={18} className="mr-3" />
+                Showcases
+              </NavLink>
+              <NavLink
                 to="/artist/models/new"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/artist/models/new'

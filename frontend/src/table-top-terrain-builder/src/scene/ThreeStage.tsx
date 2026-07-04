@@ -17,6 +17,7 @@ import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnits, levelToY,
 } from '@core/elevation'
 import { buildTableMaterial } from '@core/tableMaterials'
+import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable } from '@core/heightmap'
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
@@ -51,6 +52,7 @@ export function ThreeStage() {
     levelOverride: number | null   // manual placement level (PageUp/Down), null = auto-surface
     lastAutoLevel: number          // surface level under the cursor last frame
     lastPointer: { clientX: number; clientY: number } | null
+    sculpting: boolean             // true while dragging a terrain brush
   } | null>(null)
 
   useEffect(() => {
@@ -136,13 +138,28 @@ export function ThreeStage() {
     cellHi.visible = false
     scene.add(cellHi)
 
+    // Terrain brush cursor ring (shown only in sculpt mode).
+    const brushRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.92, 1.0, 48),
+      new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false }),
+    )
+    brushRing.rotation.x = -Math.PI / 2
+    brushRing.visible = false
+    brushRing.renderOrder = 10
+    scene.add(brushRing)
+
+    // Deformable surface: the flat plane is swapped for a heightmap mesh once the
+    // user starts sculpting (see buildTable / syncTerrain).
+    let terrainMesh: THREE.Mesh | null = null
+    let terrainGeo: THREE.BufferGeometry | null = null
+
     const raycaster = new THREE.Raycaster()
     const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 
     engine.current = {
       renderer, scene, camera, cam, inst, ghost, tableGroup, gridGroup, cellHi,
       raycaster, ground, requestRender, ghostRot: 0, drag: { kind: 'none' }, hovered: null,
-      levelOverride: null, lastAutoLevel: 0, lastPointer: null,
+      levelOverride: null, lastAutoLevel: 0, lastPointer: null, sculpting: false,
     }
 
     // expose camera controls to the store (UI buttons / fitView)
@@ -181,15 +198,33 @@ export function ThreeStage() {
     // ---- helpers ----
     function buildTable() {
       const t = store().table
+      const hm = store().heightmap
       tableGroup.clear()
-      const geo = new THREE.PlaneGeometry(t.width, t.height)
-      // AO map needs a 2nd UV set; PlaneGeometry only ships uv, so mirror it.
-      geo.setAttribute('uv2', new THREE.BufferAttribute((geo.attributes.uv as THREE.BufferAttribute).array, 2))
-      const plane = new THREE.Mesh(geo, buildTableMaterial(store().tableMaterial, t))
-      plane.rotation.x = -Math.PI / 2
-      plane.position.y = -0.006
-      plane.receiveShadow = true
-      tableGroup.add(plane)
+      terrainMesh = null
+      terrainGeo = null
+      const mat = buildTableMaterial(store().tableMaterial, t)
+
+      if (hm && heightmapFitsTable(hm, t)) {
+        // Sculpted surface: a heightmap mesh in world space (Y up).
+        const geo = buildTerrainGeometry(hm, t)
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.position.y = -0.004
+        mesh.receiveShadow = true
+        tableGroup.add(mesh)
+        terrainMesh = mesh
+        terrainGeo = geo
+      } else {
+        // Flat table.
+        const geo = new THREE.PlaneGeometry(t.width, t.height)
+        // AO map needs a 2nd UV set; PlaneGeometry only ships uv, so mirror it.
+        geo.setAttribute('uv2', new THREE.BufferAttribute((geo.attributes.uv as THREE.BufferAttribute).array, 2))
+        const plane = new THREE.Mesh(geo, mat)
+        plane.rotation.x = -Math.PI / 2
+        plane.position.y = -0.006
+        plane.receiveShadow = true
+        tableGroup.add(plane)
+      }
+
       const border = new THREE.LineSegments(
         new THREE.EdgesGeometry(new THREE.BoxGeometry(t.width, 0.02, t.height)),
         new THREE.LineBasicMaterial({ color: 0x35506e }),
@@ -200,6 +235,36 @@ export function ThreeStage() {
       const grid = GridHelper(t.width, t.height, t.gridSize)
       gridGroup.add(grid)
       applySnapVisual()
+    }
+
+    // Re-sync the surface mesh after a sculpt (or when the heightmap appears/clears).
+    function syncTerrain() {
+      const s = store()
+      const hasTerrain = !!(s.heightmap && heightmapFitsTable(s.heightmap, s.table))
+      if (hasTerrain !== !!terrainMesh) {
+        buildTable() // switch between flat plane and terrain mesh
+      } else if (hasTerrain && terrainGeo && s.heightmap) {
+        updateTerrainGeometry(terrainGeo, s.heightmap)
+      }
+      requestRender()
+    }
+
+    // Apply the active brush at the ground point under the cursor.
+    function sculptAt(e: { clientX: number; clientY: number }) {
+      const gp = groundPoint(e)
+      if (!gp) return
+      // Geometry updates via the terrainRev store subscription → syncTerrain.
+      store().actions.sculptTerrain(gp.x, gp.z)
+    }
+
+    function updateBrushRing(e: { clientX: number; clientY: number }) {
+      const s = store()
+      const gp = s.terrainTool !== 'none' ? groundPoint(e) : null
+      if (!gp) { if (brushRing.visible) { brushRing.visible = false; requestRender() } return }
+      brushRing.position.set(gp.x, 0.03, gp.z)
+      brushRing.scale.set(s.brushRadius, s.brushRadius, s.brushRadius)
+      brushRing.visible = true
+      requestRender()
     }
 
     function effSnap(): boolean {
@@ -328,6 +393,13 @@ export function ThreeStage() {
       const eng = engine.current!
       const s = store()
 
+      // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.
+      if (s.terrainTool !== 'none') {
+        eng.sculpting = true
+        sculptAt(e)
+        return
+      }
+
       if (s.selectedAssetId) {
         eng.drag = { kind: 'maybePlace', x: e.clientX, y: e.clientY }
         return
@@ -354,6 +426,14 @@ export function ThreeStage() {
     function onPointerMoveLeft(e: PointerEvent) {
       const eng = engine.current!
       const overCanvas = e.target === renderer.domElement
+
+      // Terrain sculpt mode: brush ring follows the cursor; drag paints the surface.
+      if (store().terrainTool !== 'none') {
+        if (overCanvas || eng.sculpting) updateBrushRing(e)
+        if (eng.sculpting && (e.buttons & 1)) sculptAt(e)
+        return
+      }
+
       // ghost preview follows cursor whenever placing (only over the canvas)
       if (overCanvas && store().selectedAssetId && eng.drag.kind !== 'move' && eng.drag.kind !== 'box') {
         updateGhost(e)
@@ -429,6 +509,7 @@ export function ThreeStage() {
     function onPointerUpLeft(e: PointerEvent) {
       if (e.button !== 0) return
       const eng = engine.current!
+      if (eng.sculpting) { eng.sculpting = false; return }
       const d = eng.drag
       eng.drag = { kind: 'none' }
 
@@ -638,6 +719,15 @@ export function ThreeStage() {
       }
       if (s.table !== prev.table || s.tableMaterial !== prev.tableMaterial) {
         buildTable()
+        requestRender()
+      }
+      if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap) {
+        syncTerrain()
+      }
+      if (s.terrainTool !== prev.terrainTool) {
+        // Entering/leaving sculpt mode: hide the brush ring + set the cursor.
+        if (s.terrainTool === 'none') brushRing.visible = false
+        setCursor(s.terrainTool !== 'none' ? 'crosshair' : (s.selectedAssetId ? 'cell' : 'default'))
         requestRender()
       }
       if (s.snapBaseline !== prev.snapBaseline || s.altMomentary !== prev.altMomentary) {

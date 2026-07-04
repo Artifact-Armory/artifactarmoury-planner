@@ -2,6 +2,9 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import { loadAssets, loadAssetsFromAPI, loadSetsFromAPI, type Asset, type PlannerSetData } from '../core/assets'
+import {
+  type Heightmap, type TerrainTool, createHeightmap, heightmapFitsTable, applyBrush,
+} from '../core/heightmap'
 import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
@@ -76,6 +79,13 @@ interface AppState {
   placementManual: boolean     // true when the level is a manual override (PageUp/Down)
   tableMaterial: string        // table surface material id (grass/sand/wood/snow/…)
 
+  // Terrain sculpting (deformable table surface → printable tiles later)
+  heightmap: Heightmap | null  // null = flat table (no surface edits yet)
+  terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt brush
+  brushRadius: number          // metres
+  brushStrength: number        // 0..1
+  terrainRev: number           // bumped on every sculpt so the scene re-syncs
+
   basket: BasketItem[]
   purchasedAssetIds: Set<string>
 
@@ -101,7 +111,16 @@ interface AppState {
   setPlacement: (level: number, manual: boolean) => void
   setTableMaterial: (id: string) => void
 
+  setTerrainTool: (tool: TerrainTool) => void
+  setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
+
   actions: {
+    /** Sculpt the surface at a world position with the active brush. Returns true if changed. */
+    sculptTerrain: (worldX: number, worldZ: number) => boolean
+    /** Reset the surface back to flat. */
+    resetTerrain: () => void
+    /** Ensure a heightmap exists that fits the current table (creates/regenerates). */
+    ensureHeightmap: () => void
     fitView: () => void
     loadAssetCatalogue: () => Promise<void>
     loadStarterLayout: () => void
@@ -127,7 +146,7 @@ interface AppState {
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
-    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[] }) => void
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; heightmap?: Heightmap | null }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -189,6 +208,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   placementManual: false,
   tableMaterial: 'grass',
 
+  heightmap: null,
+  terrainTool: 'none',
+  brushRadius: 0.12,
+  brushStrength: 0.5,
+  terrainRev: 0,
+
   basket: [],
   purchasedAssetIds: new Set(),
 
@@ -201,7 +226,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setTable: (t) => set(s => ({ table: { ...s.table, ...t } })),
   setRefs: (refs) => set(refs as any),
-  setSelectedAsset: (id) => set({ selectedAssetId: id }),
+  // Placement and terrain sculpting are mutually exclusive — picking a model to
+  // place leaves sculpt mode.
+  setSelectedAsset: (id) => set(s => ({ selectedAssetId: id, terrainTool: id ? 'none' : s.terrainTool })),
   setSelectedInstance: (id) =>
     set({ selectedInstanceId: id, selectedInstanceIds: id ? [id] : [] }),
   setSelectedInstances: (ids) =>
@@ -217,7 +244,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       : { placementLevel: level, placementManual: manual }),
   setTableMaterial: (id) => set({ tableMaterial: id }),
 
+  setTerrainTool: (tool) => {
+    // Entering a sculpt tool clears any pending model placement (mutually exclusive).
+    if (tool !== 'none') { get().actions.ensureHeightmap(); set({ selectedAssetId: null }) }
+    set({ terrainTool: tool })
+  },
+  setBrush: (patch) => set(s => ({
+    brushRadius: patch.radius != null ? patch.radius : s.brushRadius,
+    brushStrength: patch.strength != null ? patch.strength : s.brushStrength,
+  })),
+
   actions: {
+    ensureHeightmap: () => {
+      const s = get()
+      if (!heightmapFitsTable(s.heightmap, s.table)) {
+        set({ heightmap: createHeightmap(s.table), terrainRev: s.terrainRev + 1 })
+      }
+    },
+
+    sculptTerrain: (worldX, worldZ) => {
+      const s = get()
+      if (s.terrainTool === 'none') return false
+      let hm = s.heightmap
+      if (!heightmapFitsTable(hm, s.table)) hm = createHeightmap(s.table)
+      const changed = applyBrush(hm, s.table, worldX, worldZ, s.terrainTool, s.brushRadius, s.brushStrength)
+      if (changed) set({ heightmap: hm, terrainRev: s.terrainRev + 1 })
+      return changed
+    },
+
+    resetTerrain: () => set(s => ({ heightmap: createHeightmap(s.table), terrainRev: s.terrainRev + 1 })),
+
     // Camera framing is owned by the constrained BuilderCamera in ThreeStage.
     fitView: () => {
       get().cameraApi?.frameTable()
@@ -343,11 +399,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Name/price/thumbnail come from the set (parent) or the placed asset.
       let item
       if (parentSet) {
-        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Armoury', price: parentSet.price, imageUrl: parentSet.thumbnail }
+        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Planner', price: parentSet.price, imageUrl: parentSet.thumbnail }
       } else {
         const asset = s.assets.find(a => a.id === assetId)
         if (!asset) return
-        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Armoury', price: asset.price ?? 0, imageUrl: asset.thumbnail }
+        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Planner', price: asset.price ?? 0, imageUrl: asset.thumbnail }
       }
       cart.addItem(item, false) // don't open the drawer over the planner
     },
@@ -489,7 +545,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           kind: 'model',
           id: assetId,
           name: asset.name,
-          artistName: asset.artistName ?? 'Artifact Armoury',
+          artistName: asset.artistName ?? 'Artifact Planner',
           price: asset.price ?? 0,
           imageUrl: asset.thumbnail,
         })
@@ -572,12 +628,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.fitView()
     },
 
-    applyLayout: ({ table, tableMaterial, instances }) => {
+    applyLayout: ({ table, tableMaterial, instances, heightmap }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
       set((s) => ({
         table: { ...table },
         tableMaterial: tableMaterial ?? s.tableMaterial,
         instances: clean,
+        heightmap: heightmap ?? null,
+        terrainRev: s.terrainRev + 1,
+        terrainTool: 'none',
         selectedInstanceId: null,
         selectedInstanceIds: [],
         ...saveHistory({ ...s, instances: clean, selectedInstanceId: null }),

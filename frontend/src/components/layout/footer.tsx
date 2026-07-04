@@ -33,7 +33,7 @@ const Footer: React.FC = () => {
         </div>
 
         <p className="text-sm text-gray-500 sm:text-right">
-          &copy; {year} Artifact Armoury. All rights reserved.
+          &copy; {year} Artifact Planner. All rights reserved.
         </p>
       </div>
     </footer>

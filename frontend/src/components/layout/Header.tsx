@@ -88,23 +88,23 @@ const Header: React.FC = () => {
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center py-4">
+        <div className="flex justify-between items-center gap-8 py-4">
           {/* Logo */}
           <div className="flex-shrink-0">
             <Link to="/" className="flex items-center">
               <img
                 src="/logo.svg"
-                alt="Terrain Builder"
+                alt="Artifact Planner"
                 className="h-8 w-auto"
               />
               <span className="ml-2 text-xl font-bold text-gray-900">
-                Terrain Builder
+                Artifact Planner
               </span>
             </Link>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex space-x-6">
+          <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
             <NavLink
               to="/browse"
               className={({ isActive }) =>

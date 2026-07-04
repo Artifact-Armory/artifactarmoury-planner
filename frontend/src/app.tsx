@@ -50,6 +50,7 @@ import EditTable from './pages/dashboard/EditTable';
 import ArtistDashboard from './pages/artist/ArtistDashboard';
 import ArtistModels from './pages/artist/ArtistModels';
 import ArtistBundles from './pages/artist/ArtistBundles';
+import ArtistShowcases from './pages/artist/ArtistShowcases';
 import CreateBundle from './pages/artist/CreateBundle';
 import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
@@ -218,6 +219,7 @@ function App() {
               <Route path="bundles" element={<ArtistBundles />} />
               <Route path="bundles/new" element={<CreateBundle />} />
               <Route path="bundles/:id/edit" element={<EditBundle />} />
+              <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="sales" element={<ArtistSales />} />
               <Route path="settings" element={<ArtistSettings />} />
             </Route>

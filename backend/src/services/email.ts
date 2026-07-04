@@ -147,7 +147,7 @@ export async function sendOrderConfirmation(
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
   
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="color: #111827; font-size: 28px; margin: 0;">Artifact Armoury</h1>
+    <h1 style="color: #111827; font-size: 28px; margin: 0;">Artifact Planner</h1>
     <p style="color: #6b7280; margin-top: 8px;">Order Confirmation</p>
   </div>
   
@@ -223,7 +223,7 @@ export async function sendOrderConfirmation(
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
     <p style="margin: 0 0 8px 0;">Need help? Contact us at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
   </div>
   
 </body>
@@ -312,7 +312,7 @@ export async function sendShippingNotification(
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
     <p style="margin: 0 0 8px 0;">Questions? Contact us at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
   </div>
   
 </body>
@@ -409,7 +409,7 @@ export async function sendArtistSaleNotification(
   </div>
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
   </div>
   
 </body>
@@ -441,7 +441,7 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
   
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="color: #111827; font-size: 32px; margin: 0;">Welcome to Artifact Armoury!</h1>
+    <h1 style="color: #111827; font-size: 32px; margin: 0;">Welcome to Artifact Planner!</h1>
     <p style="color: #6b7280; margin-top: 8px; font-size: 18px;">We're excited to have you, ${artist.name}!</p>
   </div>
   
@@ -476,7 +476,7 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
     <p style="margin: 0 0 8px 0;">Need help? We're here for you at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
   </div>
   
 </body>
@@ -485,7 +485,7 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
   
   await sendEmail({
     to: artist.email,
-    subject: 'Welcome to Artifact Armoury! 🎉',
+    subject: 'Welcome to Artifact Planner! 🎉',
     html
   })
 }

@@ -46,6 +46,10 @@ const unwrap = <T>(response: ApiResponse<T> | T): T =>
     ? (response as ApiResponse<T>).data
     : response) as T
 
+// Single-table endpoints return the row wrapped as `{ table: {...} }`; tolerate
+// that, a `{ data: {...} }` envelope, or the bare row.
+const pickTable = (body: any): any => body?.table ?? body?.data ?? body
+
 export const tablesApi = {
   async getById(id: string, params?: { userId?: string; userEmail?: string }) {
     const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, {
@@ -54,12 +58,12 @@ export const tablesApi = {
         user_email: params?.userEmail
       }
     })
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async getSharedTable(token: string) {
     const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/shared/${token}`)
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async getUserTables(identifier: string, page = 1, limit = 20) {
@@ -90,12 +94,12 @@ export const tablesApi = {
 
   async createTable(payload: SaveTablePayload) {
     const response = await apiClient.post<ApiResponse<TableLayout>>(BASE_URL, toServerPayload(payload))
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async updateTable(id: string, payload: Partial<SaveTablePayload>) {
     const response = await apiClient.put<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, toServerPayload(payload))
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async deleteTable(id: string, payload: { userId?: string; userEmail?: string }) {
@@ -113,7 +117,7 @@ export const tablesApi = {
       user_email: payload.userEmail,
       is_public: payload.isPublic
     })
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async duplicate(id: string, payload: { userId?: string; userEmail?: string }) {
@@ -121,7 +125,7 @@ export const tablesApi = {
       user_id: payload.userId,
       user_email: payload.userEmail
     })
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   },
 
   async regenerateShareCode(id: string, payload: { userId?: string; userEmail?: string }) {
@@ -129,6 +133,6 @@ export const tablesApi = {
       user_id: payload.userId,
       user_email: payload.userEmail
     })
-    return mapTable(unwrap(response.data ?? (response as any)))
+    return mapTable(pickTable(response.data ?? response))
   }
 }

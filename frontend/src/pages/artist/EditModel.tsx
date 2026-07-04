@@ -59,7 +59,6 @@ const EditModel: React.FC = () => {
     load()
   }, [load])
 
-  const descLen = description.trim().length
   const isDraft = (model?.status ?? 'draft') !== 'published'
 
   async function handleSave(e: React.FormEvent) {
@@ -147,9 +146,7 @@ const EditModel: React.FC = () => {
         <div>
           <label className="block text-sm font-medium mb-1">Description</label>
           <textarea className="w-full border rounded px-3 py-2" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
-          <p className={`text-xs mt-1 ${descLen < 20 ? 'text-amber-700' : 'text-gray-500'}`}>
-            {descLen}/20 characters minimum to publish
-          </p>
+          <p className="text-xs mt-1 text-gray-500">Optional — a good description helps buyers find your model.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
