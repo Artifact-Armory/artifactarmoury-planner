@@ -103,7 +103,8 @@ const Header: React.FC = () => {
             </Link>
           </div>
 
-          {/* Desktop Navigation */}
+          {/* Desktop Navigation — keep it shallow: Browse · Tables · Artists · Planner.
+              The planner is the differentiator, so it's always visible (never gated). */}
           <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
             <NavLink
               to="/browse"
@@ -118,7 +119,7 @@ const Header: React.FC = () => {
               Browse
             </NavLink>
             <NavLink
-              to="/bundles"
+              to="/tables"
               className={({ isActive }) =>
                 `text-base font-medium ${
                   isActive
@@ -127,7 +128,7 @@ const Header: React.FC = () => {
                 }`
               }
             >
-              Bundles
+              Tables
             </NavLink>
             <NavLink
               to="/artists"
@@ -142,7 +143,19 @@ const Header: React.FC = () => {
               Artists
             </NavLink>
             <NavLink
-              to="/tables"
+              to="/planner"
+              className={({ isActive }) =>
+                `text-base font-semibold ${
+                  isActive
+                    ? 'text-indigo-600'
+                    : 'text-indigo-600 hover:text-indigo-500'
+                }`
+              }
+            >
+              Planner
+            </NavLink>
+            <NavLink
+              to="/bundles"
               className={({ isActive }) =>
                 `text-base font-medium ${
                   isActive
@@ -151,22 +164,8 @@ const Header: React.FC = () => {
                 }`
               }
             >
-              Tables
+              Bundles
             </NavLink>
-            {isAuthenticated && (
-              <NavLink
-                to="/planner"
-                className={({ isActive }) =>
-                  `text-base font-medium ${
-                    isActive
-                      ? 'text-indigo-600'
-                      : 'text-gray-700 hover:text-indigo-500'
-                  }`
-                }
-              >
-                Planner
-              </NavLink>
-            )}
             <NavLink
               to="/about"
               className={({ isActive }) =>
@@ -401,7 +400,7 @@ const Header: React.FC = () => {
               </div>
             </form>
 
-            {/* Mobile Navigation Links */}
+            {/* Mobile Navigation Links — same shallow order as desktop */}
             <NavLink
               to="/browse"
               onClick={() => setMobileMenuOpen(false)}
@@ -416,7 +415,7 @@ const Header: React.FC = () => {
               Browse
             </NavLink>
             <NavLink
-              to="/bundles"
+              to="/tables"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
                 `block py-2 text-base font-medium ${
@@ -426,7 +425,7 @@ const Header: React.FC = () => {
                 }`
               }
             >
-              Bundles
+              Tables
             </NavLink>
             <NavLink
               to="/artists"
@@ -442,7 +441,18 @@ const Header: React.FC = () => {
               Artists
             </NavLink>
             <NavLink
-              to="/tables"
+              to="/planner"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `block py-2 text-base font-semibold ${
+                  isActive ? 'text-indigo-600' : 'text-indigo-600 hover:text-indigo-500'
+                }`
+              }
+            >
+              Planner
+            </NavLink>
+            <NavLink
+              to="/bundles"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
                 `block py-2 text-base font-medium ${
@@ -452,7 +462,7 @@ const Header: React.FC = () => {
                 }`
               }
             >
-              Tables
+              Bundles
             </NavLink>
             <NavLink
               to="/about"

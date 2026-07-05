@@ -1,5 +1,6 @@
 import apiClient from '../client'
 import { ApiResponse, SaveTablePayload, TableLayout } from '../types'
+import { assetUrl } from '../transformers'
 
 const BASE_URL = '/api/tables'
 
@@ -27,6 +28,39 @@ const mapTable = (table: any): TableLayout => ({
   maxAssets: table.max_assets ?? undefined,
   createdAt: table.created_at ?? table.createdAt,
   updatedAt: table.updated_at ?? table.updatedAt
+})
+
+/** Lightweight shape for the public /tables gallery cards (never carries email). */
+export interface PublicTableCard {
+  id: string
+  name: string
+  shareToken?: string
+  pieceCount: number
+  viewCount: number
+  cloneCount: number
+  creatorId: string | null
+  creatorName: string
+  creatorIsArtist: boolean
+  thumbnails: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+const mapPublicTableCard = (t: any): PublicTableCard => ({
+  id: t.id,
+  name: t.name,
+  shareToken: t.share_token ?? undefined,
+  pieceCount: Number(t.piece_count ?? t.model_count ?? 0) || 0,
+  viewCount: Number(t.view_count ?? 0) || 0,
+  cloneCount: Number(t.clone_count ?? 0) || 0,
+  creatorId: t.creator_id ?? null,
+  creatorName: t.creator_name ?? 'Anonymous',
+  creatorIsArtist: Boolean(t.creator_is_artist),
+  thumbnails: (Array.isArray(t.thumbnails) ? t.thumbnails : [])
+    .map((p: string) => assetUrl(p))
+    .filter((u: string | undefined): u is string => Boolean(u)),
+  createdAt: t.created_at ?? t.createdAt,
+  updatedAt: t.updated_at ?? t.updatedAt
 })
 
 const toServerPayload = (payload: Partial<SaveTablePayload>) => ({
@@ -79,13 +113,17 @@ export const tablesApi = {
     }
   },
 
-  async getPublicTables(page = 1, limit = 20, sort: 'recent' | 'updated' = 'recent') {
+  async getPublicTables(
+    page = 1,
+    limit = 20,
+    sort: 'recent' | 'updated' | 'popular' = 'recent'
+  ): Promise<{ tables: PublicTableCard[]; total: number; page: number; totalPages: number }> {
     const response = await apiClient.get<ApiResponse<any>>(`${BASE_URL}/public/list`, {
       params: { page, limit, sort }
     })
     const payload = unwrap(response.data ?? (response as any)) as any
     return {
-      tables: (payload.tables ?? payload.data ?? []).map(mapTable),
+      tables: (payload.tables ?? payload.data ?? []).map(mapPublicTableCard),
       total: payload.total ?? payload.totalCount ?? 0,
       page: payload.page ?? 1,
       totalPages: payload.total_pages ?? payload.totalPages ?? 1

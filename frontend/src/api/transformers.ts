@@ -87,6 +87,16 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     height: p.height ?? undefined,
     processingStatus: p.processing_status ?? p.processingStatus ?? undefined,
   })),
+  // Faceted taxonomy tags (from GET /api/models/:id).
+  taxonomyTerms: Array.isArray(model.taxonomyTerms)
+    ? model.taxonomyTerms.map((t: any) => ({
+        facetSlug: t.facetSlug ?? t.facet_slug,
+        facetName: t.facetName ?? t.facet_name,
+        termId: t.termId ?? t.term_id,
+        path: t.path,
+        name: t.name,
+      }))
+    : undefined,
 })
 
 export const mapArtistSummary = (artist: any): ArtistSummary => ({

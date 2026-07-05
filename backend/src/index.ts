@@ -22,6 +22,7 @@ import {
 import authRoutes from './routes/auth';
 import modelsRoutes from './routes/models';
 import browseRoutes from './routes/browse';
+import taxonomyRoutes from './routes/taxonomy';
 import artistsRoutes from './routes/artists';
 import tablesRoutes from './routes/tables';
 import ordersRoutes from './routes/orders';
@@ -98,6 +99,7 @@ app.get('/health', async (req, res) => {
 app.use(`${API_PREFIX}/auth`, authRoutes);
 app.use(`${API_PREFIX}/models`, modelsRoutes);
 app.use(`${API_PREFIX}/browse`, browseRoutes);
+app.use(`${API_PREFIX}/taxonomy`, taxonomyRoutes);
 app.use(`${API_PREFIX}/artists`, artistsRoutes);
 app.use(`${API_PREFIX}/tables`, tablesRoutes);
 app.use(`${API_PREFIX}/orders`, ordersRoutes);

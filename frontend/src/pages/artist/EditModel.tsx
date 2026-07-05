@@ -2,6 +2,8 @@ import React from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { modelsApi } from '../../api/endpoints/models'
 import { TerrainModel } from '../../api/types'
+import TermPicker from '../../components/taxonomy/TermPicker'
+import { termToken } from '../../api/endpoints/taxonomy'
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -29,6 +31,7 @@ const EditModel: React.FC = () => {
   const [description, setDescription] = React.useState('')
   const [category, setCategory] = React.useState('buildings')
   const [tags, setTags] = React.useState('')
+  const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
 
   const [saving, setSaving] = React.useState(false)
@@ -47,6 +50,7 @@ const EditModel: React.FC = () => {
       setDescription(m.description ?? '')
       setCategory(m.category ?? 'buildings')
       setTags((m.tags ?? []).join(', '))
+      setTerms((m.taxonomyTerms ?? []).map((t) => termToken(t.facetSlug, t.path)))
       setBasePrice(m.basePrice != null ? String(m.basePrice) : '')
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
@@ -78,6 +82,7 @@ const EditModel: React.FC = () => {
         category,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: price,
+        terms,
       })
       setNotice('Changes saved.')
       await load()
@@ -101,6 +106,7 @@ const EditModel: React.FC = () => {
         category,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: parseFloat(basePrice) || 0,
+        terms,
       })
       await modelsApi.publishModel(id)
       navigate('/artist/models')
@@ -165,6 +171,15 @@ const EditModel: React.FC = () => {
         <div>
           <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
           <input className="w-full border rounded px-3 py-2" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Tags & categories</label>
+          <p className="text-xs text-gray-500 mb-2">
+            Fields marked <span className="text-red-500">*</span> are required before publishing. Tag
+            generously — a piece can belong to several eras and types.
+          </p>
+          <TermPicker value={terms} onChange={setTerms} disabled={busy} />
         </div>
 
         {!model?.thumbnailUrl && (

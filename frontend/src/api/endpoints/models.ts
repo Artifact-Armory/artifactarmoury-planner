@@ -37,6 +37,8 @@ export const modelsApi = {
     thumbnailKey?: string
     /** Extra STL parts for a multi-part "set" model (primary is the main rawKey). */
     parts?: Array<{ rawKey: string; filename?: string; name?: string }>
+    /** Taxonomy tags as `facetSlug:termPath` tokens. */
+    terms?: string[]
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
     const response = await apiClient.post(`${BASE_URL}/from-upload`, data);
     return response.data.model;
@@ -115,7 +117,10 @@ export const modelsApi = {
    */
   updateModel: async (
     id: string,
-    data: Partial<Pick<ModelUploadRequest, 'name' | 'description' | 'category' | 'tags' | 'basePrice'>>,
+    data: Partial<Pick<ModelUploadRequest, 'name' | 'description' | 'category' | 'tags' | 'basePrice'>> & {
+      /** Taxonomy tags as `facetSlug:termPath` tokens (replaces the full set). */
+      terms?: string[]
+    },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
     if (data.name !== undefined) body.name = data.name;
@@ -123,6 +128,7 @@ export const modelsApi = {
     if (data.category !== undefined) body.category = data.category;
     if (data.tags !== undefined) body.tags = data.tags;
     if (data.basePrice !== undefined) body.base_price = data.basePrice;
+    if (data.terms !== undefined) body.terms = data.terms;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },

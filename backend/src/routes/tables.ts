@@ -491,41 +491,73 @@ router.get('/public/list', async (req, res, next) => {
     const offset = (pageNum - 1) * limitNum
 
     // Build sort clause
-    let orderBy = 'created_at DESC'
+    let orderBy = 't.created_at DESC'
     switch (sort) {
       case 'recent':
-        orderBy = 'created_at DESC'
+        orderBy = 't.created_at DESC'
         break
       case 'updated':
-        orderBy = 'updated_at DESC'
+        orderBy = 't.updated_at DESC'
+        break
+      case 'popular':
+        orderBy = 't.view_count DESC NULLS LAST, t.created_at DESC'
         break
       default:
-        orderBy = 'created_at DESC'
+        orderBy = 't.created_at DESC'
     }
 
     // Get total count
     const countResult = await db.query(
       'SELECT COUNT(*) as total FROM user_tables WHERE is_public = true'
     )
-    const total = parseInt(countResult.rows[0].total)
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
-    // Get public tables
+    // Get public tables. We join `users` on email (user_tables is email-keyed) to
+    // surface a public display name + a linkable creator id WITHOUT ever exposing
+    // the raw email. A lateral subquery pulls up to 4 piece thumbnails from the
+    // saved layout so the gallery cards are visual ("shop-the-look").
     const result = await db.query(
-      `SELECT 
-        id,
-        user_email,
-        name,
-        table_config,
-        share_token,
-        created_at,
-        updated_at,
-        jsonb_array_length(layout_data->'models') as model_count
-       FROM user_tables
-       WHERE is_public = true
+      `SELECT
+        t.id,
+        t.name,
+        t.table_config,
+        t.share_token,
+        t.view_count,
+        t.clone_count,
+        t.created_at,
+        t.updated_at,
+        CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
+             THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,
+        u.id            AS creator_id,
+        COALESCE(NULLIF(u.artist_name, ''), NULLIF(u.name, ''), split_part(t.user_email, '@', 1)) AS creator_name,
+        (u.role = 'artist') AS creator_is_artist,
+        thumbs.thumbnails
+       FROM user_tables t
+       LEFT JOIN users u ON u.email = t.user_email
+       LEFT JOIN LATERAL (
+         SELECT array_agg(m.thumbnail_path ORDER BY m.thumbnail_path) AS thumbnails
+         FROM (
+           SELECT DISTINCT COALESCE(elem->>'modelId', elem->>'assetId') AS mid
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
+                  THEN t.layout_data->'models' ELSE '[]'::jsonb END
+           ) AS elem
+         ) ids
+         JOIN models m ON m.id::text = ids.mid
+          AND m.status = 'published'
+          AND m.thumbnail_path IS NOT NULL
+       ) thumbs ON true
+       WHERE t.is_public = true
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
       [limitNum, offset]
     )
+
+    // Cap thumbnails at 4 per card (aggregate above may return more).
+    for (const row of result.rows) {
+      row.model_count = row.piece_count
+      row.thumbnails = Array.isArray(row.thumbnails) ? row.thumbnails.slice(0, 4) : []
+    }
 
     tablesLogger.debug('Public tables fetched', {
       count: result.rows.length,

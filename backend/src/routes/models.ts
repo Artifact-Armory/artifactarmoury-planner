@@ -31,6 +31,7 @@ import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
+import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
 
@@ -245,7 +246,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -286,6 +287,10 @@ router.post('/from-upload',
     }
     const partCount = 1 + extraParts.length;
 
+    // Validate taxonomy tags up-front (read-only) so a bad payload never creates a
+    // half-tagged draft; they're written after the model row exists.
+    const resolvedTerms = await validateAndResolveTerms(terms);
+
     // Digital STL sales only for now — fulfilment is always 'stl'.
     const userId = (req as any).userId;
 
@@ -307,6 +312,11 @@ router.post('/from-upload',
          VALUES ($1, $2, $3, $4, 'processing')`,
         [model.id, p.name || `Part ${i + 2}`, p.rawKey, i + 1]
       );
+    }
+
+    // Write the (already validated) taxonomy tags.
+    if (resolvedTerms.length > 0) {
+      await writeModelTerms(model.id, resolvedTerms);
     }
 
     await db.query(
@@ -528,12 +538,16 @@ router.get('/:id',
       )).rows;
     }
 
+    // Taxonomy tags (facet terms) for the product page + cross-linking.
+    const taxonomyTerms = await getModelTerms(id);
+
     res.json({
       model: {
         ...model,
         images: imagesResult.rows,
         recentReviews: reviewsResult.rows,
         parts,
+        taxonomyTerms,
       }
     });
   })
@@ -568,25 +582,37 @@ router.patch('/:id',
       }
     }
 
-    if (updateFields.length === 0) {
+    // Taxonomy tags can be updated on their own or alongside column edits.
+    const hasTermsUpdate = updates.terms !== undefined;
+    if (updateFields.length === 0 && !hasTermsUpdate) {
       throw new ValidationError('No valid fields to update');
     }
 
-    updateValues.push(id);
+    // Validate tags before touching anything (throws on bad token / cap).
+    const resolvedTerms = hasTermsUpdate ? await validateAndResolveTerms(updates.terms) : null;
 
-    const result = await db.query(
-      `UPDATE models 
-       SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $${paramIndex}
-       RETURNING id, name, updated_at`,
-      updateValues
-    );
+    let updatedRow: any = { id };
+    if (updateFields.length > 0) {
+      updateValues.push(id);
+      const result = await db.query(
+        `UPDATE models
+         SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $${paramIndex}
+         RETURNING id, name, updated_at`,
+        updateValues
+      );
+      updatedRow = result.rows[0];
+    }
 
-    logger.info('Model updated', { userId: (req as any).userId, modelId: id });
+    if (resolvedTerms) {
+      await writeModelTerms(id, resolvedTerms);
+    }
+
+    logger.info('Model updated', { userId: (req as any).userId, modelId: id, terms: hasTermsUpdate });
 
     res.json({
       message: 'Model updated successfully',
-      model: result.rows[0]
+      model: updatedRow
     });
   })
 );
@@ -618,6 +644,9 @@ router.post('/:id/publish',
     if (!model.thumbnail_path) {
       throw new ValidationError('Model must have a thumbnail before publishing');
     }
+
+    // Required-facet guardrail: can't publish until the mandatory facets are tagged.
+    await assertRequiredTermsPresent(id);
 
     // Publish model
     await db.query(

@@ -2,6 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
+import TermPicker from '../../components/taxonomy/TermPicker'
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -21,6 +22,7 @@ const CreateModel: React.FC = () => {
   const [description, setDescription] = React.useState('')
   const [category, setCategory] = React.useState('buildings')
   const [tags, setTags] = React.useState('')
+  const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
@@ -89,6 +91,7 @@ const CreateModel: React.FC = () => {
         basePrice: price,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
+        terms: terms.length ? terms : undefined,
       })
       setModelId(created.id)
 
@@ -122,7 +125,7 @@ const CreateModel: React.FC = () => {
           <button
             className="px-4 py-2 rounded border"
             onClick={() => {
-              setPhase('form'); setName(''); setDescription(''); setTags(''); setBasePrice('')
+              setPhase('form'); setName(''); setDescription(''); setTags(''); setTerms([]); setBasePrice('')
               setStlFile(null); setThumbFile(null); setPartFiles([]); setProgress(0); setModelId(null); setError(null)
             }}
           >
@@ -165,6 +168,16 @@ const CreateModel: React.FC = () => {
             <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
             <input className="w-full border rounded px-3 py-2" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} />
           </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Tags & categories</label>
+          <p className="text-xs text-gray-500 mb-2">
+            Tag your model so buyers find it. Fields marked <span className="text-red-500">*</span> are
+            required before you can publish — pick several where they apply (a stone barn can be
+            Medieval <em>and</em> WW2).
+          </p>
+          <TermPicker value={terms} onChange={setTerms} disabled={busy} />
         </div>
 
         <div>

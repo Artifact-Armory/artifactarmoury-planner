@@ -139,12 +139,22 @@ export interface TerrainModel {
     reviewerName?: string
     createdAt: string
   }>
+  // Faceted taxonomy tags (facet terms) attached to this model.
+  taxonomyTerms?: Array<{
+    facetSlug: string
+    facetName: string
+    termId: string
+    path: string
+    name: string
+  }>
 }
 
 export interface SearchFilters {
   search?: string
   category?: string
   tags?: string[] | string
+  /** Faceted taxonomy filter: comma-separated `facetSlug:termPath` tokens. */
+  terms?: string
   minPrice?: number
   maxPrice?: number
   sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'

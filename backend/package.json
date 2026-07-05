@@ -18,6 +18,7 @@
     "test:stage4": "node -r ts-node/register/transpile-only scripts/test-stage4-e2e.ts",
     "test:terrain": "node -r ts-node/register/transpile-only scripts/test-terrain-tiles.ts",
     "db:query": "node -r ts-node/register/transpile-only scripts/db-query.ts",
+    "seed:taxonomy": "node -r ts-node/register/transpile-only scripts/seed-taxonomy.ts",
     "seed": "ts-node scripts/seed-dev-data.ts",
     "db:seed": "ts-node scripts/seed-dev-data.ts",
     "generate-invite": "ts-node scripts/generate-invite.ts",

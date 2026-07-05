@@ -8,6 +8,7 @@ import { optionalAuth } from '../middleware/auth';
 import { searchRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError } from '../middleware/error';
+import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.get('/',
     const {
       category,
       tags,
+      terms,
       minPrice,
       maxPrice,
       sortBy = 'recent',
@@ -31,48 +33,51 @@ router.get('/',
     } = req.query;
 
     const offset = (Number(page) - 1) * Number(limit);
-    
-    // Build WHERE clause
+
+    // Build WHERE clause. `push` binds a parameter and returns its `$n` placeholder,
+    // so facet helpers and this route share one consistent numbering scheme.
     const conditions: string[] = ["m.status = 'published'", "m.visibility = 'public'"];
     const params: any[] = [];
-    let paramIndex = 1;
+    const push = (value: unknown): string => {
+      params.push(value);
+      return `$${params.length}`;
+    };
 
-    // Category filter
+    // Category filter (legacy loose category, kept for back-compat)
     if (category) {
-      conditions.push(`m.category = $${paramIndex}`);
-      params.push(category);
-      paramIndex++;
+      conditions.push(`m.category = ${push(category)}`);
     }
 
     // Tags filter (any of the provided tags)
     if (tags) {
       const tagsArray = typeof tags === 'string' ? tags.split(',') : tags;
-      conditions.push(`m.tags && $${paramIndex}::text[]`);
-      params.push(tagsArray);
-      paramIndex++;
+      conditions.push(`m.tags && ${push(tagsArray)}::text[]`);
     }
 
     // Price range
     if (minPrice) {
-      conditions.push(`m.base_price >= $${paramIndex}`);
-      params.push(Number(minPrice));
-      paramIndex++;
+      conditions.push(`m.base_price >= ${push(Number(minPrice))}`);
     }
     if (maxPrice) {
-      conditions.push(`m.base_price <= $${paramIndex}`);
-      params.push(Number(maxPrice));
-      paramIndex++;
+      conditions.push(`m.base_price <= ${push(Number(maxPrice))}`);
     }
 
-    // Search query (name, description, tags)
+    // Search query (name, description, legacy tags, AND taxonomy term names/synonyms)
     if (search && typeof search === 'string' && search.trim()) {
+      const like = push(`%${search.trim()}%`);
       conditions.push(`(
-        m.name ILIKE $${paramIndex} OR 
-        m.description ILIKE $${paramIndex} OR
-        EXISTS (SELECT 1 FROM unnest(m.tags) tag WHERE tag ILIKE $${paramIndex})
+        m.name ILIKE ${like} OR
+        m.description ILIKE ${like} OR
+        EXISTS (SELECT 1 FROM unnest(m.tags) tag WHERE tag ILIKE ${like}) OR
+        ${termSearchSql(like)}
       )`);
-      params.push(`%${search.trim()}%`);
-      paramIndex++;
+    }
+
+    // Faceted taxonomy filters: OR within a facet, AND across facets, with
+    // parent→descendant roll-up (see services/facetFilter.ts).
+    const termGroups = parseTermsParam(terms);
+    for (const cond of facetConditions(termGroups, push)) {
+      conditions.push(cond);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -112,6 +117,11 @@ router.get('/',
     );
     const totalCount = parseInt(countResult.rows[0]?.count ?? '0', 10) || 0;
 
+    // Trailing params for the model query (after all filter params).
+    const favP = push((req as any).userId || null);
+    const limitP = push(Number(limit));
+    const offsetP = push(offset);
+
     // Get models with artist info
     const result = await db.query(
       `SELECT
@@ -124,8 +134,8 @@ router.get('/',
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
-          SELECT 1 FROM favorites f 
-          WHERE f.model_id = m.id AND f.user_id = $${paramIndex}
+          SELECT 1 FROM favorites f
+          WHERE f.model_id = m.id AND f.user_id = ${favP}
         ) as is_favorited
        FROM models m
        JOIN users u ON m.artist_id = u.id
@@ -133,8 +143,8 @@ router.get('/',
        WHERE ${whereClause}
        GROUP BY m.id, m.glb_file_path, u.artist_name, u.artist_url
        ORDER BY ${orderBy}
-       LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}`,
-      [...params, (req as any).userId || null, Number(limit), offset]
+       LIMIT ${limitP} OFFSET ${offsetP}`,
+      params
     );
 
     res.json({
