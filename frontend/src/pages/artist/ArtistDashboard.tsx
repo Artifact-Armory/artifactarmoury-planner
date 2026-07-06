@@ -132,7 +132,7 @@ const ArtistDashboard: React.FC = () => {
             )}
           </Tile>
 
-          <Tile label="Most viewed table" icon={<LayoutGrid size={16} />} to={data.mostViewedTable ? `/tables/${data.mostViewedTable.id}` : undefined}>
+          <Tile label="Most viewed table" icon={<LayoutGrid size={16} />} to={data.mostViewedTable ? `/planner/view/${data.mostViewedTable.id}` : undefined}>
             {data.mostViewedTable ? (
               <>
                 <p className="line-clamp-2 text-sm font-semibold text-gray-900">{data.mostViewedTable.name}</p>

@@ -7,11 +7,12 @@ import PlannerApp from '@ui/App'
 //   /planner            → scratch (save creates a new table)
 //   /planner/t/:id      → edit one of your saved tables
 //   /planner/s/:token   → open a shared table as an editable copy
-export default function Planner() {
+//   /planner/view/:id   → open a published table read-only (marketplace)
+export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
   const { id, token } = useParams<{ id?: string; token?: string }>()
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 10 }}>
-      <PlannerApp tableId={id} shareToken={token} />
+      <PlannerApp tableId={id} shareToken={token} readOnly={readOnly} />
     </div>
   )
 }

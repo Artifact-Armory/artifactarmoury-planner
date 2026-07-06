@@ -99,6 +99,11 @@ interface AppState {
   cameraMode: 'perspective' | 'top-down' | 'isometric'
   cameraApi: CameraApi | null
 
+  // View-only mode: a shopper opened a published table. Camera works, but all
+  // placement/selection/editing is disabled (only the owning artist edits, via
+  // their dashboard). Gated in ThreeStage input handlers.
+  readOnly: boolean
+
   setTable: (t: Partial<Table>) => void
   setRefs: (s: Partial<Pick<AppState,'scene'|'camera'|'renderer'>>) => void
   setSelectedAsset: (id: string | null) => void
@@ -106,6 +111,7 @@ interface AppState {
   setSelectedInstances: (ids: string[]) => void
   setCameraMode: (mode: 'perspective' | 'top-down' | 'isometric') => void
   setCameraApi: (api: CameraApi | null) => void
+  setReadOnly: (v: boolean) => void
   setSnapBaseline: (b: SnapBaseline) => void
   toggleSnapBaseline: () => void
   setAltMomentary: (v: boolean) => void
@@ -225,6 +231,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraMode: 'perspective',
   cameraApi: null,
 
+  readOnly: false,
+
   setTable: (t) => set(s => ({ table: { ...s.table, ...t } })),
   setRefs: (refs) => set(refs as any),
   // Placement and terrain sculpting are mutually exclusive — picking a model to
@@ -236,6 +244,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ selectedInstanceIds: ids, selectedInstanceId: ids.length ? ids[ids.length - 1] : null }),
   setCameraMode: (mode) => set({ cameraMode: mode }),
   setCameraApi: (api) => set({ cameraApi: api }),
+  setReadOnly: (v) => set({ readOnly: v }),
   setSnapBaseline: (b) => set({ snapBaseline: b }),
   toggleSnapBaseline: () => set(s => ({ snapBaseline: s.snapBaseline === 'snap' ? 'free' : 'snap' })),
   setAltMomentary: (v) => set({ altMomentary: v }),

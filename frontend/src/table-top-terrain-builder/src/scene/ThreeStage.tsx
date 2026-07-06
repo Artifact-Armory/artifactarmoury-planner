@@ -400,6 +400,7 @@ export function ThreeStage() {
 
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return // right/middle handled by BuilderCamera
+      if (store().readOnly) return // view-only: no placement/selection, camera still orbits
       const eng = engine.current!
       const s = store()
 
@@ -614,6 +615,14 @@ export function ThreeStage() {
       const eng = engine.current!
       const s = useAppStore.getState()
       const k = e.key.toLowerCase()
+
+      // View-only mode: only the camera framing keys are allowed; everything
+      // else (place/select/rotate/delete/undo/sculpt) is disabled.
+      if (s.readOnly) {
+        if (k === 'f') { cam.frameBox(tableBox()); return }
+        if (k === 'home') { cam.home(tableBox()); return }
+        return
+      }
 
       // Alt momentary (opposite of baseline)
       if (e.key === 'Alt') {

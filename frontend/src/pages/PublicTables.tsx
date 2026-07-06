@@ -125,7 +125,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
 
   return (
     <li className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <Link to={`/tables/${table.id}`} className="block">
+      <Link to={`/planner/view/${table.id}`} className="block">
         {/* Mosaic preview built from the pieces on the table */}
         <div className="relative aspect-[4/3] w-full bg-gray-100">
           {thumbs.length > 0 ? (
@@ -157,7 +157,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
       </Link>
 
       <div className="p-4">
-        <Link to={`/tables/${table.id}`} className="block">
+        <Link to={`/planner/view/${table.id}`} className="block">
           <h3 className="truncate text-base font-semibold text-gray-900 group-hover:text-indigo-600">
             {table.name || 'Untitled table'}
           </h3>
@@ -185,7 +185,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
             )}
           </span>
           <Link
-            to={`/tables/${table.id}`}
+            to={`/planner/view/${table.id}`}
             className="inline-flex items-center gap-1 font-medium text-indigo-600 group-hover:gap-1.5"
           >
             Shop the look <ArrowRight size={13} />

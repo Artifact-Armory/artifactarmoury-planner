@@ -296,7 +296,7 @@ const ModelDetails: React.FC = () => {
                 {tablesQuery.data.map((t) => (
                   <Link
                     key={t.id}
-                    to={`/tables/${t.id}`}
+                    to={`/planner/view/${t.id}`}
                     className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40"
                   >
                     <span className="text-sm font-medium text-gray-900">{t.name}</span>

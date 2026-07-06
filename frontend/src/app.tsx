@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useAuthStore } from './store/authStore';
@@ -25,7 +25,6 @@ import ArtistProfile from './pages/ArtistProfile';
 import ArtistsList from './pages/ArtistsList';
 import Category from './pages/Category';
 import Tag from './pages/Tag';
-import TableDetails from './pages/TableDetails';
 import PublicTables from './pages/PublicTables';
 import Contact from './pages/Contact';
 import About from './pages/About';
@@ -80,6 +79,13 @@ import Planner from './pages/Planner';
 
 // Error Boundary
 import ErrorBoundary from './components/common/ErrorBoundary';
+
+// Legacy /tables/:id (the old flat "shop the look" page) now opens the
+// read-only 3D table view in the planner.
+function TableRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/planner/view/${id}`} replace />;
+}
 
 // Create QueryClient
 const queryClient = new QueryClient({
@@ -165,7 +171,8 @@ function App() {
               <Route path="categories/:id" element={<Category />} />
               <Route path="tags/:id" element={<Tag />} />
               <Route path="tables" element={<PublicTables />} />
-              <Route path="tables/:id" element={<TableDetails />} />
+              {/* Old showcase URL now opens the read-only 3D table view. */}
+              <Route path="tables/:id" element={<TableRedirect />} />
               <Route path="about" element={<About />} />
               <Route path="contact" element={<Contact />} />
               <Route path="privacy-policy" element={<PrivacyPolicy />} />
@@ -271,6 +278,7 @@ function App() {
             <Route path="planner" element={<Planner />} />
             <Route path="planner/t/:id" element={<Planner />} />
             <Route path="planner/s/:token" element={<Planner />} />
+            <Route path="planner/view/:id" element={<Planner readOnly />} />
 
             {/* 404 Not Found */}
             <Route path="404" element={<MainLayout />}>

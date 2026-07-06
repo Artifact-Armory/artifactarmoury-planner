@@ -55,7 +55,7 @@ const ArtistShowcases: React.FC = () => {
       toast.error('Publish the showcase first so buyers can open it')
       return
     }
-    const url = `${window.location.origin}/tables/${t.id}`
+    const url = `${window.location.origin}/planner/view/${t.id}`
     await navigator.clipboard.writeText(url).catch(() => {})
     toast.success('Public showcase link copied')
   }
@@ -128,7 +128,7 @@ const ArtistShowcases: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-2">
                   <button className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open / edit</button>
                   {t.isPublic && (
-                    <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => navigate(`/tables/${t.id}`)}>View public page</button>
+                    <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/view/${t.id}`)}>View public page</button>
                   )}
                   <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => togglePublish(t)}>{t.isPublic ? 'Unpublish' : 'Publish'}</button>
                   <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => copyPublicLink(t)}>Copy link</button>

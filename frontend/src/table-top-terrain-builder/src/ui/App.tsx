@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
-  Mountain, ArrowUp, ArrowDown, Waves, Square, Download,
+  Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import hotToast from 'react-hot-toast'
@@ -31,7 +31,7 @@ const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '6×3', w: 6, h: 3 },
 ]
 
-export default function App({ tableId, shareToken }: { tableId?: string; shareToken?: string } = {}) {
+export default function App({ tableId, shareToken, readOnly = false }: { tableId?: string; shareToken?: string; readOnly?: boolean } = {}) {
   const navigate = useNavigate()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const user = useAuthStore((s) => s.user)
@@ -77,6 +77,15 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const exportLayout = useAppStore((s) => s.actions.exportLayout)
   const importLayout = useAppStore((s) => s.actions.importLayout)
   const applyLayout = useAppStore((s) => s.actions.applyLayout)
+  const setReadOnly = useAppStore((s) => s.setReadOnly)
+
+  // Push the view-only flag into the store so the scene's input handlers gate
+  // editing (placement/selection/keys). Clear it on unmount so a later /planner
+  // visit is editable again.
+  React.useEffect(() => {
+    setReadOnly(readOnly)
+    return () => setReadOnly(false)
+  }, [readOnly, setReadOnly])
 
   // Terrain sculpting
   const terrainTool = useAppStore((s) => s.terrainTool)
@@ -340,6 +349,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   }
 
   async function handleSave() {
+    if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
     if (!isAuthenticated || !user?.email) {
       hotToast.error('Log in to save this table to your account')
       navigate('/login')
@@ -436,7 +446,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
       )}
 
       {/* Mode badge (always reflects current placement mode) */}
-      {!uiHidden && (
+      {!uiHidden && !readOnly && (
         <div className="tb-badge" data-free={!effSnap}>
           {effSnap ? (
             <><Grid3x3 size={14} /> Snapping to grid</>
@@ -452,7 +462,7 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
         </div>
       )}
 
-      {!uiHidden && (
+      {!uiHidden && !readOnly && (
         <>
           {/* Top toolbar */}
           <div className="tb-toolbar">
@@ -795,13 +805,54 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
         </>
       )}
 
+      {/* View-only chrome — shopper opened a published table. No editing tools;
+          just camera controls + "add the whole look to the basket". */}
+      {readOnly && !uiHidden && (
+        <>
+          <div className="tb-viewbar">
+            <button className="tb-view-back" onClick={() => navigate('/tables')} title="Back to tables">
+              <ArrowLeft size={16} /> Tables
+            </button>
+            <div className="tb-view-title">
+              <span className="tb-view-name">{savedTableName ?? 'Table'}</span>
+              <span className="tb-view-flag"><Eye size={12} /> View only</span>
+            </div>
+            <div className="tb-view-actions">
+              <button className="tb-icon" title="Fit view (F)" onClick={() => fitView()}>
+                <Maximize2 size={18} />
+              </button>
+              <button
+                className="tb-icon"
+                title="Reset view (Home)"
+                onClick={() => useAppStore.getState().cameraApi?.home()}
+              >
+                <Home size={18} />
+              </button>
+              <button className="tb-icon" title="Keyboard help (?)" onClick={() => setShowHelp(true)}>
+                <HelpCircle size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="tb-view-cart">
+            <div className="tb-view-cart-info">
+              <strong>{bom.rows.length} model{bom.rows.length === 1 ? '' : 's'} in this build</strong>
+              <span className="tb-small">{bom.pieceCount} piece{bom.pieceCount === 1 ? '' : 's'} · £{bom.total.toFixed(2)}</span>
+            </div>
+            <button className="tb-cta" disabled={bom.rows.length === 0} onClick={handleAddAll}>
+              <ShoppingCart size={16} /> Add all to basket
+            </button>
+          </div>
+        </>
+      )}
+
       {uiHidden && (
         <button className="tb-show-ui" onClick={() => setUiHidden(false)} title="Show UI (H)">
           Show UI
         </button>
       )}
 
-      <CoachMarks />
+      {!readOnly && <CoachMarks />}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
       {/* Add-to-basket confirmation (the real CartDrawer isn't mounted on /planner) */}
