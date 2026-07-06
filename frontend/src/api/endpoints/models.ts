@@ -75,6 +75,25 @@ export const modelsApi = {
   },
 
   /**
+   * The signed-in artist's own placeable models (incl. drafts) for the planner
+   * palette, so they can lay out unpublished pieces on a table.
+   */
+  getMyPlannerModels: async (): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/mine/planner`)
+    return (response.data?.models ?? []).map((m: any) => ({ ...mapModelRecord(m), status: m.status }))
+  },
+
+  /**
+   * Resolve arbitrary models by id (publish-agnostic) so a table renders fully
+   * even when it references an unpublished piece.
+   */
+  resolvePlannerAssets: async (ids: string[]): Promise<TerrainModel[]> => {
+    if (!ids.length) return []
+    const response = await apiClient.get(`${BASE_URL}/planner-assets`, { params: { ids: ids.join(',') } })
+    return (response.data?.models ?? []).map((m: any) => mapModelRecord(m))
+  },
+
+  /**
    * Poll the background-processing state of a model the caller owns.
    */
   getProcessingStatus: async (

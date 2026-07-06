@@ -163,30 +163,8 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
       // Only single-STL models with a GLB preview. Multi-part "set" models are
       // surfaced via their individually-placeable parts (see loadSetsFromAPI).
       .filter((m) => m.glbUrl && (m.partCount ?? 1) === 1)
-      .map((m) => {
-        // Backend stores dimensions in mm; planner needs metres
-        const wM = m.width != null ? m.width / 1000 : 0.15
-        const dM = m.depth != null ? m.depth / 1000 : 0.15
-        const hM = m.height != null ? m.height / 1000 : 0.15
-
-        const aabb = { x: wM, z: dM, y: hM }
-        const footprint = deriveFootprint(aabb, DEFAULT_GRID_SIZE)
-
-        return {
-          id: m.id,
-          name: m.name,
-          tags: m.tags ?? [],
-          aabb,
-          footprint,
-          rotationStepDeg: 90,
-          price: m.basePrice ?? 0,
-          fulfillment: m.fulfillmentType ?? 'print',
-          artistName: m.artistName,
-          model: m.glbUrl,
-          thumbnail: m.thumbnailUrl,
-          scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
-        } satisfies Asset
-      })
+      .map((m) => modelToAsset(m))
+      .filter((a): a is Asset => a !== null)
 
     // Make these resolvable by getAssetById (used by the scene's ghost +
     // placement code), otherwise a palette model can't be placed on the table.
@@ -196,6 +174,83 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
     // API unreachable (dev without backend running) — use local manifest
     console.warn('[planner] API unavailable, falling back to local asset manifest')
     return loadAssets()
+  }
+}
+
+/**
+ * Map an API model record (dimensions in mm) to a placeable planner Asset, or
+ * null if it has no GLB / isn't a single-part model. Shared by the catalogue,
+ * the artist's own-models loader, and the by-id resolver.
+ */
+function modelToAsset(m: {
+  id: string; name: string; tags?: string[]; glbUrl?: string; thumbnailUrl?: string
+  width?: number | null; depth?: number | null; height?: number | null
+  basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; partCount?: number
+}): Asset | null {
+  if (!m.glbUrl || (m.partCount ?? 1) !== 1) return null
+  const wM = m.width != null ? m.width / 1000 : 0.15
+  const dM = m.depth != null ? m.depth / 1000 : 0.15
+  const hM = m.height != null ? m.height / 1000 : 0.15
+  const aabb = { x: wM, z: dM, y: hM }
+  return {
+    id: m.id,
+    name: m.name,
+    tags: m.tags ?? [],
+    aabb,
+    footprint: deriveFootprint(aabb, DEFAULT_GRID_SIZE),
+    rotationStepDeg: 90,
+    price: m.basePrice ?? 0,
+    fulfillment: m.fulfillmentType ?? 'print',
+    artistName: m.artistName,
+    model: m.glbUrl,
+    thumbnail: m.thumbnailUrl,
+    scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
+  } satisfies Asset
+}
+
+/** The signed-in artist's own placeable models (incl. drafts) for "My items". */
+export interface PlannerMyModel {
+  id: string; name: string; thumbnail?: string; price: number; status: string
+}
+
+/**
+ * Load the artist's own models (incl. unpublished drafts), register them so they
+ * can be placed, and return a lightweight list for the palette. Non-artists / guests
+ * get an empty list (the endpoint 401/403s).
+ */
+export async function loadMyModelsForPlanner(): Promise<PlannerMyModel[]> {
+  try {
+    const models = await modelsApi.getMyPlannerModels()
+    const assets = models.map((m) => modelToAsset(m)).filter((a): a is Asset => a !== null)
+    registerAssets(assets)
+    return models
+      .filter((m) => m.glbUrl && (m.partCount ?? 1) === 1)
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        thumbnail: m.thumbnailUrl,
+        price: m.basePrice ?? 0,
+        status: (m as { status?: string }).status ?? 'draft',
+      }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Resolve models by id (publish-agnostic) and register any that aren't already
+ * known, so a table renders every placed piece — including an artist's
+ * unpublished models. Skips non-uuid ids (e.g. set "part:<id>" refs).
+ */
+export async function resolveAssetsByIds(ids: string[]): Promise<void> {
+  const missing = [...new Set(ids)].filter((id) => id && !id.startsWith('part:') && !getAssetById(id))
+  if (missing.length === 0) return
+  try {
+    const models = await modelsApi.resolvePlannerAssets(missing)
+    const assets = models.map((m) => modelToAsset(m)).filter((a): a is Asset => a !== null)
+    registerAssets(assets)
+  } catch {
+    /* best-effort — unresolved ids just fall back to a placeholder box */
   }
 }
 

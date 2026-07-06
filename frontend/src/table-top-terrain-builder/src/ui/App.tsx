@@ -14,6 +14,7 @@ import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
 import { serializeLayout, deserializeLayout } from '@state/tableMapping'
+import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
@@ -48,6 +49,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const bundles = useAppStore((s) => s.bundles)
   const sets = useAppStore((s) => s.sets)
   const setPartAssets = useAppStore((s) => s.setPartAssets)
+  const myModels = useAppStore((s) => s.myModels)
   const ownedModelIds = useAppStore((s) => s.ownedModelIds)
   const ownedBundleIds = useAppStore((s) => s.ownedBundleIds)
   const cartItems = useCartStore((s) => s.items)
@@ -214,6 +216,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
         const { table, tableMaterial, instances, heightmap } = deserializeLayout(t.tableConfig, t.layoutData)
+        // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
+        // artist's unpublished piece) so every placed model renders, not a grey box.
+        await resolveAssetsByIds(instances.map((i) => i.assetId))
+        if (cancelled) return
         applyLayout({ table, tableMaterial, instances, heightmap })
         setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
         if (!shareToken) {
@@ -307,9 +313,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const displayModels = [...modelIds].filter(
       (id) => !memberIds.has(id) && !setModelIds.has(id) && assetsById.has(id),
     )
-    const count = groups.length + displayModels.length
-    return { groups, displayModels, count }
-  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, sets, assetsById, user?.id])
+    // The artist's own models (incl. unpublished drafts). Shown even without a
+    // purchase so a creator can lay out their pieces before release.
+    const ownModels = myModels.filter(
+      (m) => !memberIds.has(m.id) && !setModelIds.has(m.id) && !modelIds.has(m.id),
+    )
+    const count = groups.length + displayModels.length + ownModels.length
+    return { groups, displayModels, ownModels, count }
+  }, [cartItems, ownedModelIds, ownedBundleIds, bundles, sets, myModels, assetsById, user?.id])
 
   const toggleBundleExpanded = (id: string) =>
     setExpandedBundles((s) => {
@@ -320,8 +331,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     })
 
   // A single placeable model tile (shared by the catalogue + "My items" tabs).
+  // Falls back to the global registry for models that aren't on the flat catalogue
+  // (the artist's own drafts, or pieces resolved by id when loading a table).
   const renderModelTile = (id: string, ownedHint?: boolean) => {
-    const a = assetsById.get(id)
+    const a = assetsById.get(id) ?? getAssetById(id)
     if (!a) return null
     const owned = ownedHint ?? ownedModelIds.has(id)
     return (
@@ -336,6 +349,29 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         <div className="tb-tile-meta">
           <span className={`tb-pill ${a.fulfillment}`}>{a.fulfillment === 'stl' ? 'STL' : 'Print'}</span>
           <span>{owned ? 'Owned' : 'In basket'}</span>
+        </div>
+      </button>
+    )
+  }
+
+  // A tile for one of the artist's OWN models (incl. unpublished drafts), with a
+  // status pill instead of owned/basket. Registered assets resolve via getAssetById.
+  const renderOwnModelTile = (m: { id: string; name: string; thumbnail?: string; status: string }) => {
+    if (!getAssetById(m.id)) return null
+    return (
+      <button
+        key={m.id}
+        className={`tb-tile ${selectedAssetId === m.id ? 'is-active' : ''}`}
+        onClick={() => setSelectedAsset(selectedAssetId === m.id ? null : m.id)}
+        title={`Place ${m.name}`}
+      >
+        <div className="tb-thumb">{m.thumbnail ? <img src={m.thumbnail} alt="" /> : <Box size={22} />}</div>
+        <div className="tb-tile-name">{m.name}</div>
+        <div className="tb-tile-meta">
+          <span className={`tb-pill ${m.status === 'published' ? 'stl' : 'print'}`}>
+            {m.status === 'published' ? 'Published' : 'Draft'}
+          </span>
+          <span>Yours</span>
         </div>
       </button>
     )
@@ -720,6 +756,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                     <div className="tb-palette-cat">Individual models</div>
                     <div className="tb-palette-grid">
                       {myItems.displayModels.map((id) => renderModelTile(id))}
+                    </div>
+                  </div>
+                )}
+
+                {myItems.ownModels.length > 0 && (
+                  <div className="tb-palette-section">
+                    <div className="tb-palette-cat">Your models (incl. drafts)</div>
+                    <div className="tb-palette-grid">
+                      {myItems.ownModels.map((m) => renderOwnModelTile(m))}
                     </div>
                   </div>
                 )}

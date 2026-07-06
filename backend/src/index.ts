@@ -29,9 +29,11 @@ import artistsRoutes from './routes/artists';
 import tablesRoutes from './routes/tables';
 import ordersRoutes from './routes/orders';
 import bundlesRoutes from './routes/bundles';
+import releasesRoutes from './routes/releases';
 import adminRoutes from './routes/admin';
 import uploadsRoutes from './routes/uploads';
 import webhookRoutes from './routes/webhooks';
+import { startReleaseScheduler } from './services/releases';
 
 // ============================================================================
 // CONFIGURATION
@@ -108,6 +110,7 @@ app.use(`${API_PREFIX}/artists`, artistsRoutes);
 app.use(`${API_PREFIX}/tables`, tablesRoutes);
 app.use(`${API_PREFIX}/orders`, ordersRoutes);
 app.use(`${API_PREFIX}/bundles`, bundlesRoutes);
+app.use(`${API_PREFIX}/releases`, releasesRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
 app.use(`${API_PREFIX}/uploads`, uploadsRoutes);
 
@@ -162,6 +165,9 @@ async function startServer() {
     // Test database connection
     await db.query('SELECT NOW()');
     logger.info('Database connected successfully');
+
+    // Start the scheduled-release publisher (catch-up sweep + 60s poll).
+    startReleaseScheduler();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {

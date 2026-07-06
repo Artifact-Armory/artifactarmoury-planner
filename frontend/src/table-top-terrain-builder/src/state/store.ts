@@ -1,7 +1,10 @@
 // src/state/store.ts
 import { create } from 'zustand'
 import * as THREE from 'three'
-import { loadAssets, loadAssetsFromAPI, loadSetsFromAPI, type Asset, type PlannerSetData } from '../core/assets'
+import {
+  loadAssets, loadAssetsFromAPI, loadSetsFromAPI, loadMyModelsForPlanner,
+  type Asset, type PlannerSetData, type PlannerMyModel,
+} from '../core/assets'
 import {
   type Heightmap, type TerrainTool, createHeightmap, heightmapFitsTable, applyBrush,
 } from '../core/heightmap'
@@ -66,6 +69,7 @@ interface AppState {
   bundles: PlannerBundle[]           // published bundles (palette grouping)
   sets: PlannerSetData[]             // published multi-part "set" models (grouping)
   setPartAssets: Asset[]             // the sets' part assets (kept off the catalogue)
+  myModels: PlannerMyModel[]         // the signed-in artist's own models (incl. drafts)
   ownedModelIds: Set<string>         // models the signed-in user has purchased
   ownedBundleIds: Set<string>        // bundles the signed-in user has purchased
   selectedAssetId: string | null
@@ -202,6 +206,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   bundles: [],
   sets: [],
   setPartAssets: [],
+  myModels: [],
   ownedModelIds: new Set(),
   ownedBundleIds: new Set(),
   selectedAssetId: null,
@@ -333,6 +338,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       } catch {
         set({ ownedModelIds: new Set(), ownedBundleIds: new Set() })
       }
+
+      // The signed-in artist's own models (incl. unpublished drafts), so they can
+      // lay out pieces before release. Empty for guests/customers (endpoint 403s).
+      set({ myModels: await loadMyModelsForPlanner() })
     },
     
     loadStarterLayout: () => {
@@ -404,6 +413,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const modelId = parentSet ? parentSet.id : assetId
 
       if (s.ownedModelIds.has(modelId)) return
+      // Never add the artist's own models to their cart — you don't buy your own work.
+      if (s.myModels.some(m => m.id === modelId)) return
       const inOwnedBundle = s.bundles.some(b => s.ownedBundleIds.has(b.id) && b.modelIds.includes(modelId))
       if (inOwnedBundle) return
 

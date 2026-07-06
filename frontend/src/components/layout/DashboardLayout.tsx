@@ -20,7 +20,8 @@ import {
   Settings,
   DollarSign,
   Plus,
-  ChevronLeft
+  ChevronLeft,
+  Rocket
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
@@ -233,6 +234,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <Grid size={18} className="mr-3" />
                 My Bundles
+              </NavLink>
+              <NavLink
+                to="/artist/releases"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  location.pathname.startsWith('/artist/releases')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <Rocket size={18} className="mr-3" />
+                Releases
               </NavLink>
               <NavLink
                 to="/artist/showcases"

@@ -54,6 +54,7 @@ const CreateModel: React.FC = () => {
     if (!stlFile) { setError('Choose an STL file to upload'); return }
     if (!/\.stl$/i.test(stlFile.name)) { setError('The model file must be an .stl'); return }
     if (partFiles.some((f) => !/\.stl$/i.test(f.name))) { setError('Every part must be an .stl file'); return }
+    if (!thumbFile) { setError('Add a thumbnail image for your model'); return }
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
     if (isNaN(price) || price < 0) { setError('Enter a valid base price'); return }
@@ -73,12 +74,8 @@ const CreateModel: React.FC = () => {
         parts.push({ rawKey: p.key, filename: f.name, name: f.name.replace(/\.stl$/i, '') })
       }
 
-      // 3. Optional thumbnail, also direct to R2.
-      let thumbnailKey: string | undefined
-      if (thumbFile) {
-        const t = await uploadsApi.uploadDirect(thumbFile, 'thumbnails')
-        thumbnailKey = t.key
-      }
+      // 3. Thumbnail (required), also direct to R2.
+      const thumbnailKey = (await uploadsApi.uploadDirect(thumbFile, 'thumbnails')).key
 
       // 4. Create the model row; the API processes it (+ all parts) in the background.
       const created = await modelsApi.createFromUpload({
@@ -223,8 +220,10 @@ const CreateModel: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Thumbnail (optional)</label>
+          <label className="block text-sm font-medium mb-1">Thumbnail <span className="text-red-500">*</span></label>
+          <p className="text-xs text-gray-500 mb-1">A preview image is required — it's what buyers see in the marketplace.</p>
           <input type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          {thumbFile && <p className="text-sm text-gray-500 mt-1">{thumbFile.name}</p>}
         </div>
 
         {phase === 'uploading' && (

@@ -253,8 +253,10 @@ router.post('/from-upload',
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
     }
-    if (thumbnailKey != null && (typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/'))) {
-      throw new ValidationError('thumbnailKey must be an uploaded thumbnails/ object');
+    // A thumbnail is required up-front (it's also a hard requirement to publish),
+    // so we never create a draft that can't be listed.
+    if (!thumbnailKey || typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/')) {
+      throw new ValidationError('A thumbnail image is required');
     }
     if (!name || !category || basePrice == null) {
       throw new ValidationError('Name, category, and base price are required');
@@ -447,6 +449,55 @@ router.get('/sets',
     }));
 
     res.json({ sets });
+  })
+);
+
+// ============================================================================
+// MY PLACEABLE MODELS (artist's own, incl. drafts) — for the planner palette
+// ============================================================================
+// Lets an artist lay out their own models on a table *before* they're published.
+// Single-part, GLB-ready models of any status (draft/published), scoped to the
+// signed-in artist.
+
+router.get('/mine/planner',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req, res) => {
+    const models = (await db.query(
+      `SELECT id, name, tags, glb_file_path, thumbnail_path,
+              width, depth, height, base_price, status
+       FROM models
+       WHERE artist_id = $1 AND part_count = 1 AND glb_file_path IS NOT NULL
+         AND (processing_status IS NULL OR processing_status = 'ready')
+       ORDER BY created_at DESC`,
+      [(req as any).userId]
+    )).rows;
+    res.json({ models });
+  })
+);
+
+// ============================================================================
+// RESOLVE PLACEABLE ASSETS BY ID (publish-agnostic) — render any table fully
+// ============================================================================
+// A table may reference models that aren't in the public catalogue (an artist's
+// unpublished piece). To render such tables for everyone, resolve the referenced
+// models by id here WITHOUT a publish-status gate. Only exposes what the planner
+// needs to draw the mesh (already-public GLB + dimensions), never the STL.
+
+router.get('/planner-assets',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const raw = typeof req.query.ids === 'string' ? req.query.ids : '';
+    const ids = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
+    if (ids.length === 0) { res.json({ models: [] }); return; }
+    const models = (await db.query(
+      `SELECT m.id, m.name, m.tags, m.glb_file_path, m.thumbnail_path,
+              m.width, m.depth, m.height, m.base_price, u.artist_name
+       FROM models m JOIN users u ON u.id = m.artist_id
+       WHERE m.id = ANY($1::uuid[]) AND m.part_count = 1 AND m.glb_file_path IS NOT NULL`,
+      [ids]
+    )).rows;
+    res.json({ models });
   })
 );
 
