@@ -276,7 +276,7 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <Settings size={18} className="mr-3" />
-                Artist Settings
+                Artist Profile
               </NavLink>
             </div>
           )}

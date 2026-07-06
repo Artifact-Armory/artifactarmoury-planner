@@ -83,7 +83,7 @@ const ArtistSettings: React.FC = () => {
 
   return (
     <div className="px-4 py-10 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-semibold text-gray-900">Artist Settings</h1>
+      <h1 className="text-2xl font-semibold text-gray-900">Artist Profile</h1>
       <p className="text-gray-600">Your public brand page — banner, avatar, and bio.</p>
 
       <form className="mt-6 space-y-5" onSubmit={save}>
