@@ -33,6 +33,7 @@ import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MAT
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease } from '../services/notifications';
+import { logProductView, logWishlistAdd } from '../services/analytics';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
 
@@ -499,10 +500,14 @@ router.get('/:id',
       }
     }
 
-    // Increment view count (async, don't wait)
+    // Increment view count (async, don't wait) + log the view event for analytics.
     if (model.status === 'published') {
       db.query('UPDATE models SET view_count = view_count + 1 WHERE id = $1', [id])
         .catch(err => logger.error('Failed to increment view count', { error: err }));
+      logProductView(id, model.artist_id, {
+        userId: (req as any).userId ?? null,
+        source: typeof req.query.src === 'string' ? req.query.src : null,
+      });
     }
 
     // Get additional images
@@ -932,11 +937,16 @@ router.post('/:id/favorite',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = (req as any).userId;
-    await db.query(
+    const ins = await db.query(
       `INSERT INTO favorites (user_id, model_id) VALUES ($1, $2)
-       ON CONFLICT (user_id, model_id) DO NOTHING`,
+       ON CONFLICT (user_id, model_id) DO NOTHING
+       RETURNING (SELECT artist_id FROM models WHERE id = $2) AS artist_id`,
       [userId, id]
     );
+    // Log the wishlist event only on a fresh add (not a duplicate).
+    if ((ins.rowCount ?? 0) > 0) {
+      logWishlistAdd(id, ins.rows[0]?.artist_id ?? null, { userId });
+    }
     res.json({ favorited: true, favoriteCount: await favoriteCount(id) });
   })
 );

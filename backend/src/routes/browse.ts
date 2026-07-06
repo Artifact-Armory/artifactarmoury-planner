@@ -9,6 +9,7 @@ import { searchRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError } from '../middleware/error';
 import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
+import { logSearch } from '../services/analytics';
 
 const router = Router();
 
@@ -116,6 +117,12 @@ router.get('/',
       params
     );
     const totalCount = parseInt(countResult.rows[0]?.count ?? '0', 10) || 0;
+
+    // Log the search (first page only, to avoid double-counting pagination). The
+    // result count powers zero-result-gap analytics.
+    if (search && typeof search === 'string' && search.trim() && Number(page) === 1) {
+      logSearch(search.trim(), totalCount, { userId: (req as any).userId ?? null });
+    }
 
     // Trailing params for the model query (after all filter params).
     const favP = push((req as any).userId || null);

@@ -1,62 +1,166 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { PoundSterling, ShoppingBag, Users, Eye, Package, Download } from 'lucide-react'
-import { artistsApi } from '../../api/endpoints/artists'
+import { PoundSterling, ShoppingBag, Eye, Heart, Target, LayoutGrid, Star, Search, TrendingUp, TrendingDown, ArrowRight, Layers } from 'lucide-react'
+import { artistAnalyticsApi, type PeriodTotals } from '../../api/endpoints/artistAnalytics'
+import { useAnalyticsRange, DateRangePicker } from '../../components/analytics/dateRange'
 import { formatPrice } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
 
-const StatCard: React.FC<{ label: string; value: string; icon: React.ReactNode; hint?: string }> = ({
-  label,
-  value,
-  icon,
-  hint,
-}) => (
-  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-    <div className="flex items-center gap-2 text-gray-400">
-      {icon}
-      <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+const pct = (cur: number, prev: number): number | null => {
+  if (prev === 0) return cur > 0 ? 100 : null
+  return ((cur - prev) / prev) * 100
+}
+
+const Delta: React.FC<{ cur: number; prev: number; goodUp?: boolean }> = ({ cur, prev, goodUp = true }) => {
+  const p = pct(cur, prev)
+  if (p === null) return <span className="text-xs text-gray-400">— vs prev</span>
+  const up = p >= 0
+  const good = up === goodUp
+  const Icon = up ? TrendingUp : TrendingDown
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs ${good ? 'text-green-600' : 'text-red-500'}`}>
+      <Icon size={12} /> {Math.abs(p).toFixed(0)}% vs prev
+    </span>
+  )
+}
+
+const Tile: React.FC<{
+  label: string; icon: React.ReactNode; to?: string; children: React.ReactNode; hint?: string
+}> = ({ label, icon, to, children, hint }) => {
+  const body = (
+    <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow">
+      <div className="flex items-center gap-2 text-gray-400">
+        {icon}
+        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+        {to && <ArrowRight size={13} className="ml-auto text-gray-300" />}
+      </div>
+      <div className="mt-2 flex-1">{children}</div>
+      {hint && <p className="mt-1 text-xs text-gray-400">{hint}</p>}
     </div>
-    <p className="mt-2 text-2xl font-semibold text-gray-900">{value}</p>
-    {hint && <p className="text-xs text-gray-400">{hint}</p>}
-  </div>
+  )
+  return to ? <Link to={to} className="block h-full">{body}</Link> : body
+}
+
+const Big: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="text-2xl font-semibold text-gray-900">{children}</p>
 )
 
 const ArtistDashboard: React.FC = () => {
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['artist-stats'],
-    queryFn: () => artistsApi.getDashboardStats(),
+  const { range, setRange, setPreset } = useAnalyticsRange()
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['artist-analytics-summary', range.from, range.to],
+    queryFn: () => artistAnalyticsApi.summary(range),
+    placeholderData: (p) => p,
   })
 
+  const t: PeriodTotals | undefined = data?.totals
+  const prev = data?.prev
+  const conv = (v: PeriodTotals) => (v.conversion * 100)
+
   return (
-    <div className="px-4 py-10 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="px-4 py-8 max-w-6xl mx-auto">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Artist Dashboard</h1>
-          <p className="text-gray-600">Your sales, audience, and catalogue at a glance.</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Analytics</h1>
+          <p className="text-sm text-gray-500">What to make, how to price, present, and tag — decide from the data.</p>
         </div>
-        <div className="flex gap-2">
-          <Link to="/artist/models" className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-gray-50">My Models</Link>
-          <Link to="/artist/sales" className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">View sales</Link>
+        <div className="flex items-center gap-2">
+          {isFetching && <Spinner size="sm" className="text-indigo-500" />}
+          <DateRangePicker range={range} setRange={setRange} setPreset={setPreset} />
         </div>
       </div>
 
-      {isLoading || !stats ? (
-        <div className="flex justify-center py-20"><Spinner size="lg" /></div>
+      {isLoading || !data || !t || !prev ? (
+        <div className="flex justify-center py-24"><Spinner size="lg" /></div>
       ) : (
-        <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3">
-          <StatCard label="Your earnings" value={formatPrice(stats.netEarnings)} icon={<PoundSterling size={16} />} hint="after 15% platform fee" />
-          <StatCard label="Gross revenue" value={formatPrice(stats.grossRevenue)} icon={<PoundSterling size={16} />} />
-          <StatCard label="Sales" value={String(stats.totalSales)} icon={<ShoppingBag size={16} />} />
-          <StatCard label="Followers" value={String(stats.followers)} icon={<Users size={16} />} />
-          <StatCard label="Total views" value={String(stats.totalViews)} icon={<Eye size={16} />} />
-          <StatCard label="Downloads" value={String(stats.totalDownloads)} icon={<Download size={16} />} />
-          <StatCard
-            label="Models"
-            value={String(stats.activeModels)}
-            icon={<Package size={16} />}
-            hint={`${stats.activeModels} published · ${stats.draftModels} draft`}
-          />
+        <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+          <Tile label="Your earnings" icon={<PoundSterling size={16} />} to="/artist/analytics/sales" hint="after 15% fee">
+            <Big>{formatPrice(t.net)}</Big>
+            <Delta cur={t.net} prev={prev.net} />
+          </Tile>
+
+          <Tile label="Total sales" icon={<ShoppingBag size={16} />} to="/artist/analytics/sales">
+            <Big>{t.sales}</Big>
+            <Delta cur={t.sales} prev={prev.sales} />
+          </Tile>
+
+          <Tile label="Conversion" icon={<Target size={16} />} to="/artist/analytics/products" hint="views → sales">
+            <Big>{conv(t).toFixed(1)}%</Big>
+            <Delta cur={t.conversion} prev={prev.conversion} />
+          </Tile>
+
+          <Tile label="Planner placements" icon={<LayoutGrid size={16} />} to="/artist/analytics/products" hint="purchase intent">
+            <Big>{t.placements}</Big>
+            <Delta cur={t.placements} prev={prev.placements} />
+          </Tile>
+
+          <Tile label="Views" icon={<Eye size={16} />} to="/artist/analytics/products">
+            <Big>{t.views}</Big>
+            <Delta cur={t.views} prev={prev.views} />
+          </Tile>
+
+          <Tile label="Wishlists" icon={<Heart size={16} />} to="/artist/analytics/products">
+            <Big>{t.wishlist}</Big>
+            <Delta cur={t.wishlist} prev={prev.wishlist} />
+          </Tile>
+
+          <Tile label="Avg rating" icon={<Star size={16} />} to="/artist/analytics/rating" hint={`${data.rating.count} reviews`}>
+            <Big>{data.rating.count ? data.rating.avg.toFixed(2) : '—'}</Big>
+            {data.rating.count > 0 && (
+              <div className="mt-1 flex items-end gap-0.5" title="rating distribution">
+                {([5, 4, 3, 2, 1] as const).map((s) => {
+                  const max = Math.max(1, ...Object.values(data.rating.distribution))
+                  const h = 6 + (data.rating.distribution[String(s) as '5'] / max) * 22
+                  return <span key={s} className="w-2 rounded-t bg-amber-400" style={{ height: h }} />
+                })}
+              </div>
+            )}
+          </Tile>
+
+          <Tile label="Most popular" icon={<TrendingUp size={16} />} to={data.topModels[0] ? `/artist/analytics/model/${data.topModels[0].modelId}` : undefined}>
+            {data.topModels[0] ? (
+              <>
+                <p className="line-clamp-2 text-sm font-semibold text-gray-900">
+                  {data.topModels[0].isSet && <Layers size={12} className="mr-1 inline text-gray-400" />}
+                  {data.topModels[0].name}
+                </p>
+                <p className="text-xs text-gray-400">{data.topModels[0].units} sold · {data.topModels[0].views} views</p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400">No sales yet</p>
+            )}
+          </Tile>
+
+          <Tile label="Most viewed table" icon={<LayoutGrid size={16} />} to={data.mostViewedTable ? `/tables/${data.mostViewedTable.id}` : undefined}>
+            {data.mostViewedTable ? (
+              <>
+                <p className="line-clamp-2 text-sm font-semibold text-gray-900">{data.mostViewedTable.name}</p>
+                <p className="text-xs text-gray-400">{data.mostViewedTable.viewCount} views</p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400">Not in any public table yet</p>
+            )}
+          </Tile>
+
+          <Tile label="Featured in tables" icon={<Layers size={16} />} hint="your pieces in community builds">
+            <Big>{data.featuredInTables}</Big>
+          </Tile>
+
+          <Tile label="Top searches (site)" icon={<Search size={16} />} to="/artist/analytics/searches">
+            {data.topSearches.length ? (
+              <ul className="space-y-0.5 text-xs text-gray-600">
+                {data.topSearches.slice(0, 4).map((s) => (
+                  <li key={s.query} className="flex justify-between gap-2">
+                    <span className="truncate">{s.query}</span>
+                    <span className="text-gray-400">{s.searches}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-400">No search data yet</p>
+            )}
+          </Tile>
         </div>
       )}
     </div>

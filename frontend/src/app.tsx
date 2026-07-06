@@ -57,6 +57,11 @@ import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
 import EditModel from './pages/artist/EditModel';
 import ArtistSales from './pages/artist/ArtistSales';
+import SalesDetail from './pages/artist/analytics/SalesDetail';
+import ProductsDetail from './pages/artist/analytics/ProductsDetail';
+import RatingDetail from './pages/artist/analytics/RatingDetail';
+import SearchesDetail from './pages/artist/analytics/SearchesDetail';
+import ModelFunnel from './pages/artist/analytics/ModelFunnel';
 import ArtistSettings from './pages/artist/ArtistSettings';
 import ArtistApplication from './pages/artist/ArtistApplication';
 
@@ -223,6 +228,11 @@ function App() {
               <Route path="bundles/:id/edit" element={<EditBundle />} />
               <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="sales" element={<ArtistSales />} />
+              <Route path="analytics/sales" element={<SalesDetail />} />
+              <Route path="analytics/products" element={<ProductsDetail />} />
+              <Route path="analytics/rating" element={<RatingDetail />} />
+              <Route path="analytics/searches" element={<SearchesDetail />} />
+              <Route path="analytics/model/:id" element={<ModelFunnel />} />
               <Route path="settings" element={<ArtistSettings />} />
             </Route>
 

@@ -9,6 +9,7 @@ import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
+import { analyticsApi } from '@/api/endpoints/analytics'
 
 export type SnapBaseline = 'snap' | 'free'
 
@@ -372,6 +373,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Placing a catalogue model you don't already own/have drops it into the
       // shop basket, so it surfaces in the palette's "My items" tab.
       get().actions.addPlacedModelToShopCart(i.assetId)
+      // Purchase-intent analytics: log the placement against the parent model
+      // (set parts count for their set). No-ops for demo/non-UUID asset ids.
+      {
+        const s = get()
+        const parentSet = s.sets.find((set) => set.partAssetIds.includes(i.assetId))
+        analyticsApi.placement(parentSet ? parentSet.id : i.assetId)
+      }
       return id
     },
 
