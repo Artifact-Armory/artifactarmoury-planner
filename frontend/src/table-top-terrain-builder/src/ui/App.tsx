@@ -323,14 +323,16 @@ export default function App({ tableId, shareToken }: { tableId?: string; shareTo
   const bom = React.useMemo(() => {
     const counts = new Map<string, number>()
     for (const i of instances) counts.set(i.assetId, (counts.get(i.assetId) ?? 0) + 1)
-    const byId = new Map(assets.map((a) => [a.id, a]))
+    // Set parts live in setPartAssets (off the flat catalogue) — include them so
+    // placed set pieces show in the build and their (primary-only) price counts.
+    const byId = new Map([...assets, ...setPartAssets].map((a) => [a.id, a]))
     const rows = [...counts.entries()]
       .map(([id, qty]) => ({ asset: byId.get(id), qty }))
       .filter((r) => r.asset)
     const total = rows.reduce((sum, r) => sum + (r.asset!.price ?? 0), 0)
     const pieceCount = instances.length
     return { rows, total, pieceCount }
-  }, [instances, assets])
+  }, [instances, assets, setPartAssets])
 
   function handleAddAll() {
     const count = addLayoutToShopCart()

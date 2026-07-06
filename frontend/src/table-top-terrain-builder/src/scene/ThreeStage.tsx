@@ -119,7 +119,7 @@ export function ThreeStage() {
     const inst = new InstancedScene(() => {
       // a template finished loading — re-sync from current store
       const s = store()
-      inst.sync(s.instances, new Map(s.assets.map(a => [a.id, a])))
+      inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
       inst.setSelection(new Set(s.selectedInstanceIds))
       requestRender()
     })
@@ -320,7 +320,10 @@ export function ThreeStage() {
     }
 
     function assetMap() {
-      return new Map(store().assets.map(a => [a.id, a]))
+      const s = store()
+      // Include set-part assets — they're kept off the flat catalogue (s.assets) but
+      // are placeable, so collision/stacking/rendering must resolve them too.
+      return new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a]))
     }
 
     // Grid cells a footprint covers at the cursor.
@@ -698,15 +701,15 @@ export function ThreeStage() {
     // After an action mutated instances/selection in the store, re-sync the engine.
     function afterStateChange() {
       const s = store()
-      inst.sync(s.instances, new Map(s.assets.map(a => [a.id, a])))
+      inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
       inst.setSelection(new Set(s.selectedInstanceIds))
       requestRender()
     }
 
     // ---- store subscriptions (decoupled from React render) ----
     const unsubInstances = useAppStore.subscribe((s, prev) => {
-      if (s.instances !== prev.instances || s.assets !== prev.assets) {
-        inst.sync(s.instances, new Map(s.assets.map(a => [a.id, a])))
+      if (s.instances !== prev.instances || s.assets !== prev.assets || s.setPartAssets !== prev.setPartAssets) {
+        inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
         inst.setSelection(new Set(s.selectedInstanceIds))
         requestRender()
       }
