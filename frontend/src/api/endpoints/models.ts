@@ -1,5 +1,5 @@
 import apiClient from '../client'
-import { ApiResponse, TerrainModel, ModelUploadRequest, Review, CreateReviewRequest, UploadResponse, Pagination } from '../types'
+import { ApiResponse, TerrainModel, ModelUploadRequest, Review, CreateReviewRequest, Pagination } from '../types'
 import { mapModelRecord } from '../transformers'
 
 const BASE_URL = '/api/models'
@@ -120,6 +120,8 @@ export const modelsApi = {
     data: Partial<Pick<ModelUploadRequest, 'name' | 'description' | 'category' | 'tags' | 'basePrice'>> & {
       /** Taxonomy tags as `facetSlug:termPath` tokens (replaces the full set). */
       terms?: string[]
+      /** R2 key of a thumbnail already uploaded via the presign flow (`thumbnails/…`). */
+      thumbnailKey?: string
     },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
@@ -129,6 +131,7 @@ export const modelsApi = {
     if (data.tags !== undefined) body.tags = data.tags;
     if (data.basePrice !== undefined) body.base_price = data.basePrice;
     if (data.terms !== undefined) body.terms = data.terms;
+    if (data.thumbnailKey !== undefined) body.thumbnailKey = data.thumbnailKey;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },
@@ -208,65 +211,6 @@ export const modelsApi = {
   },
 
   /**
-   * Upload model thumbnail image
-   */
-  uploadThumbnail: async (modelId: string, file: File): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post<ApiResponse<UploadResponse>>(
-      `${BASE_URL}/${modelId}/thumbnail`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
-    );
-    return response.data;
-  },
-
-  /**
-   * Upload preview images
-   */
-  uploadPreviewImage: async (modelId: string, file: File): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post<ApiResponse<UploadResponse>>(
-      `${BASE_URL}/${modelId}/preview-images`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
-    );
-    return response.data;
-  },
-
-  /**
-   * Upload model file
-   */
-  uploadModelFile: async (modelId: string, file: File): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post<ApiResponse<UploadResponse>>(
-      `${BASE_URL}/${modelId}/file`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        // Increase timeout for large file uploads
-        timeout: 300000, // 5 minutes
-      }
-    );
-    return response.data;
-  },
-
-  /**
    * Download a purchased model's STL. The file is watermarked per-buyer and
    * streamed through the API (it can't be a plain CDN link), so we fetch it as a
    * blob with the auth header and trigger a browser save.
@@ -311,7 +255,8 @@ export const modelsApi = {
    * Get related models
    */
   getRelatedModels: async (modelId: string, limit = 6): Promise<TerrainModel[]> => {
-    const response = await apiClient.get(`${BASE_URL}/${modelId}/related`, {
+    // The related-models route lives under /api/browse, not /api/models.
+    const response = await apiClient.get(`/api/browse/${modelId}/related`, {
       params: { limit },
     })
     const related = response.data?.related ?? response.data?.models ?? []

@@ -499,7 +499,7 @@ router.get('/orders',
        ${whereClause}
        GROUP BY o.id, u.display_name
        ORDER BY o.created_at DESC
-       LIMIT ${params.length + 1} OFFSET ${params.length + 2}`,
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, Number(limit), offset]
     );
 
@@ -564,13 +564,13 @@ router.patch('/orders/:id/fulfillment',
     let paramIndex = 2;
 
     if (trackingNumber) {
-      updates.push(`tracking_number = ${paramIndex}`);
+      updates.push(`tracking_number = $${paramIndex}`);
       values.push(trackingNumber);
       paramIndex++;
     }
 
     if (trackingUrl) {
-      updates.push(`tracking_url = ${paramIndex}`);
+      updates.push(`tracking_url = $${paramIndex}`);
       values.push(trackingUrl);
       paramIndex++;
     }
@@ -582,9 +582,9 @@ router.patch('/orders/:id/fulfillment',
     values.push(id);
 
     await db.query(
-      `UPDATE orders 
+      `UPDATE orders
        SET ${updates.join(', ')}
-       WHERE id = ${paramIndex}`,
+       WHERE id = $${paramIndex}`,
       values
     );
 
@@ -748,13 +748,13 @@ router.get('/activity',
     let paramIndex = 1;
 
     if (action) {
-      conditions.push(`action = ${paramIndex}`);
+      conditions.push(`action = $${paramIndex}`);
       params.push(action);
       paramIndex++;
     }
 
     if (userId) {
-      conditions.push(`user_id = ${paramIndex}`);
+      conditions.push(`user_id = $${paramIndex}`);
       params.push(userId);
       paramIndex++;
     }
@@ -777,7 +777,7 @@ router.get('/activity',
        LEFT JOIN users u ON al.user_id = u.id
        ${whereClause}
        ORDER BY al.created_at DESC
-       LIMIT ${paramIndex} OFFSET ${paramIndex + 1}`,
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, Number(limit), offset]
     );
 

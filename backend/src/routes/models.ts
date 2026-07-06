@@ -619,6 +619,19 @@ router.patch('/:id',
       }
     }
 
+    // Thumbnail: the client uploads the image straight to R2 (presign, `thumbnails/`
+    // prefix) and sends the resulting key here. This is the only way to set/replace a
+    // model's thumbnail after creation — required before a draft can be published.
+    if (updates.thumbnailKey !== undefined) {
+      const key = updates.thumbnailKey;
+      if (key !== null && (typeof key !== 'string' || !key.startsWith('thumbnails/'))) {
+        throw new ValidationError('thumbnailKey must be an uploaded thumbnails/ object');
+      }
+      updateFields.push(`thumbnail_path = $${paramIndex}`);
+      updateValues.push(key || null);
+      paramIndex++;
+    }
+
     // Taxonomy tags can be updated on their own or alongside column edits.
     const hasTermsUpdate = updates.terms !== undefined;
     if (updateFields.length === 0 && !hasTermsUpdate) {

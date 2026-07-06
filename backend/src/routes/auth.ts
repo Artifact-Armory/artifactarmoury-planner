@@ -111,16 +111,19 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
   validateEmail(email);
   validatePassword(password);
 
-  // Validate invite code
+  // Validate invite code. Note: we deliberately do NOT filter on `used_by IS NULL`
+  // here — that column only records the *first* redeemer, so filtering on it broke
+  // multi-use codes (max_uses > 1) after a single redemption. Capacity is enforced
+  // by the `current_uses >= max_uses` check below instead.
   const inviteResult = await db.query(
-    `SELECT id, max_uses, current_uses, expires_at 
-     FROM invite_codes 
-     WHERE code = $1 AND used_by IS NULL`,
+    `SELECT id, max_uses, current_uses, expires_at
+     FROM invite_codes
+     WHERE code = $1`,
     [inviteCode]
   );
 
   if (inviteResult.rows.length === 0) {
-    throw new ValidationError('Invalid or already used invite code');
+    throw new ValidationError('Invalid invite code');
   }
 
   const invite = inviteResult.rows[0];
@@ -162,10 +165,13 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
 
     const user = userResult.rows[0];
 
-    // Update invite code
+    // Update invite code. Record the first redeemer only (COALESCE), so a multi-use
+    // code keeps a stable `used_by`/`used_at` while `current_uses` tracks the count.
     await client.query(
-      `UPDATE invite_codes 
-       SET used_by = $1, current_uses = current_uses + 1, used_at = CURRENT_TIMESTAMP
+      `UPDATE invite_codes
+       SET used_by = COALESCE(used_by, $1),
+           current_uses = current_uses + 1,
+           used_at = COALESCE(used_at, CURRENT_TIMESTAMP)
        WHERE id = $2`,
       [user.id, invite.id]
     );

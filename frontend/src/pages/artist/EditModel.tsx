@@ -1,6 +1,7 @@
 import React from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { modelsApi } from '../../api/endpoints/models'
+import { uploadsApi } from '../../api/endpoints/uploads'
 import { TerrainModel } from '../../api/types'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import { termToken } from '../../api/endpoints/taxonomy'
@@ -34,6 +35,11 @@ const EditModel: React.FC = () => {
   const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
 
+  // Thumbnail: `thumbFile` is a freshly-picked image not yet uploaded; on save we
+  // presign it to R2 and send the resulting key. `thumbPreview` is a local object URL.
+  const [thumbFile, setThumbFile] = React.useState<File | null>(null)
+  const [thumbPreview, setThumbPreview] = React.useState<string | null>(null)
+
   const [saving, setSaving] = React.useState(false)
   const [publishing, setPublishing] = React.useState(false)
   const [notice, setNotice] = React.useState<string | null>(null)
@@ -64,6 +70,27 @@ const EditModel: React.FC = () => {
   }, [load])
 
   const isDraft = (model?.status ?? 'draft') !== 'published'
+  // A model is publishable only once it has a thumbnail — either an existing one or
+  // a freshly-picked file about to be uploaded.
+  const hasThumbnail = Boolean(model?.thumbnailUrl) || Boolean(thumbFile)
+
+  function onPickThumb(file: File | null) {
+    setThumbFile(file)
+    setThumbPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return file ? URL.createObjectURL(file) : null
+    })
+  }
+
+  // Clean up the object URL on unmount.
+  React.useEffect(() => () => { if (thumbPreview) URL.revokeObjectURL(thumbPreview) }, [thumbPreview])
+
+  /** Upload a freshly-picked thumbnail to R2 (if any) and return its key. */
+  async function uploadThumbIfNeeded(): Promise<string | undefined> {
+    if (!thumbFile) return undefined
+    const { key } = await uploadsApi.uploadDirect(thumbFile, 'thumbnails')
+    return key
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -76,6 +103,7 @@ const EditModel: React.FC = () => {
 
     setSaving(true)
     try {
+      const thumbnailKey = await uploadThumbIfNeeded()
       await modelsApi.updateModel(id, {
         name: name.trim(),
         description: description.trim(),
@@ -83,7 +111,9 @@ const EditModel: React.FC = () => {
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: price,
         terms,
+        thumbnailKey,
       })
+      onPickThumb(null)
       setNotice('Changes saved.')
       await load()
     } catch (err) {
@@ -100,6 +130,7 @@ const EditModel: React.FC = () => {
     // Save first so publishing uses the latest edits (e.g. a longer description).
     setPublishing(true)
     try {
+      const thumbnailKey = await uploadThumbIfNeeded()
       await modelsApi.updateModel(id, {
         name: name.trim(),
         description: description.trim(),
@@ -107,6 +138,7 @@ const EditModel: React.FC = () => {
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: parseFloat(basePrice) || 0,
         terms,
+        thumbnailKey,
       })
       await modelsApi.publishModel(id)
       navigate('/artist/models')
@@ -182,9 +214,37 @@ const EditModel: React.FC = () => {
           <TermPicker value={terms} onChange={setTerms} disabled={busy} />
         </div>
 
-        {!model?.thumbnailUrl && (
-          <p className="text-xs text-amber-700">This model has no thumbnail — it must have one before it can be published.</p>
-        )}
+        <div>
+          <label className="block text-sm font-medium mb-1">Thumbnail</label>
+          <div className="flex items-center gap-4">
+            {(thumbPreview || model?.thumbnailUrl) ? (
+              <img
+                src={thumbPreview || model?.thumbnailUrl}
+                alt="Thumbnail preview"
+                className="h-20 w-20 rounded object-cover border"
+              />
+            ) : (
+              <div className="h-20 w-20 rounded border border-dashed flex items-center justify-center text-xs text-gray-400 text-center">
+                No image
+              </div>
+            )}
+            <div>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={busy}
+                onChange={(e) => onPickThumb(e.target.files?.[0] ?? null)}
+              />
+              {thumbFile && <p className="text-xs text-gray-500 mt-1">New image will be uploaded when you save.</p>}
+            </div>
+          </div>
+          {!hasThumbnail && (
+            <p className="text-xs text-amber-700 mt-2">
+              This model has no thumbnail — add one here before you can publish it.
+            </p>
+          )}
+        </div>
+
         {notice && <p className="text-sm text-green-700">{notice}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
