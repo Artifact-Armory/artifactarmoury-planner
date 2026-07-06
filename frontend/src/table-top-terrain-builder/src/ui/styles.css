@@ -167,6 +167,15 @@
   border-color: var(--tb-accent);
   color: var(--tb-accent-2);
 }
+/* Labeled variant of tb-icon — used for the Help button so it's discoverable. */
+.tb-help-btn {
+  width: auto;
+  gap: 6px;
+  padding: 0 12px;
+  border-color: var(--tb-border);
+  font-size: 13px;
+  font-weight: 600;
+}
 .tb-sep { width: 1px; height: 24px; background: var(--tb-border); margin: 0 4px; }
 
 /* Mode badge */

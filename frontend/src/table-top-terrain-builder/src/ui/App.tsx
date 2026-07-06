@@ -138,6 +138,21 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [toast, setToast] = React.useState<{ count: number } | null>(null)
   const startedRef = React.useRef(false)
 
+  // First visit: pop the full Controls guide once so new users discover the
+  // shortcuts. Remembered in localStorage; we also mark the lighter coach-marks
+  // as seen so both onboarding aids don't stack on the same first load. Skipped
+  // in read-only (marketplace preview) mode.
+  React.useEffect(() => {
+    if (readOnly) return
+    try {
+      if (!localStorage.getItem('tb_help_seen_v1')) {
+        setShowHelp(true)
+        localStorage.setItem('tb_help_seen_v1', '1')
+        localStorage.setItem('tb_coach_v1', '1')
+      }
+    } catch { /* localStorage unavailable (private mode) — just skip */ }
+  }, [readOnly])
+
   // Gate the builder behind a loading bar until the initial scene assets
   // (table-surface textures + starter-layout models) have finished loading,
   // so the user doesn't start placing while multi-MB textures jank in.
@@ -534,8 +549,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             >
               <Home size={18} />
             </button>
-            <button className="tb-icon" title="Keyboard help (?)" onClick={() => setShowHelp(true)}>
-              <HelpCircle size={18} />
+            <button className="tb-icon tb-help-btn" title="Controls & keyboard help (?)" onClick={() => setShowHelp(true)}>
+              <HelpCircle size={18} /><span>Help</span>
             </button>
           </div>
 
@@ -828,8 +843,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               >
                 <Home size={18} />
               </button>
-              <button className="tb-icon" title="Keyboard help (?)" onClick={() => setShowHelp(true)}>
-                <HelpCircle size={18} />
+              <button className="tb-icon tb-help-btn" title="Controls & keyboard help (?)" onClick={() => setShowHelp(true)}>
+                <HelpCircle size={18} /><span>Help</span>
               </button>
             </div>
           </div>
