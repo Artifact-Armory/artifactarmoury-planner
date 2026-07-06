@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { db } from '../db'
 import logger from '../utils/logger'
 import { validateString } from '../utils/validation'
+import { authenticate, optionalAuth, type AuthRequest } from '../middleware/auth'
 import { buildWatermarkHeader, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark'
 import { generateTerrainTiles, quoteTiles, type HeightField, type TileOptions, type TileQuote, type GeneratedTile } from '../services/terrainTiles'
 import { syncTableModels } from '../services/tableModels'
@@ -13,6 +14,18 @@ const createArchive: (format: string, options?: any) => Archiver = require('arch
 
 const router = express.Router()
 const tablesLogger = logger.child('TABLES')
+
+/**
+ * A table is owned by the user whose email it was saved under. Identity comes
+ * from the verified JWT (`req.user`), NEVER from a client-supplied `user_email`
+ * — otherwise anyone could edit/delete another user's table by passing their
+ * email. Admins may act on any table.
+ */
+function canModifyTable(req: AuthRequest, ownerEmail: string): boolean {
+  if (!req.user) return false
+  if (req.user.role === 'admin') return true
+  return req.user.email === ownerEmail
+}
 
 /** Flat price per generated terrain tile (£). Overridable via env. */
 const TERRAIN_PRICE_PER_TILE = Number(process.env.TERRAIN_PRICE_PER_TILE ?? 1.5)
@@ -71,18 +84,19 @@ function assemblyReadme(q: TileQuote, tiles: GeneratedTile[]): string {
 // SAVE TABLE LAYOUT
 // ============================================================================
 
-router.post('/', async (req, res, next) => {
+router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const {
-      user_email,
       name,
       table_config,
       layout_data,
       is_public = false
     } = req.body as any
 
+    // Owner identity comes from the verified token, not the request body.
+    const user_email = req.user!.email
+
     // Validate required fields
-    validateString(user_email, 'user_email', { maxLength: 255 })
     validateString(name, 'name', { minLength: 3, maxLength: 255 })
 
     if (!table_config || typeof table_config !== 'object') {
@@ -143,18 +157,17 @@ router.post('/', async (req, res, next) => {
 // UPDATE TABLE LAYOUT
 // ============================================================================
 
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
     const {
-      user_email,
       name,
       table_config,
       layout_data,
       is_public
     } = req.body
 
-    // Validate user owns this table
+    // Validate the authenticated user owns this table (JWT identity, not body).
     const checkResult = await db.query(
       'SELECT user_email FROM user_tables WHERE id = $1',
       [id]
@@ -164,9 +177,10 @@ router.put('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Table not found' })
     }
 
-    if (checkResult.rows[0].user_email !== user_email) {
+    if (!canModifyTable(req, checkResult.rows[0].user_email)) {
       return res.status(403).json({ error: 'Forbidden' })
     }
+    const user_email = req.user!.email
 
     // Update table
     const result = await db.query(
@@ -233,13 +247,19 @@ router.get('/:id/contributors', async (req, res, next) => {
 // GET USER'S TABLES
 // ============================================================================
 
-router.get('/user/:email', async (req, res, next) => {
+router.get('/user/:email', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { email } = req.params
     const {
       page = '1',
       limit = '20'
     } = req.query as Record<string, string>
+
+    // You can only list your own tables (admins may list anyone's). Prevents
+    // enumerating another user's tables just by knowing their email.
+    if (req.user!.role !== 'admin' && req.user!.email !== email) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
 
     const pageNum = parseInt(page) || 1
     const limitNum = Math.min(parseInt(limit) || 20, 100)
@@ -293,10 +313,9 @@ router.get('/user/:email', async (req, res, next) => {
 // GET SINGLE TABLE (by ID - requires ownership)
 // ============================================================================
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email } = req.query as { user_email?: string }
 
     const result = await db.query(
       'SELECT * FROM user_tables WHERE id = $1',
@@ -309,8 +328,9 @@ router.get('/:id', async (req, res, next) => {
 
     const table = result.rows[0]
 
-    // Check access permissions
-    if (!table.is_public && table.user_email !== user_email) {
+    // Public tables are viewable by anyone; private ones only by their owner
+    // (or an admin), identified via the verified token — not a query param.
+    if (!table.is_public && !canModifyTable(req, table.user_email)) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -366,28 +386,31 @@ router.get('/shared/:token', async (req, res, next) => {
 // DELETE TABLE
 // ============================================================================
 
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email } = req.body
 
-    if (!user_email) {
-      return res.status(400).json({ error: 'user_email is required' })
+    // Look up the owner, then verify against the verified token.
+    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    if (owner.rows.length === 0) {
+      return res.status(404).json({ error: 'Table not found' })
+    }
+    if (!canModifyTable(req, owner.rows[0].user_email)) {
+      return res.status(403).json({ error: 'Forbidden' })
     }
 
-    // Verify ownership
     const result = await db.query(
-      'DELETE FROM user_tables WHERE id = $1 AND user_email = $2 RETURNING id',
-      [id, user_email]
+      'DELETE FROM user_tables WHERE id = $1 RETURNING id',
+      [id]
     )
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found or forbidden' })
+      return res.status(404).json({ error: 'Table not found' })
     }
 
     tablesLogger.info('Table deleted', {
       tableId: id,
-      userEmail: user_email
+      userEmail: req.user!.email
     })
 
     res.json({ message: 'Table deleted successfully' })
@@ -401,30 +424,33 @@ router.delete('/:id', async (req, res, next) => {
 // TOGGLE TABLE VISIBILITY
 // ============================================================================
 
-router.patch('/:id/visibility', async (req, res, next) => {
+router.patch('/:id/visibility', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email, is_public } = req.body
-
-    if (!user_email) {
-      return res.status(400).json({ error: 'user_email is required' })
-    }
+    const { is_public } = req.body
 
     if (typeof is_public !== 'boolean') {
       return res.status(400).json({ error: 'is_public must be a boolean' })
     }
 
-    // Verify ownership and update
+    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    if (owner.rows.length === 0) {
+      return res.status(404).json({ error: 'Table not found' })
+    }
+    if (!canModifyTable(req, owner.rows[0].user_email)) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
     const result = await db.query(
-      `UPDATE user_tables 
+      `UPDATE user_tables
        SET is_public = $1, updated_at = NOW()
-       WHERE id = $2 AND user_email = $3
+       WHERE id = $2
        RETURNING *`,
-      [is_public, id, user_email]
+      [is_public, id]
     )
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found or forbidden' })
+      return res.status(404).json({ error: 'Table not found' })
     }
 
     tablesLogger.info('Table visibility toggled', {
@@ -443,14 +469,10 @@ router.patch('/:id/visibility', async (req, res, next) => {
 // DUPLICATE TABLE
 // ============================================================================
 
-router.post('/:id/duplicate', async (req, res, next) => {
+router.post('/:id/duplicate', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email } = req.body
-
-    if (!user_email) {
-      return res.status(400).json({ error: 'user_email is required' })
-    }
+    const user_email = req.user!.email
 
     // Get original table
     const originalResult = await db.query(
@@ -464,8 +486,8 @@ router.post('/:id/duplicate', async (req, res, next) => {
 
     const original = originalResult.rows[0]
 
-    // Check if user can access this table
-    if (!original.is_public && original.user_email !== user_email) {
+    // You can duplicate a table you can view: a public one, or your own.
+    if (!original.is_public && !canModifyTable(req, original.user_email)) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -616,34 +638,36 @@ router.get('/public/list', async (req, res, next) => {
 // REGENERATE SHARE TOKEN
 // ============================================================================
 
-router.post('/:id/regenerate-token', async (req, res, next) => {
+router.post('/:id/regenerate-token', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email } = req.body
 
-    if (!user_email) {
-      return res.status(400).json({ error: 'user_email is required' })
+    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    if (owner.rows.length === 0) {
+      return res.status(404).json({ error: 'Table not found' })
+    }
+    if (!canModifyTable(req, owner.rows[0].user_email)) {
+      return res.status(403).json({ error: 'Forbidden' })
     }
 
     // Generate new token
     const newShareToken = crypto.randomBytes(16).toString('hex')
 
-    // Verify ownership and update
     const result = await db.query(
-      `UPDATE user_tables 
+      `UPDATE user_tables
        SET share_token = $1, updated_at = NOW()
-       WHERE id = $2 AND user_email = $3
+       WHERE id = $2
        RETURNING *`,
-      [newShareToken, id, user_email]
+      [newShareToken, id]
     )
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found or forbidden' })
+      return res.status(404).json({ error: 'Table not found' })
     }
 
     tablesLogger.info('Share token regenerated', {
       tableId: id,
-      userEmail: user_email
+      userEmail: req.user!.email
     })
 
     res.json({ table: result.rows[0] })
@@ -683,15 +707,14 @@ router.get('/:id/terrain/quote', async (req, res, next) => {
 // Generate + stream a ZIP of watermarked, printable terrain tiles.
 // NOTE: currently gated to the table owner (or a public table). The paid-purchase
 // gate for other buyers is Phase 2b.
-router.get('/:id/terrain/download', async (req, res, next) => {
+router.get('/:id/terrain/download', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
-    const { user_email } = req.query as { user_email?: string }
 
     const result = await db.query('SELECT * FROM user_tables WHERE id = $1', [id])
     if (result.rows.length === 0) return res.status(404).json({ error: 'Table not found' })
     const row = result.rows[0]
-    if (!row.is_public && row.user_email !== user_email) {
+    if (!row.is_public && !canModifyTable(req, row.user_email)) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -701,12 +724,9 @@ router.get('/:id/terrain/download', async (req, res, next) => {
     const tiles = generateTerrainTiles(terrain.field, terrain.opts)
     if (tiles.length === 0) return res.status(400).json({ error: 'No printable tiles could be generated' })
 
-    // Watermark: modelId slot carries the map (table) id; buyer = the downloader.
-    let buyerId = WATERMARK_ZERO_ORDER
-    if (user_email) {
-      const u = await db.query('SELECT id FROM users WHERE email = $1', [user_email])
-      if (u.rows.length) buyerId = u.rows[0].id
-    }
+    // Watermark: modelId slot carries the map (table) id; buyer = the downloader
+    // (identified via the verified token, so a leaked ZIP traces to that account).
+    const buyerId = req.user?.id ?? WATERMARK_ZERO_ORDER
     const payload: WatermarkPayload = { modelId: id, buyerId, orderId: WATERMARK_ZERO_ORDER }
 
     res.setHeader('Content-Type', 'application/zip')
