@@ -564,7 +564,7 @@ router.get('/public/list', async (req, res, next) => {
         CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
              THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,
         u.id            AS creator_id,
-        COALESCE(NULLIF(u.artist_name, ''), NULLIF(u.name, ''), split_part(t.user_email, '@', 1)) AS creator_name,
+        COALESCE(NULLIF(u.artist_name, ''), NULLIF(u.display_name, ''), split_part(t.user_email, '@', 1)) AS creator_name,
         (u.role = 'artist') AS creator_is_artist,
         thumbs.thumbnails
        FROM user_tables t
