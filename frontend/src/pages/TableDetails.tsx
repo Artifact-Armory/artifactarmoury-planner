@@ -28,6 +28,13 @@ const TableDetails: React.FC = () => {
     enabled: Boolean(id),
   })
 
+  // Multi-artist BOM credit — every contributing artist, cross-linked.
+  const contributorsQuery = useQuery({
+    queryKey: ['table-contributors', id],
+    queryFn: () => tablesApi.getContributors(id as string),
+    enabled: Boolean(id),
+  })
+
   // Unique model ids referenced by the layout (skip planner-only set-part ids).
   const modelIds = React.useMemo(() => {
     const raw = (tableQuery.data?.layoutData?.models ?? []) as Array<{ modelId?: string; assetId?: string }>
@@ -128,6 +135,31 @@ const TableDetails: React.FC = () => {
         </div>
       </header>
 
+      {contributorsQuery.data && contributorsQuery.data.length > 0 && (
+        <div className="mt-6 flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-4">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+            {contributorsQuery.data.length > 1 ? 'Artists in this build' : 'Built with'}
+          </span>
+          {contributorsQuery.data.map((c) => (
+            <Link
+              key={c.id}
+              to={`/artists/${c.id}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 py-1 pl-1 pr-3 hover:border-indigo-300"
+            >
+              <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-[10px] font-semibold text-gray-500">
+                {c.profileImageUrl ? (
+                  <img src={c.profileImageUrl} alt={c.name} className="h-full w-full object-cover" />
+                ) : (
+                  c.name.slice(0, 2).toUpperCase()
+                )}
+              </span>
+              <span className="text-sm font-medium text-gray-800">{c.name}</span>
+              <span className="text-xs text-gray-400">{c.modelCount}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {modelsQuery.isLoading && (
         <div className="flex justify-center py-16"><Spinner size="lg" /></div>
       )}
@@ -168,7 +200,13 @@ const TableDetails: React.FC = () => {
                 <Link to={`/models/${m.id}`} className="text-sm font-medium text-gray-900 hover:text-indigo-600">
                   {m.name}
                 </Link>
-                <p className="text-xs text-gray-500">{m.artistName}</p>
+                <p className="text-xs text-gray-500">
+                  {m.artistId ? (
+                    <Link to={`/artists/${m.artistId}`} className="hover:text-indigo-600">{m.artistName}</Link>
+                  ) : (
+                    m.artistName
+                  )}
+                </p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">{formatPrice(m.basePrice)}</p>
               </div>
             </li>

@@ -73,6 +73,12 @@ const ModelDetails: React.FC = () => {
     enabled: Boolean(id),
   })
 
+  const tablesQuery = useQuery({
+    queryKey: ['model-tables', id],
+    queryFn: () => modelsApi.getModelTables(id as string, 12),
+    enabled: Boolean(id),
+  })
+
   const model = modelQuery.data
 
   // "Other models from the same artist" carousel (excludes the current model).
@@ -247,7 +253,29 @@ const ModelDetails: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900">Description</h2>
             <p className="mt-3 text-sm leading-relaxed text-gray-600">{model.description ?? 'No description provided.'}</p>
 
-            {model.tags?.length ? (
+            {model.taxonomyTerms?.length ? (
+              <div className="mt-5 space-y-2 border-t border-gray-100 pt-4">
+                {Object.entries(
+                  model.taxonomyTerms.reduce<Record<string, typeof model.taxonomyTerms>>((acc, t) => {
+                    ;(acc[t.facetName] ||= []).push(t)
+                    return acc
+                  }, {}),
+                ).map(([facetName, terms]) => (
+                  <div key={facetName} className="flex flex-wrap items-baseline gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{facetName}</span>
+                    {terms.map((t) => (
+                      <Link
+                        key={t.termId}
+                        to={`/browse?terms=${encodeURIComponent(`${t.facetSlug}:${t.path}`)}`}
+                        className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+                      >
+                        {t.name}
+                      </Link>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : model.tags?.length ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {model.tags.map((tag) => (
                   <span key={tag} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
@@ -257,6 +285,27 @@ const ModelDetails: React.FC = () => {
               </div>
             ) : null}
           </section>
+
+          {tablesQuery.data && tablesQuery.data.length > 0 && (
+            <section className="rounded-2xl bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Featured in {tablesQuery.data.length} table{tablesQuery.data.length === 1 ? '' : 's'}
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">See this piece in a full build — shop the whole look.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {tablesQuery.data.map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/tables/${t.id}`}
+                    className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40"
+                  >
+                    <span className="text-sm font-medium text-gray-900">{t.name}</span>
+                    <span className="text-xs text-gray-400">{t.modelCount} pieces</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
 
           {model.recentReviews && model.recentReviews.length > 0 && (
             <section className="rounded-2xl bg-white p-6 shadow-sm">

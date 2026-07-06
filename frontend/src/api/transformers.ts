@@ -87,6 +87,10 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     height: p.height ?? undefined,
     processingStatus: p.processing_status ?? p.processingStatus ?? undefined,
   })),
+  featuredInTables:
+    (model.featuredInTables ?? model.featured_in_tables) != null
+      ? Number(model.featuredInTables ?? model.featured_in_tables)
+      : undefined,
   // Faceted taxonomy tags (from GET /api/models/:id).
   taxonomyTerms: Array.isArray(model.taxonomyTerms)
     ? model.taxonomyTerms.map((t: any) => ({
@@ -104,11 +108,18 @@ export const mapArtistSummary = (artist: any): ArtistSummary => ({
   name: artist.name,
   bio: artist.bio,
   profileImageUrl:
-    artist.profileImageUrl || artist.profile_image_url || artist.profileImage || undefined,
-  bannerImageUrl: artist.bannerImageUrl || artist.banner_image_url || artist.bannerImage || undefined,
+    assetUrl(artist.profileImageUrl || artist.profile_image_url || artist.profileImage) || undefined,
+  bannerImageUrl:
+    assetUrl(artist.bannerImageUrl || artist.banner_image_url || artist.bannerImage) || undefined,
+  artistUrl: artist.artistUrl || artist.artist_url || undefined,
   totalModels: Number(artist.totalModels ?? artist.model_count ?? artist.total_models ?? 0) || undefined,
   totalSales: artist.totalSales ?? artist.total_purchases ?? undefined,
   totalViews: artist.totalViews ?? artist.total_views ?? undefined,
+  followerCount:
+    (artist.followerCount ?? artist.follower_count) != null
+      ? Number(artist.followerCount ?? artist.follower_count)
+      : undefined,
+  isFollowing: artist.isFollowing ?? artist.is_following ?? undefined,
   rating: artist.rating ?? undefined,
   createdAt: artist.created_at ?? artist.createdAt,
 })

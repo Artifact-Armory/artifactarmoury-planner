@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Heart, Package, UserPlus } from 'lucide-react';
 import { authApi } from '../../api/endpoints/auth';
+import NotificationBell from '../notifications/NotificationBell';
 
 const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -213,6 +214,9 @@ const Header: React.FC = () => {
               )}
             </button>
 
+            {/* Notifications */}
+            {isAuthenticated && <NotificationBell />}
+
             {/* User Menu */}
             {isAuthenticated ? (
               <div className="relative user-menu">
@@ -284,6 +288,17 @@ const Header: React.FC = () => {
                       <div className="flex items-center">
                         <Heart size={16} className="mr-2" />
                         Wishlist
+                      </div>
+                    </Link>
+
+                    <Link
+                      to="/dashboard/following"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <div className="flex items-center">
+                        <UserPlus size={16} className="mr-2" />
+                        Following
                       </div>
                     </Link>
 
@@ -546,6 +561,21 @@ const Header: React.FC = () => {
                   <div className="flex items-center">
                     <Heart size={16} className="mr-2" />
                     Wishlist
+                  </div>
+                </NavLink>
+
+                <NavLink
+                  to="/dashboard/following"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `block py-2 text-sm ${
+                      isActive ? 'text-indigo-600' : 'text-gray-700 hover:text-indigo-500'
+                    }`
+                  }
+                >
+                  <div className="flex items-center">
+                    <UserPlus size={16} className="mr-2" />
+                    Following
                   </div>
                 </NavLink>
 

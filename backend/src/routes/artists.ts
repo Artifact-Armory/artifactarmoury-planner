@@ -2,10 +2,30 @@
 import express from 'express'
 import { db } from '../db'
 import logger from '../utils/logger'
-import { authenticate } from '../middleware/auth'
+import { authenticate, optionalAuth, requireArtist } from '../middleware/auth'
+import { notifyNewFollower } from '../services/notifications'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
+
+// Artists are users with role='artist'. Display name falls back to display_name.
+const ARTIST_NAME = `COALESCE(NULLIF(u.artist_name, ''), u.display_name)`
+
+// Shared SELECT of an artist row (aliased `u`) + rollup stats, matching the shape
+// the frontend transformer expects (name / bio / profile_image_url / …).
+const ARTIST_FIELDS = `
+  u.id,
+  ${ARTIST_NAME} AS name,
+  u.artist_bio AS bio,
+  u.artist_url,
+  u.artist_avatar_url AS profile_image_url,
+  u.artist_banner_url AS banner_image_url,
+  u.created_at,
+  COUNT(m.id) FILTER (WHERE m.status = 'published' AND m.visibility = 'public') AS model_count,
+  COALESCE(SUM(m.view_count) FILTER (WHERE m.status = 'published'), 0) AS total_views,
+  COALESCE(SUM(m.sale_count) FILTER (WHERE m.status = 'published'), 0) AS total_purchases,
+  (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) AS follower_count
+`
 
 // ============================================================================
 // GET ALL ARTISTS (public listing)
@@ -23,47 +43,40 @@ router.get('/', async (req, res, next) => {
     const limitNum = Math.min(parseInt(limit) || 20, 50) // Max 50 per page
     const offset = (pageNum - 1) * limitNum
 
-    // Build sort clause
-    let orderBy = 'created_at DESC'
+    // Build sort clause (aliases from ARTIST_FIELDS)
+    let orderBy = 'total_purchases DESC, follower_count DESC'
     switch (sort) {
       case 'popular':
-        orderBy = `(
-          SELECT COUNT(*) FROM assets 
-          WHERE artist_id = artists.id AND status = 'published'
-        ) DESC`
+        orderBy = 'total_purchases DESC, follower_count DESC, model_count DESC'
         break
       case 'recent':
-        orderBy = 'created_at DESC'
+        orderBy = 'u.created_at DESC'
         break
       case 'name':
         orderBy = 'name ASC'
         break
       default:
-        orderBy = 'created_at DESC'
+        orderBy = 'u.created_at DESC'
     }
 
-    // Get total count
+    // Only list artists who have at least one published model (real brands).
     const countResult = await db.query(
-      `SELECT COUNT(*) as total 
-       FROM artists 
-       WHERE status = 'active'`
+      `SELECT COUNT(*) AS total FROM (
+         SELECT u.id FROM users u
+         JOIN models m ON m.artist_id = u.id AND m.status = 'published' AND m.visibility = 'public'
+         WHERE u.role = 'artist' AND u.account_status = 'active'
+         GROUP BY u.id
+       ) t`
     )
-    const total = parseInt(countResult.rows[0].total)
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
-    // Get artists with model counts
     const result = await db.query(
-      `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active'
-       GROUP BY a.id
+      `SELECT ${ARTIST_FIELDS}
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id
+       HAVING COUNT(m.id) FILTER (WHERE m.status = 'published' AND m.visibility = 'public') > 0
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
       [limitNum, offset]
@@ -93,27 +106,19 @@ router.get('/', async (req, res, next) => {
 // GET ARTIST PROFILE (public)
 // ============================================================================
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', optionalAuth, async (req, res, next) => {
   try {
     const { id } = req.params
+    const viewerId = (req as any).userId || null
 
-    // Get artist with stats
     const result = await db.query(
-      `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count,
-        COALESCE(SUM(ast.view_count), 0) as total_views,
-        COALESCE(SUM(ast.purchase_count), 0) as total_purchases
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.id = $1 AND a.status = 'active'
-       GROUP BY a.id`,
-      [id]
+      `SELECT ${ARTIST_FIELDS},
+        EXISTS (SELECT 1 FROM follows f WHERE f.artist_id = u.id AND f.follower_id = $2) AS is_following
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.id = $1 AND u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id`,
+      [id, viewerId]
     )
 
     if (result.rows.length === 0) {
@@ -148,61 +153,52 @@ router.get('/:id/models', async (req, res, next) => {
     const limitNum = Math.min(parseInt(limit) || 24, 100)
     const offset = (pageNum - 1) * limitNum
 
-    // Verify artist exists and is active
-    const artistCheck = await db.query(
-      'SELECT id FROM artists WHERE id = $1 AND status = $\'active\'',
-      [id]
-    )
-
-    if (artistCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Artist not found' })
-    }
-
     // Build sort clause
-    let orderBy = 'created_at DESC'
+    let orderBy = 'm.published_at DESC, m.created_at DESC'
     switch (sort) {
       case 'recent':
-        orderBy = 'created_at DESC'
+        orderBy = 'm.published_at DESC, m.created_at DESC'
         break
       case 'popular':
-        orderBy = 'view_count DESC, purchase_count DESC'
+        orderBy = 'm.view_count DESC, m.sale_count DESC'
         break
       case 'price_asc':
-        orderBy = 'base_price ASC'
+        orderBy = 'm.base_price ASC'
         break
       case 'price_desc':
-        orderBy = 'base_price DESC'
+        orderBy = 'm.base_price DESC'
         break
       default:
-        orderBy = 'created_at DESC'
+        orderBy = 'm.published_at DESC, m.created_at DESC'
     }
 
-    // Get total count
+    // Get total count of the artist's published models
     const countResult = await db.query(
-      `SELECT COUNT(*) as total 
-       FROM assets 
-       WHERE artist_id = $1 AND status = 'published'`,
+      `SELECT COUNT(*) AS total FROM models
+       WHERE artist_id = $1 AND status = 'published' AND visibility = 'public'`,
       [id]
     )
-    const total = parseInt(countResult.rows[0].total)
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
-    // Get models
     const result = await db.query(
-      `SELECT * FROM assets
-       WHERE artist_id = $1 AND status = 'published'
+      `SELECT
+        m.id, m.name, m.description, m.category, m.tags,
+        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.width, m.height, m.depth, m.part_count,
+        m.view_count, m.sale_count, m.published_at,
+        u.artist_name, u.artist_url
+       FROM models m
+       JOIN users u ON u.id = m.artist_id
+       WHERE m.artist_id = $1 AND m.status = 'published' AND m.visibility = 'public'
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
       [id, limitNum, offset]
     )
 
-    artistLogger.debug('Artist models fetched', {
-      artistId: id,
-      count: result.rows.length,
-      total
-    })
+    artistLogger.debug('Artist models fetched', { artistId: id, count: result.rows.length, total })
 
     res.json({
-      assets: result.rows,
+      models: result.rows,
       total,
       page: pageNum,
       limit: limitNum,
@@ -315,24 +311,16 @@ router.get('/featured/list', async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 20)
 
     const result = await db.query(
-      `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.banner_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count,
-        COALESCE(SUM(ast.view_count), 0) as total_views,
-        COALESCE(SUM(ast.purchase_count), 0) as total_purchases
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active'
-       GROUP BY a.id
-       HAVING COUNT(ast.id) FILTER (WHERE ast.status = 'published') > 0
-       ORDER BY 
-         (COALESCE(SUM(ast.view_count), 0) * 0.3 + 
-          COALESCE(SUM(ast.purchase_count), 0) * 0.7) DESC
+      `SELECT ${ARTIST_FIELDS}
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist' AND u.account_status = 'active'
+       GROUP BY u.id
+       HAVING COUNT(m.id) FILTER (WHERE m.status = 'published' AND m.visibility = 'public') > 0
+       ORDER BY
+         (COALESCE(SUM(m.view_count) FILTER (WHERE m.status = 'published'), 0) * 0.3 +
+          COALESCE(SUM(m.sale_count) FILTER (WHERE m.status = 'published'), 0) * 0.7 +
+          (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) * 2) DESC
        LIMIT $1`,
       [limit]
     )
@@ -362,23 +350,14 @@ router.get('/search/query', async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50)
 
     const result = await db.query(
-      `SELECT 
-        a.id,
-        a.name,
-        a.bio,
-        a.profile_image_url,
-        a.created_at,
-        COUNT(ast.id) FILTER (WHERE ast.status = 'published') as model_count
-       FROM artists a
-       LEFT JOIN assets ast ON a.id = ast.artist_id
-       WHERE a.status = 'active' 
-         AND (
-           a.name ILIKE $1 OR
-           a.bio ILIKE $1
-         )
-       GROUP BY a.id
-       ORDER BY 
-         CASE WHEN a.name ILIKE $2 THEN 0 ELSE 1 END,
+      `SELECT ${ARTIST_FIELDS}
+       FROM users u
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE u.role = 'artist' AND u.account_status = 'active'
+         AND (${ARTIST_NAME} ILIKE $1 OR u.artist_bio ILIKE $1)
+       GROUP BY u.id
+       ORDER BY
+         CASE WHEN ${ARTIST_NAME} ILIKE $2 THEN 0 ELSE 1 END,
          model_count DESC
        LIMIT $3`,
       [`%${searchTerm}%`, `${searchTerm}%`, limit]
@@ -392,6 +371,225 @@ router.get('/search/query', async (req, res, next) => {
     res.json({ artists: result.rows })
   } catch (error) {
     artistLogger.error('Artist search failed', { error })
+    next(error)
+  }
+})
+
+// ============================================================================
+// FOLLOW / UNFOLLOW AN ARTIST
+// ============================================================================
+
+async function followerCount(artistId: string): Promise<number> {
+  const r = await db.query('SELECT COUNT(*) AS c FROM follows WHERE artist_id = $1', [artistId])
+  return parseInt(r.rows[0]?.c ?? '0', 10) || 0
+}
+
+router.post('/:id/follow', authenticate, async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const followerId = (req as any).userId
+    if (id === followerId) {
+      return res.status(400).json({ error: "You can't follow yourself" })
+    }
+    const artist = await db.query(
+      `SELECT id FROM users WHERE id = $1 AND role = 'artist' AND account_status = 'active'`,
+      [id],
+    )
+    if (artist.rows.length === 0) {
+      return res.status(404).json({ error: 'Artist not found' })
+    }
+    const inserted = await db.query(
+      `INSERT INTO follows (follower_id, artist_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING follower_id`,
+      [followerId, id],
+    )
+    if ((inserted.rowCount ?? 0) > 0) {
+      notifyNewFollower(id, followerId)
+    }
+    res.json({ following: true, followerCount: await followerCount(id) })
+  } catch (error) {
+    artistLogger.error('Follow failed', { error, artistId: req.params.id })
+    next(error)
+  }
+})
+
+router.delete('/:id/follow', authenticate, async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const followerId = (req as any).userId
+    await db.query('DELETE FROM follows WHERE follower_id = $1 AND artist_id = $2', [followerId, id])
+    res.json({ following: false, followerCount: await followerCount(id) })
+  } catch (error) {
+    artistLogger.error('Unfollow failed', { error, artistId: req.params.id })
+    next(error)
+  }
+})
+
+// ============================================================================
+// MY FOLLOWED ARTISTS + RELEASE FEED
+// ============================================================================
+
+router.get('/me/following', authenticate, async (req, res, next) => {
+  try {
+    const userId = (req as any).userId
+    const result = await db.query(
+      `SELECT ${ARTIST_FIELDS}, true AS is_following
+       FROM follows fo
+       JOIN users u ON u.id = fo.artist_id
+       LEFT JOIN models m ON m.artist_id = u.id
+       WHERE fo.follower_id = $1 AND u.account_status = 'active'
+       GROUP BY u.id, fo.created_at
+       ORDER BY fo.created_at DESC`,
+      [userId],
+    )
+    res.json({ artists: result.rows })
+  } catch (error) {
+    artistLogger.error('Get following failed', { error })
+    next(error)
+  }
+})
+
+// Recent published models from the artists the signed-in user follows.
+router.get('/me/feed', authenticate, async (req, res, next) => {
+  try {
+    const userId = (req as any).userId
+    const limit = Math.min(parseInt(req.query.limit as string) || 24, 60)
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0)
+    const result = await db.query(
+      `SELECT
+        m.id, m.name, m.description, m.category, m.tags,
+        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.width, m.height, m.depth, m.part_count,
+        m.view_count, m.sale_count, m.published_at,
+        u.id AS artist_id, u.artist_name, u.artist_url
+       FROM follows fo
+       JOIN models m ON m.artist_id = fo.artist_id
+       JOIN users u ON u.id = m.artist_id
+       WHERE fo.follower_id = $1 AND m.status = 'published' AND m.visibility = 'public'
+       ORDER BY m.published_at DESC NULLS LAST, m.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset],
+    )
+    res.json({ models: result.rows, limit, offset })
+  } catch (error) {
+    artistLogger.error('Get feed failed', { error })
+    next(error)
+  }
+})
+
+// ============================================================================
+// ARTIST DASHBOARD — sales analytics for the signed-in artist (own data)
+// ============================================================================
+
+router.get('/me/stats', authenticate, requireArtist, async (req, res, next) => {
+  try {
+    const artistId = (req as any).userId
+
+    // Earnings from succeeded orders (artist_commission_amount is the platform's
+    // 15% cut, so the artist keeps total_price − commission).
+    const earnings = await db.query(
+      `SELECT
+         COALESCE(SUM(oi.total_price), 0) AS gross_revenue,
+         COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS net_earnings,
+         COUNT(oi.id) AS total_sales
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'`,
+      [artistId],
+    )
+
+    const models = await db.query(
+      `SELECT
+         COUNT(*) AS total_models,
+         COUNT(*) FILTER (WHERE status = 'published' AND visibility = 'public') AS active_models,
+         COUNT(*) FILTER (WHERE status = 'draft') AS draft_models,
+         COALESCE(SUM(view_count), 0) AS total_views,
+         COALESCE(SUM(download_count), 0) AS total_downloads
+       FROM models WHERE artist_id = $1`,
+      [artistId],
+    )
+
+    const followers = await db.query('SELECT COUNT(*) AS c FROM follows WHERE artist_id = $1', [artistId])
+
+    const e = earnings.rows[0]
+    const m = models.rows[0]
+    res.json({
+      stats: {
+        grossRevenue: Number(e.gross_revenue) || 0,
+        netEarnings: Number(e.net_earnings) || 0,
+        totalSales: parseInt(e.total_sales, 10) || 0,
+        totalModels: parseInt(m.total_models, 10) || 0,
+        activeModels: parseInt(m.active_models, 10) || 0,
+        draftModels: parseInt(m.draft_models, 10) || 0,
+        totalViews: parseInt(m.total_views, 10) || 0,
+        totalDownloads: parseInt(m.total_downloads, 10) || 0,
+        followers: parseInt(followers.rows[0].c, 10) || 0,
+      },
+    })
+  } catch (error) {
+    artistLogger.error('Get artist stats failed', { error })
+    next(error)
+  }
+})
+
+// Recent sales (line items) for the signed-in artist.
+router.get('/me/sales', authenticate, requireArtist, async (req, res, next) => {
+  try {
+    const artistId = (req as any).userId
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0)
+
+    const countResult = await db.query(
+      `SELECT COUNT(*) AS total
+       FROM order_items oi JOIN orders o ON o.id = oi.order_id
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'`,
+      [artistId],
+    )
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
+
+    const result = await db.query(
+      `SELECT oi.id, oi.model_id, oi.model_name, oi.bundle_name,
+              oi.total_price, oi.artist_commission_amount,
+              (oi.total_price - oi.artist_commission_amount) AS earnings,
+              o.order_number, o.customer_email, o.created_at
+       FROM order_items oi JOIN orders o ON o.id = oi.order_id
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'
+       ORDER BY o.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [artistId, limit, offset],
+    )
+
+    res.json({ sales: result.rows, total, limit, offset })
+  } catch (error) {
+    artistLogger.error('Get artist sales failed', { error })
+    next(error)
+  }
+})
+
+// Update the signed-in artist's own brand (name / bio / link / avatar / banner).
+router.put('/me', authenticate, requireArtist, async (req, res, next) => {
+  try {
+    const artistId = (req as any).userId
+    const { name, bio, url, avatar, banner } = req.body ?? {}
+    const result = await db.query(
+      `UPDATE users SET
+         artist_name = COALESCE($2, artist_name),
+         artist_bio = COALESCE($3, artist_bio),
+         artist_url = COALESCE($4, artist_url),
+         artist_avatar_url = COALESCE($5, artist_avatar_url),
+         artist_banner_url = COALESCE($6, artist_banner_url),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING id,
+         COALESCE(NULLIF(artist_name, ''), display_name) AS name,
+         artist_bio AS bio, artist_url,
+         artist_avatar_url AS profile_image_url,
+         artist_banner_url AS banner_image_url`,
+      [artistId, name ?? null, bio ?? null, url ?? null, avatar ?? null, banner ?? null],
+    )
+    res.json({ artist: result.rows[0] })
+  } catch (error) {
+    artistLogger.error('Update own artist profile failed', { error })
     next(error)
   }
 })

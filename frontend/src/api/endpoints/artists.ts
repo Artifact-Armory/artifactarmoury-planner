@@ -57,6 +57,26 @@ export const artistsApi = {
     return mapArtistDetail(response.data?.artist ?? response.data)
   },
 
+  follow: async (id: string): Promise<{ following: boolean; followerCount: number }> => {
+    const response = await apiClient.post(`/api/artists/${id}/follow`)
+    return response.data
+  },
+
+  unfollow: async (id: string): Promise<{ following: boolean; followerCount: number }> => {
+    const response = await apiClient.delete(`/api/artists/${id}/follow`)
+    return response.data
+  },
+
+  getFollowing: async (): Promise<ArtistSummary[]> => {
+    const response = await apiClient.get('/api/artists/me/following')
+    return (response.data?.artists ?? []).map((a: any) => mapArtistSummary(a))
+  },
+
+  getFeed: async (params: { limit?: number; offset?: number } = {}): Promise<TerrainModel[]> => {
+    const response = await apiClient.get('/api/artists/me/feed', { params })
+    return (response.data?.models ?? []).map((m: any) => mapModelRecord(m))
+  },
+
   getArtistModels: async (
     id: string,
     params: { page?: number; limit?: number; sort?: string } = {}
@@ -74,48 +94,37 @@ export const artistsApi = {
   },
 
   getDashboardStats: async (): Promise<ArtistStats> => {
-    const response = await apiClient.get<{ stats: ArtistStats }>('/api/artists/dashboard/stats')
+    const response = await apiClient.get<{ stats: ArtistStats }>('/api/artists/me/stats')
     return response.data.stats
   },
 
-  getSales: async (params?: { limit?: number; offset?: number }): Promise<{ sales: any[]; total: number }> => {
-    const response = await apiClient.get('/api/artists/sales', { params })
-    return response.data
+  getSales: async (params?: { limit?: number; offset?: number }): Promise<{ sales: ArtistSale[]; total: number }> => {
+    const response = await apiClient.get('/api/artists/me/sales', { params })
+    return { sales: response.data?.sales ?? [], total: Number(response.data?.total ?? 0) }
   },
 
+  // Update the artist's own brand. `avatar`/`banner` are R2 object keys from the
+  // presign upload flow (uploadsApi.uploadDirect).
   updateProfile: async (data: {
     name?: string
     bio?: string
-    profileImage?: string
-    bannerImage?: string
+    url?: string
+    avatar?: string
+    banner?: string
   }): Promise<ArtistDetail> => {
-    const response = await apiClient.put('/api/artists/profile', data)
+    const response = await apiClient.put('/api/artists/me', data)
     return mapArtistDetail(response.data?.artist ?? response.data)
   },
+}
 
-  uploadProfileImage: async (file: File): Promise<{ imageUrl: string }> => {
-    const formData = new FormData()
-    formData.append('image', file)
-
-    const response = await apiClient.post('/api/artists/profile/image', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
-
-    return response.data
-  },
-
-  uploadBannerImage: async (file: File): Promise<{ imageUrl: string }> => {
-    const formData = new FormData()
-    formData.append('banner', file)
-
-    const response = await apiClient.post('/api/artists/profile/banner', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
-
-    return response.data
-  },
+export interface ArtistSale {
+  id: string
+  model_id: string | null
+  model_name: string
+  bundle_name: string | null
+  total_price: string | number
+  earnings: string | number
+  order_number: string
+  customer_email: string
+  created_at: string
 }

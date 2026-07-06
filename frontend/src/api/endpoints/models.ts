@@ -292,6 +292,22 @@ export const modelsApi = {
   },
 
   /**
+   * Public planner tables that feature this model ("shop the look").
+   */
+  getModelTables: async (
+    modelId: string,
+    limit = 12,
+  ): Promise<Array<{ id: string; name: string; modelCount: number; viewCount: number }>> => {
+    const response = await apiClient.get(`${BASE_URL}/${modelId}/tables`, { params: { limit } })
+    return (response.data?.tables ?? []).map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      modelCount: Number(t.model_count ?? 0),
+      viewCount: Number(t.view_count ?? 0),
+    }))
+  },
+
+  /**
    * Get related models
    */
   getRelatedModels: async (modelId: string, limit = 6): Promise<TerrainModel[]> => {

@@ -32,6 +32,7 @@ import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStrea
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
+import { notifyFollowersOfRelease } from '../services/notifications';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
 
@@ -541,6 +542,14 @@ router.get('/:id',
     // Taxonomy tags (facet terms) for the product page + cross-linking.
     const taxonomyTerms = await getModelTerms(id);
 
+    // How many public tables feature this model ("Featured in N tables").
+    const tablesCount = await db.query(
+      `SELECT COUNT(*)::int AS c
+       FROM table_models tm JOIN user_tables ut ON ut.id = tm.table_id
+       WHERE tm.model_id = $1 AND ut.is_public = true`,
+      [id]
+    );
+
     res.json({
       model: {
         ...model,
@@ -548,8 +557,31 @@ router.get('/:id',
         recentReviews: reviewsResult.rows,
         parts,
         taxonomyTerms,
+        featuredInTables: tablesCount.rows[0]?.c ?? 0,
       }
     });
+  })
+);
+
+// ============================================================================
+// PUBLIC TABLES FEATURING THIS MODEL ("Featured in N tables" → the tables)
+// ============================================================================
+
+router.get('/:id/tables',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const limit = Math.min(Number(req.query.limit) || 12, 40);
+    const result = await db.query(
+      `SELECT ut.id, ut.name, ut.share_token, ut.view_count, ut.created_at,
+              jsonb_array_length(COALESCE(ut.layout_data->'models', '[]'::jsonb)) AS model_count
+       FROM table_models tm
+       JOIN user_tables ut ON ut.id = tm.table_id
+       WHERE tm.model_id = $1 AND ut.is_public = true
+       ORDER BY ut.view_count DESC, ut.created_at DESC
+       LIMIT $2`,
+      [id, limit]
+    );
+    res.json({ tables: result.rows });
   })
 );
 
@@ -630,7 +662,7 @@ router.post('/:id/publish',
 
     // Verify model is complete enough to publish
     const modelResult = await db.query(
-      `SELECT name, description, thumbnail_path, base_price, status
+      `SELECT artist_id, name, description, thumbnail_path, base_price, status, published_at
        FROM models WHERE id = $1`,
       [id]
     );
@@ -648,17 +680,25 @@ router.post('/:id/publish',
     // Required-facet guardrail: can't publish until the mandatory facets are tagged.
     await assertRequiredTermsPresent(id);
 
-    // Publish model
+    // First-time publish? (used to fan out release notifications exactly once)
+    const isFirstPublish = !model.published_at;
+
+    // Publish model (keep the original published_at on re-publish)
     await db.query(
-      `UPDATE models 
-       SET status = 'published', 
+      `UPDATE models
+       SET status = 'published',
            visibility = 'public',
-           published_at = CURRENT_TIMESTAMP
+           published_at = COALESCE(published_at, CURRENT_TIMESTAMP)
        WHERE id = $1`,
       [id]
     );
 
     logger.info('Model published', { userId: (req as any).userId, modelId: id });
+
+    // Fan out "new release" notifications to the artist's followers (once).
+    if (isFirstPublish) {
+      notifyFollowersOfRelease(model.artist_id, id);
+    }
 
     res.json({
       message: 'Model published successfully',

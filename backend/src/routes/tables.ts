@@ -6,6 +6,7 @@ import logger from '../utils/logger'
 import { validateString } from '../utils/validation'
 import { buildWatermarkHeader, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark'
 import { generateTerrainTiles, quoteTiles, type HeightField, type TileOptions, type TileQuote, type GeneratedTile } from '../services/terrainTiles'
+import { syncTableModels } from '../services/tableModels'
 import type { Archiver } from 'archiver'
 // Using untyped request body locally to avoid cross-package imports during build
 const createArchive: (format: string, options?: any) => Archiver = require('archiver')
@@ -123,6 +124,8 @@ router.post('/', async (req, res, next) => {
 
     const savedTable = result.rows[0]
 
+    await syncTableModels(savedTable.id, layout_data)
+
     tablesLogger.info('Table saved', {
       tableId: savedTable.id,
       userEmail: user_email,
@@ -184,6 +187,10 @@ router.put('/:id', async (req, res, next) => {
       ]
     )
 
+    // Re-sync links from the resulting layout (works whether or not layout_data
+    // was part of this update, thanks to the COALESCE above).
+    await syncTableModels(id, result.rows[0].layout_data)
+
     tablesLogger.info('Table updated', {
       tableId: id,
       userEmail: user_email
@@ -192,6 +199,32 @@ router.put('/:id', async (req, res, next) => {
     res.json({ table: result.rows[0] })
   } catch (error) {
     tablesLogger.error('Update table failed', { error, tableId: req.params.id })
+    next(error)
+  }
+})
+
+// ============================================================================
+// TABLE CONTRIBUTORS (multi-artist BOM credit)
+// ============================================================================
+
+router.get('/:id/contributors', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const result = await db.query(
+      `SELECT u.id,
+              COALESCE(NULLIF(u.artist_name, ''), u.display_name) AS name,
+              u.artist_avatar_url AS profile_image_url,
+              COUNT(*)::int AS model_count
+       FROM table_models tm
+       JOIN users u ON u.id = tm.artist_id
+       WHERE tm.table_id = $1
+       GROUP BY u.id
+       ORDER BY model_count DESC, name ASC`,
+      [id],
+    )
+    res.json({ contributors: result.rows })
+  } catch (error) {
+    tablesLogger.error('Get table contributors failed', { error, tableId: req.params.id })
     next(error)
   }
 })
@@ -460,6 +493,8 @@ router.post('/:id/duplicate', async (req, res, next) => {
         false // Duplicates are private by default
       ]
     )
+
+    await syncTableModels(result.rows[0].id, result.rows[0].layout_data)
 
     tablesLogger.info('Table duplicated', {
       originalId: id,

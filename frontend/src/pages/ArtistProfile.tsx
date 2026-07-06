@@ -1,10 +1,13 @@
-import React, { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
+import { UserPlus, UserCheck } from 'lucide-react'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import ModelGrid from '../components/models/ModelGrid'
 import { artistsApi } from '../api/endpoints/artists'
+import { useAuthStore } from '../store/authStore'
 
 const sortOptions = [
   { value: 'recent', label: 'Newest' },
@@ -15,8 +18,14 @@ const sortOptions = [
 
 const ArtistProfile: React.FC = () => {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const { isAuthenticated, user } = useAuthStore()
   const [sortBy, setSortBy] = useState('recent')
   const [page, setPage] = useState(1)
+
+  const [following, setFollowing] = useState(false)
+  const [followerCount, setFollowerCount] = useState(0)
+  const [followBusy, setFollowBusy] = useState(false)
 
   const artistQuery = useQuery({
     queryKey: ['artist-profile', id],
@@ -34,6 +43,38 @@ const ArtistProfile: React.FC = () => {
   const artist = artistQuery.data
   const models = modelsQuery.data?.models ?? []
   const totalPages = modelsQuery.data?.totalPages ?? 1
+  const isOwnProfile = Boolean(user?.id && user.id === id)
+
+  useEffect(() => {
+    if (artist) {
+      setFollowing(Boolean(artist.isFollowing))
+      setFollowerCount(artist.followerCount ?? 0)
+    }
+  }, [artist])
+
+  const toggleFollow = async () => {
+    if (!id) return
+    if (!isAuthenticated) {
+      navigate('/login')
+      return
+    }
+    setFollowBusy(true)
+    // optimistic
+    const prev = { following, followerCount }
+    setFollowing(!following)
+    setFollowerCount((c) => c + (following ? -1 : 1))
+    try {
+      const res = following ? await artistsApi.unfollow(id) : await artistsApi.follow(id)
+      setFollowing(res.following)
+      setFollowerCount(res.followerCount)
+    } catch {
+      setFollowing(prev.following)
+      setFollowerCount(prev.followerCount)
+      toast.error('Could not update follow')
+    } finally {
+      setFollowBusy(false)
+    }
+  }
 
   const handlePageChange = (direction: 'prev' | 'next') => {
     setPage((current) => {
@@ -84,8 +125,26 @@ const ArtistProfile: React.FC = () => {
             <h1 className="text-3xl font-semibold text-gray-900">{artist.name}</h1>
             <p className="mt-2 text-sm text-gray-500">Joined {artist.createdAt ? new Date(artist.createdAt).toLocaleDateString() : 'recently'}</p>
             {artist.bio ? <p className="mt-4 text-sm text-gray-700">{artist.bio}</p> : null}
+            {!isOwnProfile && (
+              <button
+                onClick={toggleFollow}
+                disabled={followBusy}
+                className={`mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-60 ${
+                  following
+                    ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }`}
+              >
+                {following ? <UserCheck size={16} /> : <UserPlus size={16} />}
+                {following ? 'Following' : 'Follow'}
+              </button>
+            )}
           </div>
           <div className="flex gap-8 text-sm text-gray-600">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-400">Followers</p>
+              <p className="text-xl font-semibold text-gray-900">{followerCount}</p>
+            </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-gray-400">Models</p>
               <p className="text-xl font-semibold text-gray-900">{artist.totalModels ?? 0}</p>
@@ -125,7 +184,6 @@ const ArtistProfile: React.FC = () => {
               ))}
             </select>
           </label>
-          <Button variant="outline">Follow</Button>
         </div>
       </section>
 

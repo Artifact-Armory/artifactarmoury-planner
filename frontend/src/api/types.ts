@@ -139,6 +139,8 @@ export interface TerrainModel {
     reviewerName?: string
     createdAt: string
   }>
+  // Number of public planner tables that feature this model.
+  featuredInTables?: number
   // Faceted taxonomy tags (facet terms) attached to this model.
   taxonomyTerms?: Array<{
     facetSlug: string
@@ -208,9 +210,12 @@ export interface ArtistSummary {
   bio?: string
   profileImageUrl?: string
   bannerImageUrl?: string
+  artistUrl?: string
   totalModels?: number
   totalSales?: number
   totalViews?: number
+  followerCount?: number
+  isFollowing?: boolean
   rating?: number
   createdAt?: string
 }
@@ -220,11 +225,15 @@ export interface ArtistDetail extends ArtistSummary {
 }
 
 export interface ArtistStats {
-  totalRevenue: number
+  grossRevenue: number
+  netEarnings: number
   totalSales: number
   totalModels: number
-  pendingOrders: number
   activeModels: number
+  draftModels: number
+  totalViews: number
+  totalDownloads: number
+  followers: number
 }
 
 export interface TableConfig {

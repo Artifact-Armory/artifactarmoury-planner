@@ -113,6 +113,17 @@ export const tablesApi = {
     }
   },
 
+  async getContributors(id: string): Promise<Array<{ id: string; name: string; profileImageUrl?: string; modelCount: number }>> {
+    const response = await apiClient.get<ApiResponse<any>>(`${BASE_URL}/${id}/contributors`)
+    const payload = unwrap(response.data ?? (response as any)) as any
+    return (payload.contributors ?? []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      profileImageUrl: c.profile_image_url ?? undefined,
+      modelCount: Number(c.model_count ?? 0),
+    }))
+  },
+
   async getPublicTables(
     page = 1,
     limit = 20,

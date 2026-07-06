@@ -44,6 +44,7 @@ import PurchaseHistory from './pages/dashboard/PurchaseHistory';
 import Wishlist from './pages/dashboard/Wishlist';
 import UserProfile from './pages/dashboard/UserProfile';
 import MyTables from './pages/dashboard/MyTables';
+import Following from './pages/dashboard/Following';
 import EditTable from './pages/dashboard/EditTable';
 
 // Artist Pages
@@ -197,6 +198,7 @@ function App() {
               <Route index element={<Dashboard />} />
               <Route path="purchases" element={<PurchaseHistory />} />
               <Route path="wishlist" element={<Wishlist />} />
+              <Route path="following" element={<Following />} />
               <Route path="profile" element={<UserProfile />} />
               <Route path="tables" element={<MyTables />} />
               <Route path="tables/new" element={<EditTable />} />
