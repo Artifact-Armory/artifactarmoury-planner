@@ -182,7 +182,7 @@ const CreateModel: React.FC = () => {
           </label>
           <p className="text-xs text-gray-500 mb-3">
             Tell buyers what this is — all four are required so your model shows up in the right
-            searches.
+            searches. Tick as many as apply in each (a stone barn can be Medieval <em>and</em> WW2).
           </p>
           <FacetSelects
             facetSlugs={REQUIRED_FACET_SLUGS}

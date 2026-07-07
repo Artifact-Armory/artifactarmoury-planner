@@ -1,10 +1,11 @@
 import React from 'react'
+import { ChevronDown, Check } from 'lucide-react'
 import { taxonomyApi, termToken, type TaxFacet, type TaxTerm } from '../../api/endpoints/taxonomy'
 
 interface FacetSelectsProps {
   /** Facet slugs to render as dropdowns, in order. */
   facetSlugs: string[]
-  /** Optional display-label override per facet slug (e.g. terrain-type → "Type"). */
+  /** Optional display-label override per facet slug (e.g. terrain-type → "Model type"). */
   labels?: Record<string, string>
   /** Shared selection tokens `facetSlug:termPath` — the same array TermPicker uses. */
   value: string[]
@@ -14,15 +15,17 @@ interface FacetSelectsProps {
 
 interface FlatOption {
   token: string
-  label: string
+  name: string
+  depth: number
 }
 
-/** Depth-first flatten a facet's term tree into indented <option> rows. */
+/** Depth-first flatten a facet's term tree into indented options. */
 function flatten(terms: TaxTerm[], facetSlug: string, out: FlatOption[] = []): FlatOption[] {
   for (const t of terms) {
     out.push({
       token: termToken(facetSlug, t.path),
-      label: `${'  '.repeat(t.depth)}${t.name}${t.ratio ? ` · ${t.ratio}` : ''}`,
+      name: `${t.name}${t.ratio ? ` · ${t.ratio}` : ''}`,
+      depth: t.depth,
     })
     if (t.children?.length) flatten(t.children, facetSlug, out)
   }
@@ -30,10 +33,125 @@ function flatten(terms: TaxTerm[], facetSlug: string, out: FlatOption[] = []): F
 }
 
 /**
- * A row of required, single-select dropdowns for the headline browse facets
- * (Type / Theme & Era / Scale / Condition). Each dropdown owns exactly one term
- * for its facet; selecting replaces that facet's token in the shared `value`
- * array, leaving other facets' tokens (managed by TermPicker) untouched.
+ * One facet as a dropdown whose rows are tick boxes — buyers can pick several
+ * terms per facet (up to the facet's `maxTerms` cap). Selections are stored as
+ * `facetSlug:termPath` tokens in the shared `value` array; toggling one only
+ * touches this facet's tokens, leaving others (managed by TermPicker) untouched.
+ */
+const FacetMultiSelect: React.FC<{
+  slug: string
+  facet: TaxFacet
+  label: string
+  value: string[]
+  onChange: (tokens: string[]) => void
+  disabled?: boolean
+}> = ({ slug, facet, label, value, onChange, disabled }) => {
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  const options = React.useMemo(() => flatten(facet.terms, slug), [facet, slug])
+  const nameByToken = React.useMemo(() => new Map(options.map((o) => [o.token, o.name])), [options])
+  const selectedTokens = React.useMemo(() => value.filter((t) => t.startsWith(`${slug}:`)), [value, slug])
+  const selectedSet = React.useMemo(() => new Set(selectedTokens), [selectedTokens])
+  const max = facet.maxTerms ?? null
+  const atCap = max != null && selectedTokens.length >= max
+
+  // Close when clicking away.
+  React.useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const toggle = (token: string) => {
+    if (disabled) return
+    if (selectedSet.has(token)) {
+      onChange(value.filter((t) => t !== token))
+    } else {
+      if (atCap) return // respect the per-facet cap
+      onChange([...value, token])
+    }
+  }
+
+  const summary =
+    selectedTokens.length === 0
+      ? `Select ${label}…`
+      : selectedTokens.map((t) => nameByToken.get(t) ?? t.split(':').pop()).join(', ')
+
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1">
+        {label} <span className="text-red-500">*</span>
+      </label>
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          className={`w-full flex items-center justify-between gap-2 border rounded px-3 py-2 bg-white text-left disabled:opacity-60 ${
+            selectedTokens.length ? 'text-gray-900' : 'text-gray-400'
+          }`}
+        >
+          <span className="truncate">{summary}</span>
+          <ChevronDown
+            size={16}
+            className={`flex-none text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {open && (
+          <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
+            <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 text-xs text-gray-500">
+              <span>Tick one or more</span>
+              <span>
+                {selectedTokens.length}
+                {max != null ? `/${max}` : ''}
+              </span>
+            </div>
+            <ul className="max-h-64 overflow-auto py-1">
+              {options.map((o) => {
+                const checked = selectedSet.has(o.token)
+                const blocked = !checked && atCap
+                return (
+                  <li key={o.token}>
+                    <button
+                      type="button"
+                      disabled={disabled || blocked}
+                      onClick={() => toggle(o.token)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-indigo-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                      style={{ paddingLeft: 12 + o.depth * 14 }}
+                    >
+                      <span
+                        className={`flex h-4 w-4 flex-none items-center justify-center rounded border ${
+                          checked ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300'
+                        }`}
+                      >
+                        {checked && <Check size={12} />}
+                      </span>
+                      <span className="truncate">{o.name}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {atCap && (
+              <div className="border-t border-gray-100 px-3 py-1.5 text-xs text-amber-600">
+                Up to {max} — untick one to swap.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A row of required, multi-select dropdowns for the headline browse facets
+ * (Model type / Theme & Era / Scale / Condition), populated from the taxonomy tree.
  */
 const FacetSelects: React.FC<FacetSelectsProps> = ({ facetSlugs, labels, value, onChange, disabled }) => {
   const [facets, setFacets] = React.useState<TaxFacet[] | null>(null)
@@ -55,39 +173,21 @@ const FacetSelects: React.FC<FacetSelectsProps> = ({ facetSlugs, labels, value, 
 
   const bySlug = new Map(facets.map((f) => [f.slug, f]))
 
-  // Set the single selection for one facet: drop its existing tokens, add the new one.
-  const select = (slug: string, token: string) => {
-    const kept = value.filter((t) => !t.startsWith(`${slug}:`))
-    onChange(token ? [...kept, token] : kept)
-  }
-
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {facetSlugs.map((slug) => {
         const facet = bySlug.get(slug)
         if (!facet) return null
-        const label = labels?.[slug] ?? facet.name
-        const options = flatten(facet.terms, slug)
-        const current = value.find((t) => t.startsWith(`${slug}:`)) ?? ''
         return (
-          <div key={slug}>
-            <label className="block text-sm font-medium mb-1">
-              {label} <span className="text-red-500">*</span>
-            </label>
-            <select
-              className="w-full border rounded px-3 py-2 bg-white"
-              value={current}
-              onChange={(e) => select(slug, e.target.value)}
-              disabled={disabled}
-            >
-              <option value="">— Select {label} —</option>
-              {options.map((o) => (
-                <option key={o.token} value={o.token}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FacetMultiSelect
+            key={slug}
+            slug={slug}
+            facet={facet}
+            label={labels?.[slug] ?? facet.name}
+            value={value}
+            onChange={onChange}
+            disabled={disabled}
+          />
         )
       })}
     </div>
