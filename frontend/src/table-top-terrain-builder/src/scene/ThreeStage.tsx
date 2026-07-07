@@ -16,8 +16,9 @@ import { footprintCellsFor } from '@core/footprintMask'
 import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY,
 } from '@core/elevation'
-import { buildTableMaterial } from '@core/tableMaterials'
-import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight } from '@core/heightmap'
+import { buildTableMaterial, bakePaintOverlayCanvas, makePaintOverlayTexture } from '@core/tableMaterials'
+import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight, createHeightmap } from '@core/heightmap'
+import { paintFitsTable, isBlank as paintIsBlank } from '@core/paintmap'
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
@@ -53,6 +54,7 @@ export function ThreeStage() {
     lastAutoLevel: number          // surface level under the cursor last frame
     lastPointer: { clientX: number; clientY: number } | null
     sculpting: boolean             // true while dragging a terrain brush
+    strokeChanged: boolean         // any change during the current sculpt/paint stroke
   } | null>(null)
 
   useEffect(() => {
@@ -168,9 +170,15 @@ export function ThreeStage() {
     scene.add(brushRing)
 
     // Deformable surface: the flat plane is swapped for a heightmap mesh once the
-    // user starts sculpting (see buildTable / syncTerrain).
+    // user starts sculpting (see buildTable / syncTerrain). A grid mesh is also used
+    // (flat) when the surface is painted, so the overlay has known UVs.
     let terrainMesh: THREE.Mesh | null = null
     let terrainGeo: THREE.BufferGeometry | null = null
+    // Painted-texture overlay: a transparent mesh sharing the surface geometry,
+    // sitting a hair above it so the base material shows through unpainted areas.
+    let paintMesh: THREE.Mesh | null = null
+    let paintTex: THREE.CanvasTexture | null = null
+    let paintCanvas: HTMLCanvasElement | null = null
 
     const raycaster = new THREE.Raycaster()
     const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
@@ -178,7 +186,7 @@ export function ThreeStage() {
     engine.current = {
       renderer, scene, camera, cam, inst, ghost, tableGroup, gridGroup, cellHi,
       raycaster, ground, requestRender, ghostRot: 0, drag: { kind: 'none' }, hovered: null,
-      levelOverride: null, lastAutoLevel: 0, lastPointer: null, sculpting: false,
+      levelOverride: null, lastAutoLevel: 0, lastPointer: null, sculpting: false, strokeChanged: false,
     }
 
     // expose camera controls to the store (UI buttons / fitView)
@@ -202,6 +210,8 @@ export function ThreeStage() {
     buildTable()
     applySnapVisual()
     cam.home(tableBox())
+    // Seed a baseline undo snapshot so the first placement/sculpt/paint is undoable.
+    store().actions.ensureInitialHistory()
     requestRender()
 
     // ---- resize ----
@@ -215,23 +225,38 @@ export function ThreeStage() {
     ro.observe(mount)
 
     // ---- helpers ----
+    // Is the surface painted? (a fitting, non-blank paint map)
+    function hasPaint(): boolean {
+      const s = store()
+      return paintFitsTable(s.paint, s.table) && !paintIsBlank(s.paint)
+    }
+
     function buildTable() {
       const t = store().table
       const hm = store().heightmap
+      const sculpted = !!(hm && heightmapFitsTable(hm, t))
+      const painted = hasPaint()
       tableGroup.clear()
       terrainMesh = null
       terrainGeo = null
+      paintMesh = null
+      paintTex = null
+      paintCanvas = null
       const mat = buildTableMaterial(store().tableMaterial, t)
 
-      if (hm && heightmapFitsTable(hm, t)) {
-        // Sculpted surface: a heightmap mesh in world space (Y up).
-        const geo = buildTerrainGeometry(hm, t)
+      if (sculpted || painted) {
+        // World-space grid mesh (Y up), known UVs 0..1 for the paint overlay. Uses
+        // the height field when sculpted, otherwise a flat field.
+        const field = sculpted ? hm! : createHeightmap(t)
+        const geo = buildTerrainGeometry(field, t)
         const mesh = new THREE.Mesh(geo, mat)
         mesh.position.y = -0.004
         mesh.receiveShadow = true
         tableGroup.add(mesh)
         terrainMesh = mesh
         terrainGeo = geo
+
+        if (painted) buildPaintOverlay(geo, mesh.position.y)
       } else {
         // Flat table.
         const geo = new THREE.PlaneGeometry(t.width, t.height)
@@ -256,24 +281,70 @@ export function ThreeStage() {
       applySnapVisual()
     }
 
+    // Build the transparent painted-texture overlay sharing the surface geometry.
+    function buildPaintOverlay(geo: THREE.BufferGeometry, baseY: number) {
+      const s = store()
+      if (!paintFitsTable(s.paint, s.table)) return
+      paintCanvas = bakePaintOverlayCanvas(s.paint, s.table)
+      paintTex = makePaintOverlayTexture(paintCanvas)
+      const mat = new THREE.MeshStandardMaterial({
+        map: paintTex,
+        transparent: true,
+        alphaTest: 0.02,
+        depthWrite: false,
+        roughness: 0.95,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      })
+      const mesh = new THREE.Mesh(geo, mat) // shares geo → follows sculpt updates
+      mesh.position.y = baseY + 0.0015
+      mesh.renderOrder = 2
+      mesh.receiveShadow = true
+      tableGroup.add(mesh)
+      paintMesh = mesh
+    }
+
     // Re-sync the surface mesh after a sculpt (or when the heightmap appears/clears).
     function syncTerrain() {
       const s = store()
-      const hasTerrain = !!(s.heightmap && heightmapFitsTable(s.heightmap, s.table))
-      if (hasTerrain !== !!terrainMesh) {
-        buildTable() // switch between flat plane and terrain mesh
-      } else if (hasTerrain && terrainGeo && s.heightmap) {
-        updateTerrainGeometry(terrainGeo, s.heightmap)
+      const sculpted = !!(s.heightmap && heightmapFitsTable(s.heightmap, s.table))
+      const painted = hasPaint()
+      const needsGrid = sculpted || painted
+      if (needsGrid !== !!terrainMesh) {
+        buildTable() // switch between flat plane and grid mesh
+      } else if (sculpted && terrainGeo && s.heightmap) {
+        updateTerrainGeometry(terrainGeo, s.heightmap) // shared geo → overlay follows
       }
       requestRender()
     }
 
-    // Apply the active brush at the ground point under the cursor.
+    // Re-bake the painted overlay after a paint stroke (or when it appears/clears).
+    function syncPaint() {
+      const painted = hasPaint()
+      if (painted !== !!paintMesh) {
+        buildTable() // add/remove the overlay (and switch flat plane ↔ grid mesh)
+      } else if (painted && paintCanvas && paintTex) {
+        bakePaintOverlayCanvas(store().paint!, store().table, paintCanvas)
+        paintTex.needsUpdate = true
+      }
+      requestRender()
+    }
+
+    // Apply the active brush at the ground point under the cursor. Height tools
+    // sculpt the field; paint/erase tools stamp the texture overlay. A changed dab
+    // flags the stroke so pointer-up records one undo step.
     function sculptAt(e: { clientX: number; clientY: number }) {
       const gp = groundPoint(e)
       if (!gp) return
-      // Geometry updates via the terrainRev store subscription → syncTerrain.
-      store().actions.sculptTerrain(gp.x, gp.z)
+      const tool = store().terrainTool
+      // Geometry/overlay updates via the terrainRev/paintRev store subscriptions.
+      const changed = (tool === 'paint' || tool === 'erase')
+        ? store().actions.paintTerrain(gp.x, gp.z)
+        : store().actions.sculptTerrain(gp.x, gp.z)
+      if (changed) engine.current!.strokeChanged = true
     }
 
     function updateBrushRing(e: { clientX: number; clientY: number }) {
@@ -429,6 +500,7 @@ export function ThreeStage() {
       // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.
       if (s.terrainTool !== 'none') {
         eng.sculpting = true
+        eng.strokeChanged = false
         sculptAt(e)
         return
       }
@@ -550,7 +622,13 @@ export function ThreeStage() {
     function onPointerUpLeft(e: PointerEvent) {
       if (e.button !== 0) return
       const eng = engine.current!
-      if (eng.sculpting) { eng.sculpting = false; return }
+      if (eng.sculpting) {
+        eng.sculpting = false
+        // Record the whole stroke as one undoable step (terrain + paint are in the
+        // same timeline as placement).
+        if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
+        return
+      }
       const d = eng.drag
       eng.drag = { kind: 'none' }
 
@@ -790,6 +868,9 @@ export function ThreeStage() {
       if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap) {
         syncTerrain()
         inst.refreshTransforms() // pieces ride the sculpted surface
+      }
+      if (s.paintRev !== prev.paintRev || s.paint !== prev.paint) {
+        syncPaint()
       }
       if (s.terrainTool !== prev.terrainTool) {
         // Entering/leaving sculpt mode: hide the brush ring + set the cursor.

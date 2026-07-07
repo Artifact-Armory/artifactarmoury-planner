@@ -12,7 +12,9 @@
 import * as THREE from 'three'
 import type { Table } from '../state/store'
 
-export type TerrainTool = 'none' | 'raise' | 'lower' | 'smooth' | 'flatten'
+// 'paint'/'erase' act on the texture layer (paintmap.ts), not the height field;
+// applyBrush ignores them (the store routes them to the paint action).
+export type TerrainTool = 'none' | 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'erase'
 
 export interface Heightmap {
   /** Vertices along X (width). */
@@ -141,7 +143,7 @@ export function applyBrush(
   radius: number,
   strength: number,
 ): boolean {
-  if (tool === 'none' || radius <= 0) return false
+  if (tool === 'none' || tool === 'paint' || tool === 'erase' || radius <= 0) return false
   const { cols, rows } = hm
   const dx = table.width / (cols - 1)
   const dz = table.height / (rows - 1)

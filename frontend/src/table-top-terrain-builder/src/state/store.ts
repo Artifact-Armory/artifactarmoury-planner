@@ -8,6 +8,9 @@ import {
 import {
   type Heightmap, type TerrainTool, createHeightmap, heightmapFitsTable, applyBrush,
 } from '../core/heightmap'
+import {
+  type PaintMap, createPaintMap, paintFitsTable, applyPaintBrush, clonePaintMap,
+} from '../core/paintmap'
 import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
@@ -57,6 +60,16 @@ export type SavedLayout = {
 interface HistoryState {
   instances: Instance[]
   selectedInstanceId: string | null
+  // Terrain sculpt + texture painting are part of the same undo timeline as
+  // placement, so a snapshot carries all three.
+  heightmap: Heightmap | null
+  paint: PaintMap | null
+}
+
+/** Deep-clone a height field for a history snapshot (Float32Array must be copied). */
+function cloneHeightmap(hm: Heightmap | null): Heightmap | null {
+  if (!hm) return null
+  return { cols: hm.cols, rows: hm.rows, heights: new Float32Array(hm.heights) }
 }
 
 interface AppState {
@@ -86,10 +99,15 @@ interface AppState {
 
   // Terrain sculpting (deformable table surface → printable tiles later)
   heightmap: Heightmap | null  // null = flat table (no surface edits yet)
-  terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt brush
+  terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt/paint brush
   brushRadius: number          // metres
   brushStrength: number        // 0..1
   terrainRev: number           // bumped on every sculpt so the scene re-syncs
+
+  // Ground texture painting (an overlay of table materials brushed onto the surface)
+  paint: PaintMap | null       // null = nothing painted (base material everywhere)
+  paintMaterial: string        // material id the paint brush applies
+  paintRev: number             // bumped on every paint dab so the scene re-bakes
 
   basket: BasketItem[]
   purchasedAssetIds: Set<string>
@@ -132,6 +150,7 @@ interface AppState {
 
   setTerrainTool: (tool: TerrainTool) => void
   setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
+  setPaintMaterial: (id: string) => void
 
   // Collaboration gate
   setCurrentUser: (id: string | null, isArtist: boolean) => void
@@ -144,10 +163,20 @@ interface AppState {
   actions: {
     /** Sculpt the surface at a world position with the active brush. Returns true if changed. */
     sculptTerrain: (worldX: number, worldZ: number) => boolean
+    /** Paint (or erase) the active ground texture at a world position. Returns true if changed. */
+    paintTerrain: (worldX: number, worldZ: number) => boolean
     /** Reset the surface back to flat. */
     resetTerrain: () => void
+    /** Clear all painted ground texture. */
+    resetPaint: () => void
     /** Ensure a heightmap exists that fits the current table (creates/regenerates). */
     ensureHeightmap: () => void
+    /** Ensure a paint map exists that fits the current table. */
+    ensurePaintMap: () => void
+    /** Push the current scene (instances + terrain + paint) as one undo step. */
+    commitHistory: () => void
+    /** Seed a baseline history entry if none exists, so the first edit is undoable. */
+    ensureInitialHistory: () => void
     fitView: () => void
     loadAssetCatalogue: () => Promise<void>
     loadStarterLayout: () => void
@@ -173,7 +202,7 @@ interface AppState {
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
-    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; heightmap?: Heightmap | null }) => void
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; heightmap?: Heightmap | null; paint?: PaintMap | null }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -197,7 +226,9 @@ function saveHistory(state: AppState): Partial<AppState> {
   const newHistory = state.history.slice(0, state.historyIndex + 1)
   newHistory.push({
     instances: JSON.parse(JSON.stringify(state.instances)),
-    selectedInstanceId: state.selectedInstanceId
+    selectedInstanceId: state.selectedInstanceId,
+    heightmap: cloneHeightmap(state.heightmap),
+    paint: clonePaintMap(state.paint),
   })
   
   // Limit history size
@@ -241,6 +272,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   brushRadius: 0.12,
   brushStrength: 0.5,
   terrainRev: 0,
+
+  paint: null,
+  paintMaterial: 'sand',
+  paintRev: 0,
 
   basket: [],
   purchasedAssetIds: new Set(),
@@ -294,14 +329,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTableMaterial: (id) => set({ tableMaterial: id }),
 
   setTerrainTool: (tool) => {
-    // Entering a sculpt tool clears any pending model placement (mutually exclusive).
-    if (tool !== 'none') { get().actions.ensureHeightmap(); set({ selectedAssetId: null }) }
+    // Entering a sculpt/paint tool clears any pending model placement (mutually
+    // exclusive). Height tools need a height field; paint tools need a paint map.
+    if (tool === 'raise' || tool === 'lower' || tool === 'smooth' || tool === 'flatten') {
+      get().actions.ensureHeightmap()
+      set({ selectedAssetId: null })
+    } else if (tool === 'paint' || tool === 'erase') {
+      get().actions.ensurePaintMap()
+      set({ selectedAssetId: null })
+    }
     set({ terrainTool: tool })
   },
   setBrush: (patch) => set(s => ({
     brushRadius: patch.radius != null ? patch.radius : s.brushRadius,
     brushStrength: patch.strength != null ? patch.strength : s.brushStrength,
   })),
+  setPaintMaterial: (id) => set({ paintMaterial: id }),
 
   actions: {
     ensureHeightmap: () => {
@@ -321,7 +364,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       return changed
     },
 
+    ensurePaintMap: () => {
+      const s = get()
+      if (!paintFitsTable(s.paint, s.table)) {
+        set({ paint: createPaintMap(s.table), paintRev: s.paintRev + 1 })
+      }
+    },
+
+    paintTerrain: (worldX, worldZ) => {
+      const s = get()
+      let pm = s.paint
+      if (!paintFitsTable(pm, s.table)) pm = createPaintMap(s.table)
+      const material = s.terrainTool === 'erase' ? null : s.paintMaterial
+      const changed = applyPaintBrush(pm, s.table, worldX, worldZ, material, s.brushRadius)
+      if (changed) set({ paint: pm, paintRev: s.paintRev + 1 })
+      return changed
+    },
+
     resetTerrain: () => set(s => ({ heightmap: createHeightmap(s.table), terrainRev: s.terrainRev + 1 })),
+
+    resetPaint: () => set(s => ({ paint: createPaintMap(s.table), paintRev: s.paintRev + 1 })),
 
     // Camera framing is owned by the constrained BuilderCamera in ThreeStage.
     fitView: () => {
@@ -621,14 +683,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     undo: () => {
       const s = get()
       if (s.historyIndex <= 0) return
-      
+
       const newIndex = s.historyIndex - 1
       const state = s.history[newIndex]
-      
+
       set({
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
+        heightmap: cloneHeightmap(state.heightmap),
+        paint: clonePaintMap(state.paint),
+        terrainRev: s.terrainRev + 1,
+        paintRev: s.paintRev + 1,
         historyIndex: newIndex
       })
       get().actions.syncBasketWithTable()
@@ -645,9 +711,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
+        heightmap: cloneHeightmap(state.heightmap),
+        paint: clonePaintMap(state.paint),
+        terrainRev: s.terrainRev + 1,
+        paintRev: s.paintRev + 1,
         historyIndex: newIndex
       })
       get().actions.syncBasketWithTable()
+    },
+
+    // Commit a terrain/paint stroke (or any external change) as one undo step.
+    commitHistory: () => set(s => saveHistory(s)),
+
+    // Ensure the timeline has a baseline snapshot so the very first edit (place,
+    // sculpt or paint) can be undone back to the starting state.
+    ensureInitialHistory: () => {
+      const s = get()
+      if (s.history.length === 0) set(saveHistory(s))
     },
 
     canUndo: () => get().historyIndex > 0,
@@ -691,18 +771,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.fitView()
     },
 
-    applyLayout: ({ table, tableMaterial, instances, heightmap }) => {
+    applyLayout: ({ table, tableMaterial, instances, heightmap, paint }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
+      const hm = heightmap ?? null
+      const pm = paint ?? null
       set((s) => ({
         table: { ...table },
         tableMaterial: tableMaterial ?? s.tableMaterial,
         instances: clean,
-        heightmap: heightmap ?? null,
+        heightmap: hm,
+        paint: pm,
         terrainRev: s.terrainRev + 1,
+        paintRev: s.paintRev + 1,
         terrainTool: 'none',
         selectedInstanceId: null,
         selectedInstanceIds: [],
-        ...saveHistory({ ...s, instances: clean, selectedInstanceId: null }),
+        // Reset the timeline to this loaded state as the baseline.
+        history: [],
+        historyIndex: -1,
+        ...saveHistory({ ...s, instances: clean, selectedInstanceId: null, heightmap: hm, paint: pm, history: [], historyIndex: -1 }),
       }))
       get().actions.syncBasketWithTable()
       get().actions.fitView()

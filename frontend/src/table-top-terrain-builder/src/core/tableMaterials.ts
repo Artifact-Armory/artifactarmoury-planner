@@ -12,6 +12,7 @@
 
 import * as THREE from 'three'
 import { assetLoadingManager } from '../scene/loadManager'
+import type { PaintMap } from './paintmap'
 
 /** Physical size (metres) that one texture tile covers on the table. 1 ft ≈ 0.3048m. */
 export const TEXTURE_TILE_SIZE = 0.3048
@@ -50,11 +51,15 @@ export function getTableMaterialDef(id: string): TableMaterialDef {
 }
 
 // ---- procedural placeholder albedo (seamless, cached per material) ----
+const procCanvasCache = new Map<string, HTMLCanvasElement>()
 const procTextureCache = new Map<string, THREE.Texture>()
 
-function makeProceduralTexture(def: TableMaterialDef): THREE.Texture {
-  const cached = procTextureCache.get(def.id)
+/** The seamless procedural tile as a raw canvas (cached). Used both as a Three
+ *  texture source and, for the paint overlay, as a 2D fill pattern. */
+export function getMaterialTileCanvas(id: string): HTMLCanvasElement {
+  const cached = procCanvasCache.get(id)
   if (cached) return cached
+  const def = getTableMaterialDef(id)
 
   const size = 256
   const canvas = document.createElement('canvas')
@@ -85,7 +90,14 @@ function makeProceduralTexture(def: TableMaterialDef): THREE.Texture {
     }
   }
 
-  const tex = new THREE.CanvasTexture(canvas)
+  procCanvasCache.set(id, canvas)
+  return canvas
+}
+
+function makeProceduralTexture(def: TableMaterialDef): THREE.Texture {
+  const cached = procTextureCache.get(def.id)
+  if (cached) return cached
+  const tex = new THREE.CanvasTexture(getMaterialTileCanvas(def.id))
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   tex.colorSpace = THREE.SRGBColorSpace
   procTextureCache.set(def.id, tex)
@@ -157,3 +169,70 @@ export function buildTableMaterial(id: string, table: { width: number; height: n
   mat.needsUpdate = true
   return mat
 }
+
+// ---- paint overlay ---------------------------------------------------------
+//
+// The painted ground is drawn as a transparent texture that sits just above the
+// surface. Painted cells are filled with the chosen material's tiling pattern;
+// everywhere else stays transparent so the base material shows through.
+
+/** Longest-edge resolution of the baked overlay canvas. */
+const OVERLAY_MAX = 1024
+
+/**
+ * Bake a paint map into an RGBA canvas covering the whole table (uv 0..1).
+ * Painted cells get their material's seamless tile; unpainted cells are clear.
+ * `into` reuses an existing canvas (so the CanvasTexture can just flag an update).
+ */
+export function bakePaintOverlayCanvas(
+  pm: PaintMap,
+  table: { width: number; height: number },
+  into?: HTMLCanvasElement,
+): HTMLCanvasElement {
+  const aspect = table.height / table.width
+  const w = OVERLAY_MAX
+  const h = Math.max(1, Math.round(OVERLAY_MAX * aspect))
+  const canvas = into ?? document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  // One tiling pattern per palette material, scaled so a tile covers the same
+  // physical size (TEXTURE_TILE_SIZE) it does on the base surface.
+  const tilePx = (w * (TEXTURE_TILE_SIZE / table.width)) / 256
+  const patterns = pm.palette.map((id) => {
+    const p = ctx.createPattern(getMaterialTileCanvas(id), 'repeat')
+    if (p && typeof (p as any).setTransform === 'function') {
+      ;(p as any).setTransform(new DOMMatrix().scale(tilePx))
+    }
+    return p
+  })
+
+  const cw = w / pm.cols
+  const ch = h / pm.rows
+  for (let j = 0; j < pm.rows; j++) {
+    for (let i = 0; i < pm.cols; i++) {
+      const idx = pm.cells[j * pm.cols + i]
+      if (!idx) continue
+      const pat = patterns[idx - 1]
+      if (!pat) continue
+      ctx.fillStyle = pat
+      // +1px overlap avoids hairline seams between same-material cells.
+      ctx.fillRect(Math.floor(i * cw), Math.floor(j * ch), Math.ceil(cw) + 1, Math.ceil(ch) + 1)
+    }
+  }
+  return canvas
+}
+
+/** A texture wrapping the baked overlay canvas, oriented to match terrain uv. */
+export function makePaintOverlayTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.flipY = false // terrain/grid uv has v increasing with world +Z (canvas top→bottom)
+  tex.anisotropy = 8
+  tex.needsUpdate = true
+  return tex
+}
+

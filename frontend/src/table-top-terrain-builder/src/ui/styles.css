@@ -572,6 +572,7 @@
   padding: 18px 20px;
 }
 .tb-help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 16px; }
+.tb-help-head-actions { display: flex; align-items: center; gap: 8px; }
 .tb-help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; }
 .tb-help-title { color: var(--tb-accent-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
 .tb-help-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 13px; }
@@ -703,6 +704,53 @@
 .tb-terrain-sub { color: var(--tb-muted); }
 .tb-terrain-export-btn { justify-content: center; }
 .tb-terrain-export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Ground-texture paint brush */
+.tb-terrain-paint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tb-border);
+}
+.tb-paint-swatches {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.tb-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 9px;
+  border: 1px solid var(--tb-border);
+  background: transparent;
+  color: var(--tb-text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tb-swatch:hover { background: #1f2b3c; }
+.tb-swatch.is-active {
+  background: rgba(77, 163, 255, 0.18);
+  border-color: var(--tb-accent);
+  color: #cfe6ff;
+}
+.tb-swatch-chip {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex: 0 0 auto;
+}
+.tb-swatch-erase {
+  background:
+    linear-gradient(45deg, #444 25%, transparent 25%, transparent 75%, #444 75%),
+    linear-gradient(45deg, #444 25%, #2a2a2a 25%, #2a2a2a 75%, #444 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
 
 /* View-only chrome — shopper opened a published table (read-only 3D view) */
 .tb-viewbar {

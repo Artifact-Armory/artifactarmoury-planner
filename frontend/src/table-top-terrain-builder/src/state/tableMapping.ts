@@ -7,11 +7,13 @@
 import type { Table, Instance, Unit } from './store'
 import type { Heightmap } from '../core/heightmap'
 import { serializeHeightmap, deserializeHeightmap } from '../core/heightmap'
+import type { PaintMap } from '../core/paintmap'
+import { serializePaint, deserializePaint } from '../core/paintmap'
 
 const DEFAULT_TABLE: Table = { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0254 }
 
 /** Planner scene → server { tableConfig, layoutData }. */
-export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], heightmap?: Heightmap | null) {
+export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], heightmap?: Heightmap | null, paint?: PaintMap | null) {
   return {
     tableConfig: {
       width: table.width,
@@ -33,6 +35,8 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
       })),
       // Sculpted surface (null/omitted when the table is flat).
       heightmap: serializeHeightmap(heightmap ?? null),
+      // Painted ground texture (null/omitted when nothing is painted).
+      paint: serializePaint(paint ?? null),
     },
   }
 }
@@ -41,7 +45,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
 export function deserializeLayout(
   tableConfig: any,
   layoutData: any,
-): { table: Table; tableMaterial?: string; instances: Instance[]; heightmap: Heightmap | null } {
+): { table: Table; tableMaterial?: string; instances: Instance[]; heightmap: Heightmap | null; paint: PaintMap | null } {
   const tc = tableConfig ?? {}
   const table: Table = {
     width: Number(tc.width ?? DEFAULT_TABLE.width) || DEFAULT_TABLE.width,
@@ -63,6 +67,7 @@ export function deserializeLayout(
     .filter((i: Instance) => i.assetId)
 
   const heightmap = deserializeHeightmap(layoutData?.heightmap, table)
+  const paint = deserializePaint(layoutData?.paint, table)
 
-  return { table, tableMaterial: tc.material, instances, heightmap }
+  return { table, tableMaterial: tc.material, instances, heightmap, paint }
 }

@@ -23,7 +23,7 @@ import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
 import { HelpOverlay } from './HelpOverlay'
 import OnboardingTour from '@/components/help/OnboardingTour'
-import { plannerShowcaseSteps } from '@/components/help/tourSteps'
+import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
 import './styles.css'
 
@@ -84,8 +84,6 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const fitView = useAppStore((s) => s.actions.fitView)
   const clearInstances = useAppStore((s) => s.actions.clearInstances)
   const addLayoutToShopCart = useAppStore((s) => s.actions.addLayoutToShopCart)
-  const exportLayout = useAppStore((s) => s.actions.exportLayout)
-  const importLayout = useAppStore((s) => s.actions.importLayout)
   const applyLayout = useAppStore((s) => s.actions.applyLayout)
   const setReadOnly = useAppStore((s) => s.setReadOnly)
 
@@ -146,6 +144,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const setTerrainTool = useAppStore((s) => s.setTerrainTool)
   const setBrush = useAppStore((s) => s.setBrush)
   const resetTerrain = useAppStore((s) => s.actions.resetTerrain)
+  const paintMaterial = useAppStore((s) => s.paintMaterial)
+  const setPaintMaterial = useAppStore((s) => s.setPaintMaterial)
+  const resetPaint = useAppStore((s) => s.actions.resetPaint)
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
   const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
   const [exportingTiles, setExportingTiles] = React.useState(false)
@@ -242,6 +243,17 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         window.setTimeout(() => startTour(), 400)
         return
       }
+      // Buyers (and guests) get their own first-visit walkthrough: browse → place
+      // → basket. Same overlay, buyer-tailored steps chosen at the render below.
+      const buyerTourKey = `aa_planner_buyer_tour_v1:${user?.id ?? 'anon'}`
+      if (!isArtist && !localStorage.getItem(buyerTourKey)) {
+        onboardRef.current = true
+        localStorage.setItem(buyerTourKey, '1')
+        localStorage.setItem('tb_help_seen_v1', '1')
+        localStorage.setItem('tb_coach_v1', '1')
+        window.setTimeout(() => startTour(), 400)
+        return
+      }
       if (!localStorage.getItem('tb_help_seen_v1')) {
         onboardRef.current = true
         setShowHelp(true)
@@ -292,12 +304,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           ? await tablesApi.getSharedTable(shareToken)
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
-        const { table, tableMaterial, instances, heightmap } = deserializeLayout(t.tableConfig, t.layoutData)
+        const { table, tableMaterial, instances, heightmap, paint } = deserializeLayout(t.tableConfig, t.layoutData)
         // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
         // artist's unpublished piece) so every placed model renders, not a grey box.
         await resolveAssetsByIds(instances.map((i) => i.assetId))
         if (cancelled) return
-        applyLayout({ table, tableMaterial, instances, heightmap })
+        applyLayout({ table, tableMaterial, instances, heightmap, paint })
         setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
         if (!shareToken) {
           setSavedTableId(t.id)
@@ -548,7 +560,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     if (saving) return
 
     const s = useAppStore.getState()
-    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, s.heightmap)
+    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, s.heightmap, s.paint)
     const email = user.email
 
     setSaving(true)
@@ -589,33 +601,6 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   async function handleCollabConfirm() {
     resolveCollab(true)
     await handleSave()
-  }
-
-  function handleExport() {
-    const blob = new Blob([exportLayout()], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `terrain-map-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  function handleImport() {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json'
-    input.onchange = (ev) => {
-      const file = (ev.target as HTMLInputElement).files?.[0]
-      if (!file) return
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const json = e.target?.result as string
-        if (json) importLayout(json)
-      }
-      reader.readAsText(file)
-    }
-    input.click()
   }
 
   // Current board size in feet (rounded for display / preset matching).
@@ -794,6 +779,45 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 <Trash2 size={14} /> Reset terrain
               </button>
 
+              {/* Ground texture brush: paint different table materials onto the surface. */}
+              <div className="tb-terrain-paint">
+                <div className="tb-terrain-export-head">Ground texture</div>
+                <div className="tb-paint-swatches">
+                  {TABLE_MATERIALS.filter((m) => m.id !== 'plain').map((m) => {
+                    const active = terrainTool === 'paint' && paintMaterial === m.id
+                    return (
+                      <button
+                        key={m.id}
+                        className={`tb-swatch ${active ? 'is-active' : ''}`}
+                        title={`Paint ${m.label}`}
+                        onClick={() => { setPaintMaterial(m.id); setTerrainTool('paint') }}
+                      >
+                        <span
+                          className="tb-swatch-chip"
+                          style={{ background: `#${m.color.toString(16).padStart(6, '0')}` }}
+                        />
+                        <span>{m.label}</span>
+                      </button>
+                    )
+                  })}
+                  <button
+                    className={`tb-swatch ${terrainTool === 'erase' ? 'is-active' : ''}`}
+                    title="Erase painted texture"
+                    onClick={() => setTerrainTool(terrainTool === 'erase' ? 'none' : 'erase')}
+                  >
+                    <span className="tb-swatch-chip tb-swatch-erase" />
+                    <span>Erase</span>
+                  </button>
+                </div>
+                <p className="tb-small tb-terrain-sub">Drag on the table to paint. Brush size applies here too.</p>
+                <button
+                  className="tb-terrain-reset"
+                  onClick={() => { if (window.confirm('Clear all painted ground texture on this table?')) resetPaint() }}
+                >
+                  <Trash2 size={14} /> Clear texture
+                </button>
+              </div>
+
               <div className="tb-terrain-export">
                 <div className="tb-terrain-export-head">Printable tiles</div>
                 {terrainQuote ? (
@@ -931,7 +955,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           </aside>
 
           {/* Bill of materials / cart */}
-          <aside className="tb-bom">
+          <aside className="tb-bom" data-tour="planner-bom">
             <div className="tb-bom-head">
               <strong>Models on this table</strong>
               <span className="tb-small">{bom.pieceCount} pieces</span>
@@ -969,9 +993,6 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 }}
               >
                 <Trash2 size={14} /> Clear
-              </button>
-              <button className="tb-btn" onClick={handleImport} title="Load a map file">
-                Import
               </button>
             </div>
           </aside>
@@ -1171,8 +1192,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       )}
 
       {!readOnly && <CoachMarks />}
-      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
-      {!readOnly && <OnboardingTour steps={plannerShowcaseSteps} />}
+      {showHelp && (
+        <HelpOverlay
+          onClose={() => setShowHelp(false)}
+          onReplayTour={() => { setShowHelp(false); startTour() }}
+        />
+      )}
+      {!readOnly && (
+        <OnboardingTour steps={user?.role === 'artist' ? plannerShowcaseSteps : plannerBuyerSteps} />
+      )}
 
       {/* Collaboration request prompt — placing another artist's model on a showcase */}
       {pendingCollab && (
