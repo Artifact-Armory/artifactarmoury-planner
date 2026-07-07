@@ -7,8 +7,8 @@ const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
     title: 'Camera',
     rows: [
       ['Zoom toward cursor', 'Scroll'],
-      ['Look around (orbit)', 'Right-drag'],
-      ['Pan', 'Middle-drag / WASD'],
+      ['Look around (orbit)', 'Right click and drag'],
+      ['Pan', 'Middle click and drag / WASD'],
       ['Fit to selection or table', 'F'],
       ['Reset view', 'Home'],
     ],

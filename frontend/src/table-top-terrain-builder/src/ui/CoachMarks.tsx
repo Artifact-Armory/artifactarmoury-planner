@@ -26,7 +26,7 @@ export function CoachMarks() {
     <div className="tb-coach">
       <div className="tb-coach-item"><MousePointerClick size={16} /> Drag terrain onto the table to place it</div>
       <div className="tb-coach-item"><ZoomIcon size={16} /> Scroll to zoom toward your cursor</div>
-      <div className="tb-coach-item"><Rotate3d size={16} /> Right-drag to look around</div>
+      <div className="tb-coach-item"><Rotate3d size={16} /> Right click and drag to look around</div>
       <button className="tb-coach-x" onClick={dismiss}><X size={14} /> Got it</button>
     </div>
   )

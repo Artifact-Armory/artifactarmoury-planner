@@ -78,7 +78,7 @@ export const plannerShowcaseSteps: TourStep[] = [
   {
     target: 'planner-palette',
     title: 'Place pieces',
-    body: 'Click a model to pick it up, then click the table to drop it. Scroll to zoom, right-drag to look around, and press R to rotate.',
+    body: 'Click a model to pick it up, then click the table to drop it. Scroll to zoom, right click and drag to look around, and press R to rotate.',
   },
   {
     target: 'planner-save',
@@ -111,7 +111,7 @@ export const plannerBuyerSteps: TourStep[] = [
   },
   {
     title: 'Moving around',
-    body: 'Scroll to zoom, right-drag to orbit the camera, and press R to rotate a selected piece. Drop pieces on top of each other and they stack automatically. Press ? anytime for the full list of controls.',
+    body: 'Scroll to zoom, right click and drag to orbit the camera, and press R to rotate a selected piece. Drop pieces on top of each other and they stack automatically. Press ? anytime for the full list of controls.',
   },
   {
     target: 'planner-bom',

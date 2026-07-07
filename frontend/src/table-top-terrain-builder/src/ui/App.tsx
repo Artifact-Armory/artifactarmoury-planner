@@ -838,7 +838,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
               <p className="tb-small tb-terrain-hint">
                 Drag on the table to sculpt. Cliffs are steep slopes. Tiles are watertight shells —
-                print with normal infill. Placed models don’t rest on hills yet (coming next).
+                print with normal infill.
               </p>
             </div>
           )}
