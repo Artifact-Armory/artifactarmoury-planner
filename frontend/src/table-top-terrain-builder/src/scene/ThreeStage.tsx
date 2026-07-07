@@ -14,7 +14,7 @@ import {
 } from '@core/occupancy'
 import { footprintCellsFor } from '@core/footprintMask'
 import {
-  surfaceTop, buildOccupied3D, collides3D, occupyUnits, levelToY,
+  surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY,
 } from '@core/elevation'
 import { buildTableMaterial } from '@core/tableMaterials'
 import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight } from '@core/heightmap'
@@ -352,7 +352,7 @@ export function ThreeStage() {
       if (!inBounds(cells, t)) return false
       if (!effSnap()) return true // free placement permits overlap
       const occ = buildOccupied3D(store().instances, assetMap(), t, exclude)
-      return !collides3D(cells, base, occupyUnits(asset), occ)
+      return !collides3D(cells, base, occupyUnitsAt(asset, base), occ)
     }
 
     function setCursor(c: string) {

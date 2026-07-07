@@ -47,6 +47,22 @@ export function occupyUnits(asset: Asset): number {
   return Math.max(1, Math.ceil(surfaceUnits(asset)))
 }
 
+/**
+ * Integer collision slabs a piece claims given its (possibly fractional) base —
+ * the rounded top minus the rounded base. Unlike `occupyUnits` (which rounds the
+ * height *up* from the piece's own base, over-reserving space), this measures the
+ * span between where the piece actually sits and where it actually ends. That
+ * makes identical pieces stacked on each other's exact tops tile the vertical grid
+ * seamlessly (no phantom self-collision), so a model stacks as high as you like —
+ * while a piece *buried* into another still overlaps an occupied slab and blocks.
+ * Still ≥1 so flat props claim a slab.
+ */
+export function occupyUnitsAt(asset: Asset, base: number): number {
+  const b = Math.round(base)
+  const top = Math.round(base + surfaceUnits(asset))
+  return Math.max(1, top - b)
+}
+
 export function isTile(asset: Asset): boolean {
   return heightUnits(asset) > 0
 }
@@ -109,9 +125,10 @@ export function buildOccupied3D(
     const asset = assetsById.get(inst.assetId)
     if (!asset) continue
     // Bases can be fractional (a model stacked on another's exact top); snap to
-    // integer slabs for the collision grid.
+    // integer slabs for the collision grid, measuring the span from this piece's
+    // rounded base to its rounded top so stacked pieces tile without self-colliding.
     const base = Math.round(inst.level ?? 0)
-    const units = occupyUnits(asset)
+    const units = occupyUnitsAt(asset, inst.level ?? 0)
     for (const cell of placedCells(inst, asset, table)) {
       if (cell.c < 0 || cell.r < 0) continue
       for (let l = base; l < base + units; l++) occ.add(key3(cell.c, cell.r, l))
