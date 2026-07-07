@@ -120,6 +120,11 @@ const Browse: React.FC = () => {
     return map
   }, [tree])
 
+  // Prefer the counted rail (zero-count terms pruned) once models are tagged;
+  // otherwise fall back to the full taxonomy tree so the filters are still usable
+  // on a young catalogue where nothing carries counts yet.
+  const railFacets = (facets && facets.length ? facets : tree) ?? []
+
   const models = data?.models ?? []
   const pagination = data?.pagination
   const totalPages = Math.max(1, Number(pagination?.totalPages || pagination?.pages || 1))
@@ -216,15 +221,15 @@ const Browse: React.FC = () => {
               {facetsFetching && <Spinner size="sm" className="text-indigo-500" />}
             </div>
             <div className="mt-3">
-              {facets?.length ? (
+              {railFacets.length ? (
                 <FacetRail
-                  facets={facets}
+                  facets={railFacets}
                   selected={selectedTokens}
                   onToggle={toggleTerm}
                   loading={facetsFetching}
                 />
               ) : (
-                <p className="text-sm text-gray-400">No filters available yet.</p>
+                <p className="text-sm text-gray-400">Loading filters…</p>
               )}
             </div>
           </div>
