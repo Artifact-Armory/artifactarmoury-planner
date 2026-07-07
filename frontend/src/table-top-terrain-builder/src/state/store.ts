@@ -388,9 +388,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { instances, ...saveHistory({ ...s, instances }) }
       })
       get().actions.syncBasketWithTable()
-      // Placing a catalogue model you don't already own/have drops it into the
-      // shop basket, so it surfaces in the palette's "My items" tab.
-      get().actions.addPlacedModelToShopCart(i.assetId)
+      // Placing a model no longer auto-adds it to the shop basket — the planner's
+      // right panel is a bill of materials for the table, and buying is an explicit
+      // action ("Add all to basket"). This keeps an artist laying out their table
+      // from silently filling their cart with other creators' pieces.
       // Purchase-intent analytics: log the placement against the parent model
       // (set parts count for their set). No-ops for demo/non-UUID asset ids.
       {

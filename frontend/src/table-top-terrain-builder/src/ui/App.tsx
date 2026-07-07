@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
-  Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check,
+  Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import hotToast from 'react-hot-toast'
@@ -88,8 +88,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // visit is editable again.
   React.useEffect(() => {
     setReadOnly(readOnly)
+    // Drop any pending placement tool so the green "place here" square from a prior
+    // edit session never lingers over a table you're only viewing.
+    if (readOnly) setSelectedAsset(null)
     return () => setReadOnly(false)
-  }, [readOnly, setReadOnly])
+  }, [readOnly, setReadOnly, setSelectedAsset])
 
   // Terrain sculpting
   const terrainTool = useAppStore((s) => s.terrainTool)
@@ -449,6 +452,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }
 
   const clearSelectedInstance = () => useAppStore.getState().setSelectedInstances([])
+
+  // Open the full marketplace page for the selected model (title, description,
+  // rating, reviews, gallery) in a new tab so the planner view is preserved.
+  function openModelDetails() {
+    if (!selectedModel) return
+    window.open(`/models/${selectedModel.id}`, '_blank', 'noopener,noreferrer')
+  }
 
   async function handleSave() {
     if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
@@ -826,7 +836,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {/* Bill of materials / cart */}
           <aside className="tb-bom">
             <div className="tb-bom-head">
-              <strong>Your build</strong>
+              <strong>Models on this table</strong>
               <span className="tb-small">{bom.pieceCount} pieces</span>
             </div>
             <div className="tb-bom-list">
@@ -847,7 +857,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               ))}
             </div>
             <div className="tb-bom-total">
-              <span>Total</span>
+              <span>Total cost of Table</span>
               <strong>£{bom.total.toFixed(2)}</strong>
             </div>
             <button className="tb-cta" disabled={bom.pieceCount === 0} onClick={handleAddAll}>
@@ -999,28 +1009,36 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             </div>
           </aside>
 
-          {/* Selected-model info tile — appears when the shopper taps a piece. */}
+          {/* Selected-model info tile — appears when the shopper taps a piece.
+              Its main area opens the full model page (details, rating, reviews). */}
           {selectedModel && (
             <div className="tb-view-selected">
-              <div className="tb-thumb sm">
-                {selectedModel.thumbnail ? <img src={selectedModel.thumbnail} alt="" /> : <Box size={18} />}
-              </div>
-              <div className="tb-view-selected-info">
-                <strong>{selectedModel.name}</strong>
-                <span className="tb-small">{selectedModel.artistName} · £{selectedModel.price.toFixed(2)}</span>
-              </div>
-              {selectedModel.owned ? (
-                <span className="tb-view-selected-state"><Check size={14} /> Owned</span>
-              ) : selectedModel.inCart ? (
-                <span className="tb-view-selected-state"><Check size={14} /> In basket</span>
-              ) : (
-                <button className="tb-cta sm" onClick={handleAddSelected}>
-                  <ShoppingCart size={16} /> Add to basket
-                </button>
-              )}
-              <button className="tb-view-selected-x" onClick={clearSelectedInstance} aria-label="Deselect">
-                <X size={16} />
+              <button className="tb-view-selected-main" onClick={openModelDetails} title="Open the full model page">
+                <div className="tb-thumb sm">
+                  {selectedModel.thumbnail ? <img src={selectedModel.thumbnail} alt="" /> : <Box size={18} />}
+                </div>
+                <div className="tb-view-selected-info">
+                  <strong>{selectedModel.name}</strong>
+                  <span className="tb-small">{selectedModel.artistName} · £{selectedModel.price.toFixed(2)}</span>
+                  <span className="tb-view-selected-link">
+                    <ExternalLink size={12} /> View full details, description &amp; reviews
+                  </span>
+                </div>
               </button>
+              <div className="tb-view-selected-actions">
+                {selectedModel.owned ? (
+                  <span className="tb-view-selected-state"><Check size={14} /> Owned</span>
+                ) : selectedModel.inCart ? (
+                  <span className="tb-view-selected-state"><Check size={14} /> In basket</span>
+                ) : (
+                  <button className="tb-cta sm" onClick={handleAddSelected}>
+                    <ShoppingCart size={16} /> Add to basket
+                  </button>
+                )}
+                <button className="tb-view-selected-x" onClick={clearSelectedInstance} aria-label="Deselect">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
           )}
         </>

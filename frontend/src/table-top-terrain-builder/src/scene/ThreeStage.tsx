@@ -448,6 +448,14 @@ export function ThreeStage() {
       const eng = engine.current!
       const overCanvas = e.target === renderer.domElement
 
+      // View-only (inspecting an artist's table): no ghost, no placement square, no
+      // grab cursor — just a plain pointer over models to hint they're clickable.
+      if (store().readOnly) {
+        cellHi.visible = false
+        if (overCanvas && e.buttons === 0) setCursor(pickPiece(e) ? 'pointer' : 'default')
+        return
+      }
+
       // Terrain sculpt mode: brush ring follows the cursor; drag paints the surface.
       if (store().terrainTool !== 'none') {
         if (overCanvas || eng.sculpting) updateBrushRing(e)

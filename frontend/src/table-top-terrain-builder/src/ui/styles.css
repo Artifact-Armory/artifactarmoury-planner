@@ -800,8 +800,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: min(520px, calc(100vw - 320px));
-  padding: 10px 12px;
+  max-width: min(600px, calc(100vw - 320px));
+  padding: 8px 10px;
   background: var(--tb-panel);
   border: 1px solid var(--tb-border);
   border-radius: 14px;
@@ -809,6 +809,22 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   z-index: 21;
 }
+/* The whole info block is a button that opens the full model page. */
+.tb-view-selected-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tb-view-selected-main:hover { background: #1f2b3c; }
 .tb-view-selected-info { display: flex; flex-direction: column; min-width: 0; }
 .tb-view-selected-info strong {
   font-size: 14px;
@@ -816,8 +832,18 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  max-width: 280px;
 }
+.tb-view-selected-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4da3ff;
+}
+.tb-view-selected-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .tb-view-selected .tb-cta.sm { margin: 0; white-space: nowrap; }
 .tb-view-selected-state {
   display: inline-flex;
