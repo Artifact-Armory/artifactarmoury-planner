@@ -12,6 +12,7 @@ import Button from '../components/ui/Button'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
+import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
@@ -274,6 +275,9 @@ const ModelDetails: React.FC = () => {
                     ))}
                   </div>
                 ))}
+                {model.taxonomyTerms.some((t) => t.facetSlug === 'designed-for') && (
+                  <p className="pt-1 text-[11px] leading-relaxed text-gray-400">{TRADEMARK_DISCLAIMER}</p>
+                )}
               </div>
             ) : model.tags?.length ? (
               <div className="mt-4 flex flex-wrap gap-2">

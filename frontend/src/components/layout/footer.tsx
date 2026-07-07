@@ -1,5 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import { TRADEMARK_DISCLAIMER } from '../legal/TrademarkDisclaimer'
 
 const Footer: React.FC = () => {
   const year = new Date().getFullYear()
@@ -34,6 +35,12 @@ const Footer: React.FC = () => {
 
         <p className="text-sm text-gray-500 sm:text-right">
           &copy; {year} Artifact Planner. All rights reserved.
+        </p>
+      </div>
+
+      <div className="border-t border-gray-800">
+        <p className="mx-auto max-w-7xl px-4 py-4 text-xs leading-relaxed text-gray-500 sm:px-6 lg:px-8">
+          {TRADEMARK_DISCLAIMER}
         </p>
       </div>
     </footer>

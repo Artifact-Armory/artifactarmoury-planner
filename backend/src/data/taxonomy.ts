@@ -822,13 +822,16 @@ export const TAXONOMY: FacetSeed[] = [
   },
 
   // ==========================================================================
-  // 10 · DESIGNED FOR — curated game-system compatibility (descriptive only)
+  // 10 · CAN BE USED WITH — curated game-system compatibility (descriptive only)
+  //   Slug stays `designed-for` (immutable identifier); only the display name +
+  //   copy changed to the plainer, more clearly nominative "Can be used with".
   // ==========================================================================
   {
     slug: 'designed-for',
-    name: 'Designed For',
+    name: 'Can be used with',
     description:
-      'Compatible game systems — descriptive "designed for use with" only, nominative use of names.',
+      'Game systems this terrain can be used with — a compatibility guide only. All names are the ' +
+      'trademarks of their respective owners; listing one does not imply any affiliation or endorsement.',
     selectionUi: 'grouped',
     terms: [
       t('Sci-fi Skirmish / Battle', [
