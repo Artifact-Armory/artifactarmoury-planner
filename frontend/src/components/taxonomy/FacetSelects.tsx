@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check, Search, X } from 'lucide-react'
 import { taxonomyApi, termToken, type TaxFacet, type TaxTerm } from '../../api/endpoints/taxonomy'
 
 interface FacetSelectsProps {
@@ -17,6 +17,8 @@ interface FlatOption {
   token: string
   name: string
   depth: number
+  /** Lower-cased haystack (name + synonyms) for the in-dropdown filter. */
+  search: string
 }
 
 /** Depth-first flatten a facet's term tree into indented options. */
@@ -26,6 +28,7 @@ function flatten(terms: TaxTerm[], facetSlug: string, out: FlatOption[] = []): F
       token: termToken(facetSlug, t.path),
       name: `${t.name}${t.ratio ? ` · ${t.ratio}` : ''}`,
       depth: t.depth,
+      search: [t.name, ...(t.synonyms ?? [])].join(' ').toLowerCase(),
     })
     if (t.children?.length) flatten(t.children, facetSlug, out)
   }
@@ -47,6 +50,7 @@ const FacetMultiSelect: React.FC<{
   disabled?: boolean
 }> = ({ slug, facet, label, value, onChange, disabled }) => {
   const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState('')
   const ref = React.useRef<HTMLDivElement>(null)
 
   const options = React.useMemo(() => flatten(facet.terms, slug), [facet, slug])
@@ -56,6 +60,14 @@ const FacetMultiSelect: React.FC<{
   const max = facet.maxTerms ?? null
   const atCap = max != null && selectedTokens.length >= max
 
+  // Only show a search box for facets with enough options to warrant one.
+  const searchable = options.length > 8
+  const needle = query.trim().toLowerCase()
+  const visibleOptions = React.useMemo(
+    () => (needle ? options.filter((o) => o.search.includes(needle)) : options),
+    [options, needle],
+  )
+
   // Close when clicking away.
   React.useEffect(() => {
     if (!open) return
@@ -64,6 +76,11 @@ const FacetMultiSelect: React.FC<{
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  // Reset the filter whenever the dropdown closes.
+  React.useEffect(() => {
+    if (!open) setQuery('')
   }, [open])
 
   const toggle = (token: string) => {
@@ -111,8 +128,35 @@ const FacetMultiSelect: React.FC<{
                 {max != null ? `/${max}` : ''}
               </span>
             </div>
+            {searchable && (
+              <div className="border-b border-gray-100 p-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={`Search ${label.toLowerCase()}…`}
+                    className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-8 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      onClick={() => setQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <ul className="max-h-64 overflow-auto py-1">
-              {options.map((o) => {
+              {visibleOptions.length === 0 && (
+                <li className="px-3 py-2 text-sm text-gray-400">No matches</li>
+              )}
+              {visibleOptions.map((o) => {
                 const checked = selectedSet.has(o.token)
                 const blocked = !checked && atCap
                 return (
