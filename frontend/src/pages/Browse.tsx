@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { X } from 'lucide-react'
+import { X, Search } from 'lucide-react'
 import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
@@ -37,6 +37,21 @@ const Browse: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState(searchTermParam)
   const [minPrice, setMinPrice] = useState(minPriceParam)
   const [maxPrice, setMaxPrice] = useState(maxPriceParam)
+
+  // Live search: debounce the keyword box into the URL so results filter as you
+  // type (no need to hit "Apply" to find a specific model).
+  React.useEffect(() => {
+    if (searchTerm === searchTermParam) return
+    const id = setTimeout(() => {
+      const next = new URLSearchParams(searchParams)
+      if (searchTerm) next.set('search', searchTerm)
+      else next.delete('search')
+      next.delete('query')
+      next.delete('page')
+      setSearchParams(next)
+    }, 300)
+    return () => clearTimeout(id)
+  }, [searchTerm, searchTermParam, searchParams, setSearchParams])
 
   const selectedTokens = useMemo(
     () => new Set(termsParam ? termsParam.split(',').filter(Boolean) : []),
@@ -135,7 +150,7 @@ const Browse: React.FC = () => {
 
   const handleApplyFilters = (event: React.FormEvent) => {
     event.preventDefault()
-    updateParams({ search: searchTerm || undefined, minPrice: minPrice || undefined, maxPrice: maxPrice || undefined })
+    updateParams({ minPrice: minPrice || undefined, maxPrice: maxPrice || undefined })
   }
 
   const handleResetFilters = () => {
@@ -156,17 +171,34 @@ const Browse: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      {/* Prominent, live keyword search — the quickest way to find a specific model. */}
+      <div className="relative mb-8">
+        <Search size={20} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="search"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Search models by name, tag or keyword…"
+          aria-label="Search models"
+          className="w-full rounded-xl border border-gray-300 bg-white py-3.5 pl-12 pr-11 text-base shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => setSearchTerm('')}
+            aria-label="Clear search"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[300px_1fr]">
         <aside className="space-y-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Search</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Price</h2>
             <form onSubmit={handleApplyFilters} className="mt-4 space-y-4">
-              <Input
-                label="Keyword"
-                placeholder="Search terrain"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-              />
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Min £" type="number" min={0} value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
                 <Input label="Max £" type="number" min={0} value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
