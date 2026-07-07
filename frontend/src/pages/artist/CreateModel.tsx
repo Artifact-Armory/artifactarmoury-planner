@@ -3,6 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
 import TermPicker from '../../components/taxonomy/TermPicker'
+import FacetSelects from '../../components/taxonomy/FacetSelects'
+
+// The headline browse facets, chosen via required dropdowns and mandatory before a
+// model can be uploaded. Keys are taxonomy facet slugs; values are the UI labels.
+const REQUIRED_FACET_LABELS: Record<string, string> = {
+  'terrain-type': 'Type',
+  'setting-era': 'Theme / Era',
+  scale: 'Scale',
+  condition: 'Condition',
+}
+const REQUIRED_FACET_SLUGS = Object.keys(REQUIRED_FACET_LABELS)
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -58,6 +69,11 @@ const CreateModel: React.FC = () => {
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
     if (isNaN(price) || price < 0) { setError('Enter a valid base price'); return }
+    const missingFacets = REQUIRED_FACET_SLUGS.filter((s) => !terms.some((t) => t.startsWith(`${s}:`)))
+    if (missingFacets.length) {
+      setError(`Choose a value for: ${missingFacets.map((s) => REQUIRED_FACET_LABELS[s]).join(', ')}`)
+      return
+    }
 
     try {
       setPhase('uploading')
@@ -167,14 +183,36 @@ const CreateModel: React.FC = () => {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Tags & categories</label>
-          <p className="text-xs text-gray-500 mb-2">
-            Tag your model so buyers find it. Fields marked <span className="text-red-500">*</span> are
-            required before you can publish — pick several where they apply (a stone barn can be
-            Medieval <em>and</em> WW2).
+        <div className="rounded-lg border border-gray-200 p-3">
+          <label className="block text-sm font-medium mb-1">
+            Classification <span className="text-red-500">*</span>
+          </label>
+          <p className="text-xs text-gray-500 mb-3">
+            Tell buyers what this is — all four are required so your model shows up in the right
+            searches.
           </p>
-          <TermPicker value={terms} onChange={setTerms} disabled={busy} />
+          <FacetSelects
+            facetSlugs={REQUIRED_FACET_SLUGS}
+            labels={REQUIRED_FACET_LABELS}
+            value={terms}
+            onChange={setTerms}
+            disabled={busy}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">More tags (optional)</label>
+          <p className="text-xs text-gray-500 mb-2">
+            Add extra tags so buyers find your model — pick several where they apply (a stone barn can
+            be Medieval <em>and</em> WW2). Fields marked <span className="text-red-500">*</span> are
+            required before you can publish.
+          </p>
+          <TermPicker
+            value={terms}
+            onChange={setTerms}
+            disabled={busy}
+            excludeFacets={REQUIRED_FACET_SLUGS}
+          />
         </div>
 
         <div>

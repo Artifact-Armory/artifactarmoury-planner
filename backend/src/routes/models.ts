@@ -295,6 +295,22 @@ router.post('/from-upload',
     // half-tagged draft; they're written after the model row exists.
     const resolvedTerms = await validateAndResolveTerms(terms);
 
+    // The headline browse facets are mandatory at upload (mirrors the required
+    // dropdowns in the UI) — a model must be classified before it's created.
+    const REQUIRED_UPLOAD_FACETS: Record<string, string> = {
+      'terrain-type': 'Type',
+      'setting-era': 'Theme / Era',
+      scale: 'Scale',
+      condition: 'Condition',
+    };
+    const taggedFacets = new Set(resolvedTerms.map((t) => t.facetSlug));
+    const missingFacets = Object.keys(REQUIRED_UPLOAD_FACETS).filter((f) => !taggedFacets.has(f));
+    if (missingFacets.length > 0) {
+      throw new ValidationError(
+        `Choose a value for: ${missingFacets.map((f) => REQUIRED_UPLOAD_FACETS[f]).join(', ')}`,
+      );
+    }
+
     // Digital STL sales only for now — fulfilment is always 'stl'.
     const userId = (req as any).userId;
 

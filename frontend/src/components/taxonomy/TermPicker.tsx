@@ -7,6 +7,11 @@ interface TermPickerProps {
   value: string[]
   onChange: (tokens: string[]) => void
   disabled?: boolean
+  /**
+   * Facet slugs to hide from the picker (they're chosen elsewhere, e.g. as
+   * required dropdowns). Their tokens already in `value` are left untouched.
+   */
+  excludeFacets?: string[]
 }
 
 /** Keep only nodes that match `q` (by name) or have a matching descendant. */
@@ -23,7 +28,7 @@ function filterTerms(terms: TaxTerm[], q: string): TaxTerm[] {
   return out
 }
 
-const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled }) => {
+const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excludeFacets }) => {
   const [facets, setFacets] = React.useState<TaxFacet[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
@@ -207,7 +212,9 @@ const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled }) =>
         )}
       </div>
 
-      {facets.map((facet) => {
+      {facets
+        .filter((facet) => !(excludeFacets ?? []).includes(facet.slug))
+        .map((facet) => {
         const body = renderFacetBody(facet)
         if (body === null) return null // hidden while searching with no matches
         const count = countInFacet(facet.slug)
