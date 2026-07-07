@@ -108,6 +108,14 @@ interface AppState {
   // their dashboard). Gated in ThreeStage input handlers.
   readOnly: boolean
 
+  // Cross-artist collaboration. When an artist places another artist's model on a
+  // showcase, we require a collaboration request. These fields drive the gate +
+  // the confirmation modal (see ThreeStage.placeGhost + ui/App CollabRequestModal).
+  currentUserId: string | null       // signed-in user id (for foreign-model detection)
+  currentUserIsArtist: boolean        // only artists are gated (customers "shop the look")
+  requestedCollaboratorIds: Set<string> // owners we've already consented to / requested this table
+  pendingCollab: { artistId: string; artistName: string; commit: () => void } | null
+
   setTable: (t: Partial<Table>) => void
   setRefs: (s: Partial<Pick<AppState,'scene'|'camera'|'renderer'>>) => void
   setSelectedAsset: (id: string | null) => void
@@ -124,6 +132,14 @@ interface AppState {
 
   setTerrainTool: (tool: TerrainTool) => void
   setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
+
+  // Collaboration gate
+  setCurrentUser: (id: string | null, isArtist: boolean) => void
+  setRequestedCollaborators: (ids: string[]) => void
+  /** Ask the user to send a collaboration request before placing a foreign model. */
+  openCollabPrompt: (artistId: string, artistName: string, commit: () => void) => void
+  /** Resolve the prompt: accept places the piece (and marks the owner requested). */
+  resolveCollab: (accept: boolean) => void
 
   actions: {
     /** Sculpt the surface at a world position with the active brush. Returns true if changed. */
@@ -237,6 +253,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraApi: null,
 
   readOnly: false,
+
+  currentUserId: null,
+  currentUserIsArtist: false,
+  requestedCollaboratorIds: new Set(),
+  pendingCollab: null,
+
+  setCurrentUser: (id, isArtist) => set({ currentUserId: id, currentUserIsArtist: isArtist }),
+  setRequestedCollaborators: (ids) => set({ requestedCollaboratorIds: new Set(ids) }),
+  openCollabPrompt: (artistId, artistName, commit) => set({ pendingCollab: { artistId, artistName, commit } }),
+  resolveCollab: (accept) => {
+    const p = get().pendingCollab
+    if (!p) return
+    if (accept) {
+      set(s => ({ requestedCollaboratorIds: new Set(s.requestedCollaboratorIds).add(p.artistId) }))
+      p.commit()
+    }
+    set({ pendingCollab: null })
+  },
 
   setTable: (t) => set(s => ({ table: { ...s.table, ...t } })),
   setRefs: (refs) => set(refs as any),

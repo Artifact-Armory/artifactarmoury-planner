@@ -596,11 +596,28 @@ export function ThreeStage() {
       const cells = ghostCells(asset, x, z, eng.ghostRot)
       const base = eng.levelOverride != null ? eng.levelOverride : surfaceTop(store().instances, assetMap(), t, cells)
       if (!validAtLevel(asset, x, z, eng.ghostRot, base, new Set())) return
-      const id = useAppStore.getState().actions.addInstance({
-        assetId, position: { x, z }, rotationDeg: eng.ghostRot, level: base,
-      })
-      inst.markPopped([id])
-      requestRender()
+
+      const commit = () => {
+        const id = useAppStore.getState().actions.addInstance({
+          assetId, position: { x, z }, rotationDeg: eng.ghostRot, level: base,
+        })
+        inst.markPopped([id])
+        requestRender()
+      }
+
+      // Collaboration gate: an artist placing another artist's model on a showcase
+      // must send a collaboration request before it can be used. The placement is
+      // deferred until they confirm (see ui/App CollabRequestModal).
+      const s = store()
+      const needsCollab =
+        s.currentUserIsArtist && !!asset.artistId &&
+        asset.artistId !== s.currentUserId &&
+        !s.requestedCollaboratorIds.has(asset.artistId)
+      if (needsCollab) {
+        s.openCollabPrompt(asset.artistId!, asset.artistName ?? 'this artist', commit)
+        return
+      }
+      commit()
     }
 
     // Re-evaluate the ghost at the last cursor position (after a level/rotation change).

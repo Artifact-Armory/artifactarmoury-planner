@@ -18,6 +18,7 @@
     "trace:watermark": "node -r ts-node/register/transpile-only scripts/trace-watermark.ts",
     "test:stage4": "node -r ts-node/register/transpile-only scripts/test-stage4-e2e.ts",
     "test:terrain": "node -r ts-node/register/transpile-only scripts/test-terrain-tiles.ts",
+    "test:collab": "node -r ts-node/register/transpile-only scripts/test-collaborations.ts",
     "db:query": "node -r ts-node/register/transpile-only scripts/db-query.ts",
     "seed:taxonomy": "node -r ts-node/register/transpile-only scripts/seed-taxonomy.ts",
     "rollup:analytics": "node -r ts-node/register/transpile-only scripts/rollup-analytics.ts",

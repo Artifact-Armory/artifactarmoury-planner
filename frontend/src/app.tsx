@@ -54,6 +54,7 @@ import ArtistBundles from './pages/artist/ArtistBundles';
 import ArtistReleases from './pages/artist/ArtistReleases';
 import EditRelease from './pages/artist/EditRelease';
 import ArtistShowcases from './pages/artist/ArtistShowcases';
+import ArtistCollaborations from './pages/artist/ArtistCollaborations';
 import CreateBundle from './pages/artist/CreateBundle';
 import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
@@ -240,6 +241,7 @@ function App() {
               <Route path="releases" element={<ArtistReleases />} />
               <Route path="releases/:id" element={<EditRelease />} />
               <Route path="showcases" element={<ArtistShowcases />} />
+              <Route path="collaborations" element={<ArtistCollaborations />} />
               <Route path="sales" element={<ArtistSales />} />
               <Route path="analytics/sales" element={<SalesDetail />} />
               <Route path="analytics/products" element={<ProductsDetail />} />

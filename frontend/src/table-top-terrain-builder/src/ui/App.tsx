@@ -13,6 +13,9 @@ import { useCartStore, cartKey } from '@/store/cartStore'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
+import { assetUrl } from '@/api/transformers'
+import { collaborationsApi, type TableCollaboration } from '@/api/endpoints/collaborations'
+import CollabRequestModal from './CollabRequestModal'
 import { serializeLayout, deserializeLayout } from '@state/tableMapping'
 import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
@@ -85,6 +88,45 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const importLayout = useAppStore((s) => s.actions.importLayout)
   const applyLayout = useAppStore((s) => s.actions.applyLayout)
   const setReadOnly = useAppStore((s) => s.setReadOnly)
+
+  // Collaboration gate (place another artist's model → request their consent).
+  const setCurrentUser = useAppStore((s) => s.setCurrentUser)
+  const setRequestedCollaborators = useAppStore((s) => s.setRequestedCollaborators)
+  const resolveCollab = useAppStore((s) => s.resolveCollab)
+  const pendingCollab = useAppStore((s) => s.pendingCollab)
+  const [collabs, setCollabs] = React.useState<TableCollaboration[]>([])
+  // Multi-artist credit shown when browsing a published showcase (read-only).
+  const [contributors, setContributors] = React.useState<Array<{ id: string; name: string; profileImageUrl?: string; modelCount: number }>>([])
+
+  React.useEffect(() => {
+    if (!readOnly || !tableId) { setContributors([]); return }
+    let alive = true
+    tablesApi.getContributors(tableId).then((c) => alive && setContributors(c)).catch(() => alive && setContributors([]))
+    return () => { alive = false }
+  }, [readOnly, tableId])
+
+  // Tell the store who's driving so the placement gate knows which models are
+  // "foreign" and whether the user is an artist (only artists are gated).
+  React.useEffect(() => {
+    setCurrentUser(user?.id ?? null, user?.role === 'artist')
+  }, [user?.id, user?.role, setCurrentUser])
+
+  // Load (or clear) the collaboration status for the table I own. Seeds the gate's
+  // "already requested" set so accepted/pending owners aren't re-prompted.
+  const refreshCollabs = React.useCallback(async (id: string | null, owned: boolean) => {
+    if (!id || !owned || user?.role !== 'artist') {
+      setCollabs([])
+      setRequestedCollaborators([])
+      return
+    }
+    try {
+      const rows = await collaborationsApi.getForTable(id)
+      setCollabs(rows)
+      setRequestedCollaborators(rows.map((r) => r.collaboratorId))
+    } catch {
+      setCollabs([])
+    }
+  }, [user?.role, setRequestedCollaborators])
 
   // Push the view-only flag into the store so the scene's input handlers gate
   // editing (placement/selection/keys). Clear it on unmount so a later /planner
@@ -240,6 +282,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       setSavedTableId(null)
       setSavedTableName(null)
       setIsOwner(false)
+      refreshCollabs(null, false)
       return
     }
     let cancelled = false
@@ -259,7 +302,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         if (!shareToken) {
           setSavedTableId(t.id)
           // Own it only if it's yours; otherwise Save makes a copy under your account.
-          setIsOwner(!!user?.email && t.userEmail === user.email)
+          const owned = !!user?.email && t.userEmail === user.email
+          setIsOwner(owned)
+          refreshCollabs(t.id, owned)
+        } else {
+          // A shared copy starts with no collaborations of its own; foreign models
+          // already in it get requests raised when the copier first saves.
+          refreshCollabs(null, false)
         }
       } catch {
         if (!cancelled) hotToast.error('Could not load that table')
@@ -513,6 +562,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           userEmail: email,
         })
         hotToast.success('Table saved')
+        // Saving raises/refreshes collaboration requests for any foreign models.
+        await refreshCollabs(savedTableId, true)
       } else {
         // New table, or a copy of a shared one → create under your account.
         const name = window.prompt('Name this table:', savedTableName ?? `Table ${new Date().toLocaleDateString()}`)
@@ -522,6 +573,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         setSavedTableName(created.name)
         setIsOwner(true)
         hotToast.success('Saved to your tables')
+        await refreshCollabs(created.id, true)
         navigate(`/planner/t/${created.id}`)
       }
     } catch {
@@ -529,6 +581,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     } finally {
       setSaving(false)
     }
+  }
+
+  // Confirming the collaboration prompt places the piece and immediately saves, so
+  // the request goes out to the owner (requests are raised at save time). A scratch
+  // table is created as a draft here (name prompt), matching the "save then send" flow.
+  async function handleCollabConfirm() {
+    resolveCollab(true)
+    await handleSave()
   }
 
   function handleExport() {
@@ -678,6 +738,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <button className="tb-icon tb-help-btn" title="Controls & keyboard help (?)" onClick={() => setShowHelp(true)}>
               <HelpCircle size={18} /><span>Help</span>
             </button>
+            {collabs.some((c) => c.status !== 'accepted') && (
+              <span
+                className="ml-1 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800"
+                title={`Waiting on ${collabs.filter((c) => c.status !== 'accepted').map((c) => c.name).join(', ')} to accept — you can't publish this showcase yet`}
+              >
+                ⏳ Pending collaboration
+              </span>
+            )}
           </div>
 
           {/* Terrain sculpting panel */}
@@ -984,6 +1052,29 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             </div>
           </div>
 
+          {/* Multi-artist credit — the artists whose models feature in this table. */}
+          {contributors.length > 0 && (
+            <div className="pointer-events-auto fixed bottom-4 left-4 z-30 flex max-w-[70vw] flex-wrap items-center gap-1.5 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 shadow">
+              <span className="text-xs font-medium text-gray-500">Featured artists:</span>
+              {contributors.map((c) => {
+                const avatar = assetUrl(c.profileImageUrl)
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => navigate(`/artists/${c.id}`)}
+                    className="flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 hover:bg-gray-100"
+                    title={`${c.modelCount} model${c.modelCount === 1 ? '' : 's'} by ${c.name}`}
+                  >
+                    <span className="flex h-6 w-6 flex-none items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-[11px] font-semibold text-indigo-600">
+                      {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : c.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="text-xs font-medium text-gray-800">{c.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           {/* Docked marketplace basket — the SAME cartStore as the shop, so it
               stays consistent everywhere. Add individual models by tapping them,
               or drop the whole build in at once. */}
@@ -1082,6 +1173,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       {!readOnly && <CoachMarks />}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {!readOnly && <OnboardingTour steps={plannerShowcaseSteps} />}
+
+      {/* Collaboration request prompt — placing another artist's model on a showcase */}
+      {pendingCollab && (
+        <CollabRequestModal
+          artistName={pendingCollab.artistName}
+          onConfirm={handleCollabConfirm}
+          onCancel={() => resolveCollab(false)}
+        />
+      )}
 
       {/* Add-to-basket confirmation (the real CartDrawer isn't mounted on /planner) */}
       {toast && (

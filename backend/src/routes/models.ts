@@ -508,7 +508,7 @@ router.get('/planner-assets',
     if (ids.length === 0) { res.json({ models: [] }); return; }
     const models = (await db.query(
       `SELECT m.id, m.name, m.tags, m.glb_file_path, m.thumbnail_path,
-              m.width, m.depth, m.height, m.base_price, u.artist_name
+              m.width, m.depth, m.height, m.base_price, m.artist_id, u.artist_name
        FROM models m JOIN users u ON u.id = m.artist_id
        WHERE m.id = ANY($1::uuid[]) AND m.part_count = 1 AND m.glb_file_path IS NOT NULL`,
       [ids]

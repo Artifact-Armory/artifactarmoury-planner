@@ -43,8 +43,21 @@ const ArtistShowcases: React.FC = () => {
       const updated = await tablesApi.toggleVisibility(t.id, { userEmail: email, isPublic: !t.isPublic })
       setTables((list) => list.map((x) => (x.id === t.id ? { ...x, isPublic: updated.isPublic, shareToken: updated.shareToken } : x)))
       toast.success(updated.isPublic ? 'Showcase published' : 'Showcase hidden')
-    } catch {
-      toast.error('Could not update visibility')
+    } catch (err: any) {
+      // Publishing a showcase that features other artists' models is blocked until
+      // each of them accepts the collaboration request.
+      const data = err?.response?.data
+      if (err?.response?.status === 409 && data?.error === 'collaboration_required') {
+        const names = (data.blockers ?? [])
+          .map((b: { name: string }) => b.name)
+          .filter((n: string, i: number, a: string[]) => a.indexOf(n) === i)
+        toast.error(
+          `Waiting on ${names.join(', ') || 'a collaborator'} to accept your collaboration request before you can publish.`,
+          { duration: 7000 },
+        )
+      } else {
+        toast.error('Could not update visibility')
+      }
     } finally {
       setBusyId(null)
     }

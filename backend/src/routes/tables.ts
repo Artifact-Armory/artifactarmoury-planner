@@ -8,6 +8,7 @@ import { authenticate, optionalAuth, type AuthRequest } from '../middleware/auth
 import { buildWatermarkHeader, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark'
 import { generateTerrainTiles, quoteTiles, type HeightField, type TileOptions, type TileQuote, type GeneratedTile } from '../services/terrainTiles'
 import { syncTableModels } from '../services/tableModels'
+import { reconcileCollaborations, publishBlockers } from '../services/collaborations'
 import type { Archiver } from 'archiver'
 // Using untyped request body locally to avoid cross-package imports during build
 const createArchive: (format: string, options?: any) => Archiver = require('archiver')
@@ -140,6 +141,11 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
 
     await syncTableModels(savedTable.id, layout_data)
 
+    // Raise collaboration requests for any other artist's models on this table.
+    if (req.user!.role === 'artist') {
+      await reconcileCollaborations(savedTable.id, req.user!.id, layout_data)
+    }
+
     tablesLogger.info('Table saved', {
       tableId: savedTable.id,
       userEmail: user_email,
@@ -205,6 +211,11 @@ router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
     // was part of this update, thanks to the COALESCE above).
     await syncTableModels(id, result.rows[0].layout_data)
 
+    // Raise/refresh collaboration requests for any foreign artist's models.
+    if (req.user!.role === 'artist') {
+      await reconcileCollaborations(id, req.user!.id, asObject(result.rows[0].layout_data))
+    }
+
     tablesLogger.info('Table updated', {
       tableId: id,
       userEmail: user_email
@@ -239,6 +250,44 @@ router.get('/:id/contributors', async (req, res, next) => {
     res.json({ contributors: result.rows })
   } catch (error) {
     tablesLogger.error('Get table contributors failed', { error, tableId: req.params.id })
+    next(error)
+  }
+})
+
+// ============================================================================
+// TABLE COLLABORATIONS (cross-artist consent — owner view)
+// ============================================================================
+
+// The collaboration status for a table (owner/admin only). Drives the planner's
+// re-prompt suppression + "pending collaboration" chip and the Showcases badges.
+router.get('/:id/collaborations', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params
+    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    if (owner.rows.length === 0) return res.status(404).json({ error: 'Table not found' })
+    if (!canModifyTable(req, owner.rows[0].user_email)) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const result = await db.query(
+      `SELECT c.id,
+              c.collaborator_id AS "collaboratorId",
+              COALESCE(NULLIF(u.artist_name, ''), u.display_name, 'Artist') AS name,
+              u.artist_avatar_url AS "avatarUrl",
+              c.status,
+              c.approve_all AS "approveAll",
+              COALESCE(array_agg(cm.model_id::text) FILTER (WHERE cm.model_id IS NOT NULL), '{}') AS "approvedModelIds"
+       FROM table_collaborations c
+       JOIN users u ON u.id = c.collaborator_id
+       LEFT JOIN table_collaboration_models cm ON cm.collaboration_id = c.id
+       WHERE c.table_id = $1
+       GROUP BY c.id, u.artist_name, u.display_name, u.artist_avatar_url
+       ORDER BY c.created_at ASC`,
+      [id],
+    )
+    res.json({ collaborations: result.rows })
+  } catch (error) {
+    tablesLogger.error('Get table collaborations failed', { error, tableId: req.params.id })
     next(error)
   }
 })
@@ -433,12 +482,28 @@ router.patch('/:id/visibility', authenticate, async (req: AuthRequest, res, next
       return res.status(400).json({ error: 'is_public must be a boolean' })
     }
 
-    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    const owner = await db.query(
+      `SELECT ut.user_email, ut.layout_data, u.id AS owner_id, u.role AS owner_role
+       FROM user_tables ut
+       LEFT JOIN users u ON u.email = ut.user_email
+       WHERE ut.id = $1`,
+      [id],
+    )
     if (owner.rows.length === 0) {
       return res.status(404).json({ error: 'Table not found' })
     }
     if (!canModifyTable(req, owner.rows[0].user_email)) {
       return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    // Publishing an artist's showcase requires every foreign artist whose model is
+    // on the table to have accepted the collaboration. Customer "shop the look"
+    // tables (non-artist owner) are unaffected.
+    if (is_public === true && owner.rows[0].owner_role === 'artist' && owner.rows[0].owner_id) {
+      const blockers = await publishBlockers(id, owner.rows[0].owner_id, asObject(owner.rows[0].layout_data))
+      if (blockers.length > 0) {
+        return res.status(409).json({ error: 'collaboration_required', blockers })
+      }
     }
 
     const result = await db.query(

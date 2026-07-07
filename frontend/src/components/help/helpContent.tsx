@@ -87,6 +87,18 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
     },
   },
   {
+    test: (p) => p.startsWith('/artist/collaborations'),
+    entry: {
+      title: 'Collaborations',
+      intro: 'Other artists need your consent to feature your models in their showcases.',
+      sections: [
+        { heading: 'Why you got a request', body: 'When an artist places one of your models on their showcase, we send you a request. They can’t publish that showcase until you accept.' },
+        { heading: 'Accept all or some', body: 'Approve every model of yours on their table, or tick just the ones you’re happy for them to use. You can also decline.' },
+        { heading: 'Your credit', body: 'Once you accept, you’re credited as a featured artist on that table wherever it’s browsed.' },
+      ],
+    },
+  },
+  {
     test: (p) => p.startsWith('/artist/settings'),
     entry: {
       title: 'Artist profile',

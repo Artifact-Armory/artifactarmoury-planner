@@ -25,6 +25,9 @@ export const AssetSchema = z.object({
   fulfillment: z.enum(['stl', 'print']).default('print'),
   sku: z.string().optional(),
   artistName: z.string().optional(),
+  // Owning artist's user id (API models only) — used to gate placing another
+  // artist's model on a showcase behind a collaboration request.
+  artistId: z.string().optional(),
   category: z.string().optional(),   // palette grouping, e.g. "Elevation"
   // Modular height-tile metadata (absent for ordinary props/buildings).
   elevation: z.object({
@@ -185,7 +188,7 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
 function modelToAsset(m: {
   id: string; name: string; tags?: string[]; glbUrl?: string; thumbnailUrl?: string
   width?: number | null; depth?: number | null; height?: number | null
-  basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; partCount?: number
+  basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; artistId?: string; partCount?: number
 }): Asset | null {
   if (!m.glbUrl || (m.partCount ?? 1) !== 1) return null
   const wM = m.width != null ? m.width / 1000 : 0.15
@@ -202,6 +205,7 @@ function modelToAsset(m: {
     price: m.basePrice ?? 0,
     fulfillment: m.fulfillmentType ?? 'print',
     artistName: m.artistName,
+    artistId: m.artistId,
     model: m.glbUrl,
     thumbnail: m.thumbnailUrl,
     scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
@@ -296,6 +300,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           // planner's "Your build" total counts the set once (not per part).
           price: assetId === s.id ? s.price : 0,
           fulfillment: 'stl',
+          artistId: s.artistId,
           model: assetUrl(part.glbPath) ?? undefined,
           thumbnail: assetUrl(s.thumbnailPath ?? undefined),
           scaleToFit: true,
