@@ -28,6 +28,10 @@ import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import CartDrawer from '../cart/CartDrawer';
 import { authApi } from '../../api/endpoints/auth';
+import HelpButton from '../help/HelpButton';
+import OnboardingTour from '../help/OnboardingTour';
+import { artistTourSteps } from '../help/tourSteps';
+import { useOnboardingStore, hasSeenArtistTour, markArtistTourSeen } from '../../store/onboardingStore';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -36,7 +40,18 @@ const DashboardLayout: React.FC = () => {
   
   const { user, isAdmin, logout } = useAuthStore();
   const { toggleCart } = useCartStore();
-  
+  const startTour = useOnboardingStore((s) => s.startTour);
+
+  // First visit to the artist dashboard: auto-run the walkthrough once.
+  useEffect(() => {
+    if (user?.role === 'artist' && location.pathname === '/artist' && !hasSeenArtistTour(user.id)) {
+      markArtistTourSeen(user.id);
+      // Let the sidebar/layout paint before the spotlight measures its targets.
+      const t = window.setTimeout(() => startTour(), 600);
+      return () => window.clearTimeout(t);
+    }
+  }, [user?.role, user?.id, location.pathname, startTour]);
+
   // Close sidebar when route changes (mobile)
   useEffect(() => {
     setSidebarOpen(false);
@@ -216,6 +231,7 @@ const DashboardLayout: React.FC = () => {
               <NavLink
                 to="/artist"
                 end
+                data-tour="nav-overview"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/artist'
                     ? 'text-indigo-700 bg-indigo-50'
@@ -227,6 +243,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/models"
+                data-tour="nav-models"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/models') && location.pathname !== '/artist/models/new'
                     ? 'text-indigo-700 bg-indigo-50'
@@ -238,6 +255,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/bundles"
+                data-tour="nav-bundles"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/bundles')
                     ? 'text-indigo-700 bg-indigo-50'
@@ -271,6 +289,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/models/new"
+                data-tour="nav-upload"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/artist/models/new'
                     ? 'text-indigo-700 bg-indigo-50'
@@ -282,6 +301,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/sales"
+                data-tour="nav-sales"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/sales')
                     ? 'text-indigo-700 bg-indigo-50'
@@ -471,7 +491,8 @@ const DashboardLayout: React.FC = () => {
                 {getPageTitle()}
               </h1>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
+              <HelpButton />
               <button
                 onClick={() => toggleCart()}
                 className="relative p-2 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
@@ -502,6 +523,7 @@ const DashboardLayout: React.FC = () => {
       </div>
       </div>
       <CartDrawer />
+      <OnboardingTour steps={artistTourSteps} />
     </>
   );
 };
