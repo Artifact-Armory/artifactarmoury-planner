@@ -835,10 +835,13 @@ export const TAXONOMY: FacetSeed[] = [
     selectionUi: 'grouped',
     terms: [
       t('Sci-fi Skirmish / Battle', [
-        'Warhammer 40,000-scale',
-        'Kill Team',
-        'Necromunda-style Underhive',
-        'Horus Heresy',
+        // GW's 40k-family games (Kill Team, Necromunda, Horus Heresy) all share the
+        // 28mm-heroic scale, so a single scale-labelled entry covers them — the game
+        // names live on as search synonyms rather than separately-listed trademarks.
+        {
+          name: 'Warhammer 40,000-scale',
+          synonyms: ['warhammer 40k', '40k', 'kill team', 'necromunda', 'underhive', 'horus heresy'],
+        },
         'Battletech (6mm)',
         'Epic Scale',
         'Infinity',
@@ -847,11 +850,10 @@ export const TAXONOMY: FacetSeed[] = [
         'Five Parsecs',
       ]),
       t('Fantasy', [
-        'Age of Sigmar-scale',
+        // GW's AoS-family games (Warcry, Mordheim) share the Age of Sigmar scale.
+        { name: 'Age of Sigmar-scale', synonyms: ['aos', 'sigmar', 'warcry', 'mordheim'] },
         'Kings of War',
         'Frostgrave',
-        'Mordheim-style',
-        'Warcry',
         'Saga: Age of Magic',
         'D&D / Pathfinder / TTRPG 28mm',
       ]),
