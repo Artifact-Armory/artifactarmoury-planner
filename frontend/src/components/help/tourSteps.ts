@@ -90,3 +90,37 @@ export const plannerShowcaseSteps: TourStep[] = [
     body: 'Back in your dashboard, open Showcases, and hit Publish on the table. Buyers can then open its public page and add your models to their basket. Press ? anytime for the full list of controls.',
   },
 ]
+
+// Shown the first time a buyer (non-artist / guest) opens the 3D Planner — walks
+// them through laying out a table and pushing it into their basket. Targets the
+// same `data-tour` values on the planner UI (see table-top-terrain-builder App).
+export const plannerBuyerSteps: TourStep[] = [
+  {
+    title: 'Welcome to the Planner 🧱',
+    body: 'Lay out a whole tabletop in 3D, then send the models you’ve used straight to your basket. Here’s a 30-second tour — skip anytime, or replay it with the Help button.',
+  },
+  {
+    target: 'planner-palette',
+    title: 'Pick your terrain',
+    body: 'Browse the marketplace here. Click a model to pick it up, then click the table to drop it. Use the search box to find something fast.',
+  },
+  {
+    target: 'planner-tabs',
+    title: 'Catalogue vs. My items',
+    body: '“Catalogue” is everything on the marketplace. “My items” gathers the models you already own or have in your basket, so your go-to pieces are one click away.',
+  },
+  {
+    title: 'Moving around',
+    body: 'Scroll to zoom, right-drag to orbit the camera, and press R to rotate a selected piece. Drop pieces on top of each other and they stack automatically. Press ? anytime for the full list of controls.',
+  },
+  {
+    target: 'planner-bom',
+    title: 'Your build & basket',
+    body: 'Every unique model you place is listed here with its price. Hit “Add all to basket” to buy the whole set — you pay for each STL once and can print it as many times as you like.',
+  },
+  {
+    target: 'planner-save',
+    title: 'Save your table',
+    body: 'Save (or Ctrl+S) keeps this layout so you can reopen and edit it later from My Tables. You’ll need to be signed in to save.',
+  },
+]

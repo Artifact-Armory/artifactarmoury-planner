@@ -49,7 +49,7 @@ const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
   },
 ]
 
-export function HelpOverlay({ onClose }: { onClose: () => void }) {
+export function HelpOverlay({ onClose, onReplayTour }: { onClose: () => void; onReplayTour?: () => void }) {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -63,7 +63,12 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
       <div className="tb-help" onClick={(e) => e.stopPropagation()}>
         <div className="tb-help-head">
           <strong>Controls</strong>
-          <button className="tb-icon" onClick={onClose} aria-label="Close"><X size={18} /></button>
+          <div className="tb-help-head-actions">
+            {onReplayTour && (
+              <button className="tb-btn" onClick={onReplayTour}>Replay walkthrough</button>
+            )}
+            <button className="tb-icon" onClick={onClose} aria-label="Close"><X size={18} /></button>
+          </div>
         </div>
         <div className="tb-help-grid">
           {GROUPS.map((g) => (
