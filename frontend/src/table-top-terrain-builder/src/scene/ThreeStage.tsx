@@ -74,10 +74,22 @@ export function ThreeStage() {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(50, mount.clientWidth / mount.clientHeight, 0.05, 500)
 
-    scene.add(new THREE.HemisphereLight(0xdfeaff, 0x202830, 0.9))
-    const dir = new THREE.DirectionalLight(0xffffff, 0.7)
+    // Ambient-ish base so no face goes fully black. Lift the ground colour a bit
+    // (was near-black 0x202830) so undersides / shadowed faces keep some detail.
+    scene.add(new THREE.HemisphereLight(0xdfeaff, 0x4a5260, 1.0))
+    // Key light (main, one corner) …
+    const dir = new THREE.DirectionalLight(0xffffff, 0.65)
     dir.position.set(3, 6, 2)
     scene.add(dir)
+    // … plus a dimmer fill from the opposite side so the far side of models isn't
+    // left in the dark. Roughly half the key's intensity keeps the key readable.
+    const fill = new THREE.DirectionalLight(0xffffff, 0.3)
+    fill.position.set(-4, 4, -3)
+    scene.add(fill)
+    // Gentle top-down bounce so flat tops read evenly regardless of camera angle.
+    const top = new THREE.DirectionalLight(0xffffff, 0.2)
+    top.position.set(0, 8, 0)
+    scene.add(top)
 
     // ---- on-demand rendering ----
     let renderRequested = false
