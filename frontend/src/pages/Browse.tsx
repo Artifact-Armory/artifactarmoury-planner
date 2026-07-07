@@ -122,8 +122,11 @@ const Browse: React.FC = () => {
 
   // Prefer the counted rail (zero-count terms pruned) once models are tagged;
   // otherwise fall back to the full taxonomy tree so the filters are still usable
-  // on a young catalogue where nothing carries counts yet.
-  const railFacets = (facets && facets.length ? facets : tree) ?? []
+  // on a young catalogue where nothing carries counts yet. Note the counted
+  // endpoint returns every facet object with its `terms` emptied when all are
+  // pruned, so we must check for actual terms, not just facet count.
+  const countedFacets = facets?.filter((f) => f.terms.length) ?? []
+  const railFacets = countedFacets.length ? countedFacets : tree ?? []
 
   const models = data?.models ?? []
   const pagination = data?.pagination
