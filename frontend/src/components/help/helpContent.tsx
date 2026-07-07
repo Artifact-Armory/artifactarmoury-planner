@@ -63,6 +63,30 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
     },
   },
   {
+    test: (p) => p.startsWith('/artist/releases'),
+    entry: {
+      title: 'Releases',
+      intro: 'Group upcoming models into a dated launch so they drop together.',
+      sections: [
+        { heading: 'Why use a release', body: 'Line several models up behind one launch date to build anticipation and publish them all at once, rather than trickling them out.' },
+        { heading: 'Before the date', body: 'Models attached to a release stay hidden from buyers until it goes live.' },
+      ],
+    },
+  },
+  {
+    test: (p) => p.startsWith('/artist/showcases'),
+    entry: {
+      title: 'Showcases',
+      intro: 'A showcase is a 3D table you build from your own models and publish for buyers.',
+      sections: [
+        { heading: 'Build one', body: 'Click “New showcase” to open the Planner, switch to the “My items” tab, and place your models on the table. Save (Ctrl+S) to store it.' },
+        { heading: 'Publish', body: 'Hit Publish on a saved showcase so buyers can open its public page. From there they can add the whole set — or individual pieces — to their basket.' },
+        { heading: 'Share', body: 'Use Copy link to share the public showcase anywhere. Only published showcases are visible to buyers.' },
+      ],
+      showTour: true,
+    },
+  },
+  {
     test: (p) => p.startsWith('/artist/settings'),
     entry: {
       title: 'Artist profile',

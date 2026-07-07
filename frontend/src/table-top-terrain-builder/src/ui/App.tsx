@@ -19,6 +19,9 @@ import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
 import { HelpOverlay } from './HelpOverlay'
+import OnboardingTour from '@/components/help/OnboardingTour'
+import { plannerShowcaseSteps } from '@/components/help/tourSteps'
+import { useOnboardingStore } from '@/store/onboardingStore'
 import './styles.css'
 
 const M_PER_FT = 0.3048
@@ -144,21 +147,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [showHelp, setShowHelp] = React.useState(false)
   const [toast, setToast] = React.useState<{ count: number } | null>(null)
   const startedRef = React.useRef(false)
+  const onboardRef = React.useRef(false)
+  const startTour = useOnboardingStore((s) => s.startTour)
 
-  // First visit: pop the full Controls guide once so new users discover the
-  // shortcuts. Remembered in localStorage; we also mark the lighter coach-marks
-  // as seen so both onboarding aids don't stack on the same first load. Skipped
-  // in read-only (marketplace preview) mode.
-  React.useEffect(() => {
-    if (readOnly) return
-    try {
-      if (!localStorage.getItem('tb_help_seen_v1')) {
-        setShowHelp(true)
-        localStorage.setItem('tb_help_seen_v1', '1')
-        localStorage.setItem('tb_coach_v1', '1')
-      }
-    } catch { /* localStorage unavailable (private mode) — just skip */ }
-  }, [readOnly])
+  // First-visit onboarding lives in a single effect further down (once the scene
+  // is ready so the palette/toolbar targets are painted): artists building a
+  // showcase get the guided walkthrough; everyone else gets the Controls guide.
 
   // Gate the builder behind a loading bar until the initial scene assets
   // (table-surface textures + starter-layout models) have finished loading,
@@ -184,6 +178,41 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     // over the network — never leave the user stuck behind the overlay.
     const hard = window.setTimeout(finish, 8000)
     return () => { unsub(); window.clearTimeout(settleTimer); window.clearTimeout(hard) }
+  }, [])
+
+  // First-visit onboarding. Runs once the scene is ready (so palette/toolbar
+  // targets are painted) and skipped in read-only preview mode. Artists who
+  // haven't seen it get the guided *showcase* walkthrough; everyone else gets
+  // the one-time Controls guide. We suppress the generic aids for artists so the
+  // two don't stack on the same first load.
+  React.useEffect(() => {
+    if (readOnly || onboardRef.current || !sceneReady) return
+    // A signed-in user whose profile hasn't loaded yet — wait so we know the role.
+    if (isAuthenticated && !user) return
+    try {
+      const isArtist = user?.role === 'artist'
+      const plannerTourKey = `aa_planner_showcase_tour_v1:${user?.id ?? 'anon'}`
+      if (isArtist && !localStorage.getItem(plannerTourKey)) {
+        onboardRef.current = true
+        localStorage.setItem(plannerTourKey, '1')
+        localStorage.setItem('tb_help_seen_v1', '1')
+        localStorage.setItem('tb_coach_v1', '1')
+        window.setTimeout(() => startTour(), 400)
+        return
+      }
+      if (!localStorage.getItem('tb_help_seen_v1')) {
+        onboardRef.current = true
+        setShowHelp(true)
+        localStorage.setItem('tb_help_seen_v1', '1')
+        localStorage.setItem('tb_coach_v1', '1')
+      }
+    } catch { /* localStorage unavailable (private mode) — just skip */ }
+  }, [readOnly, sceneReady, isAuthenticated, user, startTour])
+
+  // Clear any tour left active elsewhere (e.g. the dashboard walkthrough) so it
+  // can't bleed into the planner; our own effect above starts it when relevant.
+  React.useEffect(() => {
+    useOnboardingStore.getState().stopTour()
   }, [])
 
   // Load the catalogue, then frame the (empty) table once it's ready. The planner
@@ -636,7 +665,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </>
             )}
             <div className="tb-sep" />
-            <button className="tb-icon" title="Save map (Ctrl+S)" onClick={handleSave}>
+            <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={handleSave}>
               <Save size={18} />
             </button>
             <button
@@ -723,8 +752,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           )}
 
           {/* Catalogue / palette */}
-          <aside className="tb-palette">
-            <div className="tb-palette-tabs">
+          <aside className="tb-palette" data-tour="planner-palette">
+            <div className="tb-palette-tabs" data-tour="planner-tabs">
               <button
                 className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('catalogue')}
@@ -1052,6 +1081,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
       {!readOnly && <CoachMarks />}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+      {!readOnly && <OnboardingTour steps={plannerShowcaseSteps} />}
 
       {/* Add-to-basket confirmation (the real CartDrawer isn't mounted on /planner) */}
       {toast && (

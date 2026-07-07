@@ -267,6 +267,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/releases"
+                data-tour="nav-releases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/releases')
                     ? 'text-indigo-700 bg-indigo-50'
@@ -278,6 +279,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/showcases"
+                data-tour="nav-showcases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/showcases')
                     ? 'text-indigo-700 bg-indigo-50'
@@ -313,6 +315,7 @@ const DashboardLayout: React.FC = () => {
               </NavLink>
               <NavLink
                 to="/artist/settings"
+                data-tour="nav-settings"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/settings')
                     ? 'text-indigo-700 bg-indigo-50'
