@@ -298,7 +298,7 @@ router.post('/from-upload',
     // The headline browse facets are mandatory at upload (mirrors the required
     // dropdowns in the UI) — a model must be classified before it's created.
     const REQUIRED_UPLOAD_FACETS: Record<string, string> = {
-      'terrain-type': 'Type',
+      'terrain-type': 'Model type',
       'setting-era': 'Theme / Era',
       scale: 'Scale',
       condition: 'Condition',

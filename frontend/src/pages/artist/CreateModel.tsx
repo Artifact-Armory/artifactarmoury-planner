@@ -8,7 +8,7 @@ import FacetSelects from '../../components/taxonomy/FacetSelects'
 // The headline browse facets, chosen via required dropdowns and mandatory before a
 // model can be uploaded. Keys are taxonomy facet slugs; values are the UI labels.
 const REQUIRED_FACET_LABELS: Record<string, string> = {
-  'terrain-type': 'Type',
+  'terrain-type': 'Model type',
   'setting-era': 'Theme / Era',
   scale: 'Scale',
   condition: 'Condition',
@@ -32,7 +32,6 @@ const CreateModel: React.FC = () => {
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [category, setCategory] = React.useState('buildings')
-  const [tags, setTags] = React.useState('')
   const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
@@ -100,7 +99,6 @@ const CreateModel: React.FC = () => {
         name: name.trim(),
         description: description.trim() || undefined,
         category,
-        tags: tags.trim() || undefined,
         basePrice: price,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
@@ -138,7 +136,7 @@ const CreateModel: React.FC = () => {
           <button
             className="px-4 py-2 rounded border"
             onClick={() => {
-              setPhase('form'); setName(''); setDescription(''); setTags(''); setTerms([]); setBasePrice('')
+              setPhase('form'); setName(''); setDescription(''); setTerms([]); setBasePrice('')
               setStlFile(null); setThumbFile(null); setPartFiles([]); setProgress(0); setModelId(null); setError(null)
             }}
           >
@@ -165,21 +163,16 @@ const CreateModel: React.FC = () => {
           <textarea className="w-full border rounded px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Category</label>
-          <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
-            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
-        </div>
-
         <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Category</label>
+            <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
             <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
-            <input className="w-full border rounded px-3 py-2" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} />
           </div>
         </div>
 
