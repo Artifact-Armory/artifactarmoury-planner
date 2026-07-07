@@ -379,6 +379,60 @@ router.get('/entitlements',
 );
 
 // ============================================================================
+// MY LIBRARY (the buyer's purchased models, full detail + their own review)
+// ============================================================================
+
+router.get('/library',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).userId;
+    const result = await db.query(
+      `SELECT m.*,
+              u.artist_name, u.artist_bio, u.artist_url,
+              MIN(o.created_at) AS purchased_at,
+              (SELECT COALESCE(AVG(rr.rating), 0) FROM reviews rr
+                 WHERE rr.model_id = m.id AND rr.is_visible = true) AS average_rating,
+              (SELECT COUNT(*) FROM reviews rr
+                 WHERE rr.model_id = m.id AND rr.is_visible = true) AS review_count,
+              rev.id AS my_review_id,
+              rev.rating AS my_review_rating,
+              rev.title AS my_review_title,
+              rev.comment AS my_review_comment
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       JOIN models m ON oi.model_id = m.id
+       JOIN users u ON m.artist_id = u.id
+       LEFT JOIN reviews rev ON rev.model_id = m.id AND rev.user_id = $1
+       WHERE o.user_id = $1
+         AND o.payment_status = 'succeeded'
+         AND oi.model_id IS NOT NULL
+       GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url,
+                rev.id, rev.rating, rev.title, rev.comment
+       ORDER BY purchased_at DESC`,
+      [userId]
+    );
+
+    const models = result.rows.map((row: any) => {
+      const { my_review_id, my_review_rating, my_review_title, my_review_comment, purchased_at, ...model } = row;
+      return {
+        ...model,
+        purchasedAt: purchased_at,
+        myReview: my_review_id
+          ? {
+              id: my_review_id,
+              rating: Number(my_review_rating),
+              title: my_review_title ?? null,
+              comment: my_review_comment ?? null,
+            }
+          : null,
+      };
+    });
+
+    res.json({ models });
+  })
+);
+
+// ============================================================================
 // GET ORDER STATUS
 // ============================================================================
 

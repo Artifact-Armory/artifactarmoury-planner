@@ -1026,6 +1026,150 @@ router.delete('/:id/favorite',
 );
 
 // ============================================================================
+// REVIEWS (buyers rate/review models they've purchased)
+// ============================================================================
+
+// Public: list a model's visible reviews (paginated).
+router.get('/:id/reviews',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const countRes = await db.query(
+      `SELECT COUNT(*) FROM reviews WHERE model_id = $1 AND is_visible = true`,
+      [id]
+    );
+    const totalCount = parseInt(countRes.rows[0].count, 10);
+
+    const result = await db.query(
+      `SELECT r.id, r.model_id, r.user_id, r.rating, r.title, r.comment,
+              r.created_at, r.updated_at,
+              u.display_name AS user_display_name
+       FROM reviews r
+       JOIN users u ON r.user_id = u.id
+       WHERE r.model_id = $1 AND r.is_visible = true
+       ORDER BY r.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [id, limit, offset]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        reviews: result.rows,
+        totalCount,
+        page,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+    });
+  })
+);
+
+// Create or update the signed-in buyer's review for a model they purchased.
+router.post('/:id/reviews',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+    const rating = Number(req.body.rating);
+    const comment = typeof req.body.comment === 'string' ? req.body.comment.trim() || null : null;
+    const title = typeof req.body.title === 'string' ? req.body.title.trim() || null : null;
+
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new ValidationError('Rating must be a whole number from 1 to 5');
+    }
+
+    // Only buyers (a succeeded order for this model) may review it.
+    const purchase = (await db.query(
+      `SELECT oi.id FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded'
+       ORDER BY o.created_at DESC LIMIT 1`,
+      [id, userId]
+    )).rows[0];
+    if (!purchase) throw new AuthorizationError('You can only review models you have purchased');
+
+    const result = await db.query(
+      `INSERT INTO reviews (model_id, user_id, order_item_id, rating, comment, title)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (model_id, user_id)
+       DO UPDATE SET rating = EXCLUDED.rating,
+                     comment = EXCLUDED.comment,
+                     title = EXCLUDED.title,
+                     order_item_id = EXCLUDED.order_item_id,
+                     updated_at = CURRENT_TIMESTAMP
+       RETURNING id, model_id, user_id, rating, title, comment, created_at, updated_at`,
+      [id, userId, purchase.id, rating, comment, title]
+    );
+
+    res.status(201).json({ success: true, data: result.rows[0] });
+  })
+);
+
+// Update the caller's own review.
+router.put('/reviews/:reviewId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { reviewId } = req.params;
+    const userId = (req as any).userId;
+
+    const existing = (await db.query('SELECT user_id FROM reviews WHERE id = $1', [reviewId])).rows[0];
+    if (!existing) throw new NotFoundError('Review');
+    if (existing.user_id !== userId && (req as any).user?.role !== 'admin') {
+      throw new AuthorizationError('You can only edit your own review');
+    }
+
+    const sets: string[] = [];
+    const values: any[] = [];
+    let i = 1;
+    if (req.body.rating !== undefined) {
+      const rating = Number(req.body.rating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        throw new ValidationError('Rating must be a whole number from 1 to 5');
+      }
+      sets.push(`rating = $${i++}`);
+      values.push(rating);
+    }
+    if (req.body.comment !== undefined) {
+      sets.push(`comment = $${i++}`);
+      values.push(typeof req.body.comment === 'string' ? req.body.comment.trim() || null : null);
+    }
+    if (req.body.title !== undefined) {
+      sets.push(`title = $${i++}`);
+      values.push(typeof req.body.title === 'string' ? req.body.title.trim() || null : null);
+    }
+    if (!sets.length) throw new ValidationError('Nothing to update');
+
+    sets.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(reviewId);
+    const result = await db.query(
+      `UPDATE reviews SET ${sets.join(', ')} WHERE id = $${i}
+       RETURNING id, model_id, user_id, rating, title, comment, created_at, updated_at`,
+      values
+    );
+    res.json({ success: true, data: result.rows[0] });
+  })
+);
+
+// Delete the caller's own review (or admin).
+router.delete('/reviews/:reviewId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { reviewId } = req.params;
+    const userId = (req as any).userId;
+    const existing = (await db.query('SELECT user_id FROM reviews WHERE id = $1', [reviewId])).rows[0];
+    if (!existing) throw new NotFoundError('Review');
+    if (existing.user_id !== userId && (req as any).user?.role !== 'admin') {
+      throw new AuthorizationError('You can only delete your own review');
+    }
+    await db.query('DELETE FROM reviews WHERE id = $1', [reviewId]);
+    res.json({ success: true });
+  })
+);
+
+// ============================================================================
 // DOWNLOAD PURCHASED STL (watermarked per buyer, streamed from R2)
 // ============================================================================
 

@@ -1,7 +1,15 @@
 import apiClient from '../client'
-import type { OrderSummary } from '../types'
+import type { OrderSummary, TerrainModel } from '../types'
+import { mapModelRecord } from '../transformers'
 
 const BASE_URL = '/api/orders'
+
+/** A purchased model plus the buyer's own review (if they've left one). */
+export type PurchasedModel = {
+  model: TerrainModel
+  purchasedAt?: string
+  myReview: { id: string; rating: number; title?: string | null; comment?: string | null } | null
+}
 
 type Pagination = {
   page: number
@@ -68,6 +76,23 @@ export const ordersApi = {
   /** Confirm payment (mock Stripe returns 'succeeded'), unlocking downloads. */
   async confirmOrder(orderId: string, paymentIntentId: string): Promise<void> {
     await apiClient.post(`${BASE_URL}/${orderId}/confirm`, { paymentIntentId })
+  },
+
+  /** The signed-in buyer's purchased models (full detail + their own review). */
+  async getLibrary(): Promise<PurchasedModel[]> {
+    const response = await apiClient.get(`${BASE_URL}/library`)
+    return (response.data?.models ?? []).map((row: any) => ({
+      model: mapModelRecord(row),
+      purchasedAt: row.purchasedAt ?? row.purchased_at,
+      myReview: row.myReview
+        ? {
+            id: row.myReview.id,
+            rating: Number(row.myReview.rating),
+            title: row.myReview.title ?? null,
+            comment: row.myReview.comment ?? null,
+          }
+        : null,
+    }))
   },
 
   /** The models and bundles the signed-in user owns (drives Download vs Buy UI). */

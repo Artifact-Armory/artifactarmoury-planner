@@ -1,6 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
+import { Download, Star } from 'lucide-react'
 import { ordersApi } from '../../api/endpoints/orders'
 import { browseApi } from '../../api/endpoints/browse'
 import Spinner from '../../components/ui/Spinner'
@@ -11,9 +12,11 @@ import { formatPrice } from '../../utils/format'
 const Dashboard: React.FC = () => {
   const navigate = useNavigate()
   const ordersQuery = useQuery({ queryKey: ['my-orders', { page: 1, limit: 5 }], queryFn: () => ordersApi.getMyOrders(1, 5) })
+  const libraryQuery = useQuery({ queryKey: ['my-library'], queryFn: () => ordersApi.getLibrary() })
   const featuredQuery = useQuery({ queryKey: ['recommended-models'], queryFn: () => browseApi.getTrendingModels(4) })
 
   const orders = ordersQuery.data?.orders ?? []
+  const library = libraryQuery.data ?? []
 
   return (
     <div className="space-y-10">
@@ -22,6 +25,60 @@ const Dashboard: React.FC = () => {
         <p className="mt-2 text-sm text-gray-600">
           Track your recent orders, manage saved tables, and discover new terrain to add to your collection.
         </p>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">My models</h2>
+          <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/models')}>
+            View all
+          </Button>
+        </div>
+
+        {libraryQuery.isLoading ? (
+          <div className="flex justify-center py-12">
+            <Spinner size="lg" />
+          </div>
+        ) : library.length ? (
+          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {library.slice(0, 4).map(({ model, myReview }) => (
+              <Link
+                key={model.id}
+                to="/dashboard/models"
+                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md"
+              >
+                <div className="relative h-28 w-full overflow-hidden bg-gray-100">
+                  {model.thumbnailUrl ? (
+                    <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                      No preview
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col px-3 py-2">
+                  <p className="line-clamp-1 text-sm font-medium text-gray-900">{model.name}</p>
+                  <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                    <span className="inline-flex items-center gap-1 text-indigo-600">
+                      <Download size={13} /> STL
+                    </span>
+                    {myReview ? (
+                      <span className="inline-flex items-center gap-0.5 text-amber-500">
+                        <Star size={13} className="fill-amber-400" /> {myReview.rating}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">Review</span>
+                    )}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center text-sm text-gray-600">
+            No models yet. Purchased models appear here to download and review.
+          </div>
+        )}
       </section>
 
       <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">

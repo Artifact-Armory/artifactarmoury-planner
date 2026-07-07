@@ -21,7 +21,8 @@ import {
   DollarSign,
   Plus,
   ChevronLeft,
-  Rocket
+  Rocket,
+  Download
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
@@ -152,6 +153,17 @@ const DashboardLayout: React.FC = () => {
                 Dashboard
               </NavLink>
               <NavLink
+                to="/dashboard/models"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/dashboard/models')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <Download size={18} className="mr-3" />
+                My Models
+              </NavLink>
+              <NavLink
                 to="/dashboard/purchases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/purchases')
@@ -160,7 +172,7 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <Package size={18} className="mr-3" />
-                Purchases
+                Order history
               </NavLink>
               <NavLink
                 to="/dashboard/wishlist"

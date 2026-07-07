@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
-import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Heart, Package, UserPlus } from 'lucide-react';
+import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Heart, Package, UserPlus, Download } from 'lucide-react';
 import { authApi } from '../../api/endpoints/auth';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -270,13 +270,24 @@ const Header: React.FC = () => {
                     </Link>
 
                     <Link
+                      to="/dashboard/models"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <div className="flex items-center">
+                        <Download size={16} className="mr-2" />
+                        My Models
+                      </div>
+                    </Link>
+
+                    <Link
                       to="/dashboard/purchases"
                       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
                         <Package size={16} className="mr-2" />
-                        Purchases
+                        Order history
                       </div>
                     </Link>
 
@@ -531,6 +542,23 @@ const Header: React.FC = () => {
                 </NavLink>
 
                 <NavLink
+                  to="/dashboard/models"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `block py-2 text-sm ${
+                      isActive
+                        ? 'text-indigo-600'
+                        : 'text-gray-700 hover:text-indigo-500'
+                    }`
+                  }
+                >
+                  <div className="flex items-center">
+                    <Download size={16} className="mr-2" />
+                    My Models
+                  </div>
+                </NavLink>
+
+                <NavLink
                   to="/dashboard/purchases"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
@@ -543,7 +571,7 @@ const Header: React.FC = () => {
                 >
                   <div className="flex items-center">
                     <Package size={16} className="mr-2" />
-                    Purchases
+                    Order history
                   </div>
                 </NavLink>
 
