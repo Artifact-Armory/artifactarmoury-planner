@@ -400,8 +400,18 @@ export function ThreeStage() {
 
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return // right/middle handled by BuilderCamera
-      if (store().readOnly) return // view-only: no placement/selection, camera still orbits
       const eng = engine.current!
+      // View-only (a shopper inspecting an artist's table): tapping a placed model
+      // selects it so its info + buy tile can show, but never moves/places it.
+      // The camera still orbits on the right/middle mouse buttons.
+      if (store().readOnly) {
+        const pieceId = pickPiece(e)
+        useAppStore.getState().setSelectedInstances(pieceId ? [pieceId] : [])
+        inst.setSelection(new Set(useAppStore.getState().selectedInstanceIds))
+        eng.drag = { kind: 'none' }
+        requestRender()
+        return
+      }
       const s = store()
 
       // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.

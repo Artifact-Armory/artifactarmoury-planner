@@ -4,12 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
-  Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye,
+  Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
-import { useCartStore } from '@/store/cartStore'
+import { useCartStore, cartKey } from '@/store/cartStore'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
@@ -53,6 +53,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const ownedModelIds = useAppStore((s) => s.ownedModelIds)
   const ownedBundleIds = useAppStore((s) => s.ownedBundleIds)
   const cartItems = useCartStore((s) => s.items)
+  const addCartItem = useCartStore((s) => s.addItem)
+  const removeCartItem = useCartStore((s) => s.removeItem)
   const instances = useAppStore((s) => s.instances)
   const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
   const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
@@ -398,6 +400,55 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const count = addLayoutToShopCart()
     if (count > 0) setToast({ count })
   }
+
+  // The marketplace basket subtotal (the same cartStore the shop uses).
+  const cartSubtotal = React.useMemo(
+    () => cartItems.reduce((sum, i) => sum + i.price, 0),
+    [cartItems],
+  )
+
+  // View-only: the placed model the shopper has tapped, resolved to its
+  // purchasable unit (a set part is bought as its parent model) with buy state.
+  const selectedModel = React.useMemo(() => {
+    if (!readOnly) return null
+    const instId = selectedInstanceIds[selectedInstanceIds.length - 1]
+    if (!instId) return null
+    const inst = instances.find((i) => i.id === instId)
+    if (!inst) return null
+    const asset = assetsById.get(inst.assetId) ?? getAssetById(inst.assetId)
+    // Placing a part of a "set" buys the parent model (one purchase = all parts).
+    const parentSet = sets.find((s) => s.partAssetIds.includes(inst.assetId))
+    const id = parentSet ? parentSet.id : inst.assetId
+    const name = parentSet ? parentSet.name : asset?.name
+    if (!name) return null
+    return {
+      id,
+      name,
+      price: parentSet ? parentSet.price : asset?.price ?? 0,
+      thumbnail: parentSet ? parentSet.thumbnail : asset?.thumbnail,
+      artistName: asset?.artistName ?? 'Artifact Planner',
+      owned: ownedModelIds.has(id),
+      inCart: cartItems.some((it) => it.kind === 'model' && it.id === id),
+    }
+  }, [readOnly, selectedInstanceIds, instances, assetsById, sets, ownedModelIds, cartItems])
+
+  function handleAddSelected() {
+    if (!selectedModel || selectedModel.owned || selectedModel.inCart) return
+    addCartItem(
+      {
+        kind: 'model',
+        id: selectedModel.id,
+        name: selectedModel.name,
+        artistName: selectedModel.artistName,
+        price: selectedModel.price,
+        imageUrl: selectedModel.thumbnail,
+      },
+      false, // keep the planner in view — the docked basket updates live
+    )
+    hotToast.success(`${selectedModel.name} added to basket`)
+  }
+
+  const clearSelectedInstance = () => useAppStore.getState().setSelectedInstances([])
 
   async function handleSave() {
     if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
@@ -894,15 +945,84 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             </div>
           </div>
 
-          <div className="tb-view-cart">
-            <div className="tb-view-cart-info">
-              <strong>{bom.rows.length} model{bom.rows.length === 1 ? '' : 's'} in this build</strong>
-              <span className="tb-small">{bom.pieceCount} piece{bom.pieceCount === 1 ? '' : 's'} · £{bom.total.toFixed(2)}</span>
+          {/* Docked marketplace basket — the SAME cartStore as the shop, so it
+              stays consistent everywhere. Add individual models by tapping them,
+              or drop the whole build in at once. */}
+          <aside className="tb-bom tb-view-basket">
+            <div className="tb-bom-head">
+              <strong>Your basket</strong>
+              <span className="tb-small">{cartItems.length} item{cartItems.length === 1 ? '' : 's'}</span>
             </div>
-            <button className="tb-cta" disabled={bom.rows.length === 0} onClick={handleAddAll}>
-              <ShoppingCart size={16} /> Add all to basket
+            <div className="tb-bom-list">
+              {cartItems.length === 0 && (
+                <div className="tb-small" style={{ padding: 8 }}>
+                  Tap a model on the table to see its details and add it to your basket.
+                </div>
+              )}
+              {cartItems.map((item) => (
+                <div className="tb-bom-row" key={cartKey(item.kind, item.id)}>
+                  <div className="tb-thumb sm">
+                    {item.imageUrl ? <img src={item.imageUrl} alt="" /> : <Box size={16} />}
+                  </div>
+                  <div className="tb-bom-name">
+                    {item.name}
+                    {item.kind === 'bundle' && <span className="tb-pill bundle" style={{ marginLeft: 6 }}>BUNDLE</span>}
+                  </div>
+                  <div className="tb-bom-price">£{item.price.toFixed(2)}</div>
+                  <button
+                    className="tb-bom-x"
+                    title="Remove from basket"
+                    onClick={() => removeCartItem(cartKey(item.kind, item.id))}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="tb-bom-total">
+              <span>Subtotal</span>
+              <strong>£{cartSubtotal.toFixed(2)}</strong>
+            </div>
+            <button className="tb-cta" disabled={cartItems.length === 0} onClick={() => navigate('/checkout')}>
+              <ShoppingCart size={16} /> Checkout
             </button>
-          </div>
+            <div className="tb-bom-foot">
+              <button
+                className="tb-btn"
+                style={{ flex: 1 }}
+                disabled={bom.rows.length === 0}
+                title="Add every model on this table to your basket"
+                onClick={handleAddAll}
+              >
+                Add whole table ({bom.rows.length})
+              </button>
+            </div>
+          </aside>
+
+          {/* Selected-model info tile — appears when the shopper taps a piece. */}
+          {selectedModel && (
+            <div className="tb-view-selected">
+              <div className="tb-thumb sm">
+                {selectedModel.thumbnail ? <img src={selectedModel.thumbnail} alt="" /> : <Box size={18} />}
+              </div>
+              <div className="tb-view-selected-info">
+                <strong>{selectedModel.name}</strong>
+                <span className="tb-small">{selectedModel.artistName} · £{selectedModel.price.toFixed(2)}</span>
+              </div>
+              {selectedModel.owned ? (
+                <span className="tb-view-selected-state"><Check size={14} /> Owned</span>
+              ) : selectedModel.inCart ? (
+                <span className="tb-view-selected-state"><Check size={14} /> In basket</span>
+              ) : (
+                <button className="tb-cta sm" onClick={handleAddSelected}>
+                  <ShoppingCart size={16} /> Add to basket
+                </button>
+              )}
+              <button className="tb-view-selected-x" onClick={clearSelectedInstance} aria-label="Deselect">
+                <X size={16} />
+              </button>
+            </div>
+          )}
         </>
       )}
 
