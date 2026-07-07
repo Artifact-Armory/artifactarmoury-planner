@@ -10,6 +10,7 @@ import FacetRail from '../components/taxonomy/FacetRail'
 import { browseApi } from '../api/endpoints/browse'
 import { taxonomyApi } from '../api/endpoints/taxonomy'
 import { SearchFilters } from '../api/types'
+import TrademarkDisclaimer, { mentionsTrademark } from '../components/legal/TrademarkDisclaimer'
 
 const sortOptions: { value: SearchFilters['sortBy']; label: string }[] = [
   { value: 'recent', label: 'Newest' },
@@ -40,6 +41,15 @@ const Browse: React.FC = () => {
   const selectedTokens = useMemo(
     () => new Set(termsParam ? termsParam.split(',').filter(Boolean) : []),
     [termsParam],
+  )
+
+  // Surface the non-affiliation notice when someone searches a trademarked game
+  // name or filters by a "Can be used with" (designed-for) compatibility term.
+  const showTrademarkNotice = useMemo(
+    () =>
+      mentionsTrademark(searchTermParam) ||
+      [...selectedTokens].some((t) => t.startsWith('designed-for:')),
+    [searchTermParam, selectedTokens],
   )
 
   const filters = useMemo<SearchFilters>(
@@ -212,6 +222,12 @@ const Browse: React.FC = () => {
               </label>
             </div>
           </header>
+
+          {showTrademarkNotice && (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+              <TrademarkDisclaimer className="text-xs leading-relaxed text-amber-800" />
+            </div>
+          )}
 
           {/* Selected filter chips (work even when a term is pruned from the rail). */}
           {selectedTokens.size > 0 && (
