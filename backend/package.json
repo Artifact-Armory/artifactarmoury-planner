@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "start:prod": "node dist/index.js",
     "migrate": "node -r ts-node/register scripts/migrate.ts",
+    "postmigrate": "node -r ts-node/register/transpile-only scripts/seed-taxonomy.ts || echo \"taxonomy seed skipped (non-fatal)\"",
     "migrate:rollback": "node -r ts-node/register scripts/rollback.ts",
     "migrate:status": "node -r ts-node/register scripts/migrate-status.ts",
     "migrate:models-to-assets": "node -r ts-node/register scripts/migrate-models-to-assets.ts",

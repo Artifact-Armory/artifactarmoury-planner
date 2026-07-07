@@ -54,14 +54,31 @@ function flattenTerms(facetSlug: string, nodes: TermSeed[], parentPath: string |
   return out
 }
 
+// Detect a Railway deploy so the seed can safely use the private internal
+// DATABASE_URL there (it IS reachable inside Railway's network, e.g. during the
+// Pre-Deploy / postmigrate hook), while still refusing that unreachable URL from
+// a laptop.
+const IN_RAILWAY = Boolean(
+  process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RAILWAY_ENVIRONMENT_NAME ||
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.RAILWAY_SERVICE_ID,
+)
+
 async function main() {
+  // Local mock mode has no real DB to seed — no-op so `npm run migrate` (which
+  // triggers this via the postmigrate hook) stays green.
+  if (process.env.DB_MOCK === 'true') {
+    console.log('DB_MOCK is set — skipping taxonomy seed.')
+    return
+  }
   const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL
   if (!connectionString) {
     console.error('No DATABASE_PUBLIC_URL / DATABASE_URL in env.')
     console.error('Run via `railway run` linked to the Postgres service, or set DATABASE_PUBLIC_URL.')
     process.exit(1)
   }
-  if (/\.railway\.internal/.test(connectionString) && !process.env.DATABASE_PUBLIC_URL) {
+  if (/\.railway\.internal/.test(connectionString) && !process.env.DATABASE_PUBLIC_URL && !IN_RAILWAY) {
     console.error('Only the private internal DATABASE_URL is set — not reachable from a laptop.')
     process.exit(1)
   }
