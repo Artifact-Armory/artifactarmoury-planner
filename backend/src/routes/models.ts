@@ -317,7 +317,8 @@ router.post('/from-upload',
         : { 'terrain-type': 'Model type' }),
       'setting-era': 'Theme / Era',
       scale: 'Scale',
-      condition: 'Condition',
+      // Condition doesn't apply to characters & units.
+      ...(modelClass === 'characters' ? {} : { condition: 'Condition' }),
     };
     const taggedFacets = new Set(resolvedTerms.map((t) => t.facetSlug));
     const missingFacets = Object.keys(REQUIRED_UPLOAD_FACETS).filter((f) => !taggedFacets.has(f));

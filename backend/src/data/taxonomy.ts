@@ -644,12 +644,13 @@ export const TAXONOMY: FacetSeed[] = [
     appliesTo: ['characters'],
     terms: [
       t('Infantry', [
+        'General Infantry',
         'Line Infantry',
         'Skirmishers',
         'Heavy Weapons Teams',
         'Special Forces',
-        'Snipers',
-        'Engineers & Sappers',
+        // Consolidates the former Snipers + Engineers & Sappers (retired in 020).
+        'Specialists',
       ]),
       t('Command & Heroes', [
         'Heroes & Champions',
@@ -673,9 +674,9 @@ export const TAXONOMY: FacetSeed[] = [
         'Wild Beasts',
         'Flying Creatures',
       ]),
-      t('Crewed Weapons', ['Artillery Crew', 'War Machines', 'Weapon Teams']),
+      t('Crewed Weapons', ['Artillery Crew', 'Siege Weapons', 'War Machines', 'Weapon Teams']),
       t('Undead & Horror', ['Skeletons', 'Zombies', 'Ghosts & Spirits', 'Vampires & Liches']),
-      t('Constructs & Robots', ['Golems & Automata', 'Robots & Droids', 'Battle Servitors']),
+      t('Constructs & Robots', ['Golems & Automata', 'Robots & Droids', 'Cyborgs', 'Battle Servitors']),
       t('Civilians & NPCs', [
         'Townsfolk',
         'Merchants & Traders',
@@ -849,6 +850,8 @@ export const TAXONOMY: FacetSeed[] = [
     name: 'Condition',
     description: 'Intact → rubble spectrum. Cross-cuts every terrain type.',
     selectionUi: 'chips',
+    // Characters & units aren't described by an intact→rubble condition.
+    appliesTo: ['terrain', 'vehicles'],
     terms: [
       'Pristine & New-build',
       'Weathered & Lived-in',

@@ -77,9 +77,15 @@ const CreateModel: React.FC = () => {
     })
   }
 
-  // Class-driven headline (required) facets: the type facet swaps per class.
+  // Class-driven headline (required) facets: the type facet swaps per class, and
+  // condition doesn't apply to characters & units.
   const typeFacet = TYPE_FACET_BY_CLASS[modelClass] ?? 'terrain-type'
-  const requiredFacetSlugs = [typeFacet, 'setting-era', 'scale', 'condition']
+  const requiredFacetSlugs = [
+    typeFacet,
+    'setting-era',
+    'scale',
+    ...(modelClass === 'characters' ? [] : ['condition']),
+  ]
   const requiredFacetLabels: Record<string, string> = {
     [typeFacet]: 'Model type',
     'setting-era': 'Theme / Era',
