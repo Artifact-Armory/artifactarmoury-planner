@@ -67,6 +67,8 @@ import SearchesDetail from './pages/artist/analytics/SearchesDetail';
 import ModelFunnel from './pages/artist/analytics/ModelFunnel';
 import ArtistSettings from './pages/artist/ArtistSettings';
 import ArtistApplication from './pages/artist/ArtistApplication';
+import ArtistPayouts from './pages/artist/ArtistPayouts';
+import ArtistReports from './pages/artist/ArtistReports';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -77,6 +79,7 @@ import AdminCategories from './pages/admin/AdminCategories';
 import AdminTags from './pages/admin/AdminTags';
 import AdminArtistApplications from './pages/admin/AdminArtistApplications';
 import AdminReports from './pages/admin/AdminReports';
+import AdminModeration from './pages/admin/AdminModeration';
 
 // Planner
 import Planner from './pages/Planner';
@@ -243,6 +246,8 @@ function App() {
               <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="collaborations" element={<ArtistCollaborations />} />
               <Route path="sales" element={<ArtistSales />} />
+              <Route path="payouts" element={<ArtistPayouts />} />
+              <Route path="reports" element={<ArtistReports />} />
               <Route path="analytics/sales" element={<SalesDetail />} />
               <Route path="analytics/products" element={<ProductsDetail />} />
               <Route path="analytics/rating" element={<RatingDetail />} />
@@ -279,6 +284,7 @@ function App() {
               <Route path="categories" element={<AdminCategories />} />
               <Route path="tags" element={<AdminTags />} />
               <Route path="artist-applications" element={<AdminArtistApplications />} />
+              <Route path="moderation" element={<AdminModeration />} />
               <Route path="reports" element={<AdminReports />} />
             </Route>
 

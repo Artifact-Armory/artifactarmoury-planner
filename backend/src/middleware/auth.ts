@@ -16,6 +16,7 @@ export interface User {
   display_name: string;
   role: 'customer' | 'artist' | 'admin';
   account_status: 'active' | 'suspended' | 'banned';
+  shadow_banned?: boolean;
   artist_name?: string;
   artist_bio?: string;
   artist_url?: string;
@@ -127,11 +128,11 @@ export async function authenticate(
 
     // Fetch user from database
     const result = await db.query(
-      `SELECT id, email, display_name, role, account_status, 
-              artist_name, artist_bio, artist_url, 
+      `SELECT id, email, display_name, role, account_status, shadow_banned,
+              artist_name, artist_bio, artist_url,
               stripe_account_id, stripe_onboarding_complete,
               created_at, updated_at
-       FROM users 
+       FROM users
        WHERE id = $1`,
       [decoded.userId]
     );
@@ -212,11 +213,11 @@ export async function optionalAuth(
       
       // Fetch user
       const result = await db.query(
-        `SELECT id, email, display_name, role, account_status, 
-                artist_name, artist_bio, artist_url, 
+        `SELECT id, email, display_name, role, account_status, shadow_banned,
+                artist_name, artist_bio, artist_url,
                 stripe_account_id, stripe_onboarding_complete,
                 created_at, updated_at
-         FROM users 
+         FROM users
          WHERE id = $1 AND account_status = 'active'`,
         [decoded.userId]
       );

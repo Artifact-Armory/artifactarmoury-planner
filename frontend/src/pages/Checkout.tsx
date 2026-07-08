@@ -18,10 +18,12 @@ const Checkout: React.FC = () => {
   const [placing, setPlacing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [done, setDone] = React.useState(false)
+  const [consent, setConsent] = React.useState(false)
 
   async function handlePay() {
     if (!user) { navigate('/login'); return }
     if (items.length === 0) return
+    if (!consent) { setError('Please confirm you agree to your download starting immediately.'); return }
     setPlacing(true)
     setError(null)
     try {
@@ -29,7 +31,7 @@ const Checkout: React.FC = () => {
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
       // Mock Stripe: create the order, then confirm the (auto-succeeded) payment.
-      const order = await ordersApi.createOrder(orderItems, user.email)
+      const order = await ordersApi.createOrder(orderItems, user.email, consent)
       await ordersApi.confirmOrder(order.id, order.paymentIntentId ?? order.clientSecret ?? 'mock')
       clearCart()
       setDone(true)
@@ -114,8 +116,22 @@ const Checkout: React.FC = () => {
             {!user && (
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
             )}
+
+            <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I want my download to start immediately and I understand I lose my 14-day right
+                to cancel once it begins.
+              </span>
+            </label>
+
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-            <Button className="mt-4 w-full" onClick={handlePay} disabled={placing}>
+            <Button className="mt-4 w-full" onClick={handlePay} disabled={placing || !consent}>
               {placing ? 'Processing…' : `Pay ${formatPrice(subtotal)} (mock)`}
             </Button>
             <p className="mt-2 text-center text-[11px] text-gray-400">

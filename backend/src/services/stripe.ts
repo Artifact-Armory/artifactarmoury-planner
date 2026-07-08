@@ -2,6 +2,7 @@
 import Stripe from 'stripe'
 import logger from '../utils/logger'
 import { db } from '../db'
+import { accrueEarningsForOrder } from './earnings'
 
 // ============================================================================
 // INITIALIZATION
@@ -75,9 +76,9 @@ export async function createConnectAccount(
       type: 'account_onboarding'
     })
     
-    // Save account ID to database
+    // Save account ID to database (artists ARE users with role='artist')
     await db.query(
-      'UPDATE artists SET stripe_account_id = $1 WHERE id = $2',
+      'UPDATE users SET stripe_account_id = $1 WHERE id = $2',
       [account.id, artistId]
     )
     
@@ -128,9 +129,9 @@ export async function updateOnboardingStatus(
   accountId: string
 ): Promise<void> {
   const isComplete = await checkOnboardingStatus(accountId)
-  
+
   await db.query(
-    'UPDATE artists SET stripe_onboarding_complete = $1 WHERE id = $2',
+    'UPDATE users SET stripe_onboarding_complete = $1 WHERE id = $2',
     [isComplete, artistId]
   )
   
@@ -283,155 +284,38 @@ export async function cancelPaymentIntent(
 // ============================================================================
 // TRANSFERS TO ARTISTS
 // ============================================================================
+//
+// Artist earnings are accrued into the `artist_earnings` ledger on payment (see
+// services/earnings.ts) and paid out in scheduled batches (services/payouts.ts).
+// This is the low-level Stripe call the payout job uses to move a cleared batch to
+// one artist's connected account. In mock mode it returns a fake transfer id.
 
 export interface CreateTransferParams {
-  orderId: string
-  artistId: string
   accountId: string
   amount: number // In pounds
+  currency?: string
+  metadata?: Record<string, string>
   description?: string
 }
 
-/**
- * Transfer funds to artist's connected account
- */
-export async function transferToArtist(
-  params: CreateTransferParams
-): Promise<string> {
-  try {
-    const { orderId, artistId, accountId, amount, description } = params
-    
-    // Convert to pence
-    const amountInPence = Math.round(amount * 100)
-    
-    stripeLogger.info('Creating transfer to artist', {
-      orderId,
-      artistId,
-      accountId,
-      amount,
-      amountInPence
-    })
-    
-    // Create transfer
-    const transfer = await stripe.transfers.create({
-      amount: amountInPence,
-      currency: 'gbp',
-      destination: accountId,
-      description: description || `Payment for order ${orderId}`,
-      metadata: {
-        order_id: orderId,
-        artist_id: artistId
-      }
-    })
-    
-    // Record transfer in database
-    await db.query(
-      `INSERT INTO stripe_transfers 
-       (order_id, artist_id, stripe_transfer_id, amount, status)
-       VALUES ($1, $2, $3, $4, 'completed')`,
-      [orderId, artistId, transfer.id, amount]
-    )
-    
-    stripeLogger.info('Transfer completed', {
-      transferId: transfer.id,
-      orderId,
-      artistId,
-      amount
-    })
-    
-    return transfer.id
-  } catch (error) {
-    stripeLogger.error('Failed to transfer to artist', { error, params })
-    
-    // Record failed transfer
-    await db.query(
-      `INSERT INTO stripe_transfers 
-       (order_id, artist_id, stripe_transfer_id, amount, status)
-       VALUES ($1, $2, $3, $4, 'failed')`,
-      [params.orderId, params.artistId, 'failed', params.amount]
-    ).catch(() => {})
-    
-    throw new Error('Failed to transfer funds to artist')
-  }
-}
+/** Create a Stripe Connect transfer to an artist's connected account (mock-aware). */
+export async function createTransfer(params: CreateTransferParams): Promise<string> {
+  const { accountId, amount, currency = 'gbp', metadata, description } = params
+  const amountInPence = Math.round(amount * 100)
 
-/**
- * Process artist payouts for completed order
- */
-export async function processOrderPayouts(orderId: string): Promise<void> {
-  try {
-    stripeLogger.info('Processing order payouts', { orderId })
-    
-    // Get order details with artist earnings
-    const orderResult = await db.query(
-      `SELECT 
-        o.id,
-        o.pricing,
-        o.items,
-        a.id as artist_id,
-        a.stripe_account_id,
-        a.commission_rate
-       FROM orders o
-       JOIN LATERAL jsonb_array_elements(o.items) AS item ON true
-       JOIN assets ast ON (item->>'asset_id')::uuid = ast.id
-       JOIN artists a ON ast.artist_id = a.id
-       WHERE o.id = $1
-       GROUP BY o.id, a.id, a.stripe_account_id, a.commission_rate`,
-      [orderId]
-    )
-    
-    if (orderResult.rows.length === 0) {
-      stripeLogger.warn('Order not found for payouts', { orderId })
-      return
-    }
-    
-    // Calculate payout per artist
-    const artistPayouts = new Map<string, { accountId: string; amount: number }>()
-    
-    for (const row of orderResult.rows) {
-      const artistId = row.artist_id
-      const accountId = row.stripe_account_id
-      const commissionRate = parseFloat(row.commission_rate)
-      const pricing = row.pricing
-      
-      // Artist gets their commission rate (typically 80%)
-      const artistEarnings = pricing.model_subtotal * commissionRate
-      
-      if (!artistPayouts.has(artistId)) {
-        artistPayouts.set(artistId, { accountId, amount: 0 })
-      }
-      
-      const current = artistPayouts.get(artistId)!
-      current.amount += artistEarnings
-    }
-    
-    // Process transfers
-    for (const [artistId, { accountId, amount }] of artistPayouts) {
-      if (!accountId) {
-        stripeLogger.warn('Artist has no Stripe account, skipping payout', {
-          artistId,
-          orderId
-        })
-        continue
-      }
-      
-      await transferToArtist({
-        orderId,
-        artistId,
-        accountId,
-        amount,
-        description: `Payment for order ${orderId}`
-      })
-    }
-    
-    stripeLogger.info('Order payouts completed', {
-      orderId,
-      artistCount: artistPayouts.size
-    })
-  } catch (error) {
-    stripeLogger.error('Failed to process order payouts', { error, orderId })
-    throw error
+  if (STRIPE_MOCK) {
+    return `tr_mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   }
+
+  const transfer = await stripe.transfers.create({
+    amount: amountInPence,
+    currency,
+    destination: accountId,
+    description,
+    metadata,
+  })
+  stripeLogger.info('Transfer created', { transferId: transfer.id, accountId, amount })
+  return transfer.id
 }
 
 // ============================================================================
@@ -517,19 +401,23 @@ async function handlePaymentIntentSucceeded(
   })
   
   const orderId = paymentIntent.metadata.order_id
-  
+
   if (orderId) {
-    // Update order status
+    // Mark paid + delivered (digital STLs fulfil instantly), then accrue the artists'
+    // earnings into the ledger. Idempotent, so it's safe alongside the confirm route.
     await db.query(
-      `UPDATE orders 
-       SET status = 'paid', stripe_payment_id = $1 
-       WHERE id = $2`,
-      [paymentIntent.id, orderId]
+      `UPDATE orders
+       SET payment_status = 'succeeded',
+           paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
+           fulfillment_status = 'delivered'
+       WHERE id = $1`,
+      [orderId]
     )
-    
-    // Process artist payouts
-    await processOrderPayouts(orderId)
-    
+
+    await accrueEarningsForOrder(orderId).catch(err =>
+      stripeLogger.error('Failed to accrue earnings from webhook', { error: err, orderId })
+    )
+
     stripeLogger.info('Order updated to paid', { orderId })
   }
 }
@@ -568,17 +456,24 @@ async function handleTransferFailed(transfer: Stripe.Transfer): Promise<void> {
   if (STRIPE_MOCK) return
   stripeLogger.error('Transfer failed', {
     transferId: transfer.id,
-    orderId: transfer.metadata.order_id,
-    artistId: transfer.metadata.artist_id
+    payoutId: transfer.metadata?.payout_id,
+    artistId: transfer.metadata?.artist_id,
   })
-  
-  // Update transfer status in database
-  await db.query(
-    `UPDATE stripe_transfers 
-     SET status = 'failed' 
-     WHERE stripe_transfer_id = $1`,
-    [transfer.id]
+
+  // Mark the payout batch failed and release its earnings back to `cleared` so the next
+  // payout run retries them.
+  const payout = await db.query(
+    `UPDATE payouts SET status = 'failed', failure_reason = 'Stripe transfer.failed webhook'
+     WHERE stripe_transfer_id = $1 RETURNING id`,
+    [transfer.id],
   )
+  const payoutId = payout.rows[0]?.id
+  if (payoutId) {
+    await db.query(
+      `UPDATE artist_earnings SET status = 'cleared', payout_id = NULL WHERE payout_id = $1`,
+      [payoutId],
+    )
+  }
 }
 
 // ============================================================================
@@ -639,8 +534,7 @@ export default {
   createPaymentIntent,
   getPaymentIntent,
   cancelPaymentIntent,
-  transferToArtist,
-  processOrderPayouts,
+  createTransfer,
   constructWebhookEvent,
   handleWebhookEvent,
   createRefund

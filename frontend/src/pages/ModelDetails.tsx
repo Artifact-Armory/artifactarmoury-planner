@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2 } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -13,6 +13,7 @@ import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
+import ReportModelModal from '../components/reports/ReportModelModal'
 
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
@@ -53,6 +54,8 @@ const ModelDetails: React.FC = () => {
   }))
   const inCart = useCartStore((state) => state.hasItem('model', id ?? ''))
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const currentUser = useAuthStore((state) => state.user)
+  const [reportOpen, setReportOpen] = React.useState(false)
 
   const modelQuery = useQuery({
     queryKey: ['model', id],
@@ -415,6 +418,16 @@ const ModelDetails: React.FC = () => {
               {model.downloadCount !== undefined && <li>{model.downloadCount} downloads</li>}
               {model.viewCount !== undefined && <li>{model.viewCount} total views</li>}
             </ul>
+
+            {/* Report — hidden on the artist's own listing */}
+            {currentUser?.id !== model.artistId && (
+              <button
+                onClick={() => (isAuthenticated ? setReportOpen(true) : navigate('/login'))}
+                className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-red-600"
+              >
+                <Flag size={13} /> Report this model
+              </button>
+            )}
           </section>
         </aside>
       </div>
@@ -422,6 +435,10 @@ const ModelDetails: React.FC = () => {
       {/* Discovery carousels */}
       <ModelCarousel title="More like this" models={relatedQuery.data ?? []} />
       <ModelCarousel title={`More from ${model.artistName}`} models={sameArtistModels} />
+
+      {reportOpen && (
+        <ReportModelModal modelId={model.id} modelName={model.name} onClose={() => setReportOpen(false)} />
+      )}
     </div>
   )
 }

@@ -19,13 +19,16 @@ CREATE TABLE users (
     artist_name VARCHAR(100),
     artist_bio TEXT,
     artist_url VARCHAR(255),
-    commission_rate DECIMAL(5,2) DEFAULT 15.00, -- Artist's commission percentage
+    commission_rate DECIMAL(5,2) DEFAULT 85.00, -- Artist's SHARE percent of each sale (platform keeps the remainder; 85 = 15% platform fee)
     stripe_account_id VARCHAR(255), -- Stripe Connect account
     stripe_onboarding_complete BOOLEAN DEFAULT false,
-    
+
     -- Account status
     email_verified BOOLEAN DEFAULT false,
     account_status VARCHAR(20) DEFAULT 'active' CHECK (account_status IN ('active', 'suspended', 'banned')),
+    -- Shadow-ban: still 'active' for buying (and reporting a model they own), but blocked
+    -- from filing other reports, posting reviews, and messaging. Orthogonal to account_status.
+    shadow_banned BOOLEAN NOT NULL DEFAULT false,
     
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -287,6 +290,10 @@ CREATE TABLE orders (
     tax DECIMAL(10,2) DEFAULT 0.00,
     total DECIMAL(10,2) NOT NULL,
     
+    -- Immediate-download consent: when the buyer agreed the download starts now and
+    -- thereby waived the 14-day cancellation right (UK Consumer Contracts Regs 2013).
+    download_consent_at TIMESTAMP,
+
     -- Payment
     payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('stripe', 'paypal')),
     payment_intent_id VARCHAR(255), -- Stripe PaymentIntent ID
@@ -400,6 +407,97 @@ CREATE TABLE payments (
 CREATE INDEX idx_payments_artist ON payments(artist_id);
 CREATE INDEX idx_payments_order_item ON payments(order_item_id);
 CREATE INDEX idx_payments_status ON payments(status);
+
+-- ============================================================================
+-- ARTIST EARNINGS LEDGER + PAYOUTS  (migration 021; supersedes the payments table)
+-- ============================================================================
+-- Separate charges & transfers: buyer pays the platform, we accrue one earning row
+-- per order_item at the artist's share, hold it 21 days, then pay out in batches.
+
+CREATE TABLE artist_earnings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artist_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+    model_id      UUID REFERENCES models(id) ON DELETE SET NULL,
+
+    gross_amount    DECIMAL(10,2) NOT NULL,
+    artist_amount   DECIMAL(10,2) NOT NULL,
+    platform_amount DECIMAL(10,2) NOT NULL,
+    currency        VARCHAR(3) NOT NULL DEFAULT 'GBP',
+
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'cleared', 'paid', 'reversed')),
+    available_at TIMESTAMP NOT NULL,   -- paid_at + 21 days
+    payout_id    UUID,                  -- FK to payouts(id) added after that table (see below / migration 021)
+    reversed_reason TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT artist_earnings_order_item_unique UNIQUE (order_item_id)
+);
+CREATE INDEX idx_earnings_artist ON artist_earnings(artist_id, status);
+CREATE INDEX idx_earnings_status_available ON artist_earnings(status, available_at);
+CREATE INDEX idx_earnings_payout ON artist_earnings(payout_id);
+CREATE INDEX idx_earnings_order ON artist_earnings(order_id);
+
+CREATE TABLE payouts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount   DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+    currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
+    stripe_transfer_id VARCHAR(255),
+    stripe_account_id  VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed')),
+    failure_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    paid_at    TIMESTAMP
+);
+CREATE INDEX idx_payouts_artist ON payouts(artist_id, status);
+-- Now that payouts exists, wire the earnings→payout FK.
+ALTER TABLE artist_earnings
+    ADD CONSTRAINT artist_earnings_payout_fk
+    FOREIGN KEY (payout_id) REFERENCES payouts(id) ON DELETE SET NULL;
+
+-- ============================================================================
+-- MODEL REPORTS (moderation queue)
+-- ============================================================================
+
+CREATE TABLE model_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id    UUID REFERENCES models(id) ON DELETE SET NULL,
+    artist_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+    reporter_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    reason VARCHAR(30) NOT NULL CHECK (reason IN (
+        'copyright', 'offensive', 'not_as_advertised', 'no_printed_photo', 'broken_file', 'other'
+    )),
+    detail TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN (
+        'open', 'under_review', 'awaiting_info', 'resolved_upheld', 'resolved_dismissed'
+    )),
+    resolution_action  VARCHAR(30),
+    resolution_summary TEXT,
+    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_reports_status ON model_reports(status, created_at DESC);
+CREATE INDEX idx_reports_model ON model_reports(model_id);
+CREATE INDEX idx_reports_artist ON model_reports(artist_id);
+CREATE INDEX idx_reports_reporter ON model_reports(reporter_id);
+CREATE UNIQUE INDEX idx_reports_reporter_model_open ON model_reports(reporter_id, model_id)
+    WHERE status IN ('open', 'under_review', 'awaiting_info');
+
+CREATE TABLE model_report_attachments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_id  UUID NOT NULL REFERENCES model_reports(id) ON DELETE CASCADE,
+    file_path  VARCHAR(500) NOT NULL,
+    file_name  VARCHAR(255),
+    content_type VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_report_attachments_report ON model_report_attachments(report_id);
 
 -- ============================================================================
 -- REVIEWS

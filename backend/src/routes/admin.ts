@@ -9,6 +9,11 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError } from '../middleware/error';
 import crypto from 'crypto';
 import { deleteFromStorage } from '../services/storage';
+import { reverseEarningsForModel } from '../services/earnings';
+import { createRefund } from '../services/stripe';
+import { createNotification } from '../services/notifications';
+import { runPayoutCycle } from '../services/payouts';
+import { publicUrl } from '../services/r2';
 
 const router = Router();
 
@@ -380,6 +385,299 @@ router.delete('/models',
       deletedCount: modelRows.length
     });
   })
+);
+
+// ============================================================================
+// MODERATION — MODEL REPORTS
+// ============================================================================
+
+const REASON_LABELS: Record<string, string> = {
+  copyright: 'Copyright infringement',
+  offensive: 'Offensive / inappropriate',
+  not_as_advertised: 'Not as advertised',
+  no_printed_photo: 'No photo of a printed model',
+  broken_file: 'Broken / unprintable file',
+  other: 'Other',
+};
+
+// The moderation queue: report tiles, newest first, filterable by status.
+router.get('/reports',
+  asyncHandler(async (req, res) => {
+    const { status, page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (status) { conditions.push(`r.status = $${params.length + 1}`); params.push(status); }
+    // Default view hides resolved reports unless explicitly asked for.
+    else conditions.push(`r.status IN ('open', 'under_review', 'awaiting_info')`);
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await db.query(`SELECT COUNT(*) FROM model_reports r ${whereClause}`, params);
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    const result = await db.query(
+      `SELECT r.id, r.reason, r.status, r.created_at, r.detail,
+              r.model_id, m.name AS model_name, m.thumbnail_path, m.status AS model_status,
+              r.artist_id, au.artist_name, au.display_name AS artist_display_name,
+              r.reporter_id, ru.display_name AS reporter_name,
+              (SELECT COUNT(*) FROM model_report_attachments a WHERE a.report_id = r.id) AS attachment_count
+       FROM model_reports r
+       LEFT JOIN models m ON r.model_id = m.id
+       LEFT JOIN users au ON r.artist_id = au.id
+       LEFT JOIN users ru ON r.reporter_id = ru.id
+       ${whereClause}
+       ORDER BY
+         CASE r.status WHEN 'open' THEN 0 WHEN 'under_review' THEN 1 WHEN 'awaiting_info' THEN 2 ELSE 3 END,
+         r.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, Number(limit), offset],
+    );
+
+    // Also surface open-count for the nav badge.
+    const openResult = await db.query(
+      `SELECT COUNT(*) FROM model_reports WHERE status IN ('open','under_review','awaiting_info')`,
+    );
+
+    res.json({
+      reports: result.rows.map((r: any) => ({ ...r, reason_label: REASON_LABELS[r.reason] || r.reason })),
+      openCount: parseInt(openResult.rows[0].count),
+      pagination: { page: Number(page), limit: Number(limit), total: totalCount, pages: Math.ceil(totalCount / Number(limit)) },
+    });
+  }),
+);
+
+// Full report detail for the moderation drill-down.
+router.get('/reports/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const reportResult = await db.query(
+      `SELECT r.*,
+              m.name AS model_name, m.thumbnail_path, m.status AS model_status,
+              m.description AS model_description, m.category AS model_category,
+              au.artist_name, au.email AS artist_email, au.display_name AS artist_display_name,
+              au.account_status AS artist_account_status, au.shadow_banned AS artist_shadow_banned,
+              ru.display_name AS reporter_name, ru.email AS reporter_email,
+              ru.shadow_banned AS reporter_shadow_banned,
+              resu.display_name AS resolved_by_name
+       FROM model_reports r
+       LEFT JOIN models m ON r.model_id = m.id
+       LEFT JOIN users au ON r.artist_id = au.id
+       LEFT JOIN users ru ON r.reporter_id = ru.id
+       LEFT JOIN users resu ON r.resolved_by = resu.id
+       WHERE r.id = $1`,
+      [id],
+    );
+    if (reportResult.rows.length === 0) throw new NotFoundError('Report');
+    const report = reportResult.rows[0];
+
+    const attachmentsResult = await db.query(
+      `SELECT id, file_path, file_name, content_type, created_at
+       FROM model_report_attachments WHERE report_id = $1 ORDER BY created_at ASC`,
+      [id],
+    );
+
+    // Context: how many other reports on this model / against this artist.
+    const historyResult = await db.query(
+      `SELECT
+        (SELECT COUNT(*) FROM model_reports x WHERE x.model_id = $1 AND x.id <> $3) AS other_reports_on_model,
+        (SELECT COUNT(*) FROM model_reports x WHERE x.artist_id = $2 AND x.id <> $3) AS other_reports_on_artist,
+        (SELECT COUNT(*) FROM models WHERE artist_id = $2) AS artist_model_count`,
+      [report.model_id, report.artist_id, id],
+    );
+
+    // Mark an untouched report as under_review the moment an admin opens it.
+    if (report.status === 'open') {
+      await db.query(`UPDATE model_reports SET status = 'under_review', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      report.status = 'under_review';
+    }
+
+    res.json({
+      report: { ...report, reason_label: REASON_LABELS[report.reason] || report.reason },
+      attachments: attachmentsResult.rows.map((a: any) => ({ ...a, url: publicUrl(a.file_path) })),
+      context: historyResult.rows[0],
+    });
+  }),
+);
+
+// Resolve a report: apply an action, record findings, notify reporter + artist.
+router.post('/reports/:id/resolve',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { action, summary, targetUserId } = req.body;
+    const adminId = (req as any).userId;
+
+    const VALID_ACTIONS = [
+      'dismiss', 'request_info', 'warn_artist', 'unpublish_model', 'flag_model',
+      'remove_model', 'refund_buyers', 'suspend_artist', 'ban_artist',
+      'shadow_ban_user', 'reinstate_model',
+    ];
+    if (!action || !VALID_ACTIONS.includes(action)) {
+      throw new ValidationError('A valid action is required');
+    }
+    if (!summary || typeof summary !== 'string' || summary.trim().length < 5) {
+      throw new ValidationError('Please write a short findings summary (this is shown to the reporter and artist)');
+    }
+
+    const reportResult = await db.query(
+      `SELECT r.*, m.name AS model_name FROM model_reports r
+       LEFT JOIN models m ON r.model_id = m.id WHERE r.id = $1`,
+      [id],
+    );
+    if (reportResult.rows.length === 0) throw new NotFoundError('Report');
+    const report = reportResult.rows[0];
+    const modelId = report.model_id;
+    const artistId = report.artist_id;
+
+    let newStatus = 'resolved_upheld';
+    const notes: string[] = [];
+
+    switch (action) {
+      case 'dismiss':
+        newStatus = 'resolved_dismissed';
+        break;
+
+      case 'request_info':
+        newStatus = 'awaiting_info';
+        break;
+
+      case 'warn_artist':
+        // Formal warning — recorded via notification + activity log below.
+        break;
+
+      case 'unpublish_model':
+        if (modelId) await db.query(`UPDATE models SET status = 'draft', moderated_by = $1, moderated_at = CURRENT_TIMESTAMP WHERE id = $2`, [adminId, modelId]);
+        break;
+
+      case 'flag_model':
+        if (modelId) await db.query(`UPDATE models SET status = 'flagged', flagged_reason = $1, moderated_by = $2, moderated_at = CURRENT_TIMESTAMP WHERE id = $3`, [summary, adminId, modelId]);
+        break;
+
+      case 'remove_model':
+        // Archive (not hard-delete) so evidence + purchase history survive; the download
+        // route blocks buyers on archived models, and we void the artist's un-paid earnings.
+        if (modelId) {
+          await db.query(`UPDATE models SET status = 'archived', flagged_reason = $1, moderated_by = $2, moderated_at = CURRENT_TIMESTAMP WHERE id = $3`, [summary, adminId, modelId]);
+          const { reversed, alreadyPaid } = await reverseEarningsForModel(modelId, `Model removed: report ${id}`);
+          notes.push(`voided ${reversed} un-paid earning(s)${alreadyPaid ? `, ${alreadyPaid} already paid`: ''}`);
+        }
+        break;
+
+      case 'refund_buyers': {
+        if (modelId) {
+          // Refund each buyer the amount they paid for this model, then void artist earnings
+          // and archive the model so downloads stop.
+          const affected = await db.query(
+            `SELECT o.id AS order_id, o.payment_intent_id, o.user_id,
+                    SUM(oi.total_price) AS amount
+             FROM orders o JOIN order_items oi ON oi.order_id = o.id
+             WHERE oi.model_id = $1 AND o.payment_status = 'succeeded'
+             GROUP BY o.id, o.payment_intent_id, o.user_id`,
+            [modelId],
+          );
+          let refundCount = 0;
+          for (const row of affected.rows) {
+            if (!row.payment_intent_id) continue;
+            try {
+              await createRefund(row.payment_intent_id, Number(row.amount), 'requested_by_customer');
+              refundCount++;
+              if (row.user_id) {
+                createNotification({
+                  userId: row.user_id,
+                  type: 'refund_issued',
+                  title: `Refund issued for "${report.model_name}"`,
+                  body: `We've refunded £${Number(row.amount).toFixed(2)} for this model following a moderation review.`,
+                  link: '/dashboard/purchases',
+                });
+              }
+            } catch (err) {
+              logger.error('Refund failed during moderation', { error: err, orderId: row.order_id, modelId });
+            }
+          }
+          await db.query(`UPDATE models SET status = 'archived', flagged_reason = $1, moderated_by = $2, moderated_at = CURRENT_TIMESTAMP WHERE id = $3`, [summary, adminId, modelId]);
+          await reverseEarningsForModel(modelId, `Buyers refunded: report ${id}`);
+          notes.push(`refunded ${refundCount} buyer(s)`);
+        }
+        break;
+      }
+
+      case 'suspend_artist':
+        if (artistId) await db.query(`UPDATE users SET account_status = 'suspended' WHERE id = $1`, [artistId]);
+        break;
+
+      case 'ban_artist':
+        if (artistId) await db.query(`UPDATE users SET account_status = 'banned' WHERE id = $1`, [artistId]);
+        break;
+
+      case 'shadow_ban_user': {
+        // Defaults to the reporter (abusive reporting); admin may target another user.
+        const target = targetUserId || report.reporter_id;
+        if (target) await db.query(`UPDATE users SET shadow_banned = true WHERE id = $1`, [target]);
+        notes.push(`shadow-banned user ${target}`);
+        break;
+      }
+
+      case 'reinstate_model':
+        if (modelId) await db.query(`UPDATE models SET status = 'published', flagged_reason = NULL, moderated_by = $1, moderated_at = CURRENT_TIMESTAMP WHERE id = $2`, [adminId, modelId]);
+        newStatus = 'resolved_dismissed';
+        break;
+    }
+
+    await db.query(
+      `UPDATE model_reports
+       SET status = $1, resolution_action = $2, resolution_summary = $3,
+           resolved_by = $4,
+           resolved_at = CASE WHEN $1 = 'awaiting_info' THEN NULL ELSE CURRENT_TIMESTAMP END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [newStatus, action, summary, adminId, id],
+    );
+
+    // Notify both parties of the outcome (except pure "request more info", which pings
+    // the reporter only).
+    if (report.reporter_id) {
+      createNotification({
+        userId: report.reporter_id,
+        type: 'report_resolved',
+        title: action === 'request_info' ? 'We need more information about your report' : `Update on your report of "${report.model_name || 'a model'}"`,
+        body: summary,
+        link: '/dashboard',
+      });
+    }
+    if (artistId && action !== 'request_info') {
+      createNotification({
+        userId: artistId,
+        type: 'moderation_decision',
+        title: `Moderation decision on "${report.model_name || 'your model'}"`,
+        body: summary,
+        link: '/artist/reports',
+      });
+    }
+
+    logger.warn('Report resolved by admin', { adminId, reportId: id, action, notes });
+    res.json({ message: 'Report resolved', action, status: newStatus, notes });
+  }),
+);
+
+// Directly toggle a user's shadow-ban (from the Users admin page).
+router.patch('/users/:id/shadow-ban',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { shadowBanned } = req.body;
+    await db.query(`UPDATE users SET shadow_banned = $1 WHERE id = $2`, [!!shadowBanned, id]);
+    logger.warn('User shadow-ban toggled by admin', { adminId: (req as any).userId, targetUserId: id, shadowBanned: !!shadowBanned });
+    res.json({ message: 'Shadow-ban updated', shadowBanned: !!shadowBanned });
+  }),
+);
+
+// Manually trigger a payout cycle (clear matured earnings + pay eligible artists).
+router.post('/payouts/run',
+  asyncHandler(async (req, res) => {
+    const result = await runPayoutCycle();
+    logger.info('Payout cycle run manually by admin', { adminId: (req as any).userId, ...result });
+    res.json({ message: 'Payout cycle complete', ...result });
+  }),
 );
 
 // ============================================================================

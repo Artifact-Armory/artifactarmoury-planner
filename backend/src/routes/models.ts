@@ -1217,13 +1217,19 @@ router.get('/:id/download',
     const userId = (req as any).userId;
 
     const model = (await db.query(
-      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status, part_count
+      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status, part_count, status
        FROM models WHERE id = $1`,
       [id]
     )).rows[0];
     if (!model) throw new NotFoundError('Model');
     if (model.processing_status && model.processing_status !== 'ready') {
       throw new ValidationError('This model is still processing');
+    }
+    // Moderation takedown: a flagged/archived model can't be downloaded (even by prior
+    // buyers or the artist) — only admins, for evidence. Copyright/inappropriate removals
+    // rely on this to actually stop distribution.
+    if ((model.status === 'archived' || model.status === 'flagged') && (req as any).user?.role !== 'admin') {
+      throw new AuthorizationError('This model is unavailable for download');
     }
     if (!model.stl_file_path) throw new NotFoundError('STL file');
     if (!isR2Enabled()) throw new ValidationError('Downloads are not configured (R2 disabled)');

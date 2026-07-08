@@ -10,6 +10,7 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, PaymentError } from '../middleware/error';
 import { validateEmail } from '../utils/validation';
 import { createPaymentIntent, getPaymentIntent } from '../services/stripe';
+import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
 
 const router = Router();
@@ -24,8 +25,15 @@ router.post('/',
   asyncHandler(async (req, res) => {
     const {
       items, // [{ modelId } | { bundleId }]
-      customerEmail
+      customerEmail,
+      // Buyer ticked "I want my download now and understand I lose my 14-day right to
+      // cancel once it begins" — required to lawfully deliver instantly (UK CCRs 2013).
+      downloadConsent,
     } = req.body;
+
+    if (!downloadConsent) {
+      throw new ValidationError('Please confirm you agree to your download starting immediately (this waives the 14-day cancellation right) before purchasing');
+    }
 
     // Validate items
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -188,8 +196,9 @@ router.post('/',
         `INSERT INTO orders (
           user_id, customer_email,
           subtotal, shipping_cost, tax, total,
-          payment_method, payment_status, fulfillment_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'stripe', 'pending', 'pending')
+          payment_method, payment_status, fulfillment_status,
+          download_consent_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'stripe', 'pending', 'pending', CURRENT_TIMESTAMP)
         RETURNING id, order_number`,
         [userId, email, subtotal, shippingCost, tax, total]
       );
@@ -300,6 +309,13 @@ router.post('/:id/confirm',
            fulfillment_status = 'delivered'
        WHERE id = $1`,
       [id]
+    );
+
+    // Accrue the artists' earnings into the ledger (held for the payout hold window,
+    // then cleared + paid out by the payout job). Idempotent — safe if the Stripe
+    // webhook also fires for this order.
+    await accrueEarningsForOrder(id).catch(err =>
+      logger.error('Failed to accrue earnings on confirm', { error: err, orderId: id })
     );
 
     // Get order items (for the confirmation email + sale counts)

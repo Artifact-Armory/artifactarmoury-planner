@@ -60,9 +60,11 @@ export const ordersApi = {
     }
   },
 
-  /** Create a digital order from cart items (models and/or bundles). */
-  async createOrder(items: OrderItemInput[], customerEmail?: string): Promise<CreatedOrder> {
-    const response = await apiClient.post(BASE_URL, { items, customerEmail })
+  /** Create a digital order from cart items (models and/or bundles).
+   * `downloadConsent` records the buyer waiving their 14-day cancellation right so the
+   * download can start immediately — the backend rejects the order without it. */
+  async createOrder(items: OrderItemInput[], customerEmail?: string, downloadConsent = true): Promise<CreatedOrder> {
+    const response = await apiClient.post(BASE_URL, { items, customerEmail, downloadConsent })
     const o = response.data?.order ?? response.data
     return {
       id: o.id,

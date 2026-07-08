@@ -1,8 +1,9 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { PoundSterling, ShoppingBag, Eye, Heart, Target, LayoutGrid, Star, Search, TrendingUp, TrendingDown, ArrowRight, Layers } from 'lucide-react'
+import { PoundSterling, ShoppingBag, Eye, Heart, Target, LayoutGrid, Star, Search, TrendingUp, TrendingDown, ArrowRight, Layers, Wallet } from 'lucide-react'
 import { artistAnalyticsApi, type PeriodTotals } from '../../api/endpoints/artistAnalytics'
+import { payoutsApi } from '../../api/endpoints/payouts'
 import { useAnalyticsRange, DateRangePicker } from '../../components/analytics/dateRange'
 import { formatPrice } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
@@ -54,6 +55,11 @@ const ArtistDashboard: React.FC = () => {
     placeholderData: (p) => p,
   })
 
+  const { data: payouts } = useQuery({
+    queryKey: ['artist-payouts-summary'],
+    queryFn: () => payoutsApi.getMine(),
+  })
+
   const t: PeriodTotals | undefined = data?.totals
   const prev = data?.prev
   const conv = (v: PeriodTotals) => (v.conversion * 100)
@@ -78,6 +84,13 @@ const ArtistDashboard: React.FC = () => {
           <Tile label="Your earnings" icon={<PoundSterling size={16} />} to="/artist/analytics/sales" hint="after 15% fee">
             <Big>{formatPrice(t.net)}</Big>
             <Delta cur={t.net} prev={prev.net} />
+          </Tile>
+
+          <Tile label="Pending payouts" icon={<Wallet size={16} />} to="/artist/payouts" hint={payouts?.connect.onboardingComplete ? 'in 21-day hold' : 'set up payouts to get paid'}>
+            <Big>{formatPrice(payouts?.summary.pending ?? 0)}</Big>
+            {payouts && (payouts.summary.cleared > 0) && (
+              <p className="text-xs text-green-600">{formatPrice(payouts.summary.cleared)} ready</p>
+            )}
           </Tile>
 
           <Tile label="Total sales" icon={<ShoppingBag size={16} />} to="/artist/analytics/sales">

@@ -34,7 +34,10 @@ import releasesRoutes from './routes/releases';
 import adminRoutes from './routes/admin';
 import uploadsRoutes from './routes/uploads';
 import webhookRoutes from './routes/webhooks';
+import reportsRoutes from './routes/reports';
+import payoutsRoutes from './routes/payouts';
 import { startReleaseScheduler } from './services/releases';
+import { startPayoutScheduler } from './services/payouts';
 
 // ============================================================================
 // CONFIGURATION
@@ -115,6 +118,8 @@ app.use(`${API_PREFIX}/bundles`, bundlesRoutes);
 app.use(`${API_PREFIX}/releases`, releasesRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
 app.use(`${API_PREFIX}/uploads`, uploadsRoutes);
+app.use(`${API_PREFIX}/reports`, reportsRoutes);
+app.use(`${API_PREFIX}/payouts`, payoutsRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {
@@ -170,6 +175,9 @@ async function startServer() {
 
     // Start the scheduled-release publisher (catch-up sweep + 60s poll).
     startReleaseScheduler();
+
+    // Start the payout job: clears matured earnings + pays eligible artists on a timer.
+    startPayoutScheduler();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {
