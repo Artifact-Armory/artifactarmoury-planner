@@ -624,14 +624,17 @@ router.post('/reports/:id/resolve',
         break;
     }
 
+    // "awaiting_info" isn't a final resolution, so it has no resolved_at. Compute this
+    // in JS rather than a SQL CASE that reuses $1 (Postgres can't always infer the
+    // param's type across `status = $1` + `$1 = 'awaiting_info'`, which 500s as a
+    // generic DB error).
+    const resolvedAt = newStatus === 'awaiting_info' ? null : new Date();
     await db.query(
       `UPDATE model_reports
        SET status = $1, resolution_action = $2, resolution_summary = $3,
-           resolved_by = $4,
-           resolved_at = CASE WHEN $1 = 'awaiting_info' THEN NULL ELSE CURRENT_TIMESTAMP END,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5`,
-      [newStatus, action, summary, adminId, id],
+           resolved_by = $4, resolved_at = $5, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6`,
+      [newStatus, action, summary, adminId, resolvedAt, id],
     );
 
     // Notify both parties of the outcome (except pure "request more info", which pings

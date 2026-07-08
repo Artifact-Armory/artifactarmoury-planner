@@ -31,7 +31,7 @@ const ACTIONS: Array<{ action: ModerationAction; label: string; cls: string; con
   { action: 'refund_buyers', label: 'Refund buyers', cls: 'border-red-300 text-red-700 hover:bg-red-50', confirm: 'Refund every buyer of this model and archive it?' },
   { action: 'suspend_artist', label: 'Suspend artist', cls: 'border-red-300 text-red-700 hover:bg-red-50', confirm: 'Suspend this artist? All their models are hidden.' },
   { action: 'ban_artist', label: 'Ban artist', cls: 'border-red-400 text-red-800 hover:bg-red-50', confirm: 'Permanently ban this artist?' },
-  { action: 'shadow_ban_user', label: 'Shadow-ban user', cls: 'border-gray-400 text-gray-800 hover:bg-gray-50' },
+  { action: 'shadow_ban_user', label: 'Shadow-ban reporter', cls: 'border-gray-400 text-gray-800 hover:bg-gray-50', confirm: 'Shadow-ban the reporter? They can still buy, but can no longer file reports (except on models they own), post reviews, or message.' },
   { action: 'reinstate_model', label: 'Reinstate model', cls: 'border-green-300 text-green-700 hover:bg-green-50' },
 ]
 
@@ -111,7 +111,6 @@ const Tile: React.FC<{ report: ReportTile; onOpen: () => void }> = ({ report: r,
 const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ reportId, onClose }) => {
   const qc = useQueryClient()
   const [summary, setSummary] = useState('')
-  const [shadowTarget, setShadowTarget] = useState<'reporter' | 'artist'>('reporter')
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-report', reportId],
@@ -119,12 +118,9 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
   })
 
   const resolve = useMutation({
-    mutationFn: ({ action }: { action: ModerationAction }) => {
-      const targetUserId = action === 'shadow_ban_user'
-        ? (shadowTarget === 'artist' ? data?.report.artist_id : data?.report.reporter_id) ?? undefined
-        : undefined
-      return adminModerationApi.resolve(reportId, action, summary.trim(), targetUserId || undefined)
-    },
+    // Shadow-ban targets the reporter by default (handled server-side).
+    mutationFn: ({ action }: { action: ModerationAction }) =>
+      adminModerationApi.resolve(reportId, action, summary.trim()),
     onSuccess: (res) => {
       toast.success(`Done${res.notes?.length ? ` — ${res.notes.join('; ')}` : ''}`)
       qc.invalidateQueries({ queryKey: ['admin-reports'] })
@@ -248,15 +244,7 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
                 className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
               />
 
-              <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                Shadow-ban target:
-                <select value={shadowTarget} onChange={(e) => setShadowTarget(e.target.value as any)} className="rounded border px-2 py-1">
-                  <option value="reporter">Reporter</option>
-                  <option value="artist">Artist</option>
-                </select>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 {ACTIONS.map((a) => (
                   <button
                     key={a.action}
