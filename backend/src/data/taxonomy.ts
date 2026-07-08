@@ -22,6 +22,11 @@ export interface FacetSeed {
   selectionUi: 'tree' | 'chips' | 'grouped' | 'flat'
   required?: boolean
   maxTerms?: number
+  // The model-class slugs this facet is relevant to (e.g. ['vehicles']). Omitted /
+  // empty = universal (applies to every class). Drives which facets the upload form,
+  // browse rail and planner show per class, and class-conditional required-ness — a
+  // Vehicle is required to tag `vehicle-type`, not `terrain-type`.
+  appliesTo?: string[]
   terms: TermSeed[]
 }
 
@@ -36,7 +41,26 @@ const scale = (name: string, ratio?: string): TermSeed => ({ name, ratio })
 
 export const TAXONOMY: FacetSeed[] = [
   // ==========================================================================
-  // 1 · TERRAIN TYPE — the primary "what is it" tree
+  // 0 · MODEL CLASS — the coarse "what kind of product is this" axis. One class
+  //   per model. Drives which of the three type trees (terrain / vehicle /
+  //   character) and which facets apply. Kept first so it leads every rail.
+  // ==========================================================================
+  {
+    slug: 'model-class',
+    name: 'Model Class',
+    description: 'The kind of model: terrain, a vehicle, or a character / unit.',
+    selectionUi: 'flat',
+    required: true,
+    maxTerms: 1,
+    terms: [
+      { name: 'Terrain', slug: 'terrain' },
+      { name: 'Vehicles', slug: 'vehicles' },
+      { name: 'Characters & Units', slug: 'characters' },
+    ],
+  },
+
+  // ==========================================================================
+  // 1 · TERRAIN TYPE — the primary "what is it" tree (Terrain class only)
   // ==========================================================================
   {
     slug: 'terrain-type',
@@ -45,6 +69,7 @@ export const TAXONOMY: FacetSeed[] = [
     selectionUi: 'tree',
     required: true,
     maxTerms: 6,
+    appliesTo: ['terrain'],
     terms: [
       t('Buildings', [
         t('Residential', [
@@ -530,6 +555,138 @@ export const TAXONOMY: FacetSeed[] = [
   },
 
   // ==========================================================================
+  // 1b · VEHICLE TYPE — the "what is it" tree for the Vehicles class. A solid
+  //   starter vocabulary (extend by editing this file + re-seeding, no migration).
+  // ==========================================================================
+  {
+    slug: 'vehicle-type',
+    name: 'Vehicle Type',
+    description: 'What kind of vehicle the model is.',
+    selectionUi: 'tree',
+    required: true,
+    maxTerms: 4,
+    appliesTo: ['vehicles'],
+    terms: [
+      t('Armour & Fighting Vehicles', [
+        'Tanks',
+        'Tank Destroyers & Assault Guns',
+        'Armoured Cars',
+        'APCs & IFVs',
+        'Half-tracks',
+        'Self-propelled Guns',
+      ]),
+      t('Artillery', [
+        'Field Guns',
+        'Howitzers',
+        'Anti-tank Guns',
+        'Anti-aircraft Guns',
+        'Rocket Artillery',
+        'Mortars',
+      ]),
+      t('Soft-skin & Civilian', [
+        'Cars',
+        'Trucks & Lorries',
+        'Vans',
+        'Buses & Coaches',
+        'Motorcycles',
+        'Tractors & Farm Machinery',
+        'Construction Plant',
+      ]),
+      t('Aircraft', [
+        'Fighters',
+        'Bombers',
+        'Ground-attack',
+        'Transport & Cargo',
+        'Gliders',
+        'Drones & UAVs',
+      ]),
+      t('Rotorcraft', ['Attack Helicopters', 'Transport Helicopters', 'Gunships']),
+      t('Naval & Watercraft', [
+        'Warships',
+        'Patrol & Fast Boats',
+        'Landing Craft',
+        'Submarines',
+        'Merchant & Civilian Boats',
+        'Sailing Ships',
+      ]),
+      t('Rail', ['Locomotives', 'Wagons & Rolling Stock', 'Armoured Trains']),
+      t('Walkers & Mechs', ['Light Walkers', 'Battle Mechs', 'Titans & Super-heavy']),
+      t('Sci-fi Vehicles', [
+        'Grav / Hover',
+        'Flyers & Gunships',
+        'Dropships & Landers',
+        'Buggies & Rovers',
+        'Battle Tanks (Sci-fi)',
+        'Spacecraft',
+      ]),
+      t('Fantasy & Mounts', [
+        'War Beasts',
+        'Chariots',
+        'Carts & Wagons',
+        'Siege Engines',
+        'Flying Mounts',
+      ]),
+    ],
+  },
+
+  // ==========================================================================
+  // 1c · CHARACTER TYPE — the "what is it" tree for Characters & Units. Generic
+  //   archetypes only; trademarked army names never appear here (game-system
+  //   compatibility lives in the "Can be used with" facet). Solid starter set.
+  // ==========================================================================
+  {
+    slug: 'character-type',
+    name: 'Character Type',
+    description: 'What kind of character or unit the model is.',
+    selectionUi: 'tree',
+    required: true,
+    maxTerms: 4,
+    appliesTo: ['characters'],
+    terms: [
+      t('Infantry', [
+        'Line Infantry',
+        'Skirmishers',
+        'Heavy Weapons Teams',
+        'Special Forces',
+        'Snipers',
+        'Engineers & Sappers',
+      ]),
+      t('Command & Heroes', [
+        'Heroes & Champions',
+        'Officers & Leaders',
+        'Standard Bearers',
+        'Musicians',
+        'Spellcasters',
+        'Named Characters',
+      ]),
+      t('Cavalry & Riders', [
+        'Light Cavalry',
+        'Heavy Cavalry',
+        'Mounted Command',
+        'Beast Riders',
+        'Bikers & Outriders',
+      ]),
+      t('Monsters & Beasts', [
+        'Large Monsters',
+        'Gargantuan / Titanic',
+        'Swarms',
+        'Wild Beasts',
+        'Flying Creatures',
+      ]),
+      t('Crewed Weapons', ['Artillery Crew', 'War Machines', 'Weapon Teams']),
+      t('Undead & Horror', ['Skeletons', 'Zombies', 'Ghosts & Spirits', 'Vampires & Liches']),
+      t('Constructs & Robots', ['Golems & Automata', 'Robots & Droids', 'Battle Servitors']),
+      t('Civilians & NPCs', [
+        'Townsfolk',
+        'Merchants & Traders',
+        'Workers & Labourers',
+        'Adventurers',
+        'Animals & Livestock',
+      ]),
+    ],
+  },
+
+  // ==========================================================================
   // 2 · SETTING & ERA — when / what world it belongs to
   // ==========================================================================
   {
@@ -715,6 +872,7 @@ export const TAXONOMY: FacetSeed[] = [
     name: 'Gameplay Role',
     description: 'How the piece behaves in play.',
     selectionUi: 'chips',
+    appliesTo: ['terrain'],
     terms: [
       { name: 'LOS Blocker', synonyms: ['line of sight'] },
       'Heavy Cover',

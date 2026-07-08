@@ -16,6 +16,13 @@ import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
 import { analyticsApi } from '@/api/endpoints/analytics'
+import { taxonomyApi, MODEL_CLASS_SLUG, type TaxFacet } from '@/api/endpoints/taxonomy'
+
+/** Build the browse `terms` string from a class + facet-token selection. */
+function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
+  const tokens = modelClass ? [`${MODEL_CLASS_SLUG}:${modelClass}`, ...terms] : [...terms]
+  return tokens.length ? tokens.join(',') : undefined
+}
 
 export type SnapBaseline = 'snap' | 'free'
 
@@ -79,6 +86,11 @@ interface AppState {
   renderer: THREE.WebGLRenderer | null
 
   assets: Asset[]
+  // Planner palette filters (model class + facet terms), driving the catalogue query.
+  catalogueClass: string | null      // selected model class (null = all)
+  catalogueTerms: string[]           // selected facet tokens (excl. model-class)
+  catalogueFacets: TaxFacet[]        // facet tree w/ counts for the palette filter rail
+  catalogueLoading: boolean          // true while re-querying the catalogue
   bundles: PlannerBundle[]           // published bundles (palette grouping)
   sets: PlannerSetData[]             // published multi-part "set" models (grouping)
   setPartAssets: Asset[]             // the sets' part assets (kept off the catalogue)
@@ -179,6 +191,8 @@ interface AppState {
     ensureInitialHistory: () => void
     fitView: () => void
     loadAssetCatalogue: () => Promise<void>
+    /** Re-query the palette catalogue for a class / facet-term selection. */
+    setCatalogueFilter: (next: { modelClass?: string | null; terms?: string[] }) => Promise<void>
     loadStarterLayout: () => void
     addInstance: (i: Omit<Instance,'id'>) => string
     updateInstance: (id: string, patch: Partial<Omit<Instance,'id'|'assetId'>>) => void
@@ -250,6 +264,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   renderer: null,
 
   assets: [],
+  catalogueClass: null,
+  catalogueTerms: [],
+  catalogueFacets: [],
+  catalogueLoading: false,
   bundles: [],
   sets: [],
   setPartAssets: [],
@@ -438,8 +456,41 @@ export const useAppStore = create<AppState>((set, get) => ({
       // The signed-in artist's own models (incl. unpublished drafts), so they can
       // lay out pieces before release. Empty for guests/customers (endpoint 403s).
       set({ myModels: await loadMyModelsForPlanner() })
+
+      // Facet tree with live counts for the palette filter rail (zero-count terms
+      // pruned so the narrow palette only lists terms that have models).
+      try {
+        const facets = await taxonomyApi.getFacetsWithCounts({ hideZero: true })
+        set({ catalogueFacets: facets })
+      } catch {
+        /* filters are optional — palette still works with class + text search */
+      }
     },
-    
+
+    // Re-query the catalogue for a class / facet selection. Only the catalogue
+    // assets + facet counts change here (bundles/sets/ownership are class-agnostic).
+    setCatalogueFilter: async ({ modelClass, terms }) => {
+      const s = get()
+      const nextClass = modelClass !== undefined ? modelClass : s.catalogueClass
+      const nextTerms = terms !== undefined ? terms : s.catalogueTerms
+      set({ catalogueClass: nextClass, catalogueTerms: nextTerms, catalogueLoading: true })
+
+      const termsStr = buildCatalogueTerms(nextClass, nextTerms)
+      try {
+        const assets = await loadAssetsFromAPI({ terms: termsStr })
+        set({ assets })
+      } catch {
+        /* keep the previous catalogue on error */
+      }
+      try {
+        const facets = await taxonomyApi.getFacetsWithCounts({ terms: termsStr, hideZero: true })
+        set({ catalogueFacets: facets })
+      } catch {
+        /* keep the previous facet counts */
+      }
+      set({ catalogueLoading: false })
+    },
+
     loadStarterLayout: () => {
       // A small, tidy default scene so the planner never opens onto an empty void.
       // Uses whatever assets are available; silently skips any that aren't loaded.

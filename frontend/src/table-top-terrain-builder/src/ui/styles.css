@@ -336,6 +336,75 @@
 .tb-tab:hover { color: var(--tb-text); background: #131c28; }
 .tb-tab.is-active { color: var(--tb-text); border-bottom-color: var(--tb-accent); }
 
+/* Model-class chip row (All / Terrain / Vehicles / Characters & Units) */
+.tb-class-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 4px;
+}
+.tb-class {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--tb-border);
+  background: #0c1119;
+  color: var(--tb-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tb-class:hover:not(:disabled) { color: var(--tb-text); border-color: var(--tb-accent); }
+.tb-class.is-active { color: #fff; background: var(--tb-accent); border-color: var(--tb-accent); }
+.tb-class:disabled { opacity: 0.5; cursor: default; }
+
+/* Filter toggle + rail */
+.tb-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 8px;
+}
+.tb-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--tb-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tb-filter-toggle:hover { color: var(--tb-text); }
+.tb-filter-count {
+  background: var(--tb-accent);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 10px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+.tb-filter-clear {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--tb-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.tb-filter-clear:hover { color: var(--tb-text); }
+/* The marketplace FacetRail is a light-theme component; host it on a light card so
+   its gray text reads correctly inside the dark planner palette. */
+.tb-filter-rail {
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  background: #fff;
+  border-radius: 8px;
+  max-height: 340px;
+  overflow: auto;
+}
+
 /* Bundle group tile (expandable) */
 .tb-bundle {
   margin: 10px 0 4px;

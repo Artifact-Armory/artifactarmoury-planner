@@ -99,14 +99,15 @@ async function main() {
     for (let f = 0; f < TAXONOMY.length; f++) {
       const facet = TAXONOMY[f]
       const facetRow = await client.query(
-        `INSERT INTO facets (slug, name, description, selection_ui, is_required, max_terms, display_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO facets (slug, name, description, selection_ui, is_required, max_terms, applies_to, display_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (slug) DO UPDATE SET
            name = EXCLUDED.name,
            description = EXCLUDED.description,
            selection_ui = EXCLUDED.selection_ui,
            is_required = EXCLUDED.is_required,
            max_terms = EXCLUDED.max_terms,
+           applies_to = EXCLUDED.applies_to,
            display_order = EXCLUDED.display_order,
            is_active = true,
            updated_at = NOW()
@@ -118,6 +119,7 @@ async function main() {
           facet.selectionUi,
           facet.required ?? false,
           facet.maxTerms ?? null,
+          facet.appliesTo && facet.appliesTo.length ? facet.appliesTo : null,
           f,
         ],
       )
@@ -163,6 +165,29 @@ async function main() {
       }
 
       console.log(`  ✓ ${facet.name.padEnd(26)} ${flat.length} terms`)
+    }
+
+    // Backfill: the marketplace sold terrain only before model classes existed, so
+    // every model predating this seed is Terrain. Tag any model that has no
+    // model-class term with `model-class:terrain`. Idempotent (guarded by NOT EXISTS
+    // + ON CONFLICT) and a no-op on a fresh DB with no models.
+    const backfill = await client.query(
+      `INSERT INTO model_terms (model_id, term_id)
+       SELECT m.id, t.id
+         FROM models m
+         CROSS JOIN terms t
+         JOIN facets f ON f.id = t.facet_id
+        WHERE f.slug = 'model-class' AND t.path = 'terrain'
+          AND NOT EXISTS (
+            SELECT 1 FROM model_terms mt
+            JOIN terms t2 ON t2.id = mt.term_id
+            JOIN facets f2 ON f2.id = t2.facet_id
+            WHERE mt.model_id = m.id AND f2.slug = 'model-class'
+          )
+       ON CONFLICT DO NOTHING`,
+    )
+    if (backfill.rowCount) {
+      console.log(`  ✓ Backfilled ${backfill.rowCount} model(s) → model-class:terrain`)
     }
 
     await client.query('COMMIT')

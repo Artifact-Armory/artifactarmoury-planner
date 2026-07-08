@@ -68,7 +68,8 @@ CREATE TABLE models (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     category VARCHAR(50) NOT NULL CHECK (category IN (
-        'buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other'
+        'buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other',
+        'vehicles', 'characters'
     )),
     tags TEXT[], -- Array of searchable tags
     

@@ -44,7 +44,15 @@ const createArchive: (format: string, options?: any) => Archiver = require('arch
 
 const router = Router();
 
-const VALID_CATEGORIES = ['buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other'];
+const VALID_CATEGORIES = ['buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other', 'vehicles', 'characters'];
+
+// The type facet a model must be tagged with, per model class. A model's headline
+// classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).
+const TYPE_FACET_BY_CLASS: Record<string, string> = {
+  terrain: 'terrain-type',
+  vehicles: 'vehicle-type',
+  characters: 'character-type',
+};
 
 function parseTags(tags: unknown): string[] {
   if (!tags) return [];
@@ -85,7 +93,7 @@ router.post('/',
     }
 
     // Validate category
-    const validCategories = ['buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other'];
+    const validCategories = VALID_CATEGORIES;
     if (!validCategories.includes(category)) {
       await deleteUploadedFile(modelFile.path);
       if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
@@ -295,10 +303,18 @@ router.post('/from-upload',
     // half-tagged draft; they're written after the model row exists.
     const resolvedTerms = await validateAndResolveTerms(terms);
 
+    // Determine the chosen model class (Terrain / Vehicles / Characters). It gates
+    // which type facet is required and which legacy category the row gets stored as.
+    const modelClass = resolvedTerms.find((t) => t.facetSlug === 'model-class')?.path ?? null;
+
     // The headline browse facets are mandatory at upload (mirrors the required
-    // dropdowns in the UI) — a model must be classified before it's created.
+    // dropdowns in the UI) — a model must be classified before it's created. The
+    // "type" facet is class-conditional; the rest are universal.
     const REQUIRED_UPLOAD_FACETS: Record<string, string> = {
-      'terrain-type': 'Model type',
+      'model-class': 'Model class',
+      ...(modelClass && TYPE_FACET_BY_CLASS[modelClass]
+        ? { [TYPE_FACET_BY_CLASS[modelClass]]: 'Model type' }
+        : { 'terrain-type': 'Model type' }),
       'setting-era': 'Theme / Era',
       scale: 'Scale',
       condition: 'Condition',
@@ -311,7 +327,11 @@ router.post('/from-upload',
       );
     }
 
-    // Digital STL sales only for now — fulfilment is always 'stl'.
+    // Digital STL sales only for now — fulfilment is always 'stl'. For vehicles /
+    // characters, store that as the legacy `category` so category-based code paths
+    // (browse related / categories / stats) stay meaningful; terrain keeps the
+    // artist-chosen sub-category (buildings / nature / …).
+    const storedCategory = modelClass === 'vehicles' || modelClass === 'characters' ? modelClass : category;
     const userId = (req as any).userId;
 
     const result = await db.query(
@@ -320,7 +340,7 @@ router.post('/from-upload',
         stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, status, processing_status
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, category, parseTags(tags), rawKey, thumbnailKey || null, price, partCount]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount]
     );
     const model = result.rows[0];
 

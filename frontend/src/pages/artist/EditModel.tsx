@@ -4,7 +4,7 @@ import { modelsApi } from '../../api/endpoints/models'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { TerrainModel } from '../../api/types'
 import TermPicker from '../../components/taxonomy/TermPicker'
-import { termToken } from '../../api/endpoints/taxonomy'
+import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -34,6 +34,12 @@ const EditModel: React.FC = () => {
   const [tags, setTags] = React.useState('')
   const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
+
+  // The model's class (set at upload) — scopes which facets the tag picker shows.
+  const modelClass = React.useMemo(() => {
+    const tok = terms.find((t) => t.startsWith(`${MODEL_CLASS_SLUG}:`))
+    return tok ? tok.slice(MODEL_CLASS_SLUG.length + 1) : 'terrain'
+  }, [terms])
 
   // Thumbnail: `thumbFile` is a freshly-picked image not yet uploaded; on save we
   // presign it to R2 and send the resulting key. `thumbPreview` is a local object URL.
@@ -188,12 +194,15 @@ const EditModel: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
-            <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
+          {/* Sub-category only applies to terrain; vehicles/characters store their class. */}
+          {modelClass === 'terrain' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Category</label>
+              <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+                {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
             <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
@@ -211,7 +220,7 @@ const EditModel: React.FC = () => {
             Fields marked <span className="text-red-500">*</span> are required before publishing. Tag
             generously — a piece can belong to several eras and types.
           </p>
-          <TermPicker value={terms} onChange={setTerms} disabled={busy} />
+          <TermPicker value={terms} onChange={setTerms} disabled={busy} modelClass={modelClass} />
         </div>
 
         <div>

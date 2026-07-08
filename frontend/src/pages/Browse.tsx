@@ -8,7 +8,12 @@ import Spinner from '../components/ui/Spinner'
 import ModelGrid from '../components/models/ModelGrid'
 import FacetRail from '../components/taxonomy/FacetRail'
 import { browseApi } from '../api/endpoints/browse'
-import { taxonomyApi } from '../api/endpoints/taxonomy'
+import {
+  taxonomyApi,
+  facetAppliesTo,
+  MODEL_CLASSES,
+  MODEL_CLASS_SLUG,
+} from '../api/endpoints/taxonomy'
 import { SearchFilters } from '../api/types'
 import TrademarkDisclaimer, { mentionsTrademark } from '../components/legal/TrademarkDisclaimer'
 
@@ -57,6 +62,12 @@ const Browse: React.FC = () => {
     () => new Set(termsParam ? termsParam.split(',').filter(Boolean) : []),
     [termsParam],
   )
+
+  // The currently-selected model class (Terrain / Vehicles / Characters), if any.
+  const selectedClass = useMemo(() => {
+    const tok = [...selectedTokens].find((t) => t.startsWith(`${MODEL_CLASS_SLUG}:`))
+    return tok ? tok.slice(MODEL_CLASS_SLUG.length + 1) : null
+  }, [selectedTokens])
 
   // Surface the non-affiliation notice when someone searches a trademarked game
   // name or filters by a "Can be used with" (designed-for) compatibility term.
@@ -125,8 +136,20 @@ const Browse: React.FC = () => {
   // on a young catalogue where nothing carries counts yet. Note the counted
   // endpoint returns every facet object with its `terms` emptied when all are
   // pruned, so we must check for actual terms, not just facet count.
+  // appliesTo per facet slug (from the full tree) — used to prune stale filters
+  // when the class changes.
+  const appliesToBySlug = useMemo(() => {
+    const m = new Map<string, string[] | null>()
+    for (const f of tree ?? []) m.set(f.slug, f.appliesTo)
+    return m
+  }, [tree])
+
   const countedFacets = facets?.filter((f) => f.terms.length) ?? []
-  const railFacets = countedFacets.length ? countedFacets : tree ?? []
+  // Show the model-class facet as the segmented chips above (not in the rail), and
+  // hide facets that don't apply to the chosen class.
+  const railFacets = (countedFacets.length ? countedFacets : tree ?? []).filter(
+    (f) => f.slug !== MODEL_CLASS_SLUG && facetAppliesTo(f, selectedClass),
+  )
 
   const models = data?.models ?? []
   const pagination = data?.pagination
@@ -143,6 +166,22 @@ const Browse: React.FC = () => {
   const toggleTerm = (token: string) => {
     const next = new Set(selectedTokens)
     next.has(token) ? next.delete(token) : next.add(token)
+    setTerms(next)
+  }
+
+  // Switch model class: replace the model-class token and drop any selected terms
+  // for class-specific facets that no longer apply (universal filters are kept).
+  const setClass = (slug: string | null) => {
+    const next = new Set<string>()
+    for (const tok of selectedTokens) {
+      const facetSlug = tok.slice(0, tok.indexOf(':'))
+      if (facetSlug === MODEL_CLASS_SLUG) continue
+      const appliesTo = appliesToBySlug.get(facetSlug)
+      const scoped = appliesTo && appliesTo.length > 0
+      if (!scoped) next.add(tok) // universal — keep
+      else if (slug && appliesTo!.includes(slug)) next.add(tok) // still applies
+    }
+    if (slug) next.add(`${MODEL_CLASS_SLUG}:${slug}`)
     setTerms(next)
   }
 
@@ -200,6 +239,27 @@ const Browse: React.FC = () => {
             <X size={18} />
           </button>
         )}
+      </div>
+
+      {/* Model class — the primary axis. Switching it re-scopes the filter rail. */}
+      <div className="mb-8 flex flex-wrap gap-2">
+        {[{ slug: null as string | null, label: 'All models' }, ...MODEL_CLASSES].map((c) => {
+          const active = selectedClass === c.slug || (c.slug === null && !selectedClass)
+          return (
+            <button
+              key={c.slug ?? 'all'}
+              type="button"
+              onClick={() => setClass(c.slug)}
+              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                active
+                  ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                  : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
+              }`}
+            >
+              {c.label}
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[300px_1fr]">
@@ -270,9 +330,9 @@ const Browse: React.FC = () => {
           )}
 
           {/* Selected filter chips (work even when a term is pruned from the rail). */}
-          {selectedTokens.size > 0 && (
+          {[...selectedTokens].some((t) => !t.startsWith(`${MODEL_CLASS_SLUG}:`)) && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              {[...selectedTokens].map((token) => (
+              {[...selectedTokens].filter((t) => !t.startsWith(`${MODEL_CLASS_SLUG}:`)).map((token) => (
                 <button
                   key={token}
                   onClick={() => toggleTerm(token)}
@@ -282,7 +342,10 @@ const Browse: React.FC = () => {
                   <X size={13} />
                 </button>
               ))}
-              <button onClick={() => setTerms(new Set())} className="text-sm text-gray-500 hover:text-gray-800">
+              <button
+                onClick={() => setTerms(new Set(selectedClass ? [`${MODEL_CLASS_SLUG}:${selectedClass}`] : []))}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
                 Clear all
               </button>
             </div>

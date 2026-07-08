@@ -1,6 +1,13 @@
 import React from 'react'
 import { ChevronRight, ChevronDown, Check, Search, X } from 'lucide-react'
-import { taxonomyApi, termToken, type TaxFacet, type TaxTerm } from '../../api/endpoints/taxonomy'
+import {
+  taxonomyApi,
+  termToken,
+  facetAppliesTo,
+  MODEL_CLASS_SLUG,
+  type TaxFacet,
+  type TaxTerm,
+} from '../../api/endpoints/taxonomy'
 
 interface TermPickerProps {
   /** Selected tokens `facetSlug:termPath`. */
@@ -12,6 +19,12 @@ interface TermPickerProps {
    * required dropdowns). Their tokens already in `value` are left untouched.
    */
   excludeFacets?: string[]
+  /**
+   * The model's class (terrain / vehicles / characters). When set, only facets
+   * applicable to that class are shown; the model-class facet itself is always
+   * hidden (it's chosen via a dedicated picker).
+   */
+  modelClass?: string | null
 }
 
 /** Keep only nodes that match `q` (by name) or have a matching descendant. */
@@ -28,7 +41,7 @@ function filterTerms(terms: TaxTerm[], q: string): TaxTerm[] {
   return out
 }
 
-const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excludeFacets }) => {
+const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excludeFacets, modelClass }) => {
   const [facets, setFacets] = React.useState<TaxFacet[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
@@ -213,7 +226,12 @@ const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excl
       </div>
 
       {facets
-        .filter((facet) => !(excludeFacets ?? []).includes(facet.slug))
+        .filter(
+          (facet) =>
+            !(excludeFacets ?? []).includes(facet.slug) &&
+            facet.slug !== MODEL_CLASS_SLUG &&
+            (modelClass === undefined || facetAppliesTo(facet, modelClass)),
+        )
         .map((facet) => {
         const body = renderFacetBody(facet)
         if (body === null) return null // hidden while searching with no matches

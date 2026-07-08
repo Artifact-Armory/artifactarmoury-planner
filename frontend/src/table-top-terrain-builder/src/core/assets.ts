@@ -152,14 +152,22 @@ export const DEFAULT_GRID_SIZE = 0.3048
  * Maps TerrainModel records to the Asset type the planner expects.
  * Falls back to local manifest if the API is unreachable.
  */
-export async function loadAssetsFromAPI(): Promise<Asset[]> {
+export async function loadAssetsFromAPI(filter?: { terms?: string }): Promise<Asset[]> {
+  // A comma-separated `facetSlug:termPath` selection (model class + facet filters),
+  // forwarded to the same browse endpoint the marketplace uses.
+  const hasFilter = Boolean(filter?.terms)
   try {
-    const response = await browseApi.searchModels({ limit: 200, sortBy: 'recent' })
+    const response = await browseApi.searchModels({
+      limit: 200,
+      sortBy: 'recent',
+      terms: filter?.terms,
+    })
     const models = response.models
 
     if (!models.length) {
-      // API reachable but no published models — return local dev assets
-      return loadAssets()
+      // With an active filter this is a genuine "no matches" — don't substitute the
+      // local demo assets. Only seed the manifest on an unfiltered empty catalogue.
+      return hasFilter ? [] : loadAssets()
     }
 
     const mapped = models
@@ -174,9 +182,10 @@ export async function loadAssetsFromAPI(): Promise<Asset[]> {
     registerAssets(mapped)
     return mapped
   } catch {
-    // API unreachable (dev without backend running) — use local manifest
+    // API unreachable (dev without backend running) — use local manifest, unless a
+    // filter is active (then an empty list is the honest answer).
     console.warn('[planner] API unavailable, falling back to local asset manifest')
-    return loadAssets()
+    return hasFilter ? [] : loadAssets()
   }
 }
 
@@ -189,6 +198,7 @@ function modelToAsset(m: {
   id: string; name: string; tags?: string[]; glbUrl?: string; thumbnailUrl?: string
   width?: number | null; depth?: number | null; height?: number | null
   basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; artistId?: string; partCount?: number
+  category?: string
 }): Asset | null {
   if (!m.glbUrl || (m.partCount ?? 1) !== 1) return null
   const wM = m.width != null ? m.width / 1000 : 0.15
@@ -206,6 +216,7 @@ function modelToAsset(m: {
     fulfillment: m.fulfillmentType ?? 'print',
     artistName: m.artistName,
     artistId: m.artistId,
+    category: m.category, // palette grouping heading (buildings / vehicles / …)
     model: m.glbUrl,
     thumbnail: m.thumbnailUrl,
     scaleToFit: true, // GLB is in mm; rescale to the metre aabb above

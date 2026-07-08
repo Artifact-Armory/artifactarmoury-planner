@@ -4,17 +4,24 @@ import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import FacetSelects from '../../components/taxonomy/FacetSelects'
+import {
+  taxonomyApi,
+  facetAppliesTo,
+  MODEL_CLASSES,
+  MODEL_CLASS_SLUG,
+  type TaxFacet,
+} from '../../api/endpoints/taxonomy'
 
-// The headline browse facets, chosen via required dropdowns and mandatory before a
-// model can be uploaded. Keys are taxonomy facet slugs; values are the UI labels.
-const REQUIRED_FACET_LABELS: Record<string, string> = {
-  'terrain-type': 'Model type',
-  'setting-era': 'Theme / Era',
-  scale: 'Scale',
-  condition: 'Condition',
+// The "type" facet a model must be tagged with, per class — the headline
+// classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).
+const TYPE_FACET_BY_CLASS: Record<string, string> = {
+  terrain: 'terrain-type',
+  vehicles: 'vehicle-type',
+  characters: 'character-type',
 }
-const REQUIRED_FACET_SLUGS = Object.keys(REQUIRED_FACET_LABELS)
 
+// The legacy sub-category dropdown only applies to terrain; vehicles / characters
+// store their class as the legacy category (see backend from-upload).
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
   { value: 'nature', label: 'Nature' },
@@ -32,7 +39,53 @@ const CreateModel: React.FC = () => {
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [category, setCategory] = React.useState('buildings')
-  const [terms, setTerms] = React.useState<string[]>([])
+  // Terms carry the chosen model-class token from the start (Terrain by default).
+  const [terms, setTerms] = React.useState<string[]>([`${MODEL_CLASS_SLUG}:terrain`])
+  const [facetTree, setFacetTree] = React.useState<TaxFacet[]>([])
+
+  React.useEffect(() => {
+    taxonomyApi.getTree().then(setFacetTree).catch(() => {})
+  }, [])
+
+  // Current class from the selected model-class token (defaults to terrain).
+  const modelClass = React.useMemo(() => {
+    const tok = terms.find((t) => t.startsWith(`${MODEL_CLASS_SLUG}:`))
+    return tok ? tok.slice(MODEL_CLASS_SLUG.length + 1) : 'terrain'
+  }, [terms])
+
+  const appliesToBySlug = React.useMemo(() => {
+    const m = new Map<string, string[] | null>()
+    for (const f of facetTree) m.set(f.slug, f.appliesTo)
+    return m
+  }, [facetTree])
+
+  // Switch class: replace the model-class token and drop any tags for class-specific
+  // facets that no longer apply (universal tags are kept).
+  const setModelClass = (slug: string) => {
+    setTerms((prev) => {
+      const next: string[] = []
+      for (const tok of prev) {
+        const facetSlug = tok.slice(0, tok.indexOf(':'))
+        if (facetSlug === MODEL_CLASS_SLUG) continue
+        const appliesTo = appliesToBySlug.get(facetSlug)
+        const scoped = appliesTo && appliesTo.length > 0
+        if (!scoped) next.push(tok)
+        else if (appliesTo!.includes(slug)) next.push(tok)
+      }
+      next.push(`${MODEL_CLASS_SLUG}:${slug}`)
+      return next
+    })
+  }
+
+  // Class-driven headline (required) facets: the type facet swaps per class.
+  const typeFacet = TYPE_FACET_BY_CLASS[modelClass] ?? 'terrain-type'
+  const requiredFacetSlugs = [typeFacet, 'setting-era', 'scale', 'condition']
+  const requiredFacetLabels: Record<string, string> = {
+    [typeFacet]: 'Model type',
+    'setting-era': 'Theme / Era',
+    scale: 'Scale',
+    condition: 'Condition',
+  }
   const [basePrice, setBasePrice] = React.useState('')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
@@ -68,9 +121,9 @@ const CreateModel: React.FC = () => {
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
     if (isNaN(price) || price < 0) { setError('Enter a valid base price'); return }
-    const missingFacets = REQUIRED_FACET_SLUGS.filter((s) => !terms.some((t) => t.startsWith(`${s}:`)))
+    const missingFacets = requiredFacetSlugs.filter((s) => !terms.some((t) => t.startsWith(`${s}:`)))
     if (missingFacets.length) {
-      setError(`Choose a value for: ${missingFacets.map((s) => REQUIRED_FACET_LABELS[s]).join(', ')}`)
+      setError(`Choose a value for: ${missingFacets.map((s) => requiredFacetLabels[s]).join(', ')}`)
       return
     }
 
@@ -98,7 +151,9 @@ const CreateModel: React.FC = () => {
         filename: stlFile.name,
         name: name.trim(),
         description: description.trim() || undefined,
-        category,
+        // Vehicles / characters store their class as the legacy category; terrain
+        // keeps the artist-chosen sub-category.
+        category: modelClass === 'terrain' ? category : modelClass,
         basePrice: price,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
@@ -136,7 +191,7 @@ const CreateModel: React.FC = () => {
           <button
             className="px-4 py-2 rounded border"
             onClick={() => {
-              setPhase('form'); setName(''); setDescription(''); setTerms([]); setBasePrice('')
+              setPhase('form'); setName(''); setDescription(''); setTerms([`${MODEL_CLASS_SLUG}:terrain`]); setBasePrice('')
               setStlFile(null); setThumbFile(null); setPartFiles([]); setProgress(0); setModelId(null); setError(null)
             }}
           >
@@ -163,13 +218,39 @@ const CreateModel: React.FC = () => {
           <textarea className="w-full border rounded px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
-            <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            Model class <span className="text-red-500">*</span>
+          </label>
+          <p className="text-xs text-gray-500 mb-2">What kind of model is this? It sets which type and filters buyers use to find it.</p>
+          <div className="flex flex-wrap gap-2">
+            {MODEL_CLASSES.map((c) => (
+              <button
+                key={c.slug}
+                type="button"
+                disabled={busy}
+                onClick={() => setModelClass(c.slug)}
+                className={`rounded-full border px-4 py-2 text-sm font-medium transition disabled:opacity-60 ${
+                  modelClass === c.slug
+                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                    : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {modelClass === 'terrain' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Category</label>
+              <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+                {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
             <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
@@ -185,8 +266,8 @@ const CreateModel: React.FC = () => {
             searches. Tick as many as apply in each (a stone barn can be Medieval <em>and</em> WW2).
           </p>
           <FacetSelects
-            facetSlugs={REQUIRED_FACET_SLUGS}
-            labels={REQUIRED_FACET_LABELS}
+            facetSlugs={requiredFacetSlugs}
+            labels={requiredFacetLabels}
             value={terms}
             onChange={setTerms}
             disabled={busy}
@@ -204,7 +285,8 @@ const CreateModel: React.FC = () => {
             value={terms}
             onChange={setTerms}
             disabled={busy}
-            excludeFacets={REQUIRED_FACET_SLUGS}
+            excludeFacets={requiredFacetSlugs}
+            modelClass={modelClass}
           />
         </div>
 

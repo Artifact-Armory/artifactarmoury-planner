@@ -25,6 +25,9 @@ import { HelpOverlay } from './HelpOverlay'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
+import FacetRail from '@/components/taxonomy/FacetRail'
+import { facetAppliesTo, MODEL_CLASSES, MODEL_CLASS_SLUG } from '@/api/endpoints/taxonomy'
+import { SlidersHorizontal } from 'lucide-react'
 import './styles.css'
 
 const M_PER_FT = 0.3048
@@ -52,6 +55,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [saving, setSaving] = React.useState(false)
 
   const assets = useAppStore((s) => s.assets)
+  const catalogueClass = useAppStore((s) => s.catalogueClass)
+  const catalogueTerms = useAppStore((s) => s.catalogueTerms)
+  const catalogueFacets = useAppStore((s) => s.catalogueFacets)
+  const catalogueLoading = useAppStore((s) => s.catalogueLoading)
+  const setCatalogueFilter = useAppStore((s) => s.actions.setCatalogueFilter)
   const bundles = useAppStore((s) => s.bundles)
   const sets = useAppStore((s) => s.sets)
   const setPartAssets = useAppStore((s) => s.setPartAssets)
@@ -185,6 +193,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
   const [query, setQuery] = React.useState('')
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
+  const [showFilters, setShowFilters] = React.useState(false)
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
   const [showHelp, setShowHelp] = React.useState(false)
@@ -192,6 +201,38 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const startedRef = React.useRef(false)
   const onboardRef = React.useRef(false)
   const startTour = useOnboardingStore((s) => s.startTour)
+
+  // ---- Palette catalogue filters (model class + facet terms) ----
+  const appliesToBySlug = React.useMemo(() => {
+    const m = new Map<string, string[] | null>()
+    for (const f of catalogueFacets) m.set(f.slug, f.appliesTo)
+    return m
+  }, [catalogueFacets])
+  // Facets to show in the palette rail: drop the model-class facet (it's the chip
+  // row), keep only those applicable to the chosen class and that have any terms.
+  const filterRailFacets = React.useMemo(
+    () =>
+      catalogueFacets.filter(
+        (f) => f.slug !== MODEL_CLASS_SLUG && f.terms.length > 0 && facetAppliesTo(f, catalogueClass),
+      ),
+    [catalogueFacets, catalogueClass],
+  )
+  const selectedFilterTokens = React.useMemo(() => new Set(catalogueTerms), [catalogueTerms])
+  const onSetCatalogueClass = (slug: string | null) => {
+    // Drop selected terms for class-specific facets that no longer apply.
+    const nextTerms = catalogueTerms.filter((tok) => {
+      const appliesTo = appliesToBySlug.get(tok.slice(0, tok.indexOf(':')))
+      const scoped = appliesTo && appliesTo.length > 0
+      return !scoped ? true : slug ? appliesTo!.includes(slug) : false
+    })
+    setCatalogueFilter({ modelClass: slug, terms: nextTerms })
+  }
+  const onToggleFilterTerm = (token: string) => {
+    const next = catalogueTerms.includes(token)
+      ? catalogueTerms.filter((t) => t !== token)
+      : [...catalogueTerms, token]
+    setCatalogueFilter({ terms: next })
+  }
 
   // First-visit onboarding lives in a single effect further down (once the scene
   // is ready so the palette/toolbar targets are painted): artists building a
@@ -866,15 +907,62 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 <div className="tb-searchbar">
                   <Search size={14} />
                   <input
-                    placeholder="Search terrain…"
+                    placeholder="Search models…"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
                 </div>
+
+                {/* Model class — the primary axis. Switching re-queries the palette. */}
+                <div className="tb-class-row">
+                  {[{ slug: null as string | null, label: 'All' }, ...MODEL_CLASSES].map((c) => {
+                    const active = catalogueClass === c.slug || (c.slug === null && !catalogueClass)
+                    return (
+                      <button
+                        key={c.slug ?? 'all'}
+                        className={`tb-class ${active ? 'is-active' : ''}`}
+                        onClick={() => onSetCatalogueClass(c.slug)}
+                        disabled={catalogueLoading}
+                      >
+                        {c.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {filterRailFacets.length > 0 && (
+                  <div className="tb-filter">
+                    <button className="tb-filter-toggle" onClick={() => setShowFilters((v) => !v)}>
+                      <SlidersHorizontal size={13} />
+                      Filters
+                      {catalogueTerms.length > 0 && <span className="tb-filter-count">{catalogueTerms.length}</span>}
+                      <ChevronDown size={13} className={`tb-chev ${showFilters ? 'is-open' : ''}`} />
+                    </button>
+                    {catalogueTerms.length > 0 && (
+                      <button className="tb-filter-clear" onClick={() => setCatalogueFilter({ terms: [] })}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {showFilters && filterRailFacets.length > 0 && (
+                  <div className="tb-filter-rail">
+                    <FacetRail
+                      facets={filterRailFacets}
+                      selected={selectedFilterTokens}
+                      onToggle={onToggleFilterTerm}
+                      loading={catalogueLoading}
+                    />
+                  </div>
+                )}
+
                 <div className="tb-palette-scroll">
                   {paletteGroups.map(([cat, items]) => (
                     <div key={cat} className="tb-palette-section">
-                      <div className="tb-palette-cat">{cat === 'Elevation' ? 'Elevation / Hills' : cat}</div>
+                      <div className="tb-palette-cat">
+                        {cat === 'Elevation' ? 'Elevation / Hills' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      </div>
                       <div className="tb-palette-grid">
                         {items.map((a) => (
                           <button
@@ -896,7 +984,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                       </div>
                     </div>
                   ))}
-                  {filtered.length === 0 && <div className="tb-small" style={{ padding: 8 }}>No terrain matches.</div>}
+                  {filtered.length === 0 && (
+                    <div className="tb-small" style={{ padding: 8 }}>
+                      {catalogueLoading ? 'Loading…' : 'No models match your filters.'}
+                    </div>
+                  )}
                 </div>
               </>
             ) : (

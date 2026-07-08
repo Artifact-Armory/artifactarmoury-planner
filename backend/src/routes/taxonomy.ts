@@ -31,13 +31,14 @@ interface FacetNode {
   selectionUi: string;
   required: boolean;
   maxTerms: number | null;
+  appliesTo: string[] | null;
   terms: TermNode[];
 }
 
 /** Load active facets + terms and assemble the per-facet trees. */
 async function loadFacetTrees(): Promise<FacetNode[]> {
   const facetRes = await db.query(
-    `SELECT id, slug, name, description, selection_ui, is_required, max_terms
+    `SELECT id, slug, name, description, selection_ui, is_required, max_terms, applies_to
        FROM facets WHERE is_active = true ORDER BY display_order, name`,
   );
   const termRes = await db.query(
@@ -79,6 +80,7 @@ async function loadFacetTrees(): Promise<FacetNode[]> {
     selectionUi: f.selection_ui,
     required: f.is_required,
     maxTerms: f.max_terms ?? null,
+    appliesTo: f.applies_to ?? null,
     terms: childrenByFacet.get(f.id) ?? [],
   }));
 }

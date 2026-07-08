@@ -20,7 +20,31 @@ export interface TaxFacet {
   selectionUi: 'tree' | 'chips' | 'grouped' | 'flat'
   required: boolean
   maxTerms: number | null
+  /** Model-class slugs this facet applies to; null/empty = universal (all classes). */
+  appliesTo: string[] | null
   terms: TaxTerm[]
+}
+
+/** The top-level model classes (slugs match the `model-class` facet terms). */
+export const MODEL_CLASS_SLUG = 'model-class'
+export const MODEL_CLASSES = [
+  { slug: 'terrain', label: 'Terrain' },
+  { slug: 'vehicles', label: 'Vehicles' },
+  { slug: 'characters', label: 'Characters & Units' },
+] as const
+export type ModelClassSlug = (typeof MODEL_CLASSES)[number]['slug']
+
+/**
+ * Whether a facet is relevant to a given model class. A facet with no `appliesTo`
+ * (null/empty) is universal. When no class is selected (`classSlug` null), only
+ * universal facets and the `model-class` facet itself are considered applicable.
+ */
+export function facetAppliesTo(facet: TaxFacet, classSlug: string | null): boolean {
+  if (facet.slug === MODEL_CLASS_SLUG) return true
+  const scoped = facet.appliesTo && facet.appliesTo.length > 0
+  if (!scoped) return true
+  if (!classSlug) return false
+  return facet.appliesTo!.includes(classSlug)
 }
 
 /** A model's tags come back grouped-friendly from GET /api/models/:id. */

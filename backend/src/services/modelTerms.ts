@@ -118,19 +118,42 @@ export async function setModelTerms(modelId: string, tokens: unknown): Promise<R
   return resolved;
 }
 
-/** Throw if any required facet has no tag on this model (publish guardrail). */
+/**
+ * Throw if any required facet that APPLIES to the model's class has no tag
+ * (publish guardrail). Required-ness is class-conditional: a Vehicle must tag
+ * `vehicle-type`, not `terrain-type`. A facet with a NULL/empty `applies_to` is
+ * universal and always required if `is_required`. `model-class` itself is
+ * universal + required, so a model with no class term is caught here too.
+ */
 export async function assertRequiredTermsPresent(modelId: string): Promise<void> {
+  // The model's chosen class slug (path of its model-class term), if any.
+  const classRes = await db.query(
+    `SELECT t.path
+       FROM model_terms mt
+       JOIN terms t ON t.id = mt.term_id
+       JOIN facets f ON f.id = t.facet_id
+      WHERE mt.model_id = $1 AND f.slug = 'model-class' AND t.is_active = true
+      LIMIT 1`,
+    [modelId],
+  );
+  const classSlug: string | null = classRes.rows[0]?.path ?? null;
+
   const result = await db.query(
     `SELECT f.name
        FROM facets f
       WHERE f.is_active = true AND f.is_required = true
+        AND (
+          f.applies_to IS NULL
+          OR cardinality(f.applies_to) = 0
+          OR ($2::text IS NOT NULL AND f.applies_to && ARRAY[$2::text])
+        )
         AND NOT EXISTS (
           SELECT 1 FROM model_terms mt
           JOIN terms t ON t.id = mt.term_id
           WHERE mt.model_id = $1 AND t.facet_id = f.id
         )
       ORDER BY f.display_order`,
-    [modelId],
+    [modelId, classSlug],
   );
   if (result.rows.length > 0) {
     throw new ValidationError(
