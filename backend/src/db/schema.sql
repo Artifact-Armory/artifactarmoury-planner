@@ -641,20 +641,9 @@ LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
 WHERE m.status = 'published' AND m.visibility = 'public'
 GROUP BY m.id, u.artist_name, u.artist_url;
 
--- Artist earnings summary
-CREATE VIEW artist_earnings AS
-SELECT 
-    u.id as artist_id,
-    u.artist_name,
-    COUNT(DISTINCT oi.id) as total_sales,
-    SUM(oi.artist_commission_amount) as total_earnings,
-    SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END) as paid_earnings,
-    SUM(CASE WHEN p.status = 'pending' THEN p.amount ELSE 0 END) as pending_earnings
-FROM users u
-LEFT JOIN order_items oi ON u.id = oi.artist_id
-LEFT JOIN payments p ON oi.id = p.order_item_id
-WHERE u.role = 'artist'
-GROUP BY u.id, u.artist_name;
+-- (Removed the legacy `artist_earnings` summary VIEW — it was built on the dead
+--  `payments` table and is superseded by the artist_earnings ledger TABLE above,
+--  which migration 021 drops the view to make room for.)
 
 -- ============================================================================
 -- SEED DATA (Initial Admin)

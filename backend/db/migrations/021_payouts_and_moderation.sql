@@ -45,6 +45,12 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS download_consent_at TIMESTAMP;
 -- ARTIST EARNINGS LEDGER
 -- ============================================================================
 
+-- `artist_earnings` existed as a legacy summary VIEW (migration 001, built on the
+-- now-dead `payments` table and queried by nothing). Drop it so the name is free for
+-- the real ledger table below — otherwise CREATE TABLE IF NOT EXISTS silently no-ops
+-- and CREATE INDEX fails ("cannot create index on a view").
+DROP VIEW IF EXISTS artist_earnings CASCADE;
+
 -- One row per order_item that belongs to an artist. Accrued on payment success,
 -- held (pending) until `available_at`, then cleared and eventually paid.
 --   pending  — inside the 21-day hold, not yet payable
