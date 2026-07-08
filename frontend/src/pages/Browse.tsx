@@ -13,6 +13,7 @@ import {
   facetAppliesTo,
   MODEL_CLASSES,
   MODEL_CLASS_SLUG,
+  type TaxFacet,
 } from '../api/endpoints/taxonomy'
 import { SearchFilters } from '../api/types'
 import TrademarkDisclaimer, { mentionsTrademark } from '../components/legal/TrademarkDisclaimer'
@@ -144,12 +145,17 @@ const Browse: React.FC = () => {
     return m
   }, [tree])
 
-  const countedFacets = facets?.filter((f) => f.terms.length) ?? []
   // Show the model-class facet as the segmented chips above (not in the rail), and
   // hide facets that don't apply to the chosen class.
-  const railFacets = (countedFacets.length ? countedFacets : tree ?? []).filter(
-    (f) => f.slug !== MODEL_CLASS_SLUG && facetAppliesTo(f, selectedClass),
-  )
+  const scopeFacets = (list: TaxFacet[]): TaxFacet[] =>
+    list.filter((f) => f.slug !== MODEL_CLASS_SLUG && facetAppliesTo(f, selectedClass))
+  const scopedCounted = scopeFacets(facets?.filter((f) => f.terms.length) ?? [])
+  // Prefer the counted rail (zero-count terms pruned) once real facets carry counts;
+  // otherwise fall back to the full tree so filters are usable on an untagged
+  // catalogue (where only the backfilled model-class facet has any counts). Apply
+  // the class scoping BEFORE this fallback check, or a lone model-class count would
+  // wrongly suppress the tree fallback and leave the rail empty.
+  const railFacets = scopedCounted.length ? scopedCounted : scopeFacets(tree ?? [])
 
   const models = data?.models ?? []
   const pagination = data?.pagination

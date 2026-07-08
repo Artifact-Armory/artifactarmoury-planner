@@ -24,6 +24,23 @@ function buildCatalogueTerms(modelClass: string | null, terms: string[]): string
   return tokens.length ? tokens.join(',') : undefined
 }
 
+/**
+ * Facet tree for the palette filter rail. Prefer live counts (zero-count terms
+ * pruned) once real facets carry counts; if only the backfilled model-class facet
+ * has any counts (an untagged catalogue), fall back to the full tree so the filters
+ * are still usable.
+ */
+async function loadCatalogueFacets(termsStr: string | undefined): Promise<TaxFacet[]> {
+  try {
+    const counted = await taxonomyApi.getFacetsWithCounts({ terms: termsStr, hideZero: true })
+    const realCounts = counted.filter((f) => f.terms.length && f.slug !== MODEL_CLASS_SLUG)
+    if (realCounts.length > 0) return counted
+    return await taxonomyApi.getTree()
+  } catch {
+    return []
+  }
+}
+
 export type SnapBaseline = 'snap' | 'free'
 
 /** A bundle as shown in the palette: a group tile that expands into its models. */
@@ -457,14 +474,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       // lay out pieces before release. Empty for guests/customers (endpoint 403s).
       set({ myModels: await loadMyModelsForPlanner() })
 
-      // Facet tree with live counts for the palette filter rail (zero-count terms
-      // pruned so the narrow palette only lists terms that have models).
-      try {
-        const facets = await taxonomyApi.getFacetsWithCounts({ hideZero: true })
-        set({ catalogueFacets: facets })
-      } catch {
-        /* filters are optional — palette still works with class + text search */
-      }
+      // Facet tree for the palette filter rail (counts when tagged, tree otherwise).
+      set({ catalogueFacets: await loadCatalogueFacets(undefined) })
     },
 
     // Re-query the catalogue for a class / facet selection. Only the catalogue
@@ -482,12 +493,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       } catch {
         /* keep the previous catalogue on error */
       }
-      try {
-        const facets = await taxonomyApi.getFacetsWithCounts({ terms: termsStr, hideZero: true })
-        set({ catalogueFacets: facets })
-      } catch {
-        /* keep the previous facet counts */
-      }
+      set({ catalogueFacets: await loadCatalogueFacets(termsStr) })
       set({ catalogueLoading: false })
     },
 
