@@ -25,7 +25,9 @@ import {
   Download,
   Handshake,
   Wallet,
-  ShieldAlert
+  ShieldAlert,
+  MessageSquare,
+  Megaphone
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
@@ -204,6 +206,17 @@ const DashboardLayout: React.FC = () => {
                 Wishlist
               </NavLink>
               <NavLink
+                to="/dashboard/messages"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/dashboard/messages')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <MessageSquare size={18} className="mr-3" />
+                Messages
+              </NavLink>
+              <NavLink
                 to="/dashboard/tables"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/tables')
@@ -351,6 +364,17 @@ const DashboardLayout: React.FC = () => {
                 Reports
               </NavLink>
               <NavLink
+                to="/dashboard/messages"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/dashboard/messages')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <MessageSquare size={18} className="mr-3" />
+                Messages
+              </NavLink>
+              <NavLink
                 to="/artist/settings"
                 data-tour="nav-settings"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
@@ -456,6 +480,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <ShieldAlert size={18} className="mr-3" />
                 Moderation
+              </NavLink>
+              <NavLink
+                to="/admin/messages"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/admin/messages')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <Megaphone size={18} className="mr-3" />
+                Site Messages
               </NavLink>
               <NavLink
                 to="/admin/reports"

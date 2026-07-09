@@ -46,6 +46,7 @@ import UserProfile from './pages/dashboard/UserProfile';
 import MyTables from './pages/dashboard/MyTables';
 import Following from './pages/dashboard/Following';
 import EditTable from './pages/dashboard/EditTable';
+import Messages from './pages/dashboard/Messages';
 
 // Artist Pages
 import ArtistDashboard from './pages/artist/ArtistDashboard';
@@ -80,6 +81,7 @@ import AdminTags from './pages/admin/AdminTags';
 import AdminArtistApplications from './pages/admin/AdminArtistApplications';
 import AdminReports from './pages/admin/AdminReports';
 import AdminModeration from './pages/admin/AdminModeration';
+import AdminMessages from './pages/admin/AdminMessages';
 
 // Planner
 import Planner from './pages/Planner';
@@ -219,6 +221,7 @@ function App() {
               <Route path="purchases" element={<PurchaseHistory />} />
               <Route path="wishlist" element={<Wishlist />} />
               <Route path="following" element={<Following />} />
+              <Route path="messages" element={<Messages />} />
               <Route path="profile" element={<UserProfile />} />
               <Route path="tables" element={<MyTables />} />
               <Route path="tables/new" element={<EditTable />} />
@@ -285,6 +288,7 @@ function App() {
               <Route path="tags" element={<AdminTags />} />
               <Route path="artist-applications" element={<AdminArtistApplications />} />
               <Route path="moderation" element={<AdminModeration />} />
+              <Route path="messages" element={<AdminMessages />} />
               <Route path="reports" element={<AdminReports />} />
             </Route>
 

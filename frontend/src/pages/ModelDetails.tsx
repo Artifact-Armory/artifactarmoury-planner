@@ -2,10 +2,11 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
+import { messagesApi } from '../api/endpoints/messages'
 import type { TerrainModel } from '../api/types'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
@@ -149,6 +150,24 @@ const ModelDetails: React.FC = () => {
 
   const [downloading, setDownloading] = React.useState(false)
   const [downloadError, setDownloadError] = React.useState<string | null>(null)
+  const [messageBusy, setMessageBusy] = React.useState(false)
+
+  const messageArtist = async () => {
+    if (!model?.artistId) return
+    if (!isAuthenticated) {
+      navigate('/login')
+      return
+    }
+    setMessageBusy(true)
+    try {
+      const conversationId = await messagesApi.start({ recipientId: model.artistId })
+      navigate(`/dashboard/messages?c=${conversationId}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not start a conversation')
+    } finally {
+      setMessageBusy(false)
+    }
+  }
 
   const handleAddToCart = () => {
     if (!model) return
@@ -350,6 +369,17 @@ const ModelDetails: React.FC = () => {
                 model.artistName
               )}
             </p>
+
+            {model.artistId && currentUser?.id !== model.artistId && (
+              <button
+                onClick={messageArtist}
+                disabled={messageBusy}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
+              >
+                <MessageSquare size={16} />
+                Message artist
+              </button>
+            )}
 
             <div className="mt-4 flex items-center gap-4">
               <span className="text-3xl font-bold text-gray-900">{formatPrice(model.basePrice)}</span>

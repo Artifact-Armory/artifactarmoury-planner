@@ -5,6 +5,7 @@ import { useCartStore } from '../../store/cartStore';
 import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Heart, Package, UserPlus, Download } from 'lucide-react';
 import { authApi } from '../../api/endpoints/auth';
 import NotificationBell from '../notifications/NotificationBell';
+import MessagesIndicator from '../messages/MessagesIndicator';
 
 const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -213,6 +214,9 @@ const Header: React.FC = () => {
                 </span>
               )}
             </button>
+
+            {/* Messages */}
+            {isAuthenticated && <MessagesIndicator />}
 
             {/* Notifications */}
             {isAuthenticated && <NotificationBell />}

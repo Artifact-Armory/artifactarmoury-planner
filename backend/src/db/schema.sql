@@ -500,6 +500,44 @@ CREATE TABLE model_report_attachments (
 CREATE INDEX idx_report_attachments_report ON model_report_attachments(report_id);
 
 -- ============================================================================
+-- MESSAGING (migration 022): direct buyer<->artist threads + site/system messages
+-- ============================================================================
+
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kind VARCHAR(20) NOT NULL DEFAULT 'direct' CHECK (kind IN ('direct', 'system')),
+    subject VARCHAR(255),
+    pair_key VARCHAR(80),               -- canonical "minId:maxId" for direct threads; NULL for system
+    allow_replies BOOLEAN NOT NULL DEFAULT true,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    last_message_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_message_preview TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_conversations_pair ON conversations(pair_key) WHERE pair_key IS NOT NULL;
+CREATE INDEX idx_conversations_last_message ON conversations(last_message_at DESC);
+
+CREATE TABLE conversation_participants (
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_at TIMESTAMP NOT NULL DEFAULT to_timestamp(0),
+    archived BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, user_id)
+);
+CREATE INDEX idx_participants_user ON conversation_participants(user_id);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,   -- NULL = site/system
+    is_system BOOLEAN NOT NULL DEFAULT false,
+    body TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at);
+
+-- ============================================================================
 -- REVIEWS
 -- ============================================================================
 

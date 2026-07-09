@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { UserPlus, UserCheck } from 'lucide-react'
+import { UserPlus, UserCheck, MessageSquare } from 'lucide-react'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import ModelGrid from '../components/models/ModelGrid'
 import { artistsApi } from '../api/endpoints/artists'
+import { messagesApi } from '../api/endpoints/messages'
 import { useAuthStore } from '../store/authStore'
 
 const sortOptions = [
@@ -26,6 +27,7 @@ const ArtistProfile: React.FC = () => {
   const [following, setFollowing] = useState(false)
   const [followerCount, setFollowerCount] = useState(0)
   const [followBusy, setFollowBusy] = useState(false)
+  const [messageBusy, setMessageBusy] = useState(false)
 
   const artistQuery = useQuery({
     queryKey: ['artist-profile', id],
@@ -73,6 +75,23 @@ const ArtistProfile: React.FC = () => {
       toast.error('Could not update follow')
     } finally {
       setFollowBusy(false)
+    }
+  }
+
+  const startConversation = async () => {
+    if (!id) return
+    if (!isAuthenticated) {
+      navigate('/login')
+      return
+    }
+    setMessageBusy(true)
+    try {
+      const conversationId = await messagesApi.start({ recipientId: id })
+      navigate(`/dashboard/messages?c=${conversationId}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not start a conversation')
+    } finally {
+      setMessageBusy(false)
     }
   }
 
@@ -126,18 +145,28 @@ const ArtistProfile: React.FC = () => {
             <p className="mt-2 text-sm text-gray-500">Joined {artist.createdAt ? new Date(artist.createdAt).toLocaleDateString() : 'recently'}</p>
             {artist.bio ? <p className="mt-4 text-sm text-gray-700">{artist.bio}</p> : null}
             {!isOwnProfile && (
-              <button
-                onClick={toggleFollow}
-                disabled={followBusy}
-                className={`mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-60 ${
-                  following
-                    ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                {following ? <UserCheck size={16} /> : <UserPlus size={16} />}
-                {following ? 'Following' : 'Follow'}
-              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={toggleFollow}
+                  disabled={followBusy}
+                  className={`inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-60 ${
+                    following
+                      ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  {following ? <UserCheck size={16} /> : <UserPlus size={16} />}
+                  {following ? 'Following' : 'Follow'}
+                </button>
+                <button
+                  onClick={startConversation}
+                  disabled={messageBusy}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-300 px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <MessageSquare size={16} />
+                  Message
+                </button>
+              </div>
             )}
           </div>
           <div className="flex gap-8 text-sm text-gray-600">

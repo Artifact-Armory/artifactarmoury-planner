@@ -12,6 +12,7 @@ import { deleteFromStorage } from '../services/storage';
 import { reverseEarningsForModel } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
+import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { publicUrl } from '../services/r2';
 
@@ -1091,6 +1092,87 @@ router.get('/activity',
         pages: Math.ceil(totalCount / Number(limit))
       }
     });
+  })
+);
+
+// ============================================================================
+// SITE MESSAGING (migration 022): broadcasts + one-to-one support DMs
+// ============================================================================
+
+// Broadcast an announcement to an audience. One-way (recipients can't reply).
+router.post('/messages/broadcast',
+  asyncHandler(async (req, res) => {
+    const adminId = (req as any).userId as string;
+    const { subject, body, audience } = req.body ?? {};
+    if (!subject || typeof subject !== 'string' || !subject.trim()) {
+      throw new ValidationError('A subject is required');
+    }
+    if (!body || typeof body !== 'string' || !body.trim()) {
+      throw new ValidationError('A message body is required');
+    }
+    const aud = ['all', 'customers', 'artists'].includes(audience) ? audience : 'all';
+    const result = await createBroadcast({
+      subject: subject.trim().slice(0, 255),
+      body: body.trim().slice(0, 5000),
+      createdBy: adminId,
+      audience: aud,
+    });
+    logger.info('Admin broadcast sent', { adminId, audience: aud, recipients: result.recipients });
+    res.status(201).json({ message: 'Broadcast sent', ...result });
+  })
+);
+
+// Send a one-to-one support message to a user (by id or email). Repliable.
+router.post('/messages/dm',
+  asyncHandler(async (req, res) => {
+    const adminId = (req as any).userId as string;
+    const { userId, email, body, subject } = req.body ?? {};
+    if (!body || typeof body !== 'string' || !body.trim()) {
+      throw new ValidationError('A message body is required');
+    }
+    let targetId: string | undefined = typeof userId === 'string' ? userId : undefined;
+    if (!targetId && typeof email === 'string' && email.trim()) {
+      const found = await db.query('SELECT id FROM users WHERE lower(email) = lower($1)', [email.trim()]);
+      if (found.rows.length === 0) throw new NotFoundError('User');
+      targetId = found.rows[0].id;
+    }
+    if (!targetId) throw new ValidationError('A target userId or email is required');
+
+    const conversationId = await sendSupportMessage(
+      targetId,
+      body.trim().slice(0, 5000),
+      adminId,
+      typeof subject === 'string' ? subject.trim().slice(0, 255) : undefined,
+    );
+    logger.info('Admin support DM sent', { adminId, targetId });
+    res.status(201).json({ message: 'Message sent', conversationId });
+  })
+);
+
+// List support threads (repliable system conversations) for the admin desk, newest
+// activity first, flagging those whose last message came from the user (needs a reply).
+router.get('/messages/threads',
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const result = await db.query(
+      `SELECT c.id, c.subject, c.last_message_at, c.last_message_preview,
+              u.id AS user_id, u.email AS user_email,
+              COALESCE(NULLIF(u.artist_name, ''), u.display_name) AS user_name,
+              lm.sender_id AS last_sender_id,
+              (lm.sender_id IS NOT NULL) AS awaiting_reply
+       FROM conversations c
+       JOIN conversation_participants p ON p.conversation_id = c.id
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN LATERAL (
+         SELECT sender_id FROM messages m
+         WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1
+       ) lm ON true
+       WHERE c.kind = 'system' AND c.allow_replies = true
+       ORDER BY c.last_message_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+    res.json({ threads: result.rows });
   })
 );
 

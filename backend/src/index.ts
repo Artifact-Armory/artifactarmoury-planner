@@ -36,6 +36,7 @@ import uploadsRoutes from './routes/uploads';
 import webhookRoutes from './routes/webhooks';
 import reportsRoutes from './routes/reports';
 import payoutsRoutes from './routes/payouts';
+import messagesRoutes from './routes/messages';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 
@@ -120,6 +121,7 @@ app.use(`${API_PREFIX}/admin`, adminRoutes);
 app.use(`${API_PREFIX}/uploads`, uploadsRoutes);
 app.use(`${API_PREFIX}/reports`, reportsRoutes);
 app.use(`${API_PREFIX}/payouts`, payoutsRoutes);
+app.use(`${API_PREFIX}/messages`, messagesRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {
