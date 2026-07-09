@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquare, Send, ShieldCheck, User as UserIcon } from 'lucide-react'
+import { MessageSquare, Send, ShieldCheck, User as UserIcon, Flag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { messagesApi, type ChatMessage } from '../../api/endpoints/messages'
 import { useAuthStore } from '../../store/authStore'
 import { containsAbuse, ABUSE_BLOCK_MESSAGE } from '../../utils/profanity'
+import ReportConversationModal from '../../components/messages/ReportConversationModal'
 
 const SITE_NAME = 'Artifact Armoury'
 
@@ -25,6 +26,7 @@ const Messages: React.FC = () => {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data: conversations = [], isLoading: loadingList } = useQuery({
@@ -168,6 +170,16 @@ const Messages: React.FC = () => {
                     conv?.otherRole === 'artist' && <p className="text-xs text-gray-400">Artist</p>
                   )}
                 </div>
+                {!isSystem && (
+                  <button
+                    onClick={() => setReportOpen(true)}
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:border-red-200 hover:text-red-600"
+                    title="Report this conversation"
+                  >
+                    <Flag size={14} />
+                    Report
+                  </button>
+                )}
               </header>
 
               <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
@@ -236,6 +248,14 @@ const Messages: React.FC = () => {
           )}
         </section>
       </div>
+
+      {reportOpen && selectedId && conv && !isSystem && (
+        <ReportConversationModal
+          conversationId={selectedId}
+          otherName={conv.otherName || 'this user'}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </div>
   )
 }

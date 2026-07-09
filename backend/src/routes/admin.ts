@@ -1177,6 +1177,142 @@ router.get('/messages/threads',
 );
 
 // ============================================================================
+// CONVERSATION REPORTS (migration 023): review reported message threads
+// ============================================================================
+
+// Queue: open/under-review first, newest first. Optional ?status= filter.
+router.get('/conversation-reports',
+  asyncHandler(async (req, res) => {
+    const { status } = req.query;
+    const params: any[] = [];
+    let where = '';
+    if (status && typeof status === 'string') {
+      params.push(status);
+      where = `WHERE r.status = $1`;
+    }
+    const result = await db.query(
+      `SELECT r.id, r.reason, r.status, r.detail, r.created_at, r.resolved_at,
+              r.resolution_action, r.resolution_summary, r.conversation_id,
+              r.reporter_id, COALESCE(NULLIF(rep.artist_name, ''), rep.display_name) AS reporter_name,
+              r.reported_user_id, COALESCE(NULLIF(ru.artist_name, ''), ru.display_name) AS reported_user_name,
+              ru.account_status AS reported_account_status, ru.shadow_banned AS reported_shadow_banned,
+              jsonb_array_length(r.snapshot -> 'messages') AS message_count
+       FROM conversation_reports r
+       LEFT JOIN users rep ON rep.id = r.reporter_id
+       LEFT JOIN users ru ON ru.id = r.reported_user_id
+       ${where}
+       ORDER BY (r.status IN ('open', 'under_review')) DESC, r.created_at DESC
+       LIMIT 200`,
+      params,
+    );
+    const openCountResult = await db.query(
+      `SELECT COUNT(*) AS c FROM conversation_reports WHERE status IN ('open', 'under_review')`,
+    );
+    res.json({ reports: result.rows, openCount: parseInt(openCountResult.rows[0]?.c ?? '0', 10) || 0 });
+  })
+);
+
+// One report with its captured snapshot.
+router.get('/conversation-reports/:id',
+  asyncHandler(async (req, res) => {
+    const result = await db.query(
+      `SELECT r.*,
+              COALESCE(NULLIF(rep.artist_name, ''), rep.display_name) AS reporter_name,
+              rep.email AS reporter_email,
+              COALESCE(NULLIF(ru.artist_name, ''), ru.display_name) AS reported_user_name,
+              ru.email AS reported_user_email,
+              ru.account_status AS reported_account_status,
+              ru.shadow_banned AS reported_shadow_banned,
+              rb.display_name AS resolved_by_name
+       FROM conversation_reports r
+       LEFT JOIN users rep ON rep.id = r.reporter_id
+       LEFT JOIN users ru ON ru.id = r.reported_user_id
+       LEFT JOIN users rb ON rb.id = r.resolved_by
+       WHERE r.id = $1`,
+      [req.params.id],
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Report');
+
+    // Mark an unreviewed report as under_review when an admin opens it.
+    if (result.rows[0].status === 'open') {
+      await db.query(
+        `UPDATE conversation_reports SET status = 'under_review', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [req.params.id],
+      );
+      result.rows[0].status = 'under_review';
+    }
+    res.json({ report: result.rows[0] });
+  })
+);
+
+// Resolve: dismiss, or uphold and act on the reported user.
+router.post('/conversation-reports/:id/resolve',
+  asyncHandler(async (req, res) => {
+    const adminId = (req as any).userId as string;
+    const { id } = req.params;
+    const { action, summary } = req.body ?? {};
+
+    const VALID = ['dismiss', 'warn_user', 'shadow_ban_user', 'suspend_user', 'ban_user'];
+    if (!action || !VALID.includes(action)) throw new ValidationError('A valid action is required');
+    if (!summary || typeof summary !== 'string' || !summary.trim()) {
+      throw new ValidationError('A resolution summary is required');
+    }
+
+    const r = await db.query(`SELECT * FROM conversation_reports WHERE id = $1`, [id]);
+    if (r.rows.length === 0) throw new NotFoundError('Report');
+    const report = r.rows[0];
+    const target = report.reported_user_id;
+
+    const notes: string[] = [];
+    switch (action) {
+      case 'shadow_ban_user':
+        if (target) { await db.query(`UPDATE users SET shadow_banned = true WHERE id = $1`, [target]); notes.push('shadow-banned reported user'); }
+        break;
+      case 'suspend_user':
+        if (target) { await db.query(`UPDATE users SET account_status = 'suspended' WHERE id = $1`, [target]); notes.push('suspended reported user'); }
+        break;
+      case 'ban_user':
+        if (target) { await db.query(`UPDATE users SET account_status = 'banned' WHERE id = $1`, [target]); notes.push('banned reported user'); }
+        break;
+      case 'warn_user':
+        if (target) {
+          createNotification({
+            userId: target,
+            type: 'moderation_warning',
+            title: 'Warning about your conduct',
+            body: summary.trim(),
+            link: '/dashboard/messages',
+          });
+          notes.push('warned reported user');
+        }
+        break;
+    }
+
+    const newStatus = action === 'dismiss' ? 'resolved_dismissed' : 'resolved_upheld';
+    await db.query(
+      `UPDATE conversation_reports
+       SET status = $1, resolution_action = $2, resolution_summary = $3,
+           resolved_by = $4, resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [newStatus, action, summary.trim(), adminId, id],
+    );
+
+    if (report.reporter_id) {
+      createNotification({
+        userId: report.reporter_id,
+        type: 'report_resolved',
+        title: 'Update on the conversation you reported',
+        body: summary.trim(),
+        link: '/dashboard/messages',
+      });
+    }
+
+    logger.warn('Conversation report resolved', { adminId, reportId: id, action, notes });
+    res.json({ message: 'Report resolved', action, status: newStatus, notes });
+  })
+);
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 

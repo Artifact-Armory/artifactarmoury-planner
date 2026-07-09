@@ -537,6 +537,36 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at);
 
+-- Conversation reports (migration 023): a participant reports a thread; a JSONB
+-- snapshot captures the messages at report time for admin review.
+CREATE TABLE conversation_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversation_id  UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    reporter_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    reported_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    reason VARCHAR(30) NOT NULL CHECK (reason IN (
+        'harassment', 'threats', 'hate_speech', 'spam', 'scam', 'other'
+    )),
+    detail TEXT,
+    snapshot JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN (
+        'open', 'under_review', 'resolved_upheld', 'resolved_dismissed'
+    )),
+    resolution_action  VARCHAR(30),
+    resolution_summary TEXT,
+    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_conv_reports_status ON conversation_reports(status, created_at DESC);
+CREATE INDEX idx_conv_reports_reporter ON conversation_reports(reporter_id);
+CREATE INDEX idx_conv_reports_reported ON conversation_reports(reported_user_id);
+CREATE INDEX idx_conv_reports_conversation ON conversation_reports(conversation_id);
+CREATE UNIQUE INDEX idx_conv_reports_reporter_conv_open
+    ON conversation_reports(reporter_id, conversation_id)
+    WHERE status IN ('open', 'under_review');
+
 -- ============================================================================
 -- REVIEWS
 -- ============================================================================

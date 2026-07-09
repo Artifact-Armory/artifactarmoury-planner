@@ -116,6 +116,10 @@ export const messagesApi = {
     await apiClient.post(`/api/messages/${id}/read`)
   },
 
+  report: async (id: string, payload: { reason: string; detail?: string }): Promise<void> => {
+    await apiClient.post(`/api/messages/${id}/report`, payload)
+  },
+
   archive: async (id: string): Promise<void> => {
     await apiClient.post(`/api/messages/${id}/archive`)
   },

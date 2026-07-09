@@ -82,6 +82,7 @@ import AdminArtistApplications from './pages/admin/AdminArtistApplications';
 import AdminReports from './pages/admin/AdminReports';
 import AdminModeration from './pages/admin/AdminModeration';
 import AdminMessages from './pages/admin/AdminMessages';
+import AdminMessageReports from './pages/admin/AdminMessageReports';
 
 // Planner
 import Planner from './pages/Planner';
@@ -289,6 +290,7 @@ function App() {
               <Route path="artist-applications" element={<AdminArtistApplications />} />
               <Route path="moderation" element={<AdminModeration />} />
               <Route path="messages" element={<AdminMessages />} />
+              <Route path="message-reports" element={<AdminMessageReports />} />
               <Route path="reports" element={<AdminReports />} />
             </Route>
 

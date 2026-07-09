@@ -323,4 +323,106 @@ router.post(
   }),
 );
 
+// ============================================================================
+// REPORT A CONVERSATION  (captures a snapshot for admin review)
+// ============================================================================
+
+const REPORT_REASONS = new Set(['harassment', 'threats', 'hate_speech', 'spam', 'scam', 'other']);
+
+router.post(
+  '/:id/report',
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const userId = req.userId!;
+    const conversationId = req.params.id;
+    const { reason, detail } = req.body ?? {};
+
+    if (!reason || !REPORT_REASONS.has(reason)) {
+      throw new ValidationError('A valid reason is required');
+    }
+
+    const convResult = await db.query(`SELECT id, kind FROM conversations WHERE id = $1`, [conversationId]);
+    if (convResult.rows.length === 0) throw new NotFoundError('Conversation');
+    const conv = convResult.rows[0];
+    if (conv.kind !== 'direct') {
+      throw new ValidationError('Only direct conversations can be reported');
+    }
+
+    // Reporter must be a participant.
+    const participant = await db.query(
+      `SELECT 1 FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2`,
+      [conversationId, userId],
+    );
+    if (participant.rows.length === 0) {
+      throw new AuthorizationError('You are not a participant in this conversation');
+    }
+
+    // The other participant is the reported user.
+    const other = await db.query(
+      `SELECT u.id, COALESCE(NULLIF(u.artist_name, ''), u.display_name) AS name
+       FROM conversation_participants p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.conversation_id = $1 AND p.user_id <> $2
+       LIMIT 1`,
+      [conversationId, userId],
+    );
+    const reportedUserId = other.rows[0]?.id ?? null;
+    const reportedUserName = other.rows[0]?.name ?? null;
+
+    const reporterName =
+      (req.user?.artist_name && req.user.artist_name.trim()) || req.user?.display_name || 'A user';
+
+    // Capture the full thread at report time.
+    const msgs = await db.query(
+      `SELECT m.id, m.sender_id, m.is_system, m.body, m.created_at,
+              CASE WHEN m.is_system THEN NULL
+                   ELSE COALESCE(NULLIF(u.artist_name, ''), u.display_name) END AS sender_name
+       FROM messages m
+       LEFT JOIN users u ON u.id = m.sender_id
+       WHERE m.conversation_id = $1
+       ORDER BY m.created_at ASC`,
+      [conversationId],
+    );
+    const snapshot = {
+      capturedAt: new Date().toISOString(),
+      reporterName,
+      reportedUserName,
+      messages: msgs.rows.map((m: any) => ({
+        id: m.id,
+        senderId: m.sender_id,
+        senderName: m.sender_name,
+        isSystem: m.is_system,
+        body: m.body,
+        createdAt: m.created_at,
+      })),
+    };
+
+    try {
+      const inserted = await db.query(
+        `INSERT INTO conversation_reports
+           (conversation_id, reporter_id, reported_user_id, reason, detail, snapshot)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [conversationId, userId, reportedUserId, reason, detail ? String(detail).slice(0, 2000) : null, JSON.stringify(snapshot)],
+      );
+
+      createNotification({
+        userId,
+        type: 'report_received',
+        title: 'Report received',
+        body: 'Thanks — our team will review this conversation.',
+        link: `/dashboard/messages?c=${conversationId}`,
+      });
+
+      logger.warn('Conversation reported', { reportId: inserted.rows[0].id, conversationId, reporterId: userId, reason });
+      res.status(201).json({ message: 'Report submitted', reportId: inserted.rows[0].id });
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        throw new ValidationError('You already have an open report on this conversation');
+      }
+      throw err;
+    }
+  }),
+);
+
 export default router;
