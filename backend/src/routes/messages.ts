@@ -17,6 +17,7 @@ import {
   SITE_SENDER_NAME,
 } from '../services/messaging';
 import { createNotification } from '../services/notifications';
+import { containsAbuse, ABUSE_BLOCK_MESSAGE } from '../services/profanity';
 
 const router = Router();
 
@@ -132,6 +133,7 @@ router.post(
     // Optional opening message.
     if (typeof body === 'string' && body.trim()) {
       const trimmed = body.trim().slice(0, MAX_BODY);
+      if (containsAbuse(trimmed)) throw new ValidationError(ABUSE_BLOCK_MESSAGE);
       await postMessage({ conversationId, senderId: userId, body: trimmed });
       const name = senderDisplayName(req.user);
       const preview = trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
@@ -223,6 +225,11 @@ router.post(
       throw new ValidationError('Message body is required');
     }
     const trimmed = body.trim().slice(0, MAX_BODY);
+
+    // Abuse filter — applies to everyone except admins authoring official/site messages.
+    if (!isAdmin(req) && containsAbuse(trimmed)) {
+      throw new ValidationError(ABUSE_BLOCK_MESSAGE);
+    }
 
     const convResult = await db.query(
       `SELECT id, kind, allow_replies FROM conversations WHERE id = $1`,

@@ -5,6 +5,7 @@ import { MessageSquare, Send, ShieldCheck, User as UserIcon } from 'lucide-react
 import toast from 'react-hot-toast'
 import { messagesApi, type ChatMessage } from '../../api/endpoints/messages'
 import { useAuthStore } from '../../store/authStore'
+import { containsAbuse, ABUSE_BLOCK_MESSAGE } from '../../utils/profanity'
 
 const SITE_NAME = 'Artifact Armoury'
 
@@ -59,6 +60,10 @@ const Messages: React.FC = () => {
 
   const handleSend = async () => {
     if (!selectedId || !draft.trim() || sending) return
+    if (containsAbuse(draft)) {
+      toast.error(ABUSE_BLOCK_MESSAGE)
+      return
+    }
     setSending(true)
     try {
       await messagesApi.send(selectedId, draft.trim())
