@@ -21,7 +21,7 @@ export interface AdminDashboard {
     artist_count: string
     published_models: string
     total_orders: string
-    total_revenue: string | null
+    total_revenue?: string | null
     orders_last_7_days: string
     models_last_7_days: string
   }
@@ -81,6 +81,30 @@ export interface AdminInvite {
   created_by_name: string | null
   used_by_name: string | null
   used_by_email: string | null
+}
+
+export interface AnalyticsOverview {
+  periodDays: number
+  totals: {
+    totalRevenue: number
+    siteRevenue: number
+    paidOrders: number
+    totalOrders: number
+    totalUsers: number
+    totalArtists: number
+    totalCustomers: number
+    totalModels: number
+    publishedModels: number
+    totalViews: number
+    views24h: number
+    views7d: number
+    visitors24h: number
+    visitors7d: number
+    activeUsers24h: number
+    activeUsers30d: number
+  }
+  viewsByHourOfDay: Array<{ hour: number; views: number }>
+  viewsByDay: Array<{ date: string; views: number }>
 }
 
 export const adminApi = {
@@ -145,7 +169,14 @@ export const adminApi = {
     return data
   },
 
-  // -- Analytics ------------------------------------------------------------
+  // -- Analytics (super-admin only) -----------------------------------------
+  getAnalyticsOverview: async (period = 30): Promise<AnalyticsOverview> => {
+    const { data } = await apiClient.get<AnalyticsOverview>(`${BASE}/analytics/overview`, {
+      params: { period },
+    })
+    return data
+  },
+
   getRevenueAnalytics: async (period = 30): Promise<{
     revenueByDay: Array<{ date: string; order_count: string; revenue: string }>
     revenueByCategory: Array<{ category: string; sales_count: string; revenue: string }>

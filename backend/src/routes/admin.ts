@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { authenticate, requireAdmin } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError } from '../middleware/error';
 import crypto from 'crypto';
@@ -58,8 +58,14 @@ router.get('/dashboard',
        LIMIT 10`
     );
 
+    // Platform revenue is owner-only. Regular admins see everything else.
+    const stats = statsResult.rows[0];
+    if (!(req as any).user?.is_super_admin) {
+      delete stats.total_revenue;
+    }
+
     res.json({
-      stats: statsResult.rows[0],
+      stats,
       recentActivity: activityResult.rows,
       flaggedModels: flaggedResult.rows
     });
@@ -904,7 +910,122 @@ router.patch('/orders/:id/fulfillment',
 // ANALYTICS
 // ============================================================================
 
+// Owner-only KPI overview: revenue (gross + platform cut), catalogue/user counts,
+// view & visitor analytics, and a peak-hours histogram. One round-trip.
+router.get('/analytics/overview',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const days = Math.max(1, Math.min(365, Number(req.query.period) || 30));
+
+    const [
+      revenue,
+      counts,
+      views,
+      active,
+      viewsByHour,
+      viewsByDay,
+    ] = await Promise.all([
+      // Gross revenue + platform's cut (total_price minus the artist's share).
+      db.query(`
+        SELECT
+          COALESCE(SUM(o.total), 0) AS total_revenue,
+          COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS site_revenue,
+          COUNT(DISTINCT o.id) AS paid_orders
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.payment_status = 'succeeded'
+      `),
+      // Headline catalogue / user counts (all-time).
+      db.query(`
+        SELECT
+          (SELECT COUNT(*) FROM users) AS total_users,
+          (SELECT COUNT(*) FROM users WHERE role = 'artist') AS total_artists,
+          (SELECT COUNT(*) FROM users WHERE role = 'customer') AS total_customers,
+          (SELECT COUNT(*) FROM models) AS total_models,
+          (SELECT COUNT(*) FROM models WHERE status = 'published') AS published_models,
+          (SELECT COUNT(*) FROM orders) AS total_orders,
+          (SELECT COALESCE(SUM(view_count), 0) FROM models) AS total_views
+      `),
+      // Windowed view + unique-visitor counts (timestamped events).
+      db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS views_24h,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')  AS views_7d,
+          COUNT(DISTINCT COALESCE(session_id, user_id::text))
+            FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS visitors_24h,
+          COUNT(DISTINCT COALESCE(session_id, user_id::text))
+            FILTER (WHERE created_at > NOW() - INTERVAL '7 days')  AS visitors_7d
+        FROM analytics_events
+        WHERE type = 'product_view'
+      `),
+      // Active (logged-in) users by recency of any logged action.
+      db.query(`
+        SELECT
+          COUNT(DISTINCT user_id) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS active_24h,
+          COUNT(DISTINCT user_id) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')  AS active_30d
+        FROM activity_log
+      `),
+      // Peak-times histogram: views bucketed by hour-of-day in UK local time
+      // (Europe/London handles BST/GMT automatically) over the window.
+      db.query(`
+        SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'Europe/London')::int AS hour, COUNT(*) AS views
+        FROM analytics_events
+        WHERE type = 'product_view'
+          AND created_at > NOW() - INTERVAL '${days} days'
+        GROUP BY hour
+        ORDER BY hour
+      `),
+      // Daily view trend over the window (UK-local day boundaries).
+      db.query(`
+        SELECT DATE(created_at AT TIME ZONE 'Europe/London') AS date, COUNT(*) AS views
+        FROM analytics_events
+        WHERE type = 'product_view'
+          AND created_at > NOW() - INTERVAL '${days} days'
+        GROUP BY 1
+        ORDER BY 1
+      `),
+    ]);
+
+    // Fill every hour 0–23 so the chart has no gaps.
+    const hourMap = new Map<number, number>(
+      viewsByHour.rows.map((r: any) => [Number(r.hour), Number(r.views)])
+    );
+    const viewsByHourOfDay = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      views: hourMap.get(h) ?? 0,
+    }));
+
+    res.json({
+      periodDays: days,
+      totals: {
+        totalRevenue: Number(revenue.rows[0].total_revenue),
+        siteRevenue: Number(revenue.rows[0].site_revenue),
+        paidOrders: Number(revenue.rows[0].paid_orders),
+        totalOrders: Number(counts.rows[0].total_orders),
+        totalUsers: Number(counts.rows[0].total_users),
+        totalArtists: Number(counts.rows[0].total_artists),
+        totalCustomers: Number(counts.rows[0].total_customers),
+        totalModels: Number(counts.rows[0].total_models),
+        publishedModels: Number(counts.rows[0].published_models),
+        totalViews: Number(counts.rows[0].total_views),
+        views24h: Number(views.rows[0].views_24h),
+        views7d: Number(views.rows[0].views_7d),
+        visitors24h: Number(views.rows[0].visitors_24h),
+        visitors7d: Number(views.rows[0].visitors_7d),
+        activeUsers24h: Number(active.rows[0].active_24h),
+        activeUsers30d: Number(active.rows[0].active_30d),
+      },
+      viewsByHourOfDay,
+      viewsByDay: viewsByDay.rows.map((r: any) => ({
+        date: r.date,
+        views: Number(r.views),
+      })),
+    });
+  })
+);
+
 router.get('/analytics/revenue',
+  requireSuperAdmin,
   asyncHandler(async (req, res) => {
     const { period = '30' } = req.query;
 
@@ -982,6 +1103,7 @@ router.get('/analytics/revenue',
 );
 
 router.get('/analytics/users',
+  requireSuperAdmin,
   asyncHandler(async (req, res) => {
     const { period = '30' } = req.query;
 

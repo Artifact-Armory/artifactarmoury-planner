@@ -504,17 +504,19 @@ const DashboardLayout: React.FC = () => {
                 <Flag size={18} className="mr-3" />
                 Message Reports
               </NavLink>
-              <NavLink
-                to="/admin/reports"
-                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-                  isActiveRoute('/admin/reports')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
-                }`}
-              >
-                <BarChart2 size={18} className="mr-3" />
-                Reports & Analytics
-              </NavLink>
+              {user?.isSuperAdmin && (
+                <NavLink
+                  to="/admin/reports"
+                  className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                    isActiveRoute('/admin/reports')
+                      ? 'text-indigo-700 bg-indigo-50'
+                      : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                  }`}
+                >
+                  <BarChart2 size={18} className="mr-3" />
+                  Reports & Analytics
+                </NavLink>
+              )}
             </div>
           )}
 

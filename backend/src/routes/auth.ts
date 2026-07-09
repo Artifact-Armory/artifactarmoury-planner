@@ -263,7 +263,7 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
   // Find user
   const result = await db.query(
     `SELECT id, email, password_hash, display_name, role, account_status,
-            email_verified, artist_name, artist_bio, artist_url,
+            email_verified, is_super_admin, artist_name, artist_bio, artist_url,
             stripe_account_id, stripe_onboarding_complete
      FROM users
      WHERE email = $1`,
@@ -320,6 +320,7 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
       displayName: user.display_name,
       role: user.role,
       emailVerified: user.email_verified,
+      isSuperAdmin: user.is_super_admin,
       artistName: user.artist_name,
       artistBio: user.artist_bio,
       artistUrl: user.artist_url,
@@ -360,7 +361,7 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const result = await db.query(
     `SELECT id, email, display_name, role, account_status,
-            email_verified, artist_name, artist_bio, artist_url,
+            email_verified, is_super_admin, artist_name, artist_bio, artist_url,
             stripe_account_id, stripe_onboarding_complete,
             created_at, updated_at
      FROM users
@@ -382,6 +383,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
       role: user.role,
       accountStatus: user.account_status,
       emailVerified: user.email_verified,
+      isSuperAdmin: user.is_super_admin,
       artistName: user.artist_name,
       artistBio: user.artist_bio,
       artistUrl: user.artist_url,

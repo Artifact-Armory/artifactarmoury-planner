@@ -9,6 +9,21 @@ import { mapApiUserToUser } from './transformers'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
+// Stable anonymous visitor id, so view analytics can count unique visitors
+// (incl. logged-out) and peak times. Not PII — a random id in localStorage.
+const SESSION_KEY = 'aa_session_id'
+function getSessionId(): string {
+  let id = localStorage.getItem(SESSION_KEY)
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `s_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+    localStorage.setItem(SESSION_KEY, id)
+  }
+  return id
+}
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -21,10 +36,11 @@ apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
     const token = localStorage.getItem('terrain_builder_token')
 
+    config.headers = config.headers ?? {}
     if (token) {
-      config.headers = config.headers ?? {}
       config.headers.Authorization = `Bearer ${token}`
     }
+    config.headers['X-Session-Id'] = getSessionId()
 
     return config
   },

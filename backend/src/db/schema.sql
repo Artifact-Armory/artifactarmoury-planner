@@ -32,6 +32,8 @@ CREATE TABLE users (
     password_reset_token VARCHAR(64),
     password_reset_expires TIMESTAMP,
     account_status VARCHAR(20) DEFAULT 'active' CHECK (account_status IN ('active', 'suspended', 'banned')),
+    -- Super-admin (owner) sees platform financials/analytics; regular admins don't. See migration 025.
+    is_super_admin BOOLEAN NOT NULL DEFAULT false,
     -- Shadow-ban: still 'active' for buying (and reporting a model they own), but blocked
     -- from filing other reports, posting reviews, and messaging. Orthogonal to account_status.
     shadow_banned BOOLEAN NOT NULL DEFAULT false,

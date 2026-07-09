@@ -17,6 +17,7 @@ export interface User {
   role: 'customer' | 'artist' | 'admin';
   account_status: 'active' | 'suspended' | 'banned';
   email_verified?: boolean;
+  is_super_admin?: boolean;
   shadow_banned?: boolean;
   artist_name?: string;
   artist_bio?: string;
@@ -129,7 +130,7 @@ export async function authenticate(
 
     // Fetch user from database
     const result = await db.query(
-      `SELECT id, email, display_name, role, account_status, email_verified, shadow_banned,
+      `SELECT id, email, display_name, role, account_status, email_verified, is_super_admin, shadow_banned,
               artist_name, artist_bio, artist_url,
               stripe_account_id, stripe_onboarding_complete,
               created_at, updated_at
@@ -214,7 +215,7 @@ export async function optionalAuth(
       
       // Fetch user
       const result = await db.query(
-        `SELECT id, email, display_name, role, account_status, email_verified, shadow_banned,
+        `SELECT id, email, display_name, role, account_status, email_verified, is_super_admin, shadow_banned,
                 artist_name, artist_bio, artist_url,
                 stripe_account_id, stripe_onboarding_complete,
                 created_at, updated_at
@@ -279,6 +280,30 @@ export function requireRole(...allowedRoles: string[]) {
 export const requireArtist = requireRole('artist', 'admin');
 export const requireAdmin = requireRole('admin');
 export const requireCustomer = requireRole('customer', 'artist', 'admin');
+
+/**
+ * Super-admin (owner) only. Regular admins pass requireAdmin but not this — used
+ * to fence off platform financials/analytics. Run after `authenticate`.
+ */
+export function requireSuperAdmin(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required', message: 'You must be logged in' });
+    return;
+  }
+  if (!req.user.is_super_admin) {
+    res.status(403).json({
+      error: 'Forbidden',
+      code: 'SUPER_ADMIN_ONLY',
+      message: 'This area is restricted to the site owner.'
+    });
+    return;
+  }
+  next();
+}
 
 // ============================================================================
 // EMAIL-VERIFICATION GUARD (soft gate)
@@ -455,8 +480,8 @@ export async function refreshAccessToken(
 
     // Fetch user
     const result = await db.query(
-      `SELECT id, email, display_name, role, account_status
-       FROM users 
+      `SELECT id, email, display_name, role, account_status, email_verified, is_super_admin
+       FROM users
        WHERE id = $1 AND account_status = 'active'`,
       [decoded.userId]
     );
@@ -486,7 +511,9 @@ export async function refreshAccessToken(
           id: user.id,
           email: user.email,
           displayName: user.display_name,
-          role: user.role
+          role: user.role,
+          emailVerified: user.email_verified,
+          isSuperAdmin: user.is_super_admin
         }
       }
     });
@@ -526,6 +553,7 @@ export default {
   requireArtist,
   requireAdmin,
   requireCustomer,
+  requireSuperAdmin,
   requireVerifiedEmail,
   requireOwnership,
   requireModelOwnership,

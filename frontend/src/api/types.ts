@@ -9,6 +9,7 @@ export interface ApiUser {
   displayName: string
   role: AuthRole
   emailVerified?: boolean
+  isSuperAdmin?: boolean
   artistName?: string
   artistBio?: string
   artistUrl?: string

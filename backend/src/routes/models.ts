@@ -595,8 +595,10 @@ router.get('/:id',
     if (model.status === 'published') {
       db.query('UPDATE models SET view_count = view_count + 1 WHERE id = $1', [id])
         .catch(err => logger.error('Failed to increment view count', { error: err }));
+      const sessionId = req.get('x-session-id');
       logProductView(id, model.artist_id, {
         userId: (req as any).userId ?? null,
+        sessionId: sessionId && sessionId.length <= 64 ? sessionId : null,
         source: typeof req.query.src === 'string' ? req.query.src : null,
       });
     }

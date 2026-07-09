@@ -67,12 +67,15 @@ const AdminDashboard: React.FC = () => {
           value={Number(s.total_orders).toLocaleString()}
           sub={`+${Number(s.orders_last_7_days)} in last 7 days`}
         />
-        <StatCard
-          icon={<DollarSign size={18} />}
-          label="Total revenue"
-          value={formatPrice(s.total_revenue ?? 0)}
-          sub="Succeeded payments"
-        />
+        {/* Revenue is owner-only; the backend omits it for regular admins. */}
+        {s.total_revenue != null && (
+          <StatCard
+            icon={<DollarSign size={18} />}
+            label="Total revenue"
+            value={formatPrice(s.total_revenue)}
+            sub="Succeeded payments"
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
