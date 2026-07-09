@@ -37,7 +37,7 @@ const Register: React.FC = () => {
         displayName: values.displayName,
       })
       setAuth({ user: res.user, token: res.accessToken, refreshToken: res.refreshToken })
-      toast.success('Account created — welcome!')
+      toast.success('Account created — check your email to verify your address.')
       navigate('/')
     } catch (e: any) {
       const message = e?.response?.data?.message || e?.response?.data?.error || 'Registration failed'

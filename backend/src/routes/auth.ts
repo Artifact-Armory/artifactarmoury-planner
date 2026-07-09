@@ -15,10 +15,46 @@ import {
 import { authRateLimit, emailRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, ConflictError, AuthenticationError } from '../middleware/error';
-import { sendEmail } from '../services/email';
+import { sendEmail, sendVerificationEmail } from '../services/email';
 import crypto from 'crypto';
 
 const router = Router();
+
+// ============================================================================
+// EMAIL VERIFICATION HELPERS
+// ============================================================================
+
+const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Generate a fresh verification token, persist its HASH (+ 24h expiry) on the
+ * user, and email the raw token as a link. Fire-and-forget on the email itself
+ * so a mail hiccup never fails signup — the user can always request a resend.
+ */
+async function issueVerificationEmail(user: {
+  id: string;
+  email: string;
+  display_name: string;
+}): Promise<void> {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expires = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS);
+
+  await db.query(
+    `UPDATE users
+       SET email_verification_token = $1, email_verification_expires = $2
+     WHERE id = $3`,
+    [tokenHash, expires, user.id]
+  );
+
+  sendVerificationEmail({
+    to: user.email,
+    name: user.display_name,
+    token: rawToken,
+  }).catch((err) =>
+    logger.error('Failed to send verification email', { error: err, userId: user.id })
+  );
+}
 
 // ============================================================================
 // REGISTER (Customer)
@@ -76,20 +112,17 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
 
   logger.info('User registered', { userId: user.id, email: user.email });
 
-  // Send welcome email (async, don't wait)
-  sendEmail({
-    to: user.email,
-    subject: 'Welcome to Terrain Builder',
-    html: `<p>Hi ${user.display_name}, welcome to Terrain Builder!</p>`
-  }).catch(err => logger.error('Failed to send welcome email', { error: err }));
+  // Send the email-verification link (async, don't block the response).
+  await issueVerificationEmail(user);
 
   res.status(201).json({
-    message: 'Account created successfully',
+    message: 'Account created successfully. Please check your email to verify your address.',
     user: {
       id: user.id,
       email: user.email,
       displayName: user.display_name,
-      role: user.role
+      role: user.role,
+      emailVerified: false
     },
     accessToken,
     refreshToken
@@ -191,21 +224,18 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
 
     logger.info('Artist registered', { userId: user.id, email: user.email, artistName: user.artist_name });
 
-    // Send welcome email
-    sendEmail({
-      to: user.email,
-      subject: 'Welcome to Terrain Builder - Artist Account',
-      html: `<p>Hi ${user.display_name}, your artist account (${user.artist_name}) is ready.</p>`
-    }).catch(err => logger.error('Failed to send artist welcome email', { error: err }));
+    // Send the email-verification link (the user row is committed at this point).
+    await issueVerificationEmail(user);
 
     res.status(201).json({
-      message: 'Artist account created successfully',
+      message: 'Artist account created successfully. Please check your email to verify your address.',
       user: {
         id: user.id,
         email: user.email,
         displayName: user.display_name,
         role: user.role,
         artistName: user.artist_name,
+        emailVerified: false,
         stripeOnboardingComplete: false
       },
       accessToken,
@@ -233,9 +263,9 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
   // Find user
   const result = await db.query(
     `SELECT id, email, password_hash, display_name, role, account_status,
-            artist_name, artist_bio, artist_url, 
+            email_verified, artist_name, artist_bio, artist_url,
             stripe_account_id, stripe_onboarding_complete
-     FROM users 
+     FROM users
      WHERE email = $1`,
     [email.toLowerCase()]
   );
@@ -289,6 +319,7 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
       email: user.email,
       displayName: user.display_name,
       role: user.role,
+      emailVerified: user.email_verified,
       artistName: user.artist_name,
       artistBio: user.artist_bio,
       artistUrl: user.artist_url,
@@ -329,10 +360,10 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const result = await db.query(
     `SELECT id, email, display_name, role, account_status,
-            artist_name, artist_bio, artist_url,
+            email_verified, artist_name, artist_bio, artist_url,
             stripe_account_id, stripe_onboarding_complete,
             created_at, updated_at
-     FROM users 
+     FROM users
      WHERE id = $1`,
     [(req as any).userId]
   );
@@ -350,6 +381,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
       displayName: user.display_name,
       role: user.role,
       accountStatus: user.account_status,
+      emailVerified: user.email_verified,
       artistName: user.artist_name,
       artistBio: user.artist_bio,
       artistUrl: user.artist_url,
@@ -524,6 +556,80 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
   logger.info('Password changed', { userId: (req as any).userId });
 
   res.json({ message: 'Password changed successfully' });
+}));
+
+// ============================================================================
+// VERIFY EMAIL
+// ============================================================================
+
+// Public: the token itself is the proof of ownership (the user may not be logged
+// in when they click the link from their inbox).
+router.post('/verify-email', authRateLimit, asyncHandler(async (req, res) => {
+  const { token } = req.body;
+
+  if (!token || typeof token !== 'string') {
+    throw new ValidationError('Verification token is required');
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const result = await db.query(
+    `SELECT id, email, email_verified
+       FROM users
+      WHERE email_verification_token = $1
+        AND email_verification_expires > CURRENT_TIMESTAMP`,
+    [tokenHash]
+  );
+
+  if (result.rows.length === 0) {
+    // Either the token never matched, or it expired / was already consumed.
+    throw new ValidationError('This verification link is invalid or has expired. Please request a new one.');
+  }
+
+  const user = result.rows[0];
+
+  await db.query(
+    `UPDATE users
+        SET email_verified = true,
+            email_verification_token = NULL,
+            email_verification_expires = NULL
+      WHERE id = $1`,
+    [user.id]
+  );
+
+  logger.info('Email verified', { userId: user.id, email: user.email });
+
+  res.json({ message: 'Email verified successfully', emailVerified: true });
+}));
+
+// ============================================================================
+// RESEND VERIFICATION EMAIL
+// ============================================================================
+
+router.post('/resend-verification', authenticate, emailRateLimit, asyncHandler(async (req, res) => {
+  const userId = (req as any).userId;
+
+  const result = await db.query(
+    'SELECT id, email, display_name, email_verified FROM users WHERE id = $1',
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AuthenticationError('User not found');
+  }
+
+  const user = result.rows[0];
+
+  if (user.email_verified) {
+    res.json({ message: 'Your email is already verified' });
+    return;
+  }
+
+  await issueVerificationEmail(user);
+
+  logger.info('Verification email resent', { userId: user.id, email: user.email });
+
+  res.json({ message: 'Verification email sent. Please check your inbox.' });
 }));
 
 // ============================================================================

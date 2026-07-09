@@ -16,6 +16,7 @@ export interface User {
   display_name: string;
   role: 'customer' | 'artist' | 'admin';
   account_status: 'active' | 'suspended' | 'banned';
+  email_verified?: boolean;
   shadow_banned?: boolean;
   artist_name?: string;
   artist_bio?: string;
@@ -128,7 +129,7 @@ export async function authenticate(
 
     // Fetch user from database
     const result = await db.query(
-      `SELECT id, email, display_name, role, account_status, shadow_banned,
+      `SELECT id, email, display_name, role, account_status, email_verified, shadow_banned,
               artist_name, artist_bio, artist_url,
               stripe_account_id, stripe_onboarding_complete,
               created_at, updated_at
@@ -138,9 +139,9 @@ export async function authenticate(
     );
 
     if (result.rows.length === 0) {
-      res.status(401).json({ 
+      res.status(401).json({
         error: 'User not found',
-        message: 'Authentication failed' 
+        message: 'Authentication failed'
       });
       return;
     }
@@ -213,7 +214,7 @@ export async function optionalAuth(
       
       // Fetch user
       const result = await db.query(
-        `SELECT id, email, display_name, role, account_status, shadow_banned,
+        `SELECT id, email, display_name, role, account_status, email_verified, shadow_banned,
                 artist_name, artist_bio, artist_url,
                 stripe_account_id, stripe_onboarding_complete,
                 created_at, updated_at
@@ -278,6 +279,40 @@ export function requireRole(...allowedRoles: string[]) {
 export const requireArtist = requireRole('artist', 'admin');
 export const requireAdmin = requireRole('admin');
 export const requireCustomer = requireRole('customer', 'artist', 'admin');
+
+// ============================================================================
+// EMAIL-VERIFICATION GUARD (soft gate)
+// ============================================================================
+
+/**
+ * Blocks sensitive actions (uploading models, checkout) until the account's
+ * email is verified. Browsing, planner, and login remain open — this is the
+ * "soft gate". Must run after `authenticate` (needs req.user populated).
+ */
+export function requireVerifiedEmail(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    res.status(401).json({
+      error: 'Authentication required',
+      message: 'You must be logged in to access this resource'
+    });
+    return;
+  }
+
+  if (!req.user.email_verified) {
+    res.status(403).json({
+      error: 'Email not verified',
+      code: 'EMAIL_NOT_VERIFIED',
+      message: 'Please verify your email address before doing this. Check your inbox for the verification link.'
+    });
+    return;
+  }
+
+  next();
+}
 
 // ============================================================================
 // RESOURCE OWNERSHIP MIDDLEWARE
@@ -491,6 +526,7 @@ export default {
   requireArtist,
   requireAdmin,
   requireCustomer,
+  requireVerifiedEmail,
   requireOwnership,
   requireModelOwnership,
   refreshAccessToken,

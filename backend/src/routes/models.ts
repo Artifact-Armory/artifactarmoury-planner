@@ -4,11 +4,12 @@
 import { Router } from 'express';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { 
-  authenticate, 
-  requireArtist, 
+import {
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
   requireModelOwnership,
-  optionalAuth 
+  optionalAuth
 } from '../middleware/auth';
 import { 
   uploadModelWithThumbnail, 
@@ -68,6 +69,7 @@ function parseTags(tags: unknown): string[] {
 router.post('/',
   authenticate,
   requireArtist,
+  requireVerifiedEmail,
   uploadRateLimit,
   uploadModelWithThumbnail,
   handleUploadError,
@@ -250,6 +252,7 @@ router.post('/',
 router.post('/from-upload',
   authenticate,
   requireArtist,
+  requireVerifiedEmail,
   uploadRateLimit,
   asyncHandler(async (req, res) => {
     if (!isR2Enabled()) {

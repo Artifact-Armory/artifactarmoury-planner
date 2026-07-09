@@ -106,6 +106,80 @@ function stripHtml(html: string): string {
 }
 
 // ============================================================================
+// EMAIL VERIFICATION EMAIL
+// ============================================================================
+
+export interface VerificationEmailParams {
+  to: string
+  name?: string
+  /** The RAW (unhashed) token — goes in the link the user clicks. */
+  token: string
+}
+
+/**
+ * Send the "confirm your email address" email at signup (customer or artist).
+ * The link lands on the frontend /verify-email page, which POSTs the token back.
+ */
+export async function sendVerificationEmail(
+  params: VerificationEmailParams
+): Promise<void> {
+  const { to, name, token } = params
+  const verifyUrl = `${FRONTEND_URL}/verify-email?token=${encodeURIComponent(token)}`
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 28px; margin: 0;">Confirm your email</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 16px 0; color: #4b5563;">${greeting}</p>
+    <p style="margin: 0; color: #4b5563;">
+      Thanks for joining Artifact Armoury! Please confirm this email address to
+      unlock uploading and purchasing. This link expires in 24 hours.
+    </p>
+  </div>
+
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="${verifyUrl}" style="display: inline-block; padding: 14px 28px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
+      Verify email address
+    </a>
+  </div>
+
+  <div style="margin-bottom: 24px;">
+    <p style="margin: 0; color: #6b7280; font-size: 14px;">
+      If the button doesn't work, paste this link into your browser:
+    </p>
+    <p style="margin: 8px 0 0 0; word-break: break-all;">
+      <a href="${verifyUrl}" style="color: #2563eb; font-size: 14px;">${verifyUrl}</a>
+    </p>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0 0 8px 0;">If you didn't create an account, you can safely ignore this email.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to,
+    subject: 'Confirm your email address',
+    html,
+  })
+}
+
+// ============================================================================
 // ORDER CONFIRMATION EMAIL
 // ============================================================================
 
@@ -495,6 +569,7 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
 // ============================================================================
 
 export default {
+  sendVerificationEmail,
   sendOrderConfirmation,
   sendShippingNotification,
   sendArtistSaleNotification,

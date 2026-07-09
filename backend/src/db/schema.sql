@@ -25,6 +25,12 @@ CREATE TABLE users (
 
     -- Account status
     email_verified BOOLEAN DEFAULT false,
+    -- Email verification + password reset: only the SHA-256 HASH of the token is
+    -- stored, never the raw token. See migration 024.
+    email_verification_token VARCHAR(64),
+    email_verification_expires TIMESTAMP,
+    password_reset_token VARCHAR(64),
+    password_reset_expires TIMESTAMP,
     account_status VARCHAR(20) DEFAULT 'active' CHECK (account_status IN ('active', 'suspended', 'banned')),
     -- Shadow-ban: still 'active' for buying (and reporting a model they own), but blocked
     -- from filing other reports, posting reviews, and messaging. Orthogonal to account_status.

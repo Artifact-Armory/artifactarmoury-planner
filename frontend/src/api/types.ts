@@ -8,6 +8,7 @@ export interface ApiUser {
   email: string
   displayName: string
   role: AuthRole
+  emailVerified?: boolean
   artistName?: string
   artistBio?: string
   artistUrl?: string
