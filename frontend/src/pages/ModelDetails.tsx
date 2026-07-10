@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -167,6 +167,13 @@ const ModelDetails: React.FC = () => {
     } finally {
       setMessageBusy(false)
     }
+  }
+
+  const handlePrintAndShip = () => {
+    // Print checkout isn't wired yet — remind the buyer the option exists.
+    toast('Print & Ship checkout is coming soon — you\'ll be able to order this printed and delivered to your door.', {
+      icon: '🖨️',
+    })
   }
 
   const handleAddToCart = () => {
@@ -435,6 +442,27 @@ const ModelDetails: React.FC = () => {
               <Button className="mt-6 w-full" onClick={handleAddToCart} leftIcon={<ShoppingCart size={16} />}>
                 Add to cart
               </Button>
+            )}
+
+            {/* Print & Ship reminder — shown when the artist has enabled printing
+                for this model. Lets buyers without a 3D printer order it printed. */}
+            {model.printConsent && model.printPrice != null && (
+              <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+                <div className="flex items-center gap-2">
+                  <Printer size={18} className="text-indigo-600" />
+                  <h3 className="text-sm font-semibold text-indigo-900">No 3D printer? Print &amp; Ship</h3>
+                </div>
+                <p className="mt-1.5 text-sm text-indigo-800/80">
+                  Order this model printed and delivered to your door — the price covers the print and postage.
+                </p>
+                <button
+                  onClick={handlePrintAndShip}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                >
+                  <Printer size={16} />
+                  Order printed &amp; shipped · {formatPrice(model.printPrice)}
+                </button>
+              </div>
             )}
 
             <ul className="mt-6 space-y-2 text-sm text-gray-600">
