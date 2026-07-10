@@ -170,6 +170,9 @@ export interface SearchFilters {
   minPrice?: number
   maxPrice?: number
   sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
+  // Browse fulfillment tab: 'print' narrows to print-and-ship models; otherwise
+  // digital downloads (all published models).
+  fulfillment?: 'stl' | 'print'
   page?: number
   limit?: number
 }

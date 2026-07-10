@@ -38,6 +38,7 @@ const Browse: React.FC = () => {
   const minPriceParam = searchParams.get('minPrice') ?? ''
   const maxPriceParam = searchParams.get('maxPrice') ?? ''
   const sortByParam = (searchParams.get('sortBy') as SearchFilters['sortBy']) ?? 'recent'
+  const fulfillmentParam = (searchParams.get('fulfillment') === 'print' ? 'print' : 'stl') as 'stl' | 'print'
   const pageParam = Number(searchParams.get('page') ?? 1)
 
   const [searchTerm, setSearchTerm] = useState(searchTermParam)
@@ -86,10 +87,11 @@ const Browse: React.FC = () => {
       minPrice: minPriceParam ? Number(minPriceParam) : undefined,
       maxPrice: maxPriceParam ? Number(maxPriceParam) : undefined,
       sortBy: sortByParam,
+      fulfillment: fulfillmentParam,
       page: pageParam,
       limit: DEFAULT_LIMIT,
     }),
-    [searchTermParam, termsParam, minPriceParam, maxPriceParam, sortByParam, pageParam],
+    [searchTermParam, termsParam, minPriceParam, maxPriceParam, sortByParam, fulfillmentParam, pageParam],
   )
 
   const { data, isLoading, isFetching } = useQuery({
@@ -201,6 +203,14 @@ const Browse: React.FC = () => {
     setSearchParams(next)
   }
 
+  const setFulfillment = (mode: 'stl' | 'print') => {
+    const next = new URLSearchParams(searchParams)
+    if (mode === 'print') next.set('fulfillment', 'print')
+    else next.delete('fulfillment')
+    next.delete('page')
+    setSearchParams(next)
+  }
+
   const handleApplyFilters = (event: React.FormEvent) => {
     event.preventDefault()
     updateParams({ minPrice: minPrice || undefined, maxPrice: maxPrice || undefined })
@@ -212,6 +222,7 @@ const Browse: React.FC = () => {
     setMaxPrice('')
     const next = new URLSearchParams()
     if (sortByParam) next.set('sortBy', sortByParam)
+    if (fulfillmentParam === 'print') next.set('fulfillment', 'print')
     setSearchParams(next)
   }
 
@@ -224,6 +235,35 @@ const Browse: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      {/* Fulfillment tabs: digital STL download vs third-party print-and-ship. */}
+      <div className="mb-8 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1">
+        {([
+          { mode: 'stl' as const, label: 'Digital downloads only' },
+          { mode: 'print' as const, label: 'Print & Ship' },
+        ]).map((t) => {
+          const active = fulfillmentParam === t.mode
+          return (
+            <button
+              key={t.mode}
+              type="button"
+              onClick={() => setFulfillment(t.mode)}
+              aria-pressed={active}
+              className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
+                active ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {fulfillmentParam === 'print' && (
+        <p className="mb-6 -mt-4 text-sm text-gray-500">
+          Models available to order printed and shipped — no 3D printer needed. Price includes the print and delivery.
+        </p>
+      )}
+
       {/* Prominent, live keyword search — the quickest way to find a specific model. */}
       <div className="relative mb-8">
         <Search size={20} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />

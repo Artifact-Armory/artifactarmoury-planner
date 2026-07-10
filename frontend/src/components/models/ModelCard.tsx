@@ -76,6 +76,12 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
         >
           <Heart size={16} />
         </button>
+
+        {model.printConsent && model.printPrice != null && (
+          <span className="absolute left-3 top-3 rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow">
+            Print &amp; Ship · {formatPrice(model.printPrice)}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col px-3 py-4">

@@ -30,7 +30,8 @@ router.get('/',
       sortBy = 'recent',
       page = 1,
       limit = 24,
-      search
+      search,
+      fulfillment
     } = req.query;
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -61,6 +62,13 @@ router.get('/',
     }
     if (maxPrice) {
       conditions.push(`m.base_price <= ${push(Number(maxPrice))}`);
+    }
+
+    // Fulfillment mode (Browse tabs). 'print' narrows to models the artist has
+    // enabled for third-party print-and-ship (consented + a quoted print price).
+    // Anything else = digital downloads, which is every published model.
+    if (fulfillment === 'print') {
+      conditions.push(`m.print_consent = true AND m.print_price IS NOT NULL`);
     }
 
     // Search query (name, description, legacy tags, AND taxonomy term names/synonyms)
@@ -134,6 +142,7 @@ router.get('/',
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.print_price, m.print_consent,
         m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count,
         m.published_at,
@@ -169,6 +178,7 @@ router.get('/',
         minPrice: minPrice || null,
         maxPrice: maxPrice || null,
         search: search || null,
+        fulfillment: fulfillment || null,
         sortBy
       }
     });
