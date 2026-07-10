@@ -110,6 +110,14 @@ export interface TerrainModel {
   processingStatus?: 'processing' | 'ready' | 'failed' | string
   processingError?: string | null
   downloadCount?: number
+  // Print-on-demand quote (artist dashboard Print button). printPrice is the
+  // customer-facing total = provider cost + artist fee (basePrice) + £1 site fee.
+  printProviderCost?: number
+  printPrice?: number
+  printProvider?: string
+  printQuotedAt?: string
+  // Artist has agreed this model may be manufactured by a third-party print service.
+  printConsent?: boolean
   publishedAt?: string
   createdAt?: string
   updatedAt?: string

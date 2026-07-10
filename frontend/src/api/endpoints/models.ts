@@ -131,6 +131,28 @@ export const modelsApi = {
   },
 
   /**
+   * Ask the outsourced print provider for a print quote and compute the
+   * customer-facing print price (provider cost + artist fee + £1 site fee).
+   * Requires model ownership; the result is also persisted on the model.
+   */
+  getPrintQuote: async (
+    id: string,
+    /** Pass true the first time to record the artist's consent to third-party manufacturing. */
+    consent?: boolean,
+  ): Promise<{
+    providerCost: number
+    artistFee: number
+    siteFee: number
+    total: number
+    currency: string
+    provider: string
+    estimatedDays?: number
+  }> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/print-quote`, consent ? { consent: true } : {})
+    return response.data?.quote ?? response.data
+  },
+
+  /**
    * Update an existing terrain model (requires ownership or admin role).
    * The API route is PATCH and reads snake_case fields, so map from camelCase.
    */

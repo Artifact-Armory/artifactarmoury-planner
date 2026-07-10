@@ -48,6 +48,16 @@ const ProcessingBadge: React.FC<{ model: TerrainModel }> = ({ model }) => {
   )
 }
 
+interface PrintQuote {
+  providerCost: number
+  artistFee: number
+  siteFee: number
+  total: number
+  currency: string
+  provider: string
+  estimatedDays?: number
+}
+
 const ArtistModels: React.FC = () => {
   const navigate = useNavigate()
   const [models, setModels] = React.useState<TerrainModel[]>([])
@@ -55,6 +65,8 @@ const ArtistModels: React.FC = () => {
   const [error, setError] = React.useState<string | null>(null)
   const [busyId, setBusyId] = React.useState<string | null>(null)
   const [rowError, setRowError] = React.useState<Record<string, string>>({})
+  const [quotingId, setQuotingId] = React.useState<string | null>(null)
+  const [quotes, setQuotes] = React.useState<Record<string, PrintQuote>>({})
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -99,6 +111,41 @@ const ArtistModels: React.FC = () => {
     }
   }
 
+  async function handlePrintQuote(m: TerrainModel) {
+    // First time for this model, the artist must agree it can be manufactured
+    // by a third-party print service. Consent is captured once, then remembered.
+    let consent: boolean | undefined
+    if (!m.printConsent) {
+      const ok = window.confirm(
+        `Allow a third-party print service to manufacture “${m.name}”?\n\n` +
+          `Buyers without a 3D printer will be able to order it printed and shipped. The print ` +
+          `price they pay is your set price (£${m.basePrice.toFixed(2)}) + the third-party print cost ` +
+          `+ a £1 site fee. You earn exactly what you would on a normal sale of this model — the ` +
+          `print cost and site fee don't come out of your share.`,
+      )
+      if (!ok) return
+      consent = true
+    }
+    setQuotingId(m.id)
+    setRowError((r) => ({ ...r, [m.id]: '' }))
+    try {
+      const q = await modelsApi.getPrintQuote(m.id, consent)
+      setQuotes((s) => ({ ...s, [m.id]: q }))
+      // Reflect the freshly-stored price + consent on the row too.
+      setModels((list) =>
+        list.map((x) =>
+          x.id === m.id
+            ? { ...x, printPrice: q.total, printProviderCost: q.providerCost, printProvider: q.provider, printQuotedAt: new Date().toISOString(), printConsent: true }
+            : x,
+        ),
+      )
+    } catch (err) {
+      setRowError((r) => ({ ...r, [m.id]: errMessage(err, 'Could not get a print quote') }))
+    } finally {
+      setQuotingId(null)
+    }
+  }
+
   async function handleDelete(m: TerrainModel) {
     const ok = window.confirm(
       `Delete “${m.name}”?\n\nThis permanently removes the model, its files and its ` +
@@ -124,6 +171,10 @@ const ArtistModels: React.FC = () => {
         <div>
           <h1 className="text-xl font-semibold">My Models</h1>
           <p className="text-gray-600 mt-1">Create and manage your listings. Drafts stay here until you publish them.</p>
+          <p className="text-gray-500 text-sm mt-1">
+            Offer your model as a <span className="text-indigo-700">print</span> for buyers without a 3D printer. They pay your set
+            price + the third-party print cost (+ a £1 site fee), and you earn exactly what you would on a normal sale of this model.
+          </p>
         </div>
         <Link to="/artist/models/new" className="px-4 py-2 rounded bg-blue-600 text-white whitespace-nowrap">
           + New model
@@ -153,6 +204,9 @@ const ArtistModels: React.FC = () => {
             const blocker = publishBlocker(m)
             const isDraft = (m.status ?? 'draft') !== 'published'
             const busy = busyId === m.id
+            const quoting = quotingId === m.id
+            const notReady = !!m.processingStatus && m.processingStatus !== 'ready'
+            const quote = quotes[m.id]
             return (
               <li key={m.id} className="flex items-center gap-4 p-4">
                 <div className="w-16 h-16 rounded bg-gray-100 overflow-hidden flex-shrink-0">
@@ -176,6 +230,23 @@ const ArtistModels: React.FC = () => {
                   </p>
                   {isDraft && blocker && <p className="text-xs text-amber-700 mt-1">{blocker}</p>}
                   {rowError[m.id] && <p className="text-xs text-red-600 mt-1">{rowError[m.id]}</p>}
+
+                  {(quote || m.printPrice != null) && (
+                    <div className="mt-2 text-xs text-gray-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5 inline-block">
+                      <span className="font-medium">Print price: £{(quote?.total ?? m.printPrice ?? 0).toFixed(2)}</span>
+                      {quote ? (
+                        <span className="text-gray-500">
+                          {' '}
+                          = £{quote.providerCost.toFixed(2)} print + £{quote.artistFee.toFixed(2)} your fee + £{quote.siteFee.toFixed(2)} site
+                          {quote.estimatedDays != null && <> · ~{quote.estimatedDays} days</>}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">
+                          {' '}(incl. £{(m.printProviderCost ?? 0).toFixed(2)} print cost) — re-quote to refresh
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -190,6 +261,14 @@ const ArtistModels: React.FC = () => {
                     disabled={busy}
                   >
                     Edit
+                  </button>
+                  <button
+                    className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
+                    onClick={() => handlePrintQuote(m)}
+                    disabled={quoting || busy || notReady}
+                    title={notReady ? 'Model must finish processing before it can be priced for print' : 'Get a print-on-demand price from the print service'}
+                  >
+                    {quoting ? 'Pricing…' : m.printPrice != null ? 'Re-quote print' : 'Print price'}
                   </button>
                   {isDraft ? (
                     <button

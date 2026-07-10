@@ -99,7 +99,19 @@ CREATE TABLE models (
 
     -- Pricing
     base_price DECIMAL(10,2) NOT NULL, -- Base price in USD
-    
+
+    -- Print-on-demand quote (see migration 027): the outsourced print provider's
+    -- cost + the computed customer-facing print price. Set by the artist Print
+    -- button; print_price = print_provider_cost + base_price + £1 site fee.
+    print_provider_cost DECIMAL(10,2),
+    print_price DECIMAL(10,2),
+    print_provider VARCHAR(50),
+    print_quoted_at TIMESTAMP,
+    -- Artist agreement that this model may be manufactured by a third-party
+    -- print service (see migration 028). Required before a print can be quoted.
+    print_consent BOOLEAN NOT NULL DEFAULT false,
+    print_consent_at TIMESTAMP,
+
     -- Print specifications
     estimated_print_time INTEGER, -- Minutes
     estimated_material_cost DECIMAL(10,2), -- USD

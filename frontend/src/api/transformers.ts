@@ -57,6 +57,18 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   processingStatus: model.processing_status ?? model.processingStatus ?? undefined,
   processingError: model.processing_error ?? model.processingError ?? null,
   downloadCount: model.download_count ?? model.downloadCount ?? undefined,
+  // Print-on-demand quote (NUMERIC columns come back as strings — coerce).
+  printProviderCost:
+    (model.print_provider_cost ?? model.printProviderCost) != null
+      ? Number(model.print_provider_cost ?? model.printProviderCost)
+      : undefined,
+  printPrice:
+    (model.print_price ?? model.printPrice) != null
+      ? Number(model.print_price ?? model.printPrice)
+      : undefined,
+  printProvider: model.print_provider ?? model.printProvider ?? undefined,
+  printQuotedAt: model.print_quoted_at ?? model.printQuotedAt ?? undefined,
+  printConsent: model.print_consent ?? model.printConsent ?? undefined,
   publishedAt: model.published_at ?? model.publishedAt,
   createdAt: model.created_at ?? model.createdAt,
   updatedAt: model.updated_at ?? model.updatedAt,

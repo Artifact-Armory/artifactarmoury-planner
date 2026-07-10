@@ -28,6 +28,7 @@ import { promises as fsp } from 'fs';
 import os from 'os';
 import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
+import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
@@ -424,6 +425,8 @@ router.get('/my-models',
         m.processing_status, m.processing_error, m.part_count,
         m.view_count, m.download_count, m.sale_count,
         m.width, m.height, m.depth,
+        m.print_provider_cost, m.print_price, m.print_provider, m.print_quoted_at,
+        m.print_consent,
         m.created_at, m.updated_at, m.published_at,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating
@@ -757,6 +760,73 @@ router.patch('/:id',
       message: 'Model updated successfully',
       model: updatedRow
     });
+  })
+);
+
+// ============================================================================
+// PRINT QUOTE — outsourced print-on-demand pricing (artist dashboard button)
+// ============================================================================
+// Asks the configured print provider what it costs to physically print this
+// model, then computes the customer-facing print price:
+//   print_price = provider cost + artist fee (the model's base_price) + £1 site.
+// The result is stored on the model so the quote persists.
+
+router.post('/:id/print-quote',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const consent = (req.body || {}).consent === true;
+
+    const result = await db.query(
+      `SELECT id, name, base_price, width, depth, height, print_consent
+       FROM models WHERE id = $1`,
+      [id]
+    );
+    const model = result.rows[0];
+    if (!model) {
+      throw new NotFoundError('Model not found');
+    }
+
+    // The artist must agree the model may be manufactured by a third party
+    // before it can be priced for print. Consent is captured once, per model.
+    if (!model.print_consent && !consent) {
+      throw new ValidationError(
+        'Artist consent required before this model can be manufactured by a third-party print service',
+      );
+    }
+
+    const provider = getPrintProvider();
+    const quote = await provider.getQuote({
+      modelId: model.id,
+      modelName: model.name,
+      widthMm: model.width != null ? Number(model.width) : null,
+      depthMm: model.depth != null ? Number(model.depth) : null,
+      heightMm: model.height != null ? Number(model.height) : null,
+    });
+
+    const breakdown = buildPrintPrice(quote, Number(model.base_price));
+
+    await db.query(
+      `UPDATE models
+       SET print_provider_cost = $1, print_price = $2, print_provider = $3,
+           print_quoted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+           print_consent = true,
+           print_consent_at = COALESCE(print_consent_at, CURRENT_TIMESTAMP)
+       WHERE id = $4`,
+      [breakdown.providerCost, breakdown.total, breakdown.provider, id]
+    );
+
+    logger.info('Print quote generated', {
+      userId: (req as any).userId,
+      modelId: id,
+      provider: breakdown.provider,
+      providerCost: breakdown.providerCost,
+      total: breakdown.total,
+    });
+
+    res.json({ quote: breakdown });
   })
 );
 
