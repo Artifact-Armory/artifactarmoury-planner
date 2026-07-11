@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   Rocket,
   Download,
+  DownloadCloud,
   Handshake,
   Wallet,
   ShieldAlert,
@@ -183,6 +184,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <Download size={18} className="mr-3" />
                 My Models
+              </NavLink>
+              <NavLink
+                to="/dashboard/downloads"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/dashboard/downloads')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <DownloadCloud size={18} className="mr-3" />
+                My Downloads
               </NavLink>
               <NavLink
                 to="/dashboard/purchases"

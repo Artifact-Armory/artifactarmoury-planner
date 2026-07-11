@@ -40,6 +40,7 @@ import Bundles from './pages/Bundles';
 // User Dashboard Pages
 import Dashboard from './pages/dashboard/Dashboard';
 import PurchaseHistory from './pages/dashboard/PurchaseHistory';
+import MyDownloads from './pages/dashboard/MyDownloads';
 import MyModels from './pages/dashboard/MyModels';
 import Wishlist from './pages/dashboard/Wishlist';
 import UserProfile from './pages/dashboard/UserProfile';
@@ -218,6 +219,7 @@ function App() {
               }
             >
               <Route index element={<Dashboard />} />
+              <Route path="downloads" element={<MyDownloads />} />
               <Route path="models" element={<MyModels />} />
               <Route path="purchases" element={<PurchaseHistory />} />
               <Route path="wishlist" element={<Wishlist />} />
