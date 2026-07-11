@@ -63,15 +63,16 @@ const mapPublicTableCard = (t: any): PublicTableCard => ({
   updatedAt: t.updated_at ?? t.updatedAt
 })
 
+// Owner identity is derived server-side from the verified JWT (see
+// backend/src/routes/tables.ts `canModifyTable`), NEVER from a client-supplied
+// email/id — so we deliberately do NOT send user_email/user_id/session_id. Any
+// such fields on `payload` are ignored (kept on the type only for callers).
 const toServerPayload = (payload: Partial<SaveTablePayload>) => ({
   name: payload.name,
   description: payload.description,
   table_config: payload.tableConfig,
   layout_data: payload.layoutData,
-  is_public: payload.isPublic,
-  user_id: payload.userId,
-  user_email: payload.userEmail,
-  session_id: payload.sessionId
+  is_public: payload.isPublic
 })
 
 const unwrap = <T>(response: ApiResponse<T> | T): T =>
@@ -85,13 +86,11 @@ const unwrap = <T>(response: ApiResponse<T> | T): T =>
 const pickTable = (body: any): any => body?.table ?? body?.data ?? body
 
 export const tablesApi = {
-  async getById(id: string, params?: { userId?: string; userEmail?: string }) {
-    const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, {
-      params: {
-        user_id: params?.userId,
-        user_email: params?.userEmail
-      }
-    })
+  // `_params` is accepted for backwards-compat but intentionally NOT sent: the
+  // server authorises private tables via the JWT, and putting an email in the
+  // query string would leak it into logs/history.
+  async getById(id: string, _params?: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.get<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`)
     return mapTable(pickTable(response.data ?? response))
   },
 
@@ -151,37 +150,26 @@ export const tablesApi = {
     return mapTable(pickTable(response.data ?? response))
   },
 
-  async deleteTable(id: string, payload: { userId?: string; userEmail?: string }) {
-    await apiClient.delete(`${BASE_URL}/${id}`, {
-      data: {
-        user_id: payload.userId,
-        user_email: payload.userEmail
-      }
-    })
+  // Ownership is enforced server-side from the JWT; the `_payload` (userId/email)
+  // is accepted for backwards-compat but intentionally not transmitted.
+  async deleteTable(id: string, _payload?: { userId?: string; userEmail?: string }) {
+    await apiClient.delete(`${BASE_URL}/${id}`)
   },
 
   async toggleVisibility(id: string, payload: { userId?: string; userEmail?: string; isPublic: boolean }) {
     const response = await apiClient.patch<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/visibility`, {
-      user_id: payload.userId,
-      user_email: payload.userEmail,
       is_public: payload.isPublic
     })
     return mapTable(pickTable(response.data ?? response))
   },
 
-  async duplicate(id: string, payload: { userId?: string; userEmail?: string }) {
-    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/duplicate`, {
-      user_id: payload.userId,
-      user_email: payload.userEmail
-    })
+  async duplicate(id: string, _payload?: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/duplicate`, {})
     return mapTable(pickTable(response.data ?? response))
   },
 
-  async regenerateShareCode(id: string, payload: { userId?: string; userEmail?: string }) {
-    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/regenerate-token`, {
-      user_id: payload.userId,
-      user_email: payload.userEmail
-    })
+  async regenerateShareCode(id: string, _payload?: { userId?: string; userEmail?: string }) {
+    const response = await apiClient.post<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/regenerate-token`, {})
     return mapTable(pickTable(response.data ?? response))
   },
 
@@ -199,9 +187,10 @@ export const tablesApi = {
     return response.data
   },
 
-  async downloadTerrainTiles(id: string, userEmail?: string): Promise<void> {
+  // `_userEmail` accepted for backwards-compat but not sent — the download is
+  // authorised by the JWT and the watermark identifies the buyer from it.
+  async downloadTerrainTiles(id: string, _userEmail?: string): Promise<void> {
     const response = await apiClient.get(`${BASE_URL}/${id}/terrain/download`, {
-      params: { user_email: userEmail },
       responseType: 'blob',
       timeout: 300000,
     })
