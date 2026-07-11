@@ -85,9 +85,13 @@ CREATE TABLE models (
     tags TEXT[], -- Array of searchable tags
     
     -- Files
-    stl_file_path VARCHAR(500) NOT NULL,
+    stl_file_path VARCHAR(500) NOT NULL, -- canonical STL (converted from source if needed)
     glb_file_path VARCHAR(500), -- For 3D preview
     thumbnail_path VARCHAR(500),
+    -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
+    -- is the artist's original file (delivered to the buyer alongside the STL).
+    source_format VARCHAR(10) NOT NULL DEFAULT 'stl',
+    source_file_path VARCHAR(500),
     
     -- Dimensions (in mm)
     width DECIMAL(10,2),
@@ -178,7 +182,9 @@ CREATE TABLE model_parts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
     name VARCHAR(255),
-    stl_file_path VARCHAR(500) NOT NULL,
+    stl_file_path VARCHAR(500) NOT NULL, -- canonical STL (converted from source if needed)
+    source_format VARCHAR(10) NOT NULL DEFAULT 'stl',
+    source_file_path VARCHAR(500),
     glb_file_path VARCHAR(500),
     width DECIMAL(10,2), depth DECIMAL(10,2), height DECIMAL(10,2), -- mm
     file_hash VARCHAR(64),

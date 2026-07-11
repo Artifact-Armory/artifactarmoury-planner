@@ -120,9 +120,9 @@ const CreateModel: React.FC = () => {
     e.preventDefault()
     setError(null)
 
-    if (!stlFile) { setError('Choose an STL file to upload'); return }
-    if (!/\.stl$/i.test(stlFile.name)) { setError('The model file must be an .stl'); return }
-    if (partFiles.some((f) => !/\.stl$/i.test(f.name))) { setError('Every part must be an .stl file'); return }
+    if (!stlFile) { setError('Choose a model file to upload'); return }
+    if (!/\.(stl|obj|3mf)$/i.test(stlFile.name)) { setError('The model file must be an .stl, .obj or .3mf'); return }
+    if (partFiles.some((f) => !/\.(stl|obj|3mf)$/i.test(f.name))) { setError('Every part must be an .stl, .obj or .3mf file'); return }
     if (!thumbFile) { setError('Add a thumbnail image for your model'); return }
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
@@ -145,7 +145,7 @@ const CreateModel: React.FC = () => {
       for (let i = 0; i < partFiles.length; i++) {
         const f = partFiles[i]
         const p = await uploadsApi.uploadDirect(f, 'raw')
-        parts.push({ rawKey: p.key, filename: f.name, name: f.name.replace(/\.stl$/i, '') })
+        parts.push({ rawKey: p.key, filename: f.name, name: f.name.replace(/\.(stl|obj|3mf)$/i, '') })
       }
 
       // 3. Thumbnail (required), also direct to R2.
@@ -297,16 +297,19 @@ const CreateModel: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Model file (.stl)</label>
-          <input type="file" accept=".stl" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          <label className="block text-sm font-medium mb-1">Model file (.stl, .obj or .3mf)</label>
+          <input type="file" accept=".stl,.obj,.3mf" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
           {stlFile && <p className="text-sm text-gray-500 mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
+          <p className="text-xs text-gray-500 mt-1">
+            OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
+          </p>
         </div>
 
         <div className="rounded border border-dashed p-3">
           <label className="block text-sm font-medium mb-1">Extra parts (optional — makes this a “set”)</label>
           <p className="text-xs text-gray-500 mb-2">
-            Add more STL files if this piece comes in several parts (e.g. separate floors). Buyers
-            pay once, download all parts as a ZIP, and can place each part in the planner.
+            Add more STL/OBJ/3MF files if this piece comes in several parts (e.g. separate floors).
+            Buyers pay once, download all parts as a ZIP, and can place each part in the planner.
           </p>
           {partFiles.length > 0 && (
             <ul className="mb-2 space-y-1">
@@ -327,7 +330,7 @@ const CreateModel: React.FC = () => {
           )}
           <input
             type="file"
-            accept=".stl"
+            accept=".stl,.obj,.3mf"
             multiple
             disabled={busy}
             onChange={(e) => {

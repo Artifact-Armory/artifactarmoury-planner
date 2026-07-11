@@ -33,6 +33,7 @@ import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
+import { meshFormatFromName, convertToStl, watermarkOriginal, type MeshFormat } from '../services/meshConvert';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease } from '../services/notifications';
 import { logProductView, logWishlistAdd } from '../services/analytics';
@@ -265,6 +266,9 @@ router.post('/from-upload',
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
     }
+    if (!meshFormatFromName(filename || rawKey)) {
+      throw new ValidationError('The model file must be an STL, OBJ or 3MF file');
+    }
     // A thumbnail is required up-front (it's also a hard requirement to publish),
     // so we never create a draft that can't be listed.
     if (!thumbnailKey || typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/')) {
@@ -294,6 +298,9 @@ router.post('/from-upload',
       for (const p of parts) {
         if (!p?.rawKey || typeof p.rawKey !== 'string' || !p.rawKey.startsWith('raw/')) {
           throw new ValidationError('Each part needs an uploaded raw/ object');
+        }
+        if (!meshFormatFromName(p.filename || p.rawKey)) {
+          throw new ValidationError('Each part must be an STL, OBJ or 3MF file');
         }
         if (!(await objectExists(p.rawKey))) {
           throw new ValidationError('A part file was not found in storage — retry the upload');
@@ -1292,7 +1299,8 @@ router.get('/:id/download',
     const userId = (req as any).userId;
 
     const model = (await db.query(
-      `SELECT id, artist_id, name, stl_file_path, fulfillment_type, processing_status, part_count, status
+      `SELECT id, artist_id, name, stl_file_path, source_format, source_file_path,
+              fulfillment_type, processing_status, part_count, status
        FROM models WHERE id = $1`,
       [id]
     )).rows[0];
@@ -1327,24 +1335,41 @@ router.get('/:id/download',
     const safeName = String(model.name || 'model').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
     const payload = { modelId: id, buyerId: userId, orderId } as WatermarkPayload;
 
+    // Each part delivers its watermarked canonical STL, plus (for OBJ/3MF uploads)
+    // the artist's original file.
+    type Entry = { name: string; key: string; format: MeshFormat };
+    const entries: Entry[] = [];
+    const addDeliverable = (label: string, stlKey: string, srcFormat?: string, srcKey?: string | null) => {
+      entries.push({ name: `${label}.stl`, key: stlKey, format: 'stl' });
+      if (srcFormat && srcFormat !== 'stl' && srcKey) {
+        entries.push({ name: `${label}.${srcFormat}`, key: srcKey, format: srcFormat as MeshFormat });
+      }
+    };
+
     if ((model.part_count ?? 1) > 1) {
-      // Multi-part "set": deliver every part as one watermarked ZIP.
+      // Multi-part "set": every part's STL (+ original) as one watermarked ZIP.
       const parts = (await db.query(
-        `SELECT name, stl_file_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+        `SELECT name, stl_file_path, source_format, source_file_path
+         FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
         [id]
       )).rows;
-      const files: Array<{ name: string; key: string }> = [
-        { name: `${safeName}-part-1.stl`, key: model.stl_file_path },
-        ...parts.map((p: any, i: number) => ({
-          name: `${String(p.name || `part-${i + 2}`).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60)}.stl`,
-          key: p.stl_file_path as string,
-        })),
-      ];
-      await streamWatermarkedZip(files, payload, safeName, res);
+      addDeliverable(`${safeName}-part-1`, model.stl_file_path, model.source_format, model.source_file_path);
+      parts.forEach((p: any, i: number) => {
+        const label = String(p.name || `part-${i + 2}`).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
+        addDeliverable(label, p.stl_file_path, p.source_format, p.source_file_path);
+      });
+      await streamWatermarkedZip(entries, payload, safeName, res);
     } else {
-      res.setHeader('Content-Type', 'model/stl');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.stl"`);
-      await streamWatermarkedSTL(model.stl_file_path, payload, res);
+      addDeliverable(safeName, model.stl_file_path, model.source_format, model.source_file_path);
+      if (entries.length === 1) {
+        // Pure single STL — stream it directly (backpressure-aware, low memory).
+        res.setHeader('Content-Type', 'model/stl');
+        res.setHeader('Content-Disposition', `attachment; filename="${safeName}.stl"`);
+        await streamWatermarkedSTL(model.stl_file_path, payload, res);
+      } else {
+        // OBJ/3MF upload → original + converted STL as a ZIP.
+        await streamWatermarkedZip(entries, payload, safeName, res);
+      }
     }
 
     db.query('UPDATE models SET download_count = download_count + 1 WHERE id = $1', [id])
@@ -1361,16 +1386,19 @@ router.get('/:id/download',
 
 async function processUploadedModel(modelId: string, rawKey: string, filename?: string): Promise<void> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-model-'));
-  const ext = (path.extname(filename || rawKey) || '.stl').toLowerCase();
-  const stlTmp = path.join(tmpDir, `model${ext}`);
+  const format: MeshFormat = meshFormatFromName(filename || rawKey) ?? 'stl';
+  const stlTmp = path.join(tmpDir, 'model.stl');
 
   try {
-    // 1. Pull the raw bytes from R2 to a temp file (processors work on paths).
-    const buffer = await downloadObject(rawKey);
-    await fsp.writeFile(stlTmp, buffer);
+    // 1. Pull the raw upload from R2 and convert it to our canonical STL (a no-op
+    //    for STL uploads). OBJ/3MF are parsed to triangles and re-emitted as STL,
+    //    which is what the fingerprint, preview-GLB and watermark all operate on.
+    const rawBuffer = await downloadObject(rawKey);
+    const stlBuffer = convertToStl(rawBuffer, format);
+    await fsp.writeFile(stlTmp, stlBuffer);
 
-    // 2. Reject exact-duplicate uploads (by content hash), excluding this row.
-    const fileHash = computeFileHash(buffer);
+    // 2. Reject exact-duplicate uploads (by canonical-STL hash), excluding this row.
+    const fileHash = computeFileHash(stlBuffer);
     const dup = await db.query('SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2', [fileHash, modelId]);
     if (dup.rows.length > 0) {
       await markModelFailed(modelId, `This model file has already been uploaded (matches "${dup.rows[0].name}")`);
@@ -1379,7 +1407,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     }
 
     // 3. Geometry fingerprint — catches re-uploads even if the file was
-    //    re-exported/rotated/rescaled to dodge the exact-hash check above.
+    //    re-exported/rotated/rescaled/converted to dodge the exact-hash check above.
     const fingerprint = await computeGeometryFingerprint(stlTmp);
     const geoDup = await findGeometryDuplicate(fingerprint, modelId);
     if (geoDup) {
@@ -1388,10 +1416,22 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       return;
     }
 
-    // 4. Analyse geometry + generate the GLB preview.
+    // 4. Analyse geometry + generate the GLB preview (from the canonical STL).
     const stlData = await processSTL(stlTmp);
     const glbPath = await generateGLB(stlTmp);
     const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+
+    // For a non-STL upload, store the converted canonical STL in R2 (it becomes
+    // stl_file_path) and keep the artist's original as source_file_path, so the
+    // buyer receives both. STL uploads keep rawKey as their stl_file_path.
+    let canonicalStlPath: string | null = null;
+    let sourceFilePath: string | null = null;
+    if (format !== 'stl') {
+      const canonTmp = path.join(tmpDir, 'canonical.stl');
+      await fsp.writeFile(canonTmp, stlBuffer);
+      canonicalStlPath = await uploadToStorage(canonTmp, 'models');
+      sourceFilePath = rawKey;
+    }
 
     const printEstimate = estimatePrintCost({
       volume_mm3: stlData.volume,
@@ -1416,9 +1456,12 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
          recommended_layer_height = 0.2, recommended_infill = 20,
          file_hash = $8,
          geometry_fingerprint = $9,
-         processing_status = $10, processing_error = NULL,
+         source_format = $10,
+         source_file_path = $11,
+         stl_file_path = COALESCE($12, stl_file_path),
+         processing_status = $13, processing_error = NULL,
          updated_at = NOW()
-       WHERE id = $11`,
+       WHERE id = $14`,
       [
         glbStoragePath,
         stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
@@ -1427,6 +1470,9 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         stlData.needsSupports,
         fileHash,
         JSON.stringify(fingerprint),
+        format,
+        sourceFilePath,
+        canonicalStlPath,
         hasParts ? 'processing' : 'ready',
         modelId,
       ]
@@ -1465,12 +1511,15 @@ async function processModelParts(modelId: string): Promise<void> {
   for (const part of parts) {
     const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-part-'));
     const stlTmp = path.join(tmpDir, 'part.stl');
+    // A part's format is taken from its raw upload key's extension.
+    const format: MeshFormat = meshFormatFromName(part.stl_file_path) ?? 'stl';
     try {
-      const buffer = await downloadObject(part.stl_file_path);
-      await fsp.writeFile(stlTmp, buffer);
+      const rawBuffer = await downloadObject(part.stl_file_path);
+      const stlBuffer = convertToStl(rawBuffer, format);
+      await fsp.writeFile(stlTmp, stlBuffer);
 
       // Dedup each part against every other model + part (not this model's own).
-      const fileHash = computeFileHash(buffer);
+      const fileHash = computeFileHash(stlBuffer);
       const fingerprint = await computeGeometryFingerprint(stlTmp);
       const geoDup = await findGeometryDuplicate(fingerprint, modelId);
       if (geoDup) {
@@ -1485,13 +1534,25 @@ async function processModelParts(modelId: string): Promise<void> {
       const glbPath = await generateGLB(stlTmp);
       const glbStoragePath = await uploadToStorage(glbPath, 'previews');
 
+      // Non-STL part: store the converted STL and keep the original as the source.
+      let canonicalStlPath: string | null = null;
+      let sourceFilePath: string | null = null;
+      if (format !== 'stl') {
+        const canonTmp = path.join(tmpDir, 'canonical.stl');
+        await fsp.writeFile(canonTmp, stlBuffer);
+        canonicalStlPath = await uploadToStorage(canonTmp, 'models');
+        sourceFilePath = part.stl_file_path;
+      }
+
       await db.query(
         `UPDATE model_parts SET
            glb_file_path = $1, width = $2, depth = $3, height = $4,
            file_hash = $5, geometry_fingerprint = $6,
+           source_format = $7, source_file_path = $8,
+           stl_file_path = COALESCE($9, stl_file_path),
            processing_status = 'ready', processing_error = NULL
-         WHERE id = $7`,
-        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), part.id]
+         WHERE id = $10`,
+        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id]
       );
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -1597,9 +1658,19 @@ async function watermarkedSTLBuffer(key: string, payload: WatermarkPayload): Pro
   return isAscii ? watermarkAsciiSTL(buf, payload) : buf;
 }
 
-/** Stream a ZIP of watermarked STL parts (multi-part "set" download). */
+/** Watermark one deliverable: STL via its header, OBJ/3MF via a best-effort tag. */
+async function watermarkedEntryBuffer(key: string, format: MeshFormat, payload: WatermarkPayload): Promise<Buffer> {
+  if (format === 'stl') return watermarkedSTLBuffer(key, payload);
+  const buf = await downloadObject(key);
+  return watermarkOriginal(buf, format, payload);
+}
+
+/**
+ * Stream a ZIP of watermarked deliverables. Used for multi-part "sets" and for
+ * single OBJ/3MF models (where the buyer gets the original file + a converted STL).
+ */
 async function streamWatermarkedZip(
-  files: Array<{ name: string; key: string }>,
+  files: Array<{ name: string; key: string; format: MeshFormat }>,
   payload: WatermarkPayload,
   zipName: string,
   res: Response,
@@ -1613,7 +1684,7 @@ async function streamWatermarkedZip(
   });
   archive.pipe(res);
   for (const f of files) {
-    const buf = await watermarkedSTLBuffer(f.key, payload);
+    const buf = await watermarkedEntryBuffer(f.key, f.format, payload);
     archive.append(buf, { name: f.name });
   }
   await archive.finalize();
