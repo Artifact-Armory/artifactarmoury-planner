@@ -188,29 +188,41 @@ export interface OrderConfirmationParams {
   items: Array<{
     asset: AssetLike
     quantity: number
+    /** Model id — used to deep-link the buyer straight to the download button. */
+    modelId?: string
   }>
 }
 
 /**
- * Send order confirmation email to customer
+ * Send the order confirmation for a DIGITAL STL order. There is no shipping and
+ * no print step — the files are available to download the moment payment
+ * succeeds, so the email confirms the order number + total and links the buyer
+ * straight to each model's download page.
  */
 export async function sendOrderConfirmation(
   params: OrderConfirmationParams
 ): Promise<void> {
   const { order, items } = params
-  
-  const itemsHtml = items.map(item => `
+
+  const itemsHtml = items.map(item => {
+    const downloadLink = item.modelId
+      ? `<a href="${FRONTEND_URL}/models/${item.modelId}" style="color: #bf6a15; font-weight: 600; font-size: 14px; text-decoration: none;">Download &rarr;</a>`
+      : `<span style="color: #9ca3af; font-size: 14px;">Available in your account</span>`
+    return `
     <tr>
-      <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
-        <strong>${item.asset.name}</strong><br>
-        <span style="color: #6b7280; font-size: 14px;">Quantity: ${item.quantity}</span>
+      <td style="padding: 14px 16px; border-bottom: 1px solid #e5e7eb;">
+        <strong style="color: #111827;">${item.asset.name}</strong><br>
+        <span style="color: #6b7280; font-size: 13px;">Digital STL &middot; download any time</span>
       </td>
-      <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb;">
-        £${(item.asset.base_price * item.quantity).toFixed(2)}
+      <td style="padding: 14px 16px; text-align: right; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+        £${Number(item.asset.base_price).toFixed(2)}<br>
+        ${downloadLink}
       </td>
-    </tr>
-  `).join('')
-  
+    </tr>`
+  }).join('')
+
+  const total = Number(order.pricing?.total ?? 0)
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -219,94 +231,65 @@ export async function sendOrderConfirmation(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
-  
+
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="color: #111827; font-size: 28px; margin: 0;">Artifact Planner</h1>
-    <p style="color: #6b7280; margin-top: 8px;">Order Confirmation</p>
+    <h1 style="color: #111827; font-size: 28px; margin: 0;">Artifact Armoury</h1>
+    <p style="color: #6b7280; margin-top: 8px;">Order confirmation</p>
   </div>
-  
-  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
-    <h2 style="margin: 0 0 16px 0; font-size: 20px; color: #111827;">Thank you for your order!</h2>
-    <p style="margin: 0; color: #4b5563;">
-      We've received your order and will begin processing it shortly. 
-      You'll receive another email once your items have been shipped.
+
+  <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #166534;">Your files are ready to download</h2>
+    <p style="margin: 0; color: #166534;">
+      Payment received &mdash; thank you! Your STL files are available now. Download
+      them from each model below, as many times as you like. Every file is
+      watermarked to your account.
     </p>
   </div>
-  
+
   <div style="margin-bottom: 24px;">
-    <h3 style="font-size: 16px; color: #111827; margin-bottom: 8px;">Order Details</h3>
     <table style="width: 100%; border-collapse: collapse;">
       <tr>
-        <td style="padding: 8px 0; color: #6b7280;">Order Number:</td>
-        <td style="padding: 8px 0; text-align: right; font-weight: 600;">${order.order_number}</td>
+        <td style="padding: 8px 0; color: #6b7280;">Order number:</td>
+        <td style="padding: 8px 0; text-align: right; font-weight: 600; font-family: monospace;">${order.order_number}</td>
       </tr>
       <tr>
-        <td style="padding: 8px 0; color: #6b7280;">Order Date:</td>
+        <td style="padding: 8px 0; color: #6b7280;">Order date:</td>
         <td style="padding: 8px 0; text-align: right;">${new Date(order.created_at).toLocaleDateString('en-GB')}</td>
       </tr>
     </table>
   </div>
-  
+
   <div style="margin-bottom: 24px;">
-    <h3 style="font-size: 16px; color: #111827; margin-bottom: 12px;">Items</h3>
+    <h3 style="font-size: 16px; color: #111827; margin-bottom: 12px;">Your downloads</h3>
     <table style="width: 100%; border-collapse: collapse; background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       ${itemsHtml}
-    </table>
-  </div>
-  
-  <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-    <table style="width: 100%; border-collapse: collapse;">
-      <tr>
-        <td style="padding: 8px 0; color: #6b7280;">Models Subtotal:</td>
-        <td style="padding: 8px 0; text-align: right;">£${order.pricing.model_subtotal.toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; color: #6b7280;">Print & Materials:</td>
-        <td style="padding: 8px 0; text-align: right;">£${order.pricing.print_subtotal.toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; color: #6b7280;">Shipping:</td>
-        <td style="padding: 8px 0; text-align: right;">£${order.pricing.shipping.toFixed(2)}</td>
-      </tr>
-      <tr style="border-top: 2px solid #e5e7eb;">
-        <td style="padding: 12px 0; font-weight: 600; font-size: 18px;">Total:</td>
-        <td style="padding: 12px 0; text-align: right; font-weight: 600; font-size: 18px;">£${order.pricing.total.toFixed(2)}</td>
+      <tr style="background: #f9fafb;">
+        <td style="padding: 14px 16px; font-weight: 600; font-size: 18px;">Total paid</td>
+        <td style="padding: 14px 16px; text-align: right; font-weight: 600; font-size: 18px;">£${total.toFixed(2)}</td>
       </tr>
     </table>
   </div>
-  
-  <div style="margin-bottom: 24px;">
-    <h3 style="font-size: 16px; color: #111827; margin-bottom: 8px;">Shipping Address</h3>
-    <p style="margin: 0; color: #4b5563; line-height: 1.8;">
-      ${order.shipping_address.name}<br>
-      ${order.shipping_address.line1}<br>
-      ${order.shipping_address.line2 ? order.shipping_address.line2 + '<br>' : ''}
-      ${order.shipping_address.city}, ${order.shipping_address.postal_code}<br>
-      ${order.shipping_address.country}
+
+  <div style="background: #fbf3e8; border: 1px solid #e7c79a; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <p style="margin: 0; color: #7c4a12; font-size: 14px;">
+      <strong>How to print:</strong> open your STL in your slicer of choice, scale
+      to taste, and print. Multi-part sets download as a single ZIP with every part
+      inside. Need help? Just reply to this email.
     </p>
   </div>
-  
-  <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-    <p style="margin: 0; color: #1e40af; font-size: 14px;">
-      <strong>Track your order:</strong> Visit your order status page at any time to see updates.
-    </p>
-    <a href="${FRONTEND_URL}/orders/${order.id}" style="display: inline-block; margin-top: 12px; padding: 8px 16px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 500;">
-      View Order Status
-    </a>
-  </div>
-  
+
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0 0 8px 0;">Need help? Contact us at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
+    <p style="margin: 0 0 8px 0;">Questions about your order? Contact us at support@artifactarmoury.com</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
   </div>
-  
+
 </body>
 </html>
   `
-  
+
   await sendEmail({
     to: order.user_email,
-    subject: `Order Confirmation - ${order.order_number}`,
+    subject: `Your Artifact Armoury order - ${order.order_number}`,
     html
   })
 }

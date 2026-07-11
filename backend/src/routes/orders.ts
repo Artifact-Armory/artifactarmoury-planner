@@ -330,24 +330,20 @@ router.post('/:id/confirm',
       [id]
     );
 
-    // Send confirmation email
+    // Send confirmation email (digital STL order — no shipping, files ready now)
     sendOrderConfirmation({
       order: {
         id: order.id,
         order_number: order.order_number,
         created_at: order.created_at,
         user_email: order.customer_email,
-        pricing: { total: order.total, model_subtotal: 0, print_subtotal: 0, shipping: order.shipping_cost },
-        shipping_address: {
-          name: order.shipping_name,
-          line1: order.shipping_address_line1,
-          line2: order.shipping_address_line2,
-          city: order.shipping_city,
-          postal_code: order.shipping_postal_code,
-          country: order.shipping_country,
-        },
+        pricing: { total: Number(order.total) },
       } as any,
-      items: itemsResult.rows.map((r: any) => ({ asset: { name: r.model_name, base_price: Number(r.unit_price) } as any, quantity: Number(r.quantity) }))
+      items: itemsResult.rows.map((r: any) => ({
+        asset: { name: r.model_name, base_price: Number(r.unit_price) } as any,
+        quantity: Number(r.quantity),
+        modelId: r.model_id,
+      }))
     }).catch(err => logger.error('Failed to send confirmation email', { error: err }));
 
     // Increment model sale counts
