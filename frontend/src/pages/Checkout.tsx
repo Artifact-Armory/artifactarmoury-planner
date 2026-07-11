@@ -1,11 +1,24 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Trash2, CheckCircle } from 'lucide-react'
+import { Trash2, CheckCircle, Lock } from 'lucide-react'
+import { loadStripe, type Stripe } from '@stripe/stripe-js'
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { useCartStore, cartKey } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
-import { ordersApi, OrderItemInput } from '../api/endpoints/orders'
+import { ordersApi, OrderItemInput, CreatedOrder } from '../api/endpoints/orders'
 import { formatPrice } from '../utils/format'
 import Button from '../components/ui/Button'
+
+// Load Stripe.js once, only if a publishable key is configured. When it's absent
+// (or the backend is running in STRIPE_MOCK mode) checkout falls back to the mock
+// flow — create the order then confirm the auto-succeeded payment, no card needed.
+const PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined
+const stripePromise: Promise<Stripe | null> | null = PUBLISHABLE_KEY
+  ? loadStripe(PUBLISHABLE_KEY)
+  : null
+
+/** A client secret from the mock Stripe path — no real card entry is possible. */
+const isMockSecret = (secret?: string) => !secret || secret.startsWith('cs_mock')
 
 const Checkout: React.FC = () => {
   const navigate = useNavigate()
@@ -15,12 +28,24 @@ const Checkout: React.FC = () => {
   const clearCart = useCartStore((s) => s.clearCart)
   const user = useAuthStore((s) => s.user)
 
+  const [phase, setPhase] = React.useState<'review' | 'pay'>('review')
+  const [order, setOrder] = React.useState<CreatedOrder | null>(null)
   const [placing, setPlacing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [done, setDone] = React.useState(false)
   const [consent, setConsent] = React.useState(false)
 
-  async function handlePay() {
+  // Whether this order will collect a real card (Stripe live) or complete via the mock path.
+  const realPayment = !!stripePromise && !!order && !isMockSecret(order.clientSecret)
+
+  function finishSuccessfully() {
+    clearCart()
+    setDone(true)
+  }
+
+  // Step 1: create the order (and its PaymentIntent). In mock mode we can confirm
+  // immediately; in live mode we move to the card-entry step.
+  async function handleContinue() {
     if (!user) { navigate('/login'); return }
     if (items.length === 0) return
     if (!consent) { setError('Please confirm you agree to your download starting immediately.'); return }
@@ -30,11 +55,17 @@ const Checkout: React.FC = () => {
       const orderItems: OrderItemInput[] = items.map((i) =>
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
-      // Mock Stripe: create the order, then confirm the (auto-succeeded) payment.
-      const order = await ordersApi.createOrder(orderItems, user.email, consent)
-      await ordersApi.confirmOrder(order.id, order.paymentIntentId ?? order.clientSecret ?? 'mock')
-      clearCart()
-      setDone(true)
+      const created = await ordersApi.createOrder(orderItems, user.email, consent)
+      setOrder(created)
+
+      if (!stripePromise || isMockSecret(created.clientSecret)) {
+        // Mock Stripe: the payment auto-succeeds, so confirm and finish.
+        await ordersApi.confirmOrder(created.id, created.paymentIntentId ?? created.clientSecret ?? 'mock')
+        finishSuccessfully()
+      } else {
+        // Live Stripe: collect the card next.
+        setPhase('pay')
+      }
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Checkout failed — please try again.')
     } finally {
@@ -49,7 +80,7 @@ const Checkout: React.FC = () => {
         <h1 className="mt-4 text-2xl font-semibold text-gray-900">Purchase complete</h1>
         <p className="mt-2 text-gray-600">
           Your STL files are now unlocked. Download them any time from your models or your
-          purchase history.
+          purchase history — we've also emailed your receipt with download links.
         </p>
         <div className="mt-8 flex justify-center gap-3">
           <Link to="/dashboard/purchases" className="rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
@@ -97,13 +128,15 @@ const Checkout: React.FC = () => {
                   <p className="text-xs text-gray-500">{item.artistName}</p>
                 </div>
                 <span className="font-semibold text-gray-900">{formatPrice(item.price)}</span>
-                <button
-                  onClick={() => removeItem(cartKey(item.kind, item.id))}
-                  className="rounded-full p-2 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                  aria-label="Remove item"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {phase === 'review' && (
+                  <button
+                    onClick={() => removeItem(cartKey(item.kind, item.id))}
+                    className="rounded-full p-2 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    aria-label="Remove item"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -117,30 +150,119 @@ const Checkout: React.FC = () => {
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
             )}
 
-            <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                I want my download to start immediately and I understand I lose my 14-day right
-                to cancel once it begins.
-              </span>
-            </label>
+            {phase === 'review' ? (
+              <>
+                <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I want my download to start immediately and I understand I lose my 14-day right
+                    to cancel once it begins.
+                  </span>
+                </label>
 
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-            <Button className="mt-4 w-full" onClick={handlePay} disabled={placing || !consent}>
-              {placing ? 'Processing…' : `Pay ${formatPrice(subtotal)} (mock)`}
-            </Button>
-            <p className="mt-2 text-center text-[11px] text-gray-400">
-              Test checkout — no real payment is taken.
-            </p>
+                {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+                <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !consent}>
+                  {placing
+                    ? 'Processing…'
+                    : stripePromise
+                      ? `Continue to payment · ${formatPrice(subtotal)}`
+                      : `Pay ${formatPrice(subtotal)} (test)`}
+                </Button>
+                <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-gray-400">
+                  <Lock size={11} />
+                  {stripePromise ? 'Payments secured by Stripe' : 'Test checkout — no real payment is taken.'}
+                </p>
+              </>
+            ) : (
+              order && realPayment && (
+                <Elements
+                  stripe={stripePromise}
+                  options={{ clientSecret: order.clientSecret, appearance: { theme: 'stripe' } }}
+                >
+                  <PaymentForm
+                    order={order}
+                    total={subtotal}
+                    onSuccess={finishSuccessfully}
+                    onBack={() => { setPhase('review'); setOrder(null) }}
+                  />
+                </Elements>
+              )
+            )}
           </aside>
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Live card-entry step. Rendered inside <Elements>, so it can use the Stripe hooks.
+// ---------------------------------------------------------------------------
+const PaymentForm: React.FC<{
+  order: CreatedOrder
+  total: number
+  onSuccess: () => void
+  onBack: () => void
+}> = ({ order, total, onSuccess, onBack }) => {
+  const stripe = useStripe()
+  const elements = useElements()
+  const [paying, setPaying] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  async function handlePay(e: React.FormEvent) {
+    e.preventDefault()
+    if (!stripe || !elements) return
+    setPaying(true)
+    setError(null)
+    try {
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+      })
+
+      if (stripeError) {
+        setError(stripeError.message || 'Payment could not be completed. Please check your card details.')
+        return
+      }
+
+      if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'processing')) {
+        // Tell our backend to verify the intent and unlock the downloads.
+        await ordersApi.confirmOrder(order.id, order.paymentIntentId ?? paymentIntent.id)
+        onSuccess()
+      } else {
+        setError('Payment did not complete. Please try again.')
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Payment failed — please try again.')
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handlePay} className="mt-4">
+      <PaymentElement options={{ layout: 'tabs' }} />
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      <Button type="submit" className="mt-4 w-full" disabled={!stripe || paying}>
+        {paying ? 'Processing payment…' : `Pay ${formatPrice(total)}`}
+      </Button>
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={paying}
+        className="mt-2 w-full text-center text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+      >
+        Back to cart
+      </button>
+      <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-gray-400">
+        <Lock size={11} /> Payments secured by Stripe
+      </p>
+    </form>
   )
 }
 
