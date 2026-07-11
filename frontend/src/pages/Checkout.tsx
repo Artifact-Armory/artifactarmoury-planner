@@ -107,7 +107,7 @@ const Checkout: React.FC = () => {
           </Link>
         </div>
       ) : (
-        <div className="mt-6 grid gap-8 lg:grid-cols-[1.4fr_0.6fr]">
+        <div className="mt-6 space-y-6">
           <ul className="divide-y rounded-lg border bg-white">
             {items.map((item) => (
               <li key={cartKey(item.kind, item.id)} className="flex items-center gap-4 p-4">
