@@ -10,11 +10,16 @@ import { accrueEarningsForOrder } from './earnings'
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
-const STRIPE_MOCK = (process.env.STRIPE_MOCK === 'true') || (process.env.PAYMENTS_MOCK === 'true') || (process.env.PAYMENTS_ENABLED === 'false')
 
-if (!STRIPE_MOCK && !STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY environment variable is required')
-}
+// Payments are MOCKED by default and only go live when explicitly enabled with a
+// real key. This fails safe for the pre-launch marketplace: no real charge is ever
+// attempted unless PAYMENTS_ENABLED=true AND a STRIPE_SECRET_KEY is configured.
+// STRIPE_MOCK=true / PAYMENTS_MOCK=true force mock even when a key is present.
+// (Previously the presence of a secret key alone flipped it live, which broke the
+// mock/test checkout with a "Payment not completed" error.)
+const FORCE_MOCK = process.env.STRIPE_MOCK === 'true' || process.env.PAYMENTS_MOCK === 'true'
+const PAYMENTS_LIVE = process.env.PAYMENTS_ENABLED === 'true' && !!STRIPE_SECRET_KEY
+const STRIPE_MOCK = FORCE_MOCK || !PAYMENTS_LIVE
 
 export const stripe: Stripe = STRIPE_MOCK
   // In mock mode, stripe SDK is not used
@@ -25,6 +30,11 @@ export const stripe: Stripe = STRIPE_MOCK
     })
 
 const stripeLogger = logger.child('STRIPE')
+
+stripeLogger.info(`Payments ${STRIPE_MOCK ? 'MOCKED (no real charges)' : 'LIVE'}`, {
+  mock: STRIPE_MOCK,
+  hasSecretKey: !!STRIPE_SECRET_KEY,
+})
 
 // ============================================================================
 // STRIPE CONNECT - ARTIST ONBOARDING
