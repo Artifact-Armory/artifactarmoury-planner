@@ -29,7 +29,8 @@ const MyModels: React.FC = () => {
       setReviewing(null)
       queryClient.invalidateQueries({ queryKey: ['my-library'] })
     },
-    onError: () => toast.error('Could not save your review. Please try again.'),
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.message || 'Could not save your review. Please try again.'),
   })
 
   const handleDownload = async (item: PurchasedModel) => {
