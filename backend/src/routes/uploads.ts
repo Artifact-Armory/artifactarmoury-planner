@@ -7,7 +7,10 @@ import crypto from 'crypto'
 import path from 'path'
 import { authenticate, requireArtist, AuthRequest } from '../middleware/auth'
 import { asyncHandler, ValidationError } from '../middleware/error'
-import { isR2Enabled, presignUpload } from '../services/r2'
+import {
+  isR2Enabled, presignUpload,
+  createMultipartUpload, presignUploadPart, completeMultipartUpload, abortMultipartUpload,
+} from '../services/r2'
 import { contentTypeFor } from '../services/storage'
 
 const router = Router()
@@ -53,6 +56,102 @@ router.post(
       headers: { 'Content-Type': contentType },
       expiresIn: EXPIRES_IN,
     })
+  }),
+)
+
+// R2/S3 multipart caps: max 10,000 parts. We also bound part count so a client
+// can't ask us to sign an unreasonable number of URLs.
+const MAX_PARTS = 10_000
+
+/**
+ * POST /api/uploads/multipart/create  { filename, prefix, partCount }
+ * → { key, uploadId, contentType, parts: [{ partNumber, url }] }
+ * Starts a multipart upload and hands back a presigned PUT URL for every part.
+ * The client PUTs each chunk, collects the ETag response header, then calls
+ * /complete (or /abort on failure).
+ */
+router.post(
+  '/multipart/create',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)')
+    }
+    const { filename, prefix = 'raw', partCount } = req.body ?? {}
+    if (!filename || typeof filename !== 'string') {
+      throw new ValidationError('filename is required')
+    }
+    if (!SAFE_PREFIXES.includes(prefix)) {
+      throw new ValidationError(`prefix must be one of: ${SAFE_PREFIXES.join(', ')}`)
+    }
+    const n = Number(partCount)
+    if (!Number.isInteger(n) || n < 1 || n > MAX_PARTS) {
+      throw new ValidationError(`partCount must be an integer between 1 and ${MAX_PARTS}`)
+    }
+
+    const ext = path.extname(filename).toLowerCase()
+    const contentType = contentTypeFor(filename)
+    const hash = crypto.randomBytes(16).toString('hex')
+    const key = `${prefix}/${hash}${ext}`
+
+    const uploadId = await createMultipartUpload(key, contentType)
+    const parts = await Promise.all(
+      Array.from({ length: n }, (_, i) => i + 1).map(async (partNumber) => ({
+        partNumber,
+        url: await presignUploadPart(key, uploadId, partNumber, 3600),
+      })),
+    )
+
+    res.json({ key, uploadId, contentType, parts })
+  }),
+)
+
+/**
+ * POST /api/uploads/multipart/complete  { key, uploadId, parts: [{ partNumber, etag }] }
+ * → { key, publicUrl }
+ */
+router.post(
+  '/multipart/complete',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)')
+    }
+    const { key, uploadId, parts } = req.body ?? {}
+    if (!key || typeof key !== 'string') throw new ValidationError('key is required')
+    if (!uploadId || typeof uploadId !== 'string') throw new ValidationError('uploadId is required')
+    if (!Array.isArray(parts) || parts.length < 1) throw new ValidationError('parts is required')
+    for (const p of parts) {
+      if (!Number.isInteger(p?.partNumber) || !p?.etag || typeof p.etag !== 'string') {
+        throw new ValidationError('each part needs a partNumber and etag')
+      }
+    }
+
+    const publicUrl = await completeMultipartUpload(key, uploadId, parts)
+    res.json({ key, publicUrl })
+  }),
+)
+
+/**
+ * POST /api/uploads/multipart/abort  { key, uploadId }
+ * Best-effort cleanup of a failed multipart upload.
+ */
+router.post(
+  '/multipart/abort',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { key, uploadId } = req.body ?? {}
+    if (!key || typeof key !== 'string') throw new ValidationError('key is required')
+    if (!uploadId || typeof uploadId !== 'string') throw new ValidationError('uploadId is required')
+    try {
+      await abortMultipartUpload(key, uploadId)
+    } catch {
+      // best-effort — the upload will be garbage-collected by R2 lifecycle anyway
+    }
+    res.json({ ok: true })
   }),
 )
 

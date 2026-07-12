@@ -14,6 +14,8 @@
 
 import {
   S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand,
+  CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Readable } from 'stream'
@@ -129,6 +131,77 @@ export async function presignUpload(
     { expiresIn: expiresInSeconds },
   )
   return { uploadUrl, publicUrl: publicUrl(k), key: k }
+}
+
+// ---------------------------------------------------------------------------
+// Multipart upload (for large models). The browser uploads the file in chunks:
+// each part is PUT to its own presigned URL and can be retried independently, so
+// a single network blip no longer fails a whole 300MB+ upload. R2 speaks the S3
+// multipart API. Parts must be >= 5MB (except the last); max 10,000 parts.
+// ---------------------------------------------------------------------------
+
+/** Begin a multipart upload; returns the uploadId that ties the parts together. */
+export async function createMultipartUpload(key: string, contentType: string): Promise<string> {
+  const res = await client().send(new CreateMultipartUploadCommand({
+    Bucket: BUCKET,
+    Key: normalizeKey(key),
+    ContentType: contentType,
+  }))
+  if (!res.UploadId) throw new Error('R2 did not return an UploadId')
+  return res.UploadId
+}
+
+/**
+ * Presigned PUT URL for one part. The browser PUTs the chunk here and must read
+ * the returned `ETag` response header (requires R2 CORS to expose ETag) to pass
+ * back to completeMultipartUpload.
+ */
+export async function presignUploadPart(
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  expiresInSeconds = 3600,
+): Promise<string> {
+  return getSignedUrl(
+    client(),
+    new UploadPartCommand({
+      Bucket: BUCKET,
+      Key: normalizeKey(key),
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    }),
+    { expiresIn: expiresInSeconds },
+  )
+}
+
+/** Finish a multipart upload by stitching the uploaded parts (in order). */
+export async function completeMultipartUpload(
+  key: string,
+  uploadId: string,
+  parts: Array<{ partNumber: number; etag: string }>,
+): Promise<string> {
+  const k = normalizeKey(key)
+  await client().send(new CompleteMultipartUploadCommand({
+    Bucket: BUCKET,
+    Key: k,
+    UploadId: uploadId,
+    MultipartUpload: {
+      Parts: parts
+        .slice()
+        .sort((a, b) => a.partNumber - b.partNumber)
+        .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+    },
+  }))
+  return publicUrl(k)
+}
+
+/** Discard an incomplete multipart upload (frees the staged parts). */
+export async function abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+  await client().send(new AbortMultipartUploadCommand({
+    Bucket: BUCKET,
+    Key: normalizeKey(key),
+    UploadId: uploadId,
+  }))
 }
 
 /** Presigned GET URL (only needed for private objects; public assets use publicUrl). */
