@@ -734,16 +734,29 @@ export const TAXONOMY: FacetSeed[] = [
           'Old West',
           'Franco-Prussian',
         ]),
-        t('World War One', ['Western Front', 'Eastern Front', 'Gallipoli & Middle East']),
+        // Slugs pinned to the pre-rename values ('world-war-one'/'world-war-two')
+        // so existing tags + saved filters keep working; the (WW1)/(WW2) is just
+        // display, and synonyms let buyers find them by searching "WW1"/"WW2".
+        {
+          name: 'World War One (WW1)',
+          slug: 'world-war-one',
+          synonyms: ['WW1', 'WWI', 'Great War', 'First World War'],
+          children: [{ name: 'Western Front' }, { name: 'Eastern Front' }, { name: 'Gallipoli & Middle East' }],
+        },
         t('Interwar', ['Spanish Civil War', 'Back of Beyond']),
-        t('World War Two', [
-          'Western Europe',
-          'Eastern Front',
-          'North Africa',
-          'Italy',
-          'Pacific',
-          'Home Front & Blitz',
-        ]),
+        {
+          name: 'World War Two (WW2)',
+          slug: 'world-war-two',
+          synonyms: ['WW2', 'WWII', 'Second World War'],
+          children: [
+            { name: 'Western Europe' },
+            { name: 'Eastern Front' },
+            { name: 'North Africa' },
+            { name: 'Italy' },
+            { name: 'Pacific' },
+            { name: 'Home Front & Blitz' },
+          ],
+        },
         t('Cold War', ['1950s–80s Conventional', 'Vietnam', 'Korea']),
         t('Modern', ['1990s–present', 'Middle East Operations', 'Urban Ops']),
         t('Near Future', ['Ultramodern Speculative']),
@@ -950,6 +963,7 @@ export const TAXONOMY: FacetSeed[] = [
       ]),
       t('Files', [
         'STL',
+        'OBJ',
         '3MF',
         'Pre-sliced (Lychee)',
         'Pre-sliced (Chitubox)',
