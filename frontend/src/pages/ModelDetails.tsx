@@ -186,6 +186,7 @@ const ModelDetails: React.FC = () => {
       name: model.name,
       artistName: model.artistName,
       price: model.onSale && model.salePrice != null ? model.salePrice : model.basePrice,
+      originalPrice: model.onSale && model.salePrice != null ? model.basePrice : undefined,
       imageUrl: model.thumbnailUrl,
     })
     openCart()

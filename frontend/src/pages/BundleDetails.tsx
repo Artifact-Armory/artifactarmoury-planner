@@ -60,6 +60,7 @@ const BundleDetails: React.FC = () => {
       name: bundle.name,
       artistName: bundle.artistName ?? '',
       price: bundle.onSale && bundle.salePrice != null ? bundle.salePrice : bundle.price,
+      originalPrice: bundle.onSale && bundle.salePrice != null ? bundle.price : undefined,
       imageUrl: bundle.thumbnailUrl,
     })
     openCart()

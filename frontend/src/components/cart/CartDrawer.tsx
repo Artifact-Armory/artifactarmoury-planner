@@ -111,8 +111,15 @@ const CartDrawer: React.FC = () => {
                         )}
                       </div>
                       <p className="text-xs text-gray-500">{item.artistName}</p>
-                      <p className="mt-1 text-sm font-semibold text-gray-900">
-                        £{item.price.toFixed(2)}
+                      <p className="mt-1 flex items-baseline gap-1.5 text-sm font-semibold">
+                        {item.originalPrice != null && item.originalPrice > item.price ? (
+                          <>
+                            <span className="text-rose-600">£{item.price.toFixed(2)}</span>
+                            <span className="text-xs font-normal text-gray-400 line-through">£{item.originalPrice.toFixed(2)}</span>
+                          </>
+                        ) : (
+                          <span className="text-gray-900">£{item.price.toFixed(2)}</span>
+                        )}
                       </p>
                     </div>
                   </div>

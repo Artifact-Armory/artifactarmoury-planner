@@ -135,7 +135,14 @@ const Checkout: React.FC = () => {
                   </div>
                   <p className="text-xs text-gray-500">{item.artistName}</p>
                 </div>
-                <span className="font-semibold text-gray-900">{formatPrice(item.price)}</span>
+                {item.originalPrice != null && item.originalPrice > item.price ? (
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="font-semibold text-rose-600">{formatPrice(item.price)}</span>
+                    <span className="text-xs text-gray-400 line-through">{formatPrice(item.originalPrice)}</span>
+                  </span>
+                ) : (
+                  <span className="font-semibold text-gray-900">{formatPrice(item.price)}</span>
+                )}
                 {phase === 'review' && (
                   <button
                     onClick={() => removeItem(cartKey(item.kind, item.id))}

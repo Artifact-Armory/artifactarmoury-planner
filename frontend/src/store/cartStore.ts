@@ -12,6 +12,8 @@ export interface CartItem {
   name: string
   artistName: string
   price: number
+  /** Pre-sale price, when the item is discounted — shown struck-through in the cart. */
+  originalPrice?: number
   imageUrl?: string
 }
 
@@ -50,11 +52,16 @@ export const useCartStore = create<CartState>()(
 
       addItem: (item, openDrawer = true) => {
         set((state) => {
-          // Already own-once: if it's in the cart, don't duplicate — just open.
-          if (state.items.some((i) => i.kind === item.kind && i.id === item.id)) {
-            return { isOpen: openDrawer ? true : state.isOpen }
+          const idx = state.items.findIndex((i) => i.kind === item.kind && i.id === item.id)
+          let items: CartItem[]
+          if (idx >= 0) {
+            // Own-once: don't duplicate, but refresh the line's price/details so a
+            // sale that started (or ended) since it was added is reflected.
+            items = state.items.slice()
+            items[idx] = { ...items[idx], ...item }
+          } else {
+            items = [...state.items, item]
           }
-          const items = [...state.items, item]
           return { items, ...calculateTotals(items), isOpen: openDrawer ? true : state.isOpen }
         })
       },
