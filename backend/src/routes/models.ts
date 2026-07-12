@@ -34,6 +34,7 @@ import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { analyzeMeshQuality } from '../services/meshQA';
+import { annotateModelsWithSales, recordPrice } from '../services/sales';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
@@ -390,6 +391,8 @@ router.post('/from-upload',
       [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType]
     );
     const model = result.rows[0];
+    // Seed price history (backs the anti-inflation guard on sales).
+    recordPrice('model', model.id, price);
 
     // Insert a row per extra part (processed in the background job).
     for (let i = 0; i < extraParts.length; i++) {
@@ -748,6 +751,9 @@ router.get('/:id',
       [id]
     )).rows;
 
+    // Apply any active sale (adds sale_price / sale_percent / original_price).
+    await annotateModelsWithSales([model]);
+
     // Taxonomy tags (facet terms) for the product page + cross-linking.
     const taxonomyTerms = await getModelTerms(id);
 
@@ -873,6 +879,12 @@ router.patch('/:id',
         updateValues
       );
       updatedRow = result.rows[0];
+    }
+
+    // Track price changes for the sale anti-inflation guard.
+    if (updates.base_price !== undefined) {
+      const p = Number(updates.base_price);
+      if (!Number.isNaN(p)) recordPrice('model', id, p);
     }
 
     if (resolvedTerms) {

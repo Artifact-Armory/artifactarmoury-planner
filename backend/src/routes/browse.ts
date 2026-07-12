@@ -10,6 +10,7 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError } from '../middleware/error';
 import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
 import { logSearch } from '../services/analytics';
+import { annotateModelsWithSales } from '../services/sales';
 
 const router = Router();
 
@@ -164,6 +165,8 @@ router.get('/',
       params
     );
 
+    await annotateModelsWithSales(result.rows);
+
     res.json({
       models: result.rows,
       pagination: {
@@ -244,7 +247,7 @@ router.get('/featured',
     // Featured models = highest rated + most sales in last 30 days
     const result = await db.query(
       `SELECT 
-        m.id, m.name, m.description, m.category,
+        m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price, m.fulfillment_type,
         u.artist_name, u.artist_url,
         COUNT(DISTINCT r.id) as review_count,
@@ -267,6 +270,7 @@ router.get('/featured',
       [(req as any).userId || null, Number(limit)]
     );
 
+    await annotateModelsWithSales(result.rows);
     res.json({
       featured: result.rows
     });
@@ -284,7 +288,7 @@ router.get('/new',
 
     const result = await db.query(
       `SELECT 
-        m.id, m.name, m.description, m.category,
+        m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price,
         m.published_at,
         u.artist_name, u.artist_url,
@@ -304,6 +308,7 @@ router.get('/new',
       [(req as any).userId || null, Number(limit)]
     );
 
+    await annotateModelsWithSales(result.rows);
     res.json({
       newArrivals: result.rows
     });
@@ -322,7 +327,7 @@ router.get('/trending',
     // Trending = most views in last 7 days
     const result = await db.query(
       `SELECT 
-        m.id, m.name, m.description, m.category,
+        m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price,
         m.view_count, m.sale_count,
         u.artist_name, u.artist_url,
@@ -344,6 +349,7 @@ router.get('/trending',
       [(req as any).userId || null, Number(limit)]
     );
 
+    await annotateModelsWithSales(result.rows);
     res.json({
       trending: result.rows
     });

@@ -63,6 +63,7 @@ import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
 import EditModel from './pages/artist/EditModel';
 import ArtistSales from './pages/artist/ArtistSales';
+import ArtistPromotions from './pages/artist/ArtistPromotions';
 import SalesDetail from './pages/artist/analytics/SalesDetail';
 import ProductsDetail from './pages/artist/analytics/ProductsDetail';
 import RatingDetail from './pages/artist/analytics/RatingDetail';
@@ -254,6 +255,7 @@ function App() {
               <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="collaborations" element={<ArtistCollaborations />} />
               <Route path="sales" element={<ArtistSales />} />
+              <Route path="promotions" element={<ArtistPromotions />} />
               <Route path="payouts" element={<ArtistPayouts />} />
               <Route path="reports" element={<ArtistReports />} />
               <Route path="analytics/sales" element={<SalesDetail />} />

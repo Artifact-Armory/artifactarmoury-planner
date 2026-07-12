@@ -88,6 +88,13 @@ export interface TerrainModel {
   // Buyer usage licence (see utils/licenses). 'personal' = own use only;
   // 'commercial' = may sell physical prints. Neither permits sharing the file.
   license?: 'personal' | 'commercial'
+  // Active sale (migration 034). When onSale, salePrice is the charged price and
+  // originalPrice is the honest "was" price to strike through.
+  onSale?: boolean
+  salePercent?: number
+  salePrice?: number
+  originalPrice?: number
+  saleEndsAt?: string | null
   // Printability metadata (artist-declared) + automated mesh QA (see utils/printability).
   printerType?: 'fdm' | 'resin' | 'both' | null
   supportsRequired?: boolean
@@ -421,4 +428,9 @@ export interface Bundle {
   models: BundleModelRef[]
   createdAt?: string
   publishedAt?: string
+  onSale?: boolean
+  salePercent?: number
+  salePrice?: number
+  originalPrice?: number
+  saleEndsAt?: string | null
 }

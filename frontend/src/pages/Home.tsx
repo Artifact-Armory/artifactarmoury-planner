@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import Spinner from '../components/ui/Spinner'
 import ModelGrid from '../components/models/ModelGrid'
+import SaleCarousel from '../components/models/SaleCarousel'
 import { browseApi } from '../api/endpoints/browse'
 
 const Home: React.FC = () => {
@@ -97,6 +98,8 @@ const Home: React.FC = () => {
           </div>
         </section>
       ) : null}
+
+      <SaleCarousel />
 
       <section className="mt-12">
         <div className="flex items-center justify-between">

@@ -649,6 +649,38 @@ CREATE INDEX idx_reviews_user ON reviews(user_id);
 CREATE INDEX idx_reviews_visible ON reviews(is_visible) WHERE is_visible = true;
 
 -- ============================================================================
+-- SALES / DISCOUNTS (migration 034) + price history (anti-inflation guard)
+-- ============================================================================
+
+CREATE TABLE sales (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL CHECK (scope IN ('model', 'bundle', 'portfolio')),
+    target_id UUID,
+    discount_percent INTEGER NOT NULL CHECK (discount_percent BETWEEN 5 AND 90),
+    starts_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ends_at TIMESTAMP NOT NULL,
+    canceled_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (ends_at > starts_at),
+    CHECK (ends_at <= starts_at + INTERVAL '14 days'),
+    CHECK ((scope = 'portfolio' AND target_id IS NULL) OR (scope <> 'portfolio' AND target_id IS NOT NULL))
+);
+CREATE INDEX idx_sales_artist ON sales(artist_id);
+CREATE INDEX idx_sales_active ON sales(starts_at, ends_at) WHERE canceled_at IS NULL;
+CREATE UNIQUE INDEX idx_sales_one_live_per_target
+    ON sales (artist_id, scope, COALESCE(target_id, artist_id)) WHERE canceled_at IS NULL;
+
+CREATE TABLE price_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('model', 'bundle')),
+    entity_id UUID NOT NULL,
+    price NUMERIC(10, 2) NOT NULL,
+    recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_price_history_entity ON price_history(entity_type, entity_id, recorded_at DESC);
+
+-- ============================================================================
 -- FAVORITES (Wishlist)
 -- ============================================================================
 

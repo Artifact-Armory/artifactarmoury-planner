@@ -185,7 +185,7 @@ const ModelDetails: React.FC = () => {
       id: model.id,
       name: model.name,
       artistName: model.artistName,
-      price: model.basePrice,
+      price: model.onSale && model.salePrice != null ? model.salePrice : model.basePrice,
       imageUrl: model.thumbnailUrl,
     })
     openCart()
@@ -413,11 +413,29 @@ const ModelDetails: React.FC = () => {
             )}
 
             <div className="mt-4 flex items-center gap-4">
-              <span className="text-3xl font-bold text-gray-900">{formatPrice(model.basePrice)}</span>
+              {model.onSale && model.salePrice != null ? (
+                <span className="flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-rose-600">{formatPrice(model.salePrice)}</span>
+                  <span className="text-lg text-gray-400 line-through">{formatPrice(model.originalPrice ?? model.basePrice)}</span>
+                  {model.salePercent != null && (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                      -{model.salePercent}%
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-3xl font-bold text-gray-900">{formatPrice(model.basePrice)}</span>
+              )}
               <span className="text-sm text-gray-500">
                 Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews
               </span>
             </div>
+
+            {model.onSale && model.saleEndsAt && (
+              <p className="mt-1 text-xs font-medium text-rose-600">
+                Sale ends {new Date(model.saleEndsAt).toLocaleDateString()}
+              </p>
+            )}
 
             {model.filesUpdatedAt && (model.fileVersion ?? 1) > 1 && (
               <p className="mt-2 text-xs font-medium text-green-700">

@@ -27,6 +27,20 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   basePrice: Number(model.base_price ?? model.basePrice ?? 0),
   fulfillmentType: (model.fulfillment_type ?? model.fulfillmentType ?? 'stl') as 'stl' | 'print',
   license: (model.license ?? 'personal') as 'personal' | 'commercial',
+  onSale: model.on_sale ?? model.onSale ?? false,
+  salePercent:
+    (model.sale_percent ?? model.salePercent) != null
+      ? Number(model.sale_percent ?? model.salePercent)
+      : undefined,
+  salePrice:
+    (model.sale_price ?? model.salePrice) != null
+      ? Number(model.sale_price ?? model.salePrice)
+      : undefined,
+  originalPrice:
+    (model.original_price ?? model.originalPrice) != null
+      ? Number(model.original_price ?? model.originalPrice)
+      : undefined,
+  saleEndsAt: model.sale_ends_at ?? model.saleEndsAt ?? null,
   printerType: (model.printer_type ?? model.printerType ?? null) as 'fdm' | 'resin' | 'both' | null,
   supportsRequired: model.supports_required ?? model.supportsRequired ?? undefined,
   recommendedLayerHeight:

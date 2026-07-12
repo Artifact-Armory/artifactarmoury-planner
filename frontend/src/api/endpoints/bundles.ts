@@ -30,6 +30,11 @@ export function mapBundle(b: any): Bundle {
     models: Array.isArray(b.models) ? b.models.map(mapModelRef) : [],
     createdAt: b.created_at ?? b.createdAt,
     publishedAt: b.published_at ?? b.publishedAt ?? undefined,
+    onSale: b.on_sale ?? b.onSale ?? false,
+    salePercent: (b.sale_percent ?? b.salePercent) != null ? Number(b.sale_percent ?? b.salePercent) : undefined,
+    salePrice: (b.sale_price ?? b.salePrice) != null ? Number(b.sale_price ?? b.salePrice) : undefined,
+    originalPrice: (b.original_price ?? b.originalPrice) != null ? Number(b.original_price ?? b.originalPrice) : undefined,
+    saleEndsAt: b.sale_ends_at ?? b.saleEndsAt ?? null,
   }
 }
 

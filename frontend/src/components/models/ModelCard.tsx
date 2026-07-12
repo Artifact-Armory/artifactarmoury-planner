@@ -32,7 +32,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
       id: model.id,
       name: model.name,
       artistName: model.artistName,
-      price: model.basePrice,
+      price: model.onSale && model.salePrice != null ? model.salePrice : model.basePrice,
       imageUrl: model.thumbnailUrl,
     })
     openCart()
@@ -77,11 +77,18 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
           <Heart size={16} />
         </button>
 
-        {model.printConsent && model.printPrice != null && (
-          <span className="absolute left-3 top-3 rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow">
-            Print &amp; Ship · {formatPrice(model.printPrice)}
-          </span>
-        )}
+        <div className="absolute left-3 top-3 flex flex-col items-start gap-1.5">
+          {model.onSale && model.salePercent != null && (
+            <span className="rounded-full bg-rose-600/95 px-2.5 py-1 text-xs font-semibold text-white shadow">
+              -{model.salePercent}%
+            </span>
+          )}
+          {model.printConsent && model.printPrice != null && (
+            <span className="rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow">
+              Print &amp; Ship · {formatPrice(model.printPrice)}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col px-3 py-4">
@@ -89,7 +96,14 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
         <p className="line-clamp-1 text-sm text-gray-500">by {model.artistName}</p>
 
         <div className="mt-3 flex items-center justify-between">
-          <div className="text-sm font-medium text-gray-900">{formatPrice(model.basePrice)}</div>
+          {model.onSale && model.salePrice != null ? (
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-sm font-semibold text-rose-600">{formatPrice(model.salePrice)}</span>
+              <span className="text-xs text-gray-400 line-through">{formatPrice(model.originalPrice ?? model.basePrice)}</span>
+            </div>
+          ) : (
+            <div className="text-sm font-medium text-gray-900">{formatPrice(model.basePrice)}</div>
+          )}
           <div className="flex items-center text-sm text-amber-500">
             <Star size={16} className="mr-1 fill-amber-400" />
             <span className="text-gray-700">{formatRating(model.averageRating)}</span>

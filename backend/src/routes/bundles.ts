@@ -9,6 +9,7 @@ import logger from '../utils/logger';
 import { authenticate, requireArtist, requireTwoFactor, optionalAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
+import { annotateBundlesWithSales, recordPrice } from '../services/sales';
 
 const router = Router();
 
@@ -69,6 +70,7 @@ router.post('/',
       [artistId, String(name).trim(), description || null, priceNum, thumbnailKey || null]
     );
     const bundle = inserted.rows[0];
+    recordPrice('bundle', bundle.id, priceNum);
 
     for (let i = 0; i < ids.length; i++) {
       await db.query(
@@ -126,6 +128,7 @@ router.get('/',
        LIMIT $1 OFFSET $2`,
       [Number(limit), offset]
     );
+    await annotateBundlesWithSales(bundles.rows);
     // Attach members so the planner palette can expand a bundle into its models.
     const withModels = await Promise.all(
       bundles.rows.map(async (b: any) => ({ ...b, models: await loadBundleModels(b.id) }))
@@ -154,6 +157,7 @@ router.get('/:id',
     const isOwner = userId && bundle.artist_id === userId;
     if (bundle.status !== 'published' && !isOwner) throw new NotFoundError('Bundle');
 
+    await annotateBundlesWithSales([bundle]);
     res.json({ bundle: { ...bundle, models: await loadBundleModels(id) } });
   })
 );
@@ -195,6 +199,12 @@ router.patch('/:id',
     if (fields.length > 0) {
       values.push(id);
       await db.query(`UPDATE bundles SET ${fields.join(', ')} WHERE id = $${i}`, values);
+    }
+
+    // Track price changes for the sale anti-inflation guard.
+    if (price !== undefined) {
+      const p = parseFloat(price);
+      if (!Number.isNaN(p)) recordPrice('bundle', id, p);
     }
 
     // Replace the model set if provided.

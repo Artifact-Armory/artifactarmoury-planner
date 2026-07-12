@@ -59,7 +59,7 @@ const BundleDetails: React.FC = () => {
       id: bundle.id,
       name: bundle.name,
       artistName: bundle.artistName ?? '',
-      price: bundle.price,
+      price: bundle.onSale && bundle.salePrice != null ? bundle.salePrice : bundle.price,
       imageUrl: bundle.thumbnailUrl,
     })
     openCart()
@@ -109,9 +109,24 @@ const BundleDetails: React.FC = () => {
             {bundle.artistName && <p className="mt-1 text-sm text-gray-500">by {bundle.artistName}</p>}
 
             <div className="mt-4">
-              <span className="text-3xl font-bold text-gray-900">{formatPrice(bundle.price)}</span>
+              {bundle.onSale && bundle.salePrice != null ? (
+                <span className="inline-flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-rose-600">{formatPrice(bundle.salePrice)}</span>
+                  <span className="text-lg text-gray-400 line-through">{formatPrice(bundle.originalPrice ?? bundle.price)}</span>
+                  {bundle.salePercent != null && (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">-{bundle.salePercent}%</span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-3xl font-bold text-gray-900">{formatPrice(bundle.price)}</span>
+              )}
               <span className="ml-2 text-sm text-gray-500">for {bundle.models.length} models</span>
             </div>
+            {bundle.onSale && bundle.saleEndsAt && (
+              <p className="mt-1 text-xs font-medium text-rose-600">
+                Sale ends {new Date(bundle.saleEndsAt).toLocaleDateString()}
+              </p>
+            )}
 
             {owned ? (
               <p className="mt-6 flex items-center justify-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-800">

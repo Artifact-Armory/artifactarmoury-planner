@@ -12,6 +12,7 @@ import { validateEmail } from '../utils/validation';
 import { createPaymentIntent, getPaymentIntent } from '../services/stripe';
 import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
+import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
 
 const router = Router();
 
@@ -99,7 +100,7 @@ router.post('/',
         if (item?.bundleId) {
           // --- Bundle: one price, split across its models -------------------
           const bundleResult = await client.query(
-            `SELECT id, name, price FROM bundles WHERE id = $1 AND status = 'published'`,
+            `SELECT id, name, price, artist_id FROM bundles WHERE id = $1 AND status = 'published'`,
             [item.bundleId]
           );
           if (bundleResult.rows.length === 0) throw new NotFoundError(`Bundle ${item.bundleId}`);
@@ -117,7 +118,9 @@ router.post('/',
           const bundleModels = modelsResult.rows;
           if (bundleModels.length === 0) throw new ValidationError(`Bundle "${bundle.name}" has no models`);
 
-          const bundlePrice = Math.round(parseFloat(bundle.price) * 100); // pennies
+          // Apply any active sale on the bundle (or the artist's portfolio).
+          const bundleDiscount = await activeDiscountForBundle(client, bundle.id, bundle.artist_id);
+          const bundlePrice = Math.round(parseFloat(bundle.price) * (100 - bundleDiscount.percent)); // pennies
           const totalBase = bundleModels.reduce((s: number, m: any) => s + parseFloat(m.base_price), 0);
           let allocated = 0;
           bundleModels.forEach((m: any, idx: number) => {
@@ -143,7 +146,9 @@ router.post('/',
           );
           if (modelResult.rows.length === 0) throw new NotFoundError(`Model ${item.modelId}`);
           const model = modelResult.rows[0];
-          const price = parseFloat(model.base_price);
+          // Apply any active sale on the model (or the artist's portfolio).
+          const modelDiscount = await activeDiscountForModel(client, model.id, model.artist_id);
+          const price = Math.round(parseFloat(model.base_price) * (100 - modelDiscount.percent)) / 100;
           pushModelRow(model, price, null, null);
           subtotal += price;
         } else {
