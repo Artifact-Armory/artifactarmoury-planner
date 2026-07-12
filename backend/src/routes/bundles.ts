@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { authenticate, requireArtist, optionalAuth } from '../middleware/auth';
+import { authenticate, requireArtist, requireTwoFactor, optionalAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
 
@@ -49,6 +49,7 @@ async function assertOwnedReadyModels(artistId: string, modelIds: string[]) {
 router.post('/',
   authenticate,
   requireArtist,
+  requireTwoFactor,
   asyncHandler(async (req, res) => {
     const artistId = (req as any).userId;
     const { name, description, price, modelIds, thumbnailKey } = req.body ?? {};
@@ -216,6 +217,7 @@ router.patch('/:id',
 router.post('/:id/publish',
   authenticate,
   requireArtist,
+  requireTwoFactor,
   asyncHandler(async (req, res) => {
     const artistId = (req as any).userId;
     const { id } = req.params;

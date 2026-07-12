@@ -112,6 +112,16 @@ export async function objectExists(key: string): Promise<boolean> {
   }
 }
 
+/** An object's size in bytes, or null if it doesn't exist. */
+export async function objectSize(key: string): Promise<number | null> {
+  try {
+    const res = await client().send(new HeadObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+    return Number(res.ContentLength ?? 0)
+  } catch {
+    return null
+  }
+}
+
 /**
  * Presigned PUT URL so the browser uploads bytes directly to R2 (never through
  * Railway). Returns the upload URL, the final public URL, and the object key.

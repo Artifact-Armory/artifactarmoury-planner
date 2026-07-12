@@ -26,6 +26,28 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   tags: Array.isArray(model.tags) ? model.tags : [],
   basePrice: Number(model.base_price ?? model.basePrice ?? 0),
   fulfillmentType: (model.fulfillment_type ?? model.fulfillmentType ?? 'stl') as 'stl' | 'print',
+  license: (model.license ?? 'personal') as 'personal' | 'commercial',
+  printerType: (model.printer_type ?? model.printerType ?? null) as 'fdm' | 'resin' | 'both' | null,
+  supportsRequired: model.supports_required ?? model.supportsRequired ?? undefined,
+  recommendedLayerHeight:
+    (model.recommended_layer_height ?? model.recommendedLayerHeight) != null
+      ? Number(model.recommended_layer_height ?? model.recommendedLayerHeight)
+      : undefined,
+  recommendedInfill:
+    (model.recommended_infill ?? model.recommendedInfill) != null
+      ? Number(model.recommended_infill ?? model.recommendedInfill)
+      : undefined,
+  meshAnalyzed: model.mesh_analyzed ?? model.meshAnalyzed ?? undefined,
+  meshIsWatertight: model.mesh_is_watertight ?? model.meshIsWatertight ?? null,
+  meshIsManifold: model.mesh_is_manifold ?? model.meshIsManifold ?? null,
+  meshTriangleCount:
+    (model.mesh_triangle_count ?? model.meshTriangleCount) != null
+      ? Number(model.mesh_triangle_count ?? model.meshTriangleCount)
+      : undefined,
+  meshOpenEdges:
+    (model.mesh_open_edges ?? model.meshOpenEdges) != null
+      ? Number(model.mesh_open_edges ?? model.meshOpenEdges)
+      : undefined,
   thumbnailUrl: model.thumbnail_url || model.thumbnailUrl || assetUrl(model.thumbnail_path),
   glbUrl: model.glb_url || model.glbUrl || assetUrl(model.glb_file_path),
   previewImages: model.preview_images || model.previewImages || undefined,

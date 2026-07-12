@@ -4,6 +4,7 @@ import axios, {
   InternalAxiosRequestConfig,
   isAxiosError,
 } from 'axios'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore'
 import { mapApiUserToUser } from './transformers'
 
@@ -57,6 +58,20 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined
 
     if (!originalRequest) {
+      return Promise.reject(error)
+    }
+
+    // Mandatory seller 2FA: the backend blocks upload/publish/payouts until the
+    // account enrols. Steer the user to the security page to set it up.
+    if (
+      error.response?.status === 403 &&
+      (error.response?.data as any)?.code === 'TWO_FACTOR_REQUIRED'
+    ) {
+      const path = '/dashboard/security'
+      if (window.location.pathname !== path) {
+        toast.error('Set up two-factor authentication to sell on Artifact Armoury.')
+        window.location.assign(path)
+      }
       return Promise.reject(error)
     }
 

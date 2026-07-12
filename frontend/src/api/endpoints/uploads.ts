@@ -89,7 +89,7 @@ async function uploadMultipart(
   // 1. Start the upload and get a presigned URL for every part.
   const { data } = await apiClient.post(
     '/api/uploads/multipart/create',
-    { filename: file.name, prefix, partCount },
+    { filename: file.name, prefix, partCount, fileSize: file.size },
     { timeout: 60_000 },
   )
   const { key, uploadId, parts } = data as {

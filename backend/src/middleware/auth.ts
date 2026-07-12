@@ -19,6 +19,7 @@ export interface User {
   email_verified?: boolean;
   is_super_admin?: boolean;
   shadow_banned?: boolean;
+  totp_enabled?: boolean;
   artist_name?: string;
   artist_bio?: string;
   artist_url?: string;
@@ -131,7 +132,7 @@ export async function authenticate(
     // Fetch user from database
     const result = await db.query(
       `SELECT id, email, display_name, role, account_status, email_verified, is_super_admin, shadow_banned,
-              artist_name, artist_bio, artist_url,
+              totp_enabled, artist_name, artist_bio, artist_url,
               stripe_account_id, stripe_onboarding_complete,
               created_at, updated_at
        FROM users
@@ -216,7 +217,7 @@ export async function optionalAuth(
       // Fetch user
       const result = await db.query(
         `SELECT id, email, display_name, role, account_status, email_verified, is_super_admin, shadow_banned,
-                artist_name, artist_bio, artist_url,
+                totp_enabled, artist_name, artist_bio, artist_url,
                 stripe_account_id, stripe_onboarding_complete,
                 created_at, updated_at
          FROM users
@@ -336,6 +337,45 @@ export function requireVerifiedEmail(
     return;
   }
 
+  next();
+}
+
+// ============================================================================
+// TWO-FACTOR GUARD (mandatory 2FA for sellers)
+// ============================================================================
+
+/**
+ * Requires the account to have TOTP two-factor auth enabled before a sensitive
+ * seller action (uploading/publishing models, bundles, payouts). Sellers hold
+ * earnings and are phishing targets, so 2FA is mandatory for them. Admins are
+ * exempt (internal accounts). Run after `authenticate`.
+ *
+ * On failure returns 403 with code `TWO_FACTOR_REQUIRED` so the client can send
+ * the user to the security settings page to enrol.
+ */
+export function requireTwoFactor(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required', message: 'You must be logged in' });
+    return;
+  }
+  // Admins (internal) don't go through the seller 2FA gate.
+  if (req.user.role === 'admin') {
+    next();
+    return;
+  }
+  if (!req.user.totp_enabled) {
+    res.status(403).json({
+      error: 'Two-factor authentication required',
+      code: 'TWO_FACTOR_REQUIRED',
+      message:
+        'Set up two-factor authentication before selling on Artifact Armoury. Go to Security in your dashboard to enable it.',
+    });
+    return;
+  }
   next();
 }
 
@@ -555,6 +595,7 @@ export default {
   requireCustomer,
   requireSuperAdmin,
   requireVerifiedEmail,
+  requireTwoFactor,
   requireOwnership,
   requireModelOwnership,
   refreshAccessToken,

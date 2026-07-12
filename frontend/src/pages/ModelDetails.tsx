@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -13,6 +13,8 @@ import Button from '../components/ui/Button'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
+import { licenseInfo } from '../utils/licenses'
+import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 import ReportModelModal from '../components/reports/ReportModelModal'
 
@@ -464,6 +466,63 @@ const ModelDetails: React.FC = () => {
                 </button>
               </div>
             )}
+
+            {/* Usage licence + anti-piracy watermark disclosure. The licence defines
+                what a buyer may do with the file; the disclosure is the GDPR notice
+                that downloads embed the buyer's identity for traceability. */}
+            <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-gray-500" />
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Licence: {licenseInfo(model.license).label}
+                </h3>
+              </div>
+              <p className="mt-1.5 text-sm text-gray-600">{licenseInfo(model.license).description}</p>
+              <div className="mt-3 flex items-start gap-2 border-t border-gray-200 pt-3">
+                <ShieldCheck size={16} className="mt-0.5 shrink-0 text-gray-500" />
+                <p className="text-xs text-gray-500">
+                  For anti-piracy, every file you download is invisibly watermarked with a
+                  code tied to your account and order, so a leaked file can be traced back to
+                  the buyer. See our{' '}
+                  <Link to="/terms-of-service" className="underline hover:text-gray-700">terms</Link> and{' '}
+                  <Link to="/privacy-policy" className="underline hover:text-gray-700">privacy policy</Link>.
+                </p>
+              </div>
+            </div>
+
+            {/* Printability — artist-declared + automated mesh QA */}
+            {(() => {
+              const mq = meshQualitySummary(model)
+              const printer = printerTypeLabel(model.printerType)
+              if (!mq && !printer && model.supportsRequired === undefined) return null
+              return (
+                <div className="mt-6 rounded-xl border border-gray-200 p-4">
+                  <h3 className="text-sm font-semibold text-gray-900">Printability</h3>
+                  {mq && (
+                    <p
+                      className={`mt-2 text-sm ${
+                        mq.tone === 'good' ? 'text-green-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {mq.tone === 'good' ? '✓ ' : '⚠ '}
+                      <span className="font-medium">{mq.label}.</span> {mq.detail}
+                    </p>
+                  )}
+                  <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                    {printer && <li>Printer type: {printer}</li>}
+                    {model.supportsRequired !== undefined && (
+                      <li>Supports: {model.supportsRequired ? 'required' : 'not required'}</li>
+                    )}
+                    {model.recommendedLayerHeight != null && (
+                      <li>Recommended layer height: {model.recommendedLayerHeight} mm</li>
+                    )}
+                    {model.recommendedInfill != null && (
+                      <li>Recommended infill: {model.recommendedInfill}%</li>
+                    )}
+                  </ul>
+                </div>
+              )
+            })()}
 
             <ul className="mt-6 space-y-2 text-sm text-gray-600">
               <li>Category: {model.category}</li>

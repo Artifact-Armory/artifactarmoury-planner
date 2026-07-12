@@ -16,9 +16,63 @@ import { authRateLimit, emailRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, ConflictError, AuthenticationError } from '../middleware/error';
 import { sendEmail, sendVerificationEmail } from '../services/email';
+import {
+  generateTotpSecret,
+  buildOtpauthUrl,
+  verifyTotp,
+  encryptSecret,
+  decryptSecret,
+  generateBackupCodes,
+  hashBackupCode,
+} from '../services/totp';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import QRCode from 'qrcode';
 
 const router = Router();
+
+// Same secret the auth middleware verifies with — used here to sign the short-lived
+// "2FA challenge" token issued between the password step and the code step.
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+/**
+ * Finish a successful sign-in: record last-login, log the activity, mint the
+ * session tokens and send the standard login response. Shared by the normal
+ * password login and the 2FA-completion step so both return an identical shape.
+ */
+async function completeLogin(user: any, req: any, res: any): Promise<void> {
+  await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
+  await db.query(
+    `INSERT INTO activity_log (user_id, action, resource_type, ip_address, user_agent)
+     VALUES ($1, 'user.login', 'user', $2, $3)`,
+    [user.id, req.ip, req.get('user-agent')]
+  );
+
+  const accessToken = generateToken(user);
+  const refreshToken = generateRefreshToken(user);
+
+  logger.info('User logged in', { userId: user.id, email: user.email });
+
+  res.json({
+    message: 'Login successful',
+    user: {
+      id: user.id,
+      email: user.email,
+      displayName: user.display_name,
+      role: user.role,
+      emailVerified: user.email_verified,
+      isSuperAdmin: user.is_super_admin,
+      artistName: user.artist_name,
+      artistBio: user.artist_bio,
+      artistUrl: user.artist_url,
+      stripeOnboardingComplete: user.stripe_onboarding_complete,
+      twoFactorEnabled: user.totp_enabled ?? false,
+    },
+    accessToken,
+    refreshToken,
+  });
+}
 
 // ============================================================================
 // EMAIL VERIFICATION HELPERS
@@ -236,7 +290,8 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
         role: user.role,
         artistName: user.artist_name,
         emailVerified: false,
-        stripeOnboardingComplete: false
+        stripeOnboardingComplete: false,
+        twoFactorEnabled: false
       },
       accessToken,
       refreshToken
@@ -264,7 +319,7 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
   const result = await db.query(
     `SELECT id, email, password_hash, display_name, role, account_status,
             email_verified, is_super_admin, artist_name, artist_bio, artist_url,
-            stripe_account_id, stripe_onboarding_complete
+            stripe_account_id, stripe_onboarding_complete, totp_enabled
      FROM users
      WHERE email = $1`,
     [email.toLowerCase()]
@@ -293,42 +348,96 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
     throw new AuthenticationError('Invalid email or password');
   }
 
-  // Update last login
-  await db.query(
-    'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
-    [user.id]
+  // Two-factor gate: if the account has 2FA on, the password alone isn't enough.
+  // Issue a short-lived challenge token instead of the real session, and require
+  // the code via POST /login/2fa. We reveal nothing extra — the password was valid.
+  if (user.totp_enabled) {
+    const challengeToken = jwt.sign(
+      { purpose: '2fa', userId: user.id },
+      JWT_SECRET as jwt.Secret,
+      { expiresIn: '5m' }
+    );
+    logger.info('2FA challenge issued at login', { userId: user.id });
+    res.json({ twoFactorRequired: true, challengeToken });
+    return;
+  }
+
+  await completeLogin(user, req, res);
+}));
+
+// ============================================================================
+// LOGIN — 2FA STEP (complete a sign-in that requires a one-time code)
+// ============================================================================
+
+router.post('/login/2fa', authRateLimit, asyncHandler(async (req, res) => {
+  const { challengeToken, code } = req.body;
+
+  if (!challengeToken || !code) {
+    throw new ValidationError('A code and challenge token are required');
+  }
+
+  // The challenge token proves the password step just succeeded for this user.
+  let payload: any;
+  try {
+    payload = jwt.verify(challengeToken, JWT_SECRET);
+  } catch {
+    throw new AuthenticationError('Your sign-in session expired — please log in again.');
+  }
+  if (payload?.purpose !== '2fa' || !payload?.userId) {
+    throw new AuthenticationError('Invalid sign-in session — please log in again.');
+  }
+
+  const result = await db.query(
+    `SELECT id, email, password_hash, display_name, role, account_status,
+            email_verified, is_super_admin, artist_name, artist_bio, artist_url,
+            stripe_account_id, stripe_onboarding_complete,
+            totp_enabled, totp_secret, totp_backup_codes
+     FROM users
+     WHERE id = $1`,
+    [payload.userId]
   );
 
-  // Log activity
-  await db.query(
-    `INSERT INTO activity_log (user_id, action, resource_type, ip_address, user_agent)
-     VALUES ($1, 'user.login', 'user', $2, $3)`,
-    [user.id, req.ip, req.get('user-agent')]
-  );
+  if (result.rows.length === 0 || !result.rows[0].totp_enabled || !result.rows[0].totp_secret) {
+    throw new AuthenticationError('Two-factor authentication is not set up for this account.');
+  }
 
-  // Generate tokens
-  const accessToken = generateToken(user);
-  const refreshToken = generateRefreshToken(user);
+  const user = result.rows[0];
 
-  logger.info('User logged in', { userId: user.id, email: user.email });
+  // Re-check account status (it may have changed since the password step).
+  if (user.account_status === 'suspended') {
+    throw new AuthenticationError('Your account has been suspended. Please contact support.');
+  }
+  if (user.account_status === 'banned') {
+    throw new AuthenticationError('Your account has been banned.');
+  }
 
-  res.json({
-    message: 'Login successful',
-    user: {
-      id: user.id,
-      email: user.email,
-      displayName: user.display_name,
-      role: user.role,
-      emailVerified: user.email_verified,
-      isSuperAdmin: user.is_super_admin,
-      artistName: user.artist_name,
-      artistBio: user.artist_bio,
-      artistUrl: user.artist_url,
-      stripeOnboardingComplete: user.stripe_onboarding_complete
-    },
-    accessToken,
-    refreshToken
-  });
+  const submitted = String(code).replace(/\s+/g, '');
+
+  // Try the TOTP code first, then fall back to a single-use backup code.
+  let ok = verifyTotp(decryptSecret(user.totp_secret), submitted);
+
+  if (!ok && /^[A-Za-z0-9-]{6,}$/.test(submitted)) {
+    const codes: string[] = Array.isArray(user.totp_backup_codes) ? user.totp_backup_codes : [];
+    const submittedHash = hashBackupCode(submitted);
+    const idx = codes.indexOf(submittedHash);
+    if (idx !== -1) {
+      ok = true;
+      // Burn the used backup code so it can't be reused.
+      const remaining = codes.filter((_, i) => i !== idx);
+      await db.query('UPDATE users SET totp_backup_codes = $1 WHERE id = $2', [
+        JSON.stringify(remaining),
+        user.id,
+      ]);
+      logger.info('2FA backup code used at login', { userId: user.id, remaining: remaining.length });
+    }
+  }
+
+  if (!ok) {
+    logger.warn('Failed 2FA attempt', { userId: user.id, ip: req.ip });
+    throw new AuthenticationError('That code is incorrect or has expired.');
+  }
+
+  await completeLogin(user, req, res);
 }));
 
 // ============================================================================
@@ -362,7 +471,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const result = await db.query(
     `SELECT id, email, display_name, role, account_status,
             email_verified, is_super_admin, artist_name, artist_bio, artist_url,
-            stripe_account_id, stripe_onboarding_complete,
+            stripe_account_id, stripe_onboarding_complete, totp_enabled,
             created_at, updated_at
      FROM users
      WHERE id = $1`,
@@ -388,6 +497,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
       artistBio: user.artist_bio,
       artistUrl: user.artist_url,
       stripeOnboardingComplete: user.stripe_onboarding_complete,
+      twoFactorEnabled: user.totp_enabled ?? false,
       createdAt: user.created_at,
       updatedAt: user.updated_at
     }
@@ -670,6 +780,126 @@ router.post('/invite/verify', asyncHandler(async (req, res) => {
   }
 
   res.json({ valid: true, message: 'Invite code is valid' });
+}));
+
+// ============================================================================
+// TWO-FACTOR AUTHENTICATION (TOTP) — enrolment & management
+// ============================================================================
+
+// Current 2FA state for the signed-in user (drives the security settings UI).
+router.get('/2fa/status', authenticate, asyncHandler(async (req, res) => {
+  const result = await db.query(
+    'SELECT totp_enabled, totp_secret, totp_backup_codes, totp_enrolled_at FROM users WHERE id = $1',
+    [(req as any).userId]
+  );
+  if (result.rows.length === 0) throw new AuthenticationError('User not found');
+  const u = result.rows[0];
+  res.json({
+    enabled: !!u.totp_enabled,
+    // A secret exists but isn't confirmed yet → the user began setup and stopped.
+    pending: !u.totp_enabled && !!u.totp_secret,
+    enrolledAt: u.totp_enrolled_at ?? null,
+    backupCodesRemaining: Array.isArray(u.totp_backup_codes) ? u.totp_backup_codes.length : 0,
+  });
+}));
+
+// Begin enrolment: mint a fresh secret (stored pending, encrypted), and return the
+// otpauth URL + a scannable QR + the manual-entry key. Does NOT enable 2FA yet.
+router.post('/2fa/setup', authenticate, asyncHandler(async (req, res) => {
+  const userId = (req as any).userId;
+
+  const cur = await db.query('SELECT email, totp_enabled FROM users WHERE id = $1', [userId]);
+  if (cur.rows.length === 0) throw new AuthenticationError('User not found');
+  if (cur.rows[0].totp_enabled) {
+    throw new ConflictError('Two-factor authentication is already enabled. Disable it first to re-enrol.');
+  }
+
+  const secret = generateTotpSecret();
+  const otpauthUrl = buildOtpauthUrl(secret, cur.rows[0].email);
+  const qrDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 240 });
+
+  // Store the pending (not-yet-confirmed) secret encrypted at rest.
+  await db.query('UPDATE users SET totp_secret = $1, totp_enabled = false WHERE id = $2', [
+    encryptSecret(secret),
+    userId,
+  ]);
+
+  res.json({ secret, otpauthUrl, qrDataUrl });
+}));
+
+// Confirm enrolment: verify a code against the pending secret, turn 2FA on, and
+// return one-time backup codes (shown to the user ONCE — we only store hashes).
+router.post('/2fa/enable', authenticate, asyncHandler(async (req, res) => {
+  const userId = (req as any).userId;
+  const { code } = req.body;
+  if (!code) throw new ValidationError('Enter the 6-digit code from your authenticator app');
+
+  const cur = await db.query('SELECT totp_secret, totp_enabled FROM users WHERE id = $1', [userId]);
+  if (cur.rows.length === 0) throw new AuthenticationError('User not found');
+  if (cur.rows[0].totp_enabled) {
+    throw new ConflictError('Two-factor authentication is already enabled.');
+  }
+  if (!cur.rows[0].totp_secret) {
+    throw new ValidationError('Start two-factor setup first.');
+  }
+
+  const secret = decryptSecret(cur.rows[0].totp_secret);
+  if (!verifyTotp(secret, String(code))) {
+    throw new ValidationError('That code is incorrect or has expired — try the current one.');
+  }
+
+  const { plain, hashed } = generateBackupCodes(10);
+  await db.query(
+    `UPDATE users
+        SET totp_enabled = true,
+            totp_backup_codes = $1,
+            totp_enrolled_at = CURRENT_TIMESTAMP
+      WHERE id = $2`,
+    [JSON.stringify(hashed), userId]
+  );
+
+  await db.query(
+    `INSERT INTO activity_log (user_id, action, resource_type, ip_address)
+     VALUES ($1, '2fa.enabled', 'user', $2)`,
+    [userId, req.ip]
+  );
+  logger.info('2FA enabled', { userId });
+
+  res.json({ message: 'Two-factor authentication is on.', backupCodes: plain });
+}));
+
+// Turn 2FA off. Requires the account password as a re-authentication step so a
+// hijacked session can't quietly strip the protection.
+router.post('/2fa/disable', authenticate, asyncHandler(async (req, res) => {
+  const userId = (req as any).userId;
+  const { password } = req.body;
+  if (!password) throw new ValidationError('Enter your password to disable two-factor authentication');
+
+  const cur = await db.query('SELECT password_hash, totp_enabled FROM users WHERE id = $1', [userId]);
+  if (cur.rows.length === 0) throw new AuthenticationError('User not found');
+  if (!cur.rows[0].totp_enabled) {
+    res.json({ message: 'Two-factor authentication is already off.' });
+    return;
+  }
+
+  const valid = await bcrypt.compare(password, cur.rows[0].password_hash);
+  if (!valid) throw new AuthenticationError('Password is incorrect');
+
+  await db.query(
+    `UPDATE users
+        SET totp_enabled = false, totp_secret = NULL, totp_backup_codes = NULL, totp_enrolled_at = NULL
+      WHERE id = $1`,
+    [userId]
+  );
+
+  await db.query(
+    `INSERT INTO activity_log (user_id, action, resource_type, ip_address)
+     VALUES ($1, '2fa.disabled', 'user', $2)`,
+    [userId, req.ip]
+  );
+  logger.info('2FA disabled', { userId });
+
+  res.json({ message: 'Two-factor authentication has been turned off.' });
 }));
 
 export default router;

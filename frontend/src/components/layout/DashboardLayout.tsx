@@ -27,6 +27,7 @@ import {
   Handshake,
   Wallet,
   ShieldAlert,
+  ShieldCheck,
   MessageSquare,
   Megaphone,
   Flag
@@ -250,6 +251,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <User size={18} className="mr-3" />
                 Profile Settings
+              </NavLink>
+              <NavLink
+                to="/dashboard/security"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/dashboard/security')
+                    ? 'text-indigo-700 bg-indigo-50'
+                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                }`}
+              >
+                <ShieldCheck size={18} className="mr-3" />
+                Security
               </NavLink>
             </div>
           )}

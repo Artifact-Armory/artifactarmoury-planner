@@ -37,7 +37,14 @@ CREATE TABLE users (
     -- Shadow-ban: still 'active' for buying (and reporting a model they own), but blocked
     -- from filing other reports, posting reviews, and messaging. Orthogonal to account_status.
     shadow_banned BOOLEAN NOT NULL DEFAULT false,
-    
+
+    -- Optional TOTP two-factor auth (migration 031). totp_secret is encrypted at
+    -- rest (services/totp.ts); backup codes are stored hashed.
+    totp_secret TEXT,
+    totp_enabled BOOLEAN NOT NULL DEFAULT false,
+    totp_backup_codes JSONB,
+    totp_enrolled_at TIMESTAMP,
+
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -136,6 +143,19 @@ CREATE TABLE models (
     -- Multi-part ("set") models: number of STL files in the product (1 = ordinary
     -- single-STL model; extra parts live in model_parts, this row is part 1).
     part_count INTEGER NOT NULL DEFAULT 1,
+
+    -- Buyer usage licence (migration 030): personal (own use) | commercial (may
+    -- sell physical prints). Neither permits redistributing the digital file.
+    license TEXT NOT NULL DEFAULT 'personal' CHECK (license IN ('personal', 'commercial')),
+
+    -- Printability metadata + automated mesh QA (migration 032).
+    printer_type TEXT CHECK (printer_type IS NULL OR printer_type IN ('fdm', 'resin', 'both')),
+    mesh_analyzed BOOLEAN NOT NULL DEFAULT false,
+    mesh_is_watertight BOOLEAN,
+    mesh_is_manifold BOOLEAN,
+    mesh_triangle_count INTEGER,
+    mesh_open_edges INTEGER,
+    mesh_report JSONB,
 
     -- Duplicate prevention
     file_hash VARCHAR(64) UNIQUE, -- SHA-256 of original STL bytes

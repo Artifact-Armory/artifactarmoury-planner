@@ -5,7 +5,7 @@
 import { Router } from 'express'
 import { db } from '../db'
 import logger from '../utils/logger'
-import { authenticate, requireArtist, AuthRequest } from '../middleware/auth'
+import { authenticate, requireArtist, requireTwoFactor, AuthRequest } from '../middleware/auth'
 import { asyncHandler, ValidationError } from '../middleware/error'
 import {
   getArtistEarningsSummary, getArtistEarnings, PAYOUT_HOLD_DAYS,
@@ -50,6 +50,7 @@ router.get('/me',
 router.post('/connect/onboard',
   authenticate,
   requireArtist,
+  requireTwoFactor,
   asyncHandler(async (req: AuthRequest, res) => {
     const artistId = req.userId!
     const email = req.user!.email

@@ -15,6 +15,7 @@ export interface ApiUser {
   artistUrl?: string
   accountStatus?: AccountStatus
   stripeOnboardingComplete?: boolean
+  twoFactorEnabled?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -84,6 +85,19 @@ export interface TerrainModel {
   tags: string[]
   basePrice: number
   fulfillmentType?: 'stl' | 'print'
+  // Buyer usage licence (see utils/licenses). 'personal' = own use only;
+  // 'commercial' = may sell physical prints. Neither permits sharing the file.
+  license?: 'personal' | 'commercial'
+  // Printability metadata (artist-declared) + automated mesh QA (see utils/printability).
+  printerType?: 'fdm' | 'resin' | 'both' | null
+  supportsRequired?: boolean
+  recommendedLayerHeight?: number
+  recommendedInfill?: number
+  meshAnalyzed?: boolean
+  meshIsWatertight?: boolean | null
+  meshIsManifold?: boolean | null
+  meshTriangleCount?: number
+  meshOpenEdges?: number
   thumbnailUrl?: string
   glbUrl?: string
   previewImages?: string[]

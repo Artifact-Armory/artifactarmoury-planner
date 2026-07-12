@@ -13,6 +13,15 @@ import { buildWatermarkHeader, type WatermarkPayload } from './watermark'
 
 export type MeshFormat = 'stl' | 'obj' | '3mf'
 
+// Hard cap on an uploaded model (or set part) file. Processing an upload is
+// entirely in-memory (download -> parse to triangles -> STL -> preview GLB), so
+// a very large mesh exhausts the server's memory and crashes it. 150MB is far
+// larger than any printable terrain piece needs — beyond it, the artist should
+// decimate the model first. Enforced client-side (fast fail) and server-side
+// (authoritative, from the object's real R2 size).
+export const MAX_MODEL_FILE_BYTES = 150 * 1024 * 1024
+export const MAX_MODEL_FILE_MB = Math.round(MAX_MODEL_FILE_BYTES / (1024 * 1024))
+
 interface V3 { x: number; y: number; z: number }
 interface Tri { vertices: [V3, V3, V3] }
 

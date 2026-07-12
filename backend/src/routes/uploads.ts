@@ -12,6 +12,7 @@ import {
   createMultipartUpload, presignUploadPart, completeMultipartUpload, abortMultipartUpload,
 } from '../services/r2'
 import { contentTypeFor } from '../services/storage'
+import { MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB } from '../services/meshConvert'
 
 const router = Router()
 
@@ -78,12 +79,19 @@ router.post(
     if (!isR2Enabled()) {
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)')
     }
-    const { filename, prefix = 'raw', partCount } = req.body ?? {}
+    const { filename, prefix = 'raw', partCount, fileSize } = req.body ?? {}
     if (!filename || typeof filename !== 'string') {
       throw new ValidationError('filename is required')
     }
     if (!SAFE_PREFIXES.includes(prefix)) {
       throw new ValidationError(`prefix must be one of: ${SAFE_PREFIXES.join(', ')}`)
+    }
+    // Reject an oversized model up-front so we never start a multipart upload
+    // that from-upload would reject anyway (and that would crash processing).
+    if (prefix === 'raw' && Number(fileSize) > MAX_MODEL_FILE_BYTES) {
+      throw new ValidationError(
+        `Model file is too large (${(Number(fileSize) / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB — please reduce the model's detail (e.g. decimate it in Blender) and upload again.`,
+      )
     }
     const n = Number(partCount)
     if (!Number.isInteger(n) || n < 1 || n > MAX_PARTS) {

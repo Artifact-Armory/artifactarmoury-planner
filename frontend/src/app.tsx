@@ -44,6 +44,7 @@ import MyDownloads from './pages/dashboard/MyDownloads';
 import MyModels from './pages/dashboard/MyModels';
 import Wishlist from './pages/dashboard/Wishlist';
 import UserProfile from './pages/dashboard/UserProfile';
+import SecuritySettings from './pages/dashboard/SecuritySettings';
 import MyTables from './pages/dashboard/MyTables';
 import Following from './pages/dashboard/Following';
 import EditTable from './pages/dashboard/EditTable';
@@ -226,6 +227,7 @@ function App() {
               <Route path="following" element={<Following />} />
               <Route path="messages" element={<Messages />} />
               <Route path="profile" element={<UserProfile />} />
+              <Route path="security" element={<SecuritySettings />} />
               <Route path="tables" element={<MyTables />} />
               <Route path="tables/new" element={<EditTable />} />
               <Route path="tables/:id/edit" element={<EditTable />} />

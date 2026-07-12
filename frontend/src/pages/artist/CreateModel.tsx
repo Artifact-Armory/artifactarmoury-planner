@@ -1,9 +1,13 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
+import { ShieldCheck } from 'lucide-react'
+import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import FacetSelects from '../../components/taxonomy/FacetSelects'
+import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
+import { PRINTER_TYPE_OPTIONS } from '../../utils/printability'
 import {
   taxonomyApi,
   facetAppliesTo,
@@ -33,8 +37,14 @@ const CATEGORIES = [
 
 type Phase = 'form' | 'uploading' | 'processing' | 'done' | 'error'
 
+// Must match the backend cap (services/meshConvert.ts). Processing is in-memory,
+// so a huge mesh crashes the server — reject it here before wasting an upload.
+const MAX_MODEL_FILE_MB = 150
+const MAX_MODEL_FILE_BYTES = MAX_MODEL_FILE_MB * 1024 * 1024
+
 const CreateModel: React.FC = () => {
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
 
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
@@ -93,6 +103,8 @@ const CreateModel: React.FC = () => {
     condition: 'Condition',
   }
   const [basePrice, setBasePrice] = React.useState('')
+  const [license, setLicense] = React.useState<'personal' | 'commercial'>('personal')
+  const [printerType, setPrinterType] = React.useState<'' | 'fdm' | 'resin' | 'both'>('')
   const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
   // Extra STL parts for a multi-part "set" model (the main file above is part 1).
@@ -123,6 +135,14 @@ const CreateModel: React.FC = () => {
     if (!stlFile) { setError('Choose a model file to upload'); return }
     if (!/\.(stl|obj|3mf)$/i.test(stlFile.name)) { setError('The model file must be an .stl, .obj or .3mf'); return }
     if (partFiles.some((f) => !/\.(stl|obj|3mf)$/i.test(f.name))) { setError('Every part must be an .stl, .obj or .3mf file'); return }
+    const oversized = [stlFile, ...partFiles].find((f) => f.size > MAX_MODEL_FILE_BYTES)
+    if (oversized) {
+      setError(
+        `"${oversized.name}" is ${(oversized.size / (1024 * 1024)).toFixed(0)}MB — the maximum is ${MAX_MODEL_FILE_MB}MB per file. ` +
+        `That's more detail than a 3D printer can use; reduce the model's poly count (e.g. a Decimate modifier in Blender) and upload again.`,
+      )
+      return
+    }
     if (!thumbFile) { setError('Add a thumbnail image for your model'); return }
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
@@ -161,6 +181,8 @@ const CreateModel: React.FC = () => {
         // keeps the artist-chosen sub-category.
         category: modelClass === 'terrain' ? category : modelClass,
         basePrice: price,
+        license,
+        printerType: printerType || undefined,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
         terms: terms.length ? terms : undefined,
@@ -203,6 +225,32 @@ const CreateModel: React.FC = () => {
           >
             Upload another
           </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Sellers must have 2FA on before they can upload (the API enforces this too).
+  if (user && user.twoFactorEnabled === false) {
+    return (
+      <div className="px-4 py-10 max-w-2xl mx-auto">
+        <h1 className="text-xl font-semibold">Create Model</h1>
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="text-amber-600" size={20} />
+            <h2 className="font-semibold text-amber-900">Turn on two-factor authentication first</h2>
+          </div>
+          <p className="mt-2 text-sm text-amber-800">
+            Selling accounts hold your earnings, so we require two-factor authentication before you can
+            upload. It only takes a minute with any authenticator app.
+          </p>
+          <Link
+            to="/dashboard/security"
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+          >
+            <ShieldCheck size={16} />
+            Set up two-factor authentication
+          </Link>
         </div>
       </div>
     )
@@ -263,6 +311,41 @@ const CreateModel: React.FC = () => {
           </div>
         </div>
 
+        <div>
+          <label className="block text-sm font-medium mb-1">Usage licence</label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={license}
+            onChange={(e) => setLicense(e.target.value as 'personal' | 'commercial')}
+            disabled={busy}
+          >
+            {LICENSE_OPTIONS.map((l) => (
+              <option key={l.value} value={l.value}>{l.label} — {l.short}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">{licenseInfo(license).description}</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            Printer type <span className="font-normal text-gray-400">(optional)</span>
+          </label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={printerType}
+            onChange={(e) => setPrinterType(e.target.value as '' | 'fdm' | 'resin' | 'both')}
+            disabled={busy}
+          >
+            <option value="">Not specified</option>
+            {PRINTER_TYPE_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>{p.short}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            Tell buyers which printer this model is authored for — helps set expectations for detail and supports.
+          </p>
+        </div>
+
         <div className="rounded-lg border border-gray-200 p-3">
           <label className="block text-sm font-medium mb-1">
             Classification <span className="text-red-500">*</span>
@@ -302,6 +385,7 @@ const CreateModel: React.FC = () => {
           {stlFile && <p className="text-sm text-gray-500 mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
           <p className="text-xs text-gray-500 mt-1">
             OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
+            Max {MAX_MODEL_FILE_MB}MB per file; decimate very high-poly models before uploading.
           </p>
         </div>
 

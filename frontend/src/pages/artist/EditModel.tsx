@@ -5,6 +5,8 @@ import { uploadsApi } from '../../api/endpoints/uploads'
 import { TerrainModel } from '../../api/types'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
+import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
+import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -34,6 +36,11 @@ const EditModel: React.FC = () => {
   const [tags, setTags] = React.useState('')
   const [terms, setTerms] = React.useState<string[]>([])
   const [basePrice, setBasePrice] = React.useState('')
+  const [license, setLicense] = React.useState<'personal' | 'commercial'>('personal')
+  const [printerType, setPrinterType] = React.useState<'' | 'fdm' | 'resin' | 'both'>('')
+  const [supportsRequired, setSupportsRequired] = React.useState(false)
+  const [layerHeight, setLayerHeight] = React.useState('')
+  const [infill, setInfill] = React.useState('')
 
   // The model's class (set at upload) — scopes which facets the tag picker shows.
   const modelClass = React.useMemo(() => {
@@ -64,6 +71,11 @@ const EditModel: React.FC = () => {
       setTags((m.tags ?? []).join(', '))
       setTerms((m.taxonomyTerms ?? []).map((t) => termToken(t.facetSlug, t.path)))
       setBasePrice(m.basePrice != null ? String(m.basePrice) : '')
+      setLicense(m.license === 'commercial' ? 'commercial' : 'personal')
+      setPrinterType((m.printerType ?? '') as '' | 'fdm' | 'resin' | 'both')
+      setSupportsRequired(Boolean(m.supportsRequired))
+      setLayerHeight(m.recommendedLayerHeight != null ? String(m.recommendedLayerHeight) : '')
+      setInfill(m.recommendedInfill != null ? String(m.recommendedInfill) : '')
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
     } finally {
@@ -116,6 +128,11 @@ const EditModel: React.FC = () => {
         category,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: price,
+        license,
+        printerType,
+        supportsRequired,
+        recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
+        recommendedInfill: infill.trim() === '' ? null : Number(infill),
         terms,
         thumbnailKey,
       })
@@ -143,6 +160,11 @@ const EditModel: React.FC = () => {
         category,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         basePrice: parseFloat(basePrice) || 0,
+        license,
+        printerType,
+        supportsRequired,
+        recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
+        recommendedInfill: infill.trim() === '' ? null : Number(infill),
         terms,
         thumbnailKey,
       })
@@ -206,6 +228,71 @@ const EditModel: React.FC = () => {
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
             <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Usage licence</label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={license}
+            onChange={(e) => setLicense(e.target.value as 'personal' | 'commercial')}
+            disabled={busy}
+          >
+            {LICENSE_OPTIONS.map((l) => (
+              <option key={l.value} value={l.value}>{l.label} — {l.short}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">{licenseInfo(license).description}</p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <p className="text-sm font-medium">Printability</p>
+
+          {/* Mesh QA result (read-only, from processing). */}
+          {model && (() => {
+            const mq = meshQualitySummary(model)
+            if (!mq) return null
+            return (
+              <p className={`text-xs ${mq.tone === 'good' ? 'text-green-700' : 'text-amber-700'}`}>
+                {mq.tone === 'good' ? '✓ ' : '⚠ '}
+                <span className="font-medium">{mq.label}.</span> {mq.detail}
+              </p>
+            )
+          })()}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm mb-1">Printer type</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={printerType}
+                onChange={(e) => setPrinterType(e.target.value as '' | 'fdm' | 'resin' | 'both')}
+                disabled={busy}
+              >
+                <option value="">Not specified</option>
+                {PRINTER_TYPE_OPTIONS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <label className="flex items-center gap-2 self-end pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={supportsRequired}
+                onChange={(e) => setSupportsRequired(e.target.checked)}
+                disabled={busy}
+              />
+              Supports required
+            </label>
+            <div>
+              <label className="block text-sm mb-1">Recommended layer height (mm)</label>
+              <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={layerHeight} onChange={(e) => setLayerHeight(e.target.value)} disabled={busy} placeholder="0.2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Recommended infill (%)</label>
+              <input type="number" min={0} max={100} step="1" className="w-full border rounded px-3 py-2" value={infill} onChange={(e) => setInfill(e.target.value)} disabled={busy} placeholder="20" />
+            </div>
           </div>
         </div>
 

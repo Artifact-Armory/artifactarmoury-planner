@@ -8,6 +8,7 @@ import {
   authenticate,
   requireArtist,
   requireVerifiedEmail,
+  requireTwoFactor,
   requireModelOwnership,
   optionalAuth
 } from '../middleware/auth';
@@ -30,10 +31,11 @@ import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
-import { isR2Enabled, objectExists, downloadObject, deleteObject, getObjectStream } from '../services/r2';
+import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
+import { analyzeMeshQuality } from '../services/meshQA';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
-import { meshFormatFromName, convertToStl, watermarkOriginal, type MeshFormat } from '../services/meshConvert';
+import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease } from '../services/notifications';
 import { logProductView, logWishlistAdd } from '../services/analytics';
@@ -48,6 +50,13 @@ const createArchive: (format: string, options?: any) => Archiver = require('arch
 const router = Router();
 
 const VALID_CATEGORIES = ['buildings', 'nature', 'scatter', 'props', 'complete_sets', 'other', 'vehicles', 'characters'];
+
+// Buyer usage licences (migration 030). Neither permits redistributing the digital
+// file — that's the platform rule the per-buyer watermark enforces.
+const VALID_LICENSES = ['personal', 'commercial'];
+
+// Printer authoring targets (migration 032).
+const VALID_PRINTER_TYPES = ['fdm', 'resin', 'both'];
 
 // The type facet a model must be tagged with, per model class. A model's headline
 // classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).
@@ -255,13 +264,14 @@ router.post('/from-upload',
   authenticate,
   requireArtist,
   requireVerifiedEmail,
+  requireTwoFactor,
   uploadRateLimit,
   asyncHandler(async (req, res) => {
     if (!isR2Enabled()) {
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -284,9 +294,27 @@ router.post('/from-upload',
     if (isNaN(price) || price < 0) {
       throw new ValidationError('Invalid base price');
     }
-    // Confirm the object actually landed in R2 before we create a row for it.
-    if (!(await objectExists(rawKey))) {
+    // Usage licence — defaults to the conservative 'personal' when unset.
+    const modelLicense = license == null ? 'personal' : license;
+    if (!VALID_LICENSES.includes(modelLicense)) {
+      throw new ValidationError('Invalid licence');
+    }
+    // Printer authoring target (optional).
+    const modelPrinterType = printerType == null || printerType === '' ? null : printerType;
+    if (modelPrinterType !== null && !VALID_PRINTER_TYPES.includes(modelPrinterType)) {
+      throw new ValidationError('Invalid printer type');
+    }
+    // Confirm the object actually landed in R2 before we create a row for it,
+    // and that it's within the size we can process without exhausting memory.
+    const rawBytes = await objectSize(rawKey);
+    if (rawBytes == null) {
       throw new ValidationError('Uploaded file not found in storage — retry the upload');
+    }
+    if (rawBytes > MAX_MODEL_FILE_BYTES) {
+      await safeDeleteObject(rawKey);
+      throw new ValidationError(
+        `Model file is too large (${(rawBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB — please reduce the model's detail (e.g. decimate it in Blender) and upload again.`,
+      );
     }
 
     // Optional extra STL parts (multi-part "set" models). Each must be its own
@@ -302,8 +330,15 @@ router.post('/from-upload',
         if (!meshFormatFromName(p.filename || p.rawKey)) {
           throw new ValidationError('Each part must be an STL, OBJ or 3MF file');
         }
-        if (!(await objectExists(p.rawKey))) {
+        const partBytes = await objectSize(p.rawKey);
+        if (partBytes == null) {
           throw new ValidationError('A part file was not found in storage — retry the upload');
+        }
+        if (partBytes > MAX_MODEL_FILE_BYTES) {
+          await safeDeleteObject(p.rawKey);
+          throw new ValidationError(
+            `A part file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB per file — please reduce it and upload again.`,
+          );
         }
         extraParts.push({ rawKey: p.rawKey, filename: p.filename, name: p.name });
       }
@@ -349,10 +384,10 @@ router.post('/from-upload',
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, 'draft', 'processing')
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType]
     );
     const model = result.rows[0];
 
@@ -706,9 +741,25 @@ router.patch('/:id',
     const updates = req.body;
 
     const allowedFields = [
-      'name', 'description', 'category', 'tags', 'base_price',
+      'name', 'description', 'category', 'tags', 'base_price', 'license', 'printer_type',
       'supports_required', 'recommended_layer_height', 'recommended_infill'
     ];
+
+    // Validate the usage licence up-front if the caller is changing it.
+    if (updates.license !== undefined && !VALID_LICENSES.includes(updates.license)) {
+      throw new ValidationError('Invalid licence');
+    }
+    // Validate printer type (null/'' clears it).
+    if (
+      updates.printer_type !== undefined &&
+      updates.printer_type !== null &&
+      updates.printer_type !== '' &&
+      !VALID_PRINTER_TYPES.includes(updates.printer_type)
+    ) {
+      throw new ValidationError('Invalid printer type');
+    }
+    // Empty string clears the (nullable) printer_type without tripping the CHECK.
+    if (updates.printer_type === '') updates.printer_type = null;
 
     const updateFields: string[] = [];
     const updateValues: any[] = [];
@@ -844,6 +895,7 @@ router.post('/:id/print-quote',
 router.post('/:id/publish',
   authenticate,
   requireArtist,
+  requireTwoFactor,
   requireModelOwnership,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -1421,6 +1473,9 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     const glbPath = await generateGLB(stlTmp);
     const glbStoragePath = await uploadToStorage(glbPath, 'previews');
 
+    // Advisory mesh QA (watertight/manifold). Never blocks the upload.
+    const meshQA = await analyzeMeshQuality(stlTmp);
+
     // For a non-STL upload, store the converted canonical STL in R2 (it becomes
     // stl_file_path) and keep the artist's original as source_file_path, so the
     // buyer receives both. STL uploads keep rawKey as their stl_file_path.
@@ -1459,9 +1514,15 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
          source_format = $10,
          source_file_path = $11,
          stl_file_path = COALESCE($12, stl_file_path),
-         processing_status = $13, processing_error = NULL,
+         mesh_analyzed = $13,
+         mesh_is_watertight = $14,
+         mesh_is_manifold = $15,
+         mesh_triangle_count = $16,
+         mesh_open_edges = $17,
+         mesh_report = $18,
+         processing_status = $19, processing_error = NULL,
          updated_at = NOW()
-       WHERE id = $14`,
+       WHERE id = $20`,
       [
         glbStoragePath,
         stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
@@ -1473,6 +1534,12 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         format,
         sourceFilePath,
         canonicalStlPath,
+        meshQA.analyzed,
+        meshQA.watertight,
+        meshQA.manifold,
+        meshQA.triangleCount || null,
+        meshQA.openEdges,
+        JSON.stringify(meshQA),
         hasParts ? 'processing' : 'ready',
         modelId,
       ]

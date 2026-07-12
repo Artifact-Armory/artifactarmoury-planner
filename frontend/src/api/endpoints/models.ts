@@ -34,6 +34,10 @@ export const modelsApi = {
     category: string
     tags?: string
     basePrice: number
+    /** Buyer usage licence: 'personal' (own use) | 'commercial' (may sell prints). */
+    license?: 'personal' | 'commercial'
+    /** Printer authoring target: 'fdm' | 'resin' | 'both'. */
+    printerType?: 'fdm' | 'resin' | 'both'
     thumbnailKey?: string
     /** Extra STL parts for a multi-part "set" model (primary is the main rawKey). */
     parts?: Array<{ rawKey: string; filename?: string; name?: string }>
@@ -163,6 +167,14 @@ export const modelsApi = {
       terms?: string[]
       /** R2 key of a thumbnail already uploaded via the presign flow (`thumbnails/…`). */
       thumbnailKey?: string
+      /** Buyer usage licence: 'personal' | 'commercial'. */
+      license?: 'personal' | 'commercial'
+      /** Printer authoring target: 'fdm' | 'resin' | 'both' | '' (clears it). */
+      printerType?: 'fdm' | 'resin' | 'both' | ''
+      /** Printability metadata. */
+      supportsRequired?: boolean
+      recommendedLayerHeight?: number | null
+      recommendedInfill?: number | null
     },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
@@ -173,6 +185,11 @@ export const modelsApi = {
     if (data.basePrice !== undefined) body.base_price = data.basePrice;
     if (data.terms !== undefined) body.terms = data.terms;
     if (data.thumbnailKey !== undefined) body.thumbnailKey = data.thumbnailKey;
+    if (data.license !== undefined) body.license = data.license;
+    if (data.printerType !== undefined) body.printer_type = data.printerType;
+    if (data.supportsRequired !== undefined) body.supports_required = data.supportsRequired;
+    if (data.recommendedLayerHeight !== undefined) body.recommended_layer_height = data.recommendedLayerHeight;
+    if (data.recommendedInfill !== undefined) body.recommended_infill = data.recommendedInfill;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },
