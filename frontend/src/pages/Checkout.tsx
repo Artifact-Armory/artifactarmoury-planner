@@ -17,6 +17,13 @@ const stripePromise: Promise<Stripe | null> | null = PUBLISHABLE_KEY
   ? loadStripe(PUBLISHABLE_KEY)
   : null
 
+// Payments are mocked while the marketplace is pre-launch, so checkout completes
+// WITHOUT a card — you can "buy" models to test purchases (reviews, downloads,
+// entitlements). This defaults on; to collect real cards later, set
+// VITE_MOCK_CHECKOUT=false and provide VITE_STRIPE_PUBLISHABLE_KEY (the backend
+// must also leave STRIPE_MOCK/PAYMENTS_ENABLED unset).
+const MOCK_CHECKOUT = import.meta.env.VITE_MOCK_CHECKOUT !== 'false'
+
 /** A client secret from the mock Stripe path — no real card entry is possible. */
 const isMockSecret = (secret?: string) => !secret || secret.startsWith('cs_mock')
 
@@ -58,8 +65,9 @@ const Checkout: React.FC = () => {
       const created = await ordersApi.createOrder(orderItems, user.email, consent)
       setOrder(created)
 
-      if (!stripePromise || isMockSecret(created.clientSecret)) {
-        // Mock Stripe: the payment auto-succeeds, so confirm and finish.
+      if (MOCK_CHECKOUT || !stripePromise || isMockSecret(created.clientSecret)) {
+        // Mock/test checkout: the payment auto-succeeds, so confirm and finish
+        // immediately — no card entry.
         await ordersApi.confirmOrder(created.id, created.paymentIntentId ?? created.clientSecret ?? 'mock')
         finishSuccessfully()
       } else {
@@ -169,13 +177,13 @@ const Checkout: React.FC = () => {
                 <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !consent}>
                   {placing
                     ? 'Processing…'
-                    : stripePromise
+                    : stripePromise && !MOCK_CHECKOUT
                       ? `Continue to payment · ${formatPrice(subtotal)}`
                       : `Pay ${formatPrice(subtotal)} (test)`}
                 </Button>
                 <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-gray-400">
                   <Lock size={11} />
-                  {stripePromise ? 'Payments secured by Stripe' : 'Test checkout — no real payment is taken.'}
+                  {stripePromise && !MOCK_CHECKOUT ? 'Payments secured by Stripe' : 'Test checkout — no real payment is taken.'}
                 </p>
               </>
             ) : (
