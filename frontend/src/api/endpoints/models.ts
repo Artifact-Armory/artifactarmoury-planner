@@ -49,6 +49,19 @@ export const modelsApi = {
   },
 
   /**
+   * Replace a model's primary file with a new version. Owners re-download the new
+   * version for free and are notified. Processes in the background — poll
+   * getProcessingStatus. `rawKey` is a file already uploaded to R2 (presign, `raw/`).
+   */
+  uploadNewVersion: async (
+    id: string,
+    data: { rawKey: string; filename: string; notes?: string },
+  ): Promise<{ modelId: string; processingStatus: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/new-version`, data, { timeout: 60_000 })
+    return response.data
+  },
+
+  /**
    * Published multi-part ("set") models with their parts — for the planner, where
    * each part is an individually placeable asset grouped under the set.
    */

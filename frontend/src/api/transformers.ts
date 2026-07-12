@@ -48,6 +48,19 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     (model.mesh_open_edges ?? model.meshOpenEdges) != null
       ? Number(model.mesh_open_edges ?? model.meshOpenEdges)
       : undefined,
+  fileVersion:
+    (model.file_version ?? model.fileVersion) != null
+      ? Number(model.file_version ?? model.fileVersion)
+      : undefined,
+  versionNotes: model.version_notes ?? model.versionNotes ?? null,
+  filesUpdatedAt: model.files_updated_at ?? model.filesUpdatedAt ?? null,
+  versions: Array.isArray(model.versions)
+    ? model.versions.map((v: any) => ({
+        version: Number(v.version),
+        notes: v.notes ?? null,
+        createdAt: v.created_at ?? v.createdAt,
+      }))
+    : undefined,
   thumbnailUrl: model.thumbnail_url || model.thumbnailUrl || assetUrl(model.thumbnail_path),
   glbUrl: model.glb_url || model.glbUrl || assetUrl(model.glb_file_path),
   previewImages: model.preview_images || model.previewImages || undefined,

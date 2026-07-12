@@ -98,6 +98,12 @@ export interface TerrainModel {
   meshIsManifold?: boolean | null
   meshTriangleCount?: number
   meshOpenEdges?: number
+  // File versioning (see migration 033). fileVersion starts at 1; versionNotes is
+  // the latest changelog; versions is the full history (most recent first).
+  fileVersion?: number
+  versionNotes?: string | null
+  filesUpdatedAt?: string | null
+  versions?: Array<{ version: number; notes?: string | null; createdAt: string }>
   thumbnailUrl?: string
   glbUrl?: string
   previewImages?: string[]

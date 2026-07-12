@@ -363,6 +363,28 @@ const ModelDetails: React.FC = () => {
               </div>
             </section>
           )}
+
+          {model.versions && model.versions.length > 0 && (
+            <section className="rounded-2xl bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-gray-900">Version history</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Own this model? You can re-download the latest version free from your library.
+              </p>
+              <ul className="mt-4 space-y-3">
+                {model.versions.map((v) => (
+                  <li key={v.version} className="rounded-lg border border-gray-100 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-900">Version {v.version}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(v.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {v.notes && <p className="mt-1 text-sm text-gray-600">{v.notes}</p>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
 
         <aside className="space-y-6">
@@ -396,6 +418,12 @@ const ModelDetails: React.FC = () => {
                 Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews
               </span>
             </div>
+
+            {model.filesUpdatedAt && (model.fileVersion ?? 1) > 1 && (
+              <p className="mt-2 text-xs font-medium text-green-700">
+                Updated {new Date(model.filesUpdatedAt).toLocaleDateString()} · v{model.fileVersion}
+              </p>
+            )}
 
             {/* Like + share */}
             <div className="mt-4 flex items-center gap-3">

@@ -58,6 +58,13 @@ const EditModel: React.FC = () => {
   const [notice, setNotice] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
+  // New-version upload (replaces the primary file; owners re-download free).
+  const [versionFile, setVersionFile] = React.useState<File | null>(null)
+  const [versionNotes, setVersionNotes] = React.useState('')
+  const [versionBusy, setVersionBusy] = React.useState(false)
+  const [versionMsg, setVersionMsg] = React.useState<string | null>(null)
+  const [versionErr, setVersionErr] = React.useState<string | null>(null)
+
   const load = React.useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -143,6 +150,49 @@ const EditModel: React.FC = () => {
       setError(errMessage(err, 'Could not save changes'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function pollProcessing(modelId: string): Promise<void> {
+    for (let i = 0; i < 150; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const s = await modelsApi.getProcessingStatus(modelId)
+      if (s.processingStatus === 'ready') return
+      if (s.processingStatus === 'failed') throw new Error(s.processingError || 'Processing failed')
+    }
+    throw new Error('Processing timed out — check the model shortly')
+  }
+
+  async function handleNewVersion(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || !versionFile) return
+    setVersionErr(null)
+    setVersionMsg(null)
+    setVersionBusy(true)
+    try {
+      const { key } = await uploadsApi.uploadDirect(versionFile, 'raw')
+      await modelsApi.uploadNewVersion(id, {
+        rawKey: key,
+        filename: versionFile.name,
+        notes: versionNotes.trim() || undefined,
+      })
+      await pollProcessing(id)
+      // A dedup/geometry rejection is recorded as processing_error but leaves the
+      // model 'ready' with the OLD file — surface it rather than claiming success.
+      const refreshed = await modelsApi.getModelById(id)
+      const rejected = refreshed.processingError
+      setVersionFile(null)
+      setVersionNotes('')
+      if (rejected) {
+        setVersionErr(rejected)
+      } else {
+        setVersionMsg('New version published. Owners have been notified and can re-download it free.')
+      }
+      await load()
+    } catch (err) {
+      setVersionErr(errMessage(err, 'Could not upload the new version'))
+    } finally {
+      setVersionBusy(false)
     }
   }
 
@@ -360,6 +410,49 @@ const EditModel: React.FC = () => {
           )}
         </div>
       </form>
+
+      {/* Upload a new file version — replaces the main model file. Buyers keep
+          access and re-download the new version for free; they're notified. */}
+      <div className="mt-8 rounded-lg border border-gray-200 p-4">
+        <h2 className="text-base font-semibold text-gray-900">File version</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          Currently on <span className="font-medium">v{model?.fileVersion ?? 1}</span>
+          {model?.filesUpdatedAt && (
+            <> · updated {new Date(model.filesUpdatedAt).toLocaleDateString()}</>
+          )}
+          . Upload a fixed or improved file and everyone who owns this model can re-download it free.
+        </p>
+
+        <form onSubmit={handleNewVersion} className="mt-4 space-y-3">
+          <input
+            type="file"
+            accept=".stl,.obj,.3mf"
+            disabled={versionBusy}
+            onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
+          />
+          <div>
+            <label className="block text-sm mb-1">What changed? <span className="font-normal text-gray-400">(optional, shown to buyers)</span></label>
+            <textarea
+              className="w-full border rounded px-3 py-2"
+              rows={2}
+              maxLength={1000}
+              value={versionNotes}
+              onChange={(e) => setVersionNotes(e.target.value)}
+              disabled={versionBusy}
+              placeholder="e.g. Thickened a fragile wall and fixed a non-manifold edge."
+            />
+          </div>
+          {versionMsg && <p className="text-sm text-green-700">{versionMsg}</p>}
+          {versionErr && <p className="text-sm text-red-600">{versionErr}</p>}
+          <button
+            type="submit"
+            className="px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            disabled={versionBusy || !versionFile}
+          >
+            {versionBusy ? 'Publishing new version…' : 'Publish new version'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

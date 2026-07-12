@@ -63,6 +63,40 @@ export async function notifyFollowersOfRelease(artistId: string, modelId: string
   }
 }
 
+/**
+ * Notify everyone who owns `modelId` that the artist published an updated file
+ * version — they can re-download the new version for free (entitlement is per
+ * model, not per version). One INSERT … SELECT fans out to all distinct buyers
+ * with a succeeded order. Best-effort.
+ */
+export async function notifyOwnersOfModelUpdate(
+  modelId: string,
+  version: number,
+  notes?: string | null,
+): Promise<void> {
+  try {
+    const model = await db.query('SELECT name FROM models WHERE id = $1', [modelId]);
+    const modelName = model.rows[0]?.name ?? 'a model you own';
+    const body = notes && notes.trim()
+      ? `Version ${version}: ${notes.trim()}`
+      : `Version ${version} is now available — re-download it free from your library.`;
+
+    const result = await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, link, model_id)
+       SELECT DISTINCT o.user_id, 'model_updated', $2, $3, $4, $1
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE oi.model_id = $1
+         AND o.payment_status = 'succeeded'
+         AND o.user_id IS NOT NULL`,
+      [modelId, `“${modelName}” has an updated file`, body, `/models/${modelId}`],
+    );
+    log.info('Model-update notifications fanned out', { modelId, version, recipients: result.rowCount });
+  } catch (err) {
+    log.error('notifyOwnersOfModelUpdate failed', { error: err, modelId });
+  }
+}
+
 /** Notify an artist that a user followed them. Best-effort. */
 export async function notifyNewFollower(artistId: string, followerId: string): Promise<void> {
   try {

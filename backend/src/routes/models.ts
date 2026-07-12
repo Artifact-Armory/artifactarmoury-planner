@@ -37,7 +37,7 @@ import { analyzeMeshQuality } from '../services/meshQA';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
-import { notifyFollowersOfRelease } from '../services/notifications';
+import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate } from '../services/notifications';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
@@ -433,6 +433,65 @@ router.post('/from-upload',
 );
 
 // ============================================================================
+// UPLOAD A NEW FILE VERSION  (replaces the primary file; owners re-download free)
+// ============================================================================
+
+router.post('/:id/new-version',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+    const { id } = req.params;
+    const { rawKey, filename, notes } = req.body ?? {};
+
+    if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
+      throw new ValidationError('rawKey (an uploaded raw/ object) is required');
+    }
+    if (!meshFormatFromName(filename || rawKey)) {
+      throw new ValidationError('The model file must be an STL, OBJ or 3MF file');
+    }
+
+    const rawBytes = await objectSize(rawKey);
+    if (rawBytes == null) {
+      throw new ValidationError('Uploaded file not found in storage — retry the upload');
+    }
+    if (rawBytes > MAX_MODEL_FILE_BYTES) {
+      await safeDeleteObject(rawKey);
+      throw new ValidationError(
+        `Model file is too large (${(rawBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`,
+      );
+    }
+
+    const cur = await db.query('SELECT processing_status FROM models WHERE id = $1', [id]);
+    if (cur.rows.length === 0) throw new NotFoundError('Model');
+    if (cur.rows[0].processing_status === 'processing') {
+      throw new ValidationError('This model is still processing — please try again shortly');
+    }
+
+    const cleanNotes = typeof notes === 'string' ? notes.trim().slice(0, 1000) || null : null;
+
+    // Flip to processing so the poller/UI reflect the reprocess, then run in the
+    // background. The old file stays live until the new one succeeds.
+    await db.query(
+      `UPDATE models SET processing_status = 'processing', processing_error = NULL, updated_at = NOW() WHERE id = $1`,
+      [id],
+    );
+    processModelVersionUpdate(id, rawKey, filename, cleanNotes).catch((err) =>
+      logger.error('processModelVersionUpdate crashed', { error: err, modelId: id }),
+    );
+
+    logger.info('New model version accepted for processing', { userId: (req as any).userId, modelId: id });
+    res.status(202).json({ message: 'New version received — processing', modelId: id, processingStatus: 'processing' });
+  })
+);
+
+// ============================================================================
 // GET MY MODELS (Artist's own models)
 // ============================================================================
 
@@ -682,6 +741,13 @@ router.get('/:id',
       )).rows;
     }
 
+    // File version history (changelog) — most recent first.
+    const versions = (await db.query(
+      `SELECT version, notes, created_at
+       FROM model_versions WHERE model_id = $1 ORDER BY version DESC LIMIT 20`,
+      [id]
+    )).rows;
+
     // Taxonomy tags (facet terms) for the product page + cross-linking.
     const taxonomyTerms = await getModelTerms(id);
 
@@ -699,6 +765,7 @@ router.get('/:id',
         images: imagesResult.rows,
         recentReviews: reviewsResult.rows,
         parts,
+        versions,
         taxonomyTerms,
         featuredInTables: tablesCount.rows[0]?.c ?? 0,
       }
@@ -1562,6 +1629,140 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
   } finally {
     await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Replace an existing model's PRIMARY file with a new version. Re-runs the same
+ * dedup / fingerprint / preview / mesh-QA pipeline on the replacement, then bumps
+ * file_version, records the changelog in model_versions and notifies every owner
+ * (they re-download the new version for free). Only the primary file is versioned
+ * here; multi-part extras are left untouched. On any failure the model keeps its
+ * previous file (the derived columns are only written on success) and is returned
+ * to 'ready'.
+ */
+async function processModelVersionUpdate(
+  modelId: string,
+  rawKey: string,
+  filename: string | undefined,
+  notes: string | null,
+): Promise<void> {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-ver-'));
+  const format: MeshFormat = meshFormatFromName(filename || rawKey) ?? 'stl';
+  const stlTmp = path.join(tmpDir, 'model.stl');
+
+  try {
+    const rawBuffer = await downloadObject(rawKey);
+    const stlBuffer = convertToStl(rawBuffer, format);
+    await fsp.writeFile(stlTmp, stlBuffer);
+
+    // Exact-hash dedup against OTHER models (a version identical to someone else's
+    // model is still theft). Self is excluded, so re-uploading a tweak is fine.
+    const fileHash = computeFileHash(stlBuffer);
+    const dup = await db.query('SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2', [fileHash, modelId]);
+    if (dup.rows.length > 0) {
+      await failVersionUpdate(modelId, `That file matches an existing model ("${dup.rows[0].name}") — not applied`);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+
+    const fingerprint = await computeGeometryFingerprint(stlTmp);
+    const geoDup = await findGeometryDuplicate(fingerprint, modelId);
+    if (geoDup) {
+      await failVersionUpdate(modelId, `That file looks like a copy of another model ("${geoDup.name}") — not applied`);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+
+    const stlData = await processSTL(stlTmp);
+    const glbPath = await generateGLB(stlTmp);
+    const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    const meshQA = await analyzeMeshQuality(stlTmp);
+
+    // Where the buyer-facing STL lives: the raw key for STL uploads, or a stored
+    // canonical STL for OBJ/3MF (with the original kept as the source file).
+    let newStlPath = rawKey;
+    let sourceFilePath: string | null = null;
+    if (format !== 'stl') {
+      const canonTmp = path.join(tmpDir, 'canonical.stl');
+      await fsp.writeFile(canonTmp, stlBuffer);
+      newStlPath = await uploadToStorage(canonTmp, 'models');
+      sourceFilePath = rawKey;
+    }
+
+    const printEstimate = estimatePrintCost({
+      volume_mm3: stlData.volume,
+      surface_area_mm2: stlData.surfaceArea,
+      estimated_weight_g: undefined,
+      estimated_print_time_minutes: undefined,
+      triangle_count: undefined,
+    });
+
+    // Bump the version and write all derived fields atomically.
+    const updated = await db.query(
+      `UPDATE models SET
+         glb_file_path = $1,
+         width = $2, depth = $3, height = $4,
+         estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
+         file_hash = $8,
+         geometry_fingerprint = $9,
+         source_format = $10,
+         source_file_path = $11,
+         stl_file_path = $12,
+         mesh_analyzed = $13, mesh_is_watertight = $14, mesh_is_manifold = $15,
+         mesh_triangle_count = $16, mesh_open_edges = $17, mesh_report = $18,
+         file_version = file_version + 1,
+         version_notes = $19,
+         files_updated_at = NOW(),
+         processing_status = 'ready', processing_error = NULL,
+         updated_at = NOW()
+       WHERE id = $20
+       RETURNING file_version`,
+      [
+        glbStoragePath,
+        stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
+        Math.round(printEstimate.estimated_time_hours * 60),
+        Number(printEstimate.total_cost.toFixed(2)),
+        stlData.needsSupports,
+        fileHash,
+        JSON.stringify(fingerprint),
+        format,
+        sourceFilePath,
+        newStlPath,
+        meshQA.analyzed, meshQA.watertight, meshQA.manifold,
+        meshQA.triangleCount || null, meshQA.openEdges, JSON.stringify(meshQA),
+        notes,
+        modelId,
+      ]
+    );
+
+    const newVersion: number = updated.rows[0]?.file_version ?? 2;
+
+    // Record the changelog entry, then notify owners they can re-download free.
+    await db.query(
+      `INSERT INTO model_versions (model_id, version, notes) VALUES ($1, $2, $3)
+       ON CONFLICT (model_id, version) DO NOTHING`,
+      [modelId, newVersion, notes]
+    );
+    await notifyOwnersOfModelUpdate(modelId, newVersion, notes);
+
+    logger.info('Model version updated', { modelId, newVersion });
+  } catch (error) {
+    logger.error('Model version update failed', { error, modelId });
+    await failVersionUpdate(modelId, (error as Error)?.message?.slice(0, 300) || 'Version update failed');
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * A version update failed — the previous file is still intact, so just return the
+ * model to 'ready' and surface the reason (advisory; doesn't fail the model).
+ */
+async function failVersionUpdate(modelId: string, reason: string): Promise<void> {
+  await db.query(
+    `UPDATE models SET processing_status = 'ready', processing_error = $1, updated_at = NOW() WHERE id = $2`,
+    [reason, modelId]
+  ).catch((err) => logger.error('failVersionUpdate update failed', { error: err, modelId }));
 }
 
 /**
