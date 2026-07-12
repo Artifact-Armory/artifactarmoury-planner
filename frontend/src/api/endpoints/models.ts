@@ -40,7 +40,7 @@ export const modelsApi = {
     /** Taxonomy tags as `facetSlug:termPath` tokens. */
     terms?: string[]
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
-    const response = await apiClient.post(`${BASE_URL}/from-upload`, data);
+    const response = await apiClient.post(`${BASE_URL}/from-upload`, data, { timeout: 60_000 });
     return response.data.model;
   },
 

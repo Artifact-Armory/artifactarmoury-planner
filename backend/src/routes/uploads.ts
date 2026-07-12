@@ -42,12 +42,16 @@ router.post(
     const hash = crypto.randomBytes(16).toString('hex')
     const key = `${prefix}/${hash}${ext}`
 
-    const presigned = await presignUpload(key, contentType, 300)
+    // 1 hour: a large model (hundreds of MB) on a home upload can easily take
+    // more than 5 minutes, and the URL must stay valid for the whole PUT or the
+    // transfer 403s partway through.
+    const EXPIRES_IN = 3600
+    const presigned = await presignUpload(key, contentType, EXPIRES_IN)
     res.json({
       ...presigned,
       contentType,
       headers: { 'Content-Type': contentType },
-      expiresIn: 300,
+      expiresIn: EXPIRES_IN,
     })
   }),
 )

@@ -19,6 +19,10 @@ function putToR2(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', uploadUrl)
+    // No client-side timeout: a large model (hundreds of MB) can take minutes to
+    // upload on a home connection. The presigned URL's own expiry is the only
+    // time limit (see backend presign TTL).
+    xhr.timeout = 0
     // Must match exactly the Content-Type that was signed, or R2 returns 403.
     xhr.setRequestHeader('Content-Type', contentType)
     xhr.upload.onprogress = (e) => {
@@ -36,7 +40,7 @@ function putToR2(
 export const uploadsApi = {
   /** Ask the API for a short-lived presigned PUT URL under `prefix`. */
   presign: async (filename: string, prefix = 'raw'): Promise<PresignResponse> => {
-    const res = await apiClient.post('/api/uploads/presign', { filename, prefix })
+    const res = await apiClient.post('/api/uploads/presign', { filename, prefix }, { timeout: 60_000 })
     return res.data
   },
 

@@ -29,7 +29,11 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15_000,
+  // 15s was too aggressive: a cold Railway backend or a slow presign/from-upload
+  // round-trip (esp. during large model uploads) tripped "timeout of 15000ms
+  // exceeded". Individual long calls (file download, presign, from-upload) still
+  // override this with their own longer timeout.
+  timeout: 60_000,
 })
 
 apiClient.interceptors.request.use(
