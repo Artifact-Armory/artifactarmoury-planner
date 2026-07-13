@@ -67,6 +67,19 @@ export class Ghost {
       const mesh = child as THREE.Mesh
       if ((mesh as any).isMesh) mesh.material = this.material
     })
+    // Preview the artist's baked default tilt (and re-ground it) so the ghost reads
+    // the same as the placed piece — matches InstancedScene.composeMatrix. Yaw is
+    // applied to the whole group (setTransform); pitch tilts the clone within it.
+    const pitchDeg = this.asset?.defaultPitchDeg ?? 0
+    if (pitchDeg) {
+      clone.rotation.x = THREE.MathUtils.degToRad(pitchDeg)
+      const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
+      if (aabb) {
+        const th = THREE.MathUtils.degToRad(pitchDeg)
+        const minY = Math.min(0, aabb.y * Math.cos(th)) - (aabb.z / 2) * Math.abs(Math.sin(th))
+        clone.position.y = -minY
+      }
+    }
     this.group.add(clone)
   }
 

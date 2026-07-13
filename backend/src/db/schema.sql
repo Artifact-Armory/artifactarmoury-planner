@@ -150,6 +150,12 @@ CREATE TABLE models (
     -- single-STL model; extra parts live in model_parts, this row is part 1).
     part_count INTEGER NOT NULL DEFAULT 1,
 
+    -- Default tilt (pitch about X, degrees) applied to this model when first placed
+    -- in the planner. STL has no canonical "up" — terrain tends Z-up, character
+    -- sculpts Y-up — so an artist can bake in the orientation that stands the model
+    -- upright (0/90/180/270) instead of every buyer re-tilting it (migration 036).
+    default_pitch_deg INTEGER NOT NULL DEFAULT 0,
+
     -- Buyer usage licence (migration 030): personal (own use) | commercial (may
     -- sell physical prints). Neither permits redistributing the digital file.
     license TEXT NOT NULL DEFAULT 'personal' CHECK (license IN ('personal', 'commercial')),

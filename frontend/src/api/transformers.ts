@@ -136,6 +136,8 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     reviewerName: review.reviewer_name ?? review.reviewerName,
     createdAt: review.created_at ?? review.createdAt,
   })),
+  // Default planner tilt baked in by the artist (degrees, pitch about X).
+  defaultPitchDeg: Number(model.default_pitch_deg ?? model.defaultPitchDeg ?? 0),
   // Multi-part ("set") models: number of STL files + the extra parts.
   partCount: Number(model.part_count ?? model.partCount ?? 1),
   parts: model.parts?.map((p: any) => ({

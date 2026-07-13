@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import {
-  loadAssets, loadAssetsFromAPI, loadSetsFromAPI, loadMyModelsForPlanner,
+  loadAssets, loadAssetsFromAPI, loadSetsFromAPI, loadMyModelsForPlanner, getAssetById,
   type Asset, type PlannerSetData, type PlannerMyModel,
 } from '../core/assets'
 import {
@@ -536,8 +536,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     addInstance: (i) => {
       const id = `i_${Math.random().toString(36).slice(2,10)}`
+      // Apply the artist-baked default tilt (unless the caller set an explicit
+      // pitch) so a model authored "lying down" stands upright when placed.
+      const pitchDeg = i.pitchDeg ?? getAssetById(i.assetId)?.defaultPitchDeg ?? 0
       set(s => {
-        const instances = [...s.instances, { ...i, id }]
+        const instances = [...s.instances, { ...i, id, pitchDeg }]
         return { instances, ...saveHistory({ ...s, instances }) }
       })
       get().actions.syncBasketWithTable()

@@ -566,7 +566,7 @@ router.get('/sets',
   asyncHandler(async (_req, res) => {
     const models = (await db.query(
       `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.artist_id,
-              m.glb_file_path, m.width, m.depth, m.height
+              m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
        ORDER BY m.created_at DESC`
@@ -591,6 +591,7 @@ router.get('/sets',
         price: m.base_price,
         thumbnail_path: m.thumbnail_path,
         artist_id: m.artist_id,
+        default_pitch_deg: m.default_pitch_deg,
         parts,
       };
     }));
@@ -612,7 +613,7 @@ router.get('/mine/planner',
   asyncHandler(async (req, res) => {
     const models = (await db.query(
       `SELECT id, name, tags, glb_file_path, thumbnail_path,
-              width, depth, height, base_price, status
+              width, depth, height, base_price, status, default_pitch_deg
        FROM models
        WHERE artist_id = $1 AND part_count = 1 AND glb_file_path IS NOT NULL
          AND (processing_status IS NULL OR processing_status = 'ready')
@@ -639,7 +640,7 @@ router.get('/planner-assets',
     if (ids.length === 0) { res.json({ models: [] }); return; }
     const models = (await db.query(
       `SELECT m.id, m.name, m.tags, m.glb_file_path, m.thumbnail_path,
-              m.width, m.depth, m.height, m.base_price, m.artist_id, u.artist_name
+              m.width, m.depth, m.height, m.base_price, m.artist_id, m.default_pitch_deg, u.artist_name
        FROM models m JOIN users u ON u.id = m.artist_id
        WHERE m.id = ANY($1::uuid[]) AND m.part_count = 1 AND m.glb_file_path IS NOT NULL`,
       [ids]
@@ -815,8 +816,14 @@ router.patch('/:id',
 
     const allowedFields = [
       'name', 'description', 'category', 'tags', 'base_price', 'license', 'printer_type',
-      'supports_required', 'recommended_layer_height', 'recommended_infill'
+      'supports_required', 'recommended_layer_height', 'recommended_infill', 'default_pitch_deg'
     ];
+
+    // Default planner tilt: normalise to an integer in [0, 359] (any junk → 0).
+    if (updates.default_pitch_deg !== undefined) {
+      const p = Math.round(Number(updates.default_pitch_deg));
+      updates.default_pitch_deg = Number.isFinite(p) ? ((p % 360) + 360) % 360 : 0;
+    }
 
     // Validate the usage licence up-front if the caller is changing it.
     if (updates.license !== undefined && !VALID_LICENSES.includes(updates.license)) {

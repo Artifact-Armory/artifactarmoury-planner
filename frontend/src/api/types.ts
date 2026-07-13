@@ -161,6 +161,9 @@ export interface TerrainModel {
     height?: number
     processingStatus?: string
   }>
+  // Default planner tilt (pitch about X, degrees) baked in by the artist so the
+  // model stands upright when placed. 0 = no tilt.
+  defaultPitchDeg?: number
   images?: Array<{
     id: string
     imagePath?: string

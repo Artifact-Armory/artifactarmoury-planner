@@ -71,6 +71,7 @@ export const modelsApi = {
     price: number
     thumbnailPath: string | null
     artistId: string
+    defaultPitchDeg: number
     parts: Array<{ id: string; name: string; glbPath: string | null; width: number | null; depth: number | null; height: number | null }>
   }>> => {
     const response = await apiClient.get(`${BASE_URL}/sets`)
@@ -80,6 +81,7 @@ export const modelsApi = {
       price: Number(s.price ?? 0),
       thumbnailPath: s.thumbnail_path ?? null,
       artistId: s.artist_id,
+      defaultPitchDeg: Number(s.default_pitch_deg ?? 0),
       parts: (s.parts ?? []).map((p: any) => ({
         id: p.id,
         name: p.name,
@@ -188,6 +190,8 @@ export const modelsApi = {
       supportsRequired?: boolean
       recommendedLayerHeight?: number | null
       recommendedInfill?: number | null
+      /** Default planner tilt (pitch about X, degrees) so the model stands upright. */
+      defaultPitchDeg?: number
     },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
@@ -203,6 +207,7 @@ export const modelsApi = {
     if (data.supportsRequired !== undefined) body.supports_required = data.supportsRequired;
     if (data.recommendedLayerHeight !== undefined) body.recommended_layer_height = data.recommendedLayerHeight;
     if (data.recommendedInfill !== undefined) body.recommended_infill = data.recommendedInfill;
+    if (data.defaultPitchDeg !== undefined) body.default_pitch_deg = data.defaultPitchDeg;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },

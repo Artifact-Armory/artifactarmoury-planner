@@ -7,6 +7,7 @@ import TermPicker from '../../components/taxonomy/TermPicker'
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
+import ModelOrientationPreview from '../../components/ModelOrientationPreview'
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -41,6 +42,8 @@ const EditModel: React.FC = () => {
   const [supportsRequired, setSupportsRequired] = React.useState(false)
   const [layerHeight, setLayerHeight] = React.useState('')
   const [infill, setInfill] = React.useState('')
+  // Default tilt applied in the 3D planner so the model stands upright (0/90/180/270).
+  const [defaultPitch, setDefaultPitch] = React.useState(0)
 
   // The model's class (set at upload) — scopes which facets the tag picker shows.
   const modelClass = React.useMemo(() => {
@@ -83,6 +86,7 @@ const EditModel: React.FC = () => {
       setSupportsRequired(Boolean(m.supportsRequired))
       setLayerHeight(m.recommendedLayerHeight != null ? String(m.recommendedLayerHeight) : '')
       setInfill(m.recommendedInfill != null ? String(m.recommendedInfill) : '')
+      setDefaultPitch(Number(m.defaultPitchDeg ?? 0))
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
     } finally {
@@ -140,6 +144,7 @@ const EditModel: React.FC = () => {
         supportsRequired,
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
+        defaultPitchDeg: defaultPitch,
         terms,
         thumbnailKey,
       })
@@ -215,6 +220,7 @@ const EditModel: React.FC = () => {
         supportsRequired,
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
+        defaultPitchDeg: defaultPitch,
         terms,
         thumbnailKey,
       })
@@ -343,6 +349,34 @@ const EditModel: React.FC = () => {
               <label className="block text-sm mb-1">Recommended infill (%)</label>
               <input type="number" min={0} max={100} step="1" className="w-full border rounded px-3 py-2" value={infill} onChange={(e) => setInfill(e.target.value)} disabled={busy} placeholder="20" />
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-3">
+          <p className="text-sm font-medium">Planner orientation</p>
+          <p className="text-xs text-gray-500 mt-1">
+            If your model imports lying on its side in the 3D planner, pick the tilt that
+            stands it upright — the live preview below sits it on the table exactly as buyers
+            will see it. This is applied automatically whenever a buyer places it; the
+            downloadable STL is never changed.
+          </p>
+          <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded border bg-gradient-to-b from-slate-50 to-slate-100 overflow-hidden" />
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[0, 90, 180, 270].map((deg) => (
+              <button
+                key={deg}
+                type="button"
+                onClick={() => setDefaultPitch(deg)}
+                disabled={busy}
+                className={`px-3 py-1.5 rounded border text-sm ${
+                  defaultPitch === deg
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {deg === 0 ? 'Default (no tilt)' : `Tilt ${deg}°`}
+              </button>
+            ))}
           </div>
         </div>
 
