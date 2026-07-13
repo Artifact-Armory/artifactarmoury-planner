@@ -1,10 +1,14 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
+import { Star, ArrowUp, ArrowDown, X } from 'lucide-react'
 import { artistsApi } from '../../api/endpoints/artists'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { useAuthStore } from '../../store/authStore'
+import { TerrainModel } from '../../api/types'
 import Spinner from '../../components/ui/Spinner'
+
+const MAX_FEATURED = 12
 
 const ArtistSettings: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -15,15 +19,34 @@ const ArtistSettings: React.FC = () => {
     enabled: Boolean(user?.id),
   })
 
+  // The artist's own published models — the pool to pick featured ones from.
+  const { data: myModels } = useQuery({
+    queryKey: ['artist-self-models', user?.id],
+    queryFn: () => artistsApi.getArtistModels(user!.id as string, { sort: 'recent', limit: 100 }),
+    enabled: Boolean(user?.id),
+  })
+
+  const { data: initialFeatured } = useQuery({
+    queryKey: ['artist-self-featured', user?.id],
+    queryFn: () => artistsApi.getFeatured(user!.id as string),
+    enabled: Boolean(user?.id),
+  })
+
   const [name, setName] = React.useState('')
   const [bio, setBio] = React.useState('')
   const [url, setUrl] = React.useState('')
   const [avatarUrl, setAvatarUrl] = React.useState<string | undefined>()
   const [bannerUrl, setBannerUrl] = React.useState<string | undefined>()
+  const [backgroundUrl, setBackgroundUrl] = React.useState<string | undefined>()
   const [avatarKey, setAvatarKey] = React.useState<string | undefined>()
   const [bannerKey, setBannerKey] = React.useState<string | undefined>()
+  const [backgroundKey, setBackgroundKey] = React.useState<string | undefined>()
+  const [accent, setAccent] = React.useState('')
   const [saving, setSaving] = React.useState(false)
-  const [uploading, setUploading] = React.useState<'avatar' | 'banner' | null>(null)
+  const [uploading, setUploading] = React.useState<'avatar' | 'banner' | 'background' | null>(null)
+
+  const [featuredIds, setFeaturedIds] = React.useState<string[]>([])
+  const [savingFeatured, setSavingFeatured] = React.useState(false)
 
   React.useEffect(() => {
     if (profile) {
@@ -32,10 +55,23 @@ const ArtistSettings: React.FC = () => {
       setUrl((profile as any).artistUrl ?? (profile as any).artist_url ?? '')
       setAvatarUrl(profile.profileImageUrl)
       setBannerUrl(profile.bannerImageUrl)
+      setBackgroundUrl(profile.backgroundImageUrl)
+      setAccent(profile.accentColor ?? '')
     }
   }, [profile])
 
-  const upload = async (file: File, which: 'avatar' | 'banner') => {
+  React.useEffect(() => {
+    if (initialFeatured) setFeaturedIds(initialFeatured.map((m) => m.id))
+  }, [initialFeatured])
+
+  const models = myModels?.models ?? []
+  const modelById = React.useMemo(() => {
+    const map = new Map<string, TerrainModel>()
+    for (const m of models) map.set(m.id, m)
+    return map
+  }, [models])
+
+  const upload = async (file: File, which: 'avatar' | 'banner' | 'background') => {
     if (!/^image\//.test(file.type)) {
       toast.error('Choose an image file')
       return
@@ -46,9 +82,12 @@ const ArtistSettings: React.FC = () => {
       if (which === 'avatar') {
         setAvatarKey(key)
         setAvatarUrl(publicUrl)
-      } else {
+      } else if (which === 'banner') {
         setBannerKey(key)
         setBannerUrl(publicUrl)
+      } else {
+        setBackgroundKey(key)
+        setBackgroundUrl(publicUrl)
       }
     } catch {
       toast.error('Upload failed')
@@ -67,6 +106,8 @@ const ArtistSettings: React.FC = () => {
         url: url.trim(),
         avatar: avatarKey,
         banner: bannerKey,
+        background: backgroundKey,
+        accentColor: accent, // '' clears it back to the default theme
       })
       toast.success('Profile saved')
       await refetch()
@@ -77,14 +118,48 @@ const ArtistSettings: React.FC = () => {
     }
   }
 
+  const toggleFeatured = (id: string) => {
+    setFeaturedIds((cur) => {
+      if (cur.includes(id)) return cur.filter((x) => x !== id)
+      if (cur.length >= MAX_FEATURED) {
+        toast.error(`You can feature up to ${MAX_FEATURED} models`)
+        return cur
+      }
+      return [...cur, id]
+    })
+  }
+
+  const moveFeatured = (index: number, dir: -1 | 1) => {
+    setFeaturedIds((cur) => {
+      const next = [...cur]
+      const target = index + dir
+      if (target < 0 || target >= next.length) return cur
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
+  const saveFeatured = async () => {
+    setSavingFeatured(true)
+    try {
+      const saved = await artistsApi.setFeatured(featuredIds)
+      setFeaturedIds(saved)
+      toast.success('Featured models updated')
+    } catch {
+      toast.error('Could not save featured models')
+    } finally {
+      setSavingFeatured(false)
+    }
+  }
+
   if (isLoading) {
     return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
   }
 
   return (
-    <div className="px-4 py-10 max-w-2xl mx-auto">
+    <div className="px-4 py-10 max-w-3xl mx-auto">
       <h1 className="text-2xl font-semibold text-gray-900">Artist Profile</h1>
-      <p className="text-gray-600">Your public brand page — banner, avatar, and bio.</p>
+      <p className="text-gray-600">Your public brand page — banner, background, avatar, colour, and bio.</p>
 
       <form className="mt-6 space-y-5" onSubmit={save}>
         {/* Banner */}
@@ -96,6 +171,26 @@ const ArtistSettings: React.FC = () => {
           <input type="file" accept="image/*" className="mt-2 text-sm" disabled={uploading !== null}
             onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], 'banner')} />
           {uploading === 'banner' && <span className="ml-2 text-xs text-gray-500">Uploading…</span>}
+        </div>
+
+        {/* Page background */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Page background</label>
+          <p className="text-xs text-gray-500 mb-2">A full-page backdrop shown behind your brand page (a soft white overlay keeps text readable).</p>
+          <div className="relative h-40 w-full overflow-hidden rounded-lg border bg-gray-100">
+            {backgroundUrl && <img src={backgroundUrl} alt="background" className="h-full w-full object-cover" />}
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <input type="file" accept="image/*" className="text-sm" disabled={uploading !== null}
+              onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], 'background')} />
+            {uploading === 'background' && <span className="text-xs text-gray-500">Uploading…</span>}
+            {backgroundUrl && (
+              <button type="button" className="text-xs text-red-600 hover:underline"
+                onClick={() => { setBackgroundUrl(undefined); setBackgroundKey('') }}>
+                Remove
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Avatar */}
@@ -111,6 +206,25 @@ const ArtistSettings: React.FC = () => {
           </div>
         </div>
 
+        {/* Accent colour */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Accent colour</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#4f46e5'}
+              onChange={(e) => setAccent(e.target.value)}
+              className="h-9 w-12 cursor-pointer rounded border p-0.5"
+            />
+            <span className="text-sm text-gray-600">{accent || 'Default theme'}</span>
+            {accent && (
+              <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => setAccent('')}>
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+
         <div>
           <label className="block text-sm font-medium mb-1">Studio / artist name</label>
           <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} />
@@ -118,7 +232,8 @@ const ArtistSettings: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Bio</label>
-          <textarea className="w-full border rounded px-3 py-2" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} />
+          <textarea className="w-full border rounded px-3 py-2" rows={5} value={bio} onChange={(e) => setBio(e.target.value)}
+            placeholder="Tell buyers about your studio, your style, what makes your terrain special…" />
         </div>
 
         <div>
@@ -130,6 +245,70 @@ const ArtistSettings: React.FC = () => {
           {saving ? 'Saving…' : 'Save profile'}
         </button>
       </form>
+
+      {/* FEATURED MODELS */}
+      <section className="mt-12 border-t pt-8">
+        <h2 className="text-xl font-semibold text-gray-900">Featured models</h2>
+        <p className="text-gray-600 text-sm">
+          Pick up to {MAX_FEATURED} models to spotlight in a carousel at the top of your page. Drag order with the arrows.
+        </p>
+
+        {featuredIds.length > 0 && (
+          <ol className="mt-4 space-y-2">
+            {featuredIds.map((mid, i) => {
+              const m = modelById.get(mid)
+              return (
+                <li key={mid} className="flex items-center gap-3 rounded-lg border bg-white p-2">
+                  <span className="w-5 text-center text-sm text-gray-400">{i + 1}</span>
+                  <div className="h-12 w-12 overflow-hidden rounded bg-gray-100">
+                    {m?.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
+                  </div>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{m?.name ?? 'Model'}</span>
+                  <button type="button" className="rounded p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === 0} onClick={() => moveFeatured(i, -1)}><ArrowUp size={16} /></button>
+                  <button type="button" className="rounded p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === featuredIds.length - 1} onClick={() => moveFeatured(i, 1)}><ArrowDown size={16} /></button>
+                  <button type="button" className="rounded p-1 text-red-600 hover:bg-red-50" onClick={() => toggleFeatured(mid)}><X size={16} /></button>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+
+        <button
+          type="button"
+          onClick={saveFeatured}
+          disabled={savingFeatured}
+          className="mt-4 rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+        >
+          {savingFeatured ? 'Saving…' : 'Save featured'}
+        </button>
+
+        <h3 className="mt-8 text-sm font-medium text-gray-900">Your published models</h3>
+        {models.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-500">Publish a model first, then you can feature it here.</p>
+        ) : (
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {models.map((m) => {
+              const active = featuredIds.includes(m.id)
+              return (
+                <button
+                  type="button"
+                  key={m.id}
+                  onClick={() => toggleFeatured(m.id)}
+                  className={`group relative overflow-hidden rounded-lg border text-left transition ${active ? 'border-indigo-500 ring-2 ring-indigo-500' : 'border-gray-200 hover:border-gray-300'}`}
+                >
+                  <div className="aspect-square w-full bg-gray-100">
+                    {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
+                  </div>
+                  <span className={`absolute right-1.5 top-1.5 rounded-full p-1 ${active ? 'bg-indigo-600 text-white' : 'bg-white/80 text-gray-500'}`}>
+                    <Star size={14} fill={active ? 'currentColor' : 'none'} />
+                  </span>
+                  <span className="block truncate p-2 text-xs font-medium text-gray-800">{m.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

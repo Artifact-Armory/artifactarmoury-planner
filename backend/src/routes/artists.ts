@@ -20,6 +20,8 @@ const ARTIST_FIELDS = `
   u.artist_url,
   u.artist_avatar_url AS profile_image_url,
   u.artist_banner_url AS banner_image_url,
+  u.artist_background_url AS background_image_url,
+  u.artist_accent_color AS accent_color,
   u.created_at,
   COUNT(m.id) FILTER (WHERE m.status = 'published' AND m.visibility = 'public') AS model_count,
   COALESCE(SUM(m.view_count) FILTER (WHERE m.status = 'published'), 0) AS total_views,
@@ -206,6 +208,139 @@ router.get('/:id/models', async (req, res, next) => {
     })
   } catch (error) {
     artistLogger.error('Get artist models failed', { error, artistId: req.params.id })
+    next(error)
+  }
+})
+
+// Columns selected for a marketplace model card (matches the /:id/models shape
+// that the frontend `mapModelRecord` transformer expects).
+const MODEL_CARD_FIELDS = `
+  m.id, m.name, m.description, m.category, m.tags,
+  m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+  m.width, m.height, m.depth, m.part_count,
+  m.view_count, m.sale_count, m.published_at,
+  u.id AS artist_id, u.artist_name, u.artist_url`
+
+// ============================================================================
+// FEATURED MODELS CAROUSEL
+// ============================================================================
+
+// Public: the artist's hand-picked featured models, in their chosen order.
+router.get('/:id/featured', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const result = await db.query(
+      `SELECT ${MODEL_CARD_FIELDS}
+       FROM artist_featured_models f
+       JOIN models m ON m.id = f.model_id
+       JOIN users u ON u.id = m.artist_id
+       WHERE f.artist_id = $1
+         AND m.status = 'published' AND m.visibility = 'public'
+       ORDER BY f.position ASC, f.created_at ASC`,
+      [id],
+    )
+    res.json({ models: result.rows })
+  } catch (error) {
+    artistLogger.error('Get featured models failed', { error, artistId: req.params.id })
+    next(error)
+  }
+})
+
+// Owner: replace the featured set with an ordered list of the artist's own
+// published models. Body: { modelIds: string[] } (order = carousel order).
+router.put('/me/featured', authenticate, requireArtist, async (req, res, next) => {
+  try {
+    const artistId = (req as any).userId
+    const ids: unknown = req.body?.modelIds
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: 'modelIds must be an array' })
+    }
+    // De-dupe, keep only strings, cap the carousel size.
+    const modelIds = [...new Set(ids.filter((x): x is string => typeof x === 'string'))].slice(0, 12)
+
+    // Keep only models the artist actually owns and has published (silently drops
+    // anything else so a stale client can't feature someone else's model).
+    let valid: string[] = []
+    if (modelIds.length) {
+      const owned = await db.query(
+        `SELECT id FROM models
+         WHERE id = ANY($1::uuid[]) AND artist_id = $2
+           AND status = 'published' AND visibility = 'public'`,
+        [modelIds, artistId],
+      )
+      const ownedSet = new Set(owned.rows.map((r) => r.id))
+      valid = modelIds.filter((mid) => ownedSet.has(mid)) // preserve requested order
+    }
+
+    await db.query('DELETE FROM artist_featured_models WHERE artist_id = $1', [artistId])
+    for (let i = 0; i < valid.length; i++) {
+      await db.query(
+        `INSERT INTO artist_featured_models (artist_id, model_id, position) VALUES ($1, $2, $3)`,
+        [artistId, valid[i], i],
+      )
+    }
+
+    artistLogger.debug('Featured models updated', { artistId, count: valid.length })
+    res.json({ modelIds: valid })
+  } catch (error) {
+    artistLogger.error('Update featured models failed', { error })
+    next(error)
+  }
+})
+
+// ============================================================================
+// GET ARTIST'S PUBLISHED SHOWCASE TABLES (public planner displays)
+// ============================================================================
+
+// Public: the artist's published planner "showcase" tables. user_tables is
+// email-keyed, so we resolve the artist's email from their user id first, then
+// pull a few piece thumbnails per table so the cards are visual (never exposes
+// the raw email).
+router.get('/:id/showcases', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const limit = Math.min(parseInt(req.query.limit as string) || 12, 30)
+
+    const result = await db.query(
+      `SELECT
+        t.id,
+        t.name,
+        t.description,
+        t.share_token,
+        t.view_count,
+        t.updated_at,
+        CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
+             THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,
+        thumbs.thumbnails
+       FROM users u
+       JOIN user_tables t ON t.user_email = u.email AND t.is_public = true
+       LEFT JOIN LATERAL (
+         SELECT array_agg(m.thumbnail_path ORDER BY m.thumbnail_path) AS thumbnails
+         FROM (
+           SELECT DISTINCT COALESCE(elem->>'modelId', elem->>'assetId') AS mid
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
+                  THEN t.layout_data->'models' ELSE '[]'::jsonb END
+           ) AS elem
+         ) ids
+         JOIN models m ON m.id::text = ids.mid
+          AND m.status = 'published'
+          AND m.thumbnail_path IS NOT NULL
+       ) thumbs ON true
+       WHERE u.id = $1
+       ORDER BY t.updated_at DESC
+       LIMIT $2`,
+      [id, limit],
+    )
+
+    for (const row of result.rows) {
+      row.model_count = row.piece_count
+      row.thumbnails = Array.isArray(row.thumbnails) ? row.thumbnails.slice(0, 4) : []
+    }
+
+    res.json({ showcases: result.rows })
+  } catch (error) {
+    artistLogger.error('Get artist showcases failed', { error, artistId: req.params.id })
     next(error)
   }
 })
@@ -570,7 +705,17 @@ router.get('/me/sales', authenticate, requireArtist, async (req, res, next) => {
 router.put('/me', authenticate, requireArtist, async (req, res, next) => {
   try {
     const artistId = (req as any).userId
-    const { name, bio, url, avatar, banner } = req.body ?? {}
+    const { name, bio, url, avatar, banner, background, accentColor } = req.body ?? {}
+    // Accent is a hex colour like '#4f46e5'. An explicit '' clears it back to the
+    // default theme; a valid hex sets it; anything else (or undefined) leaves it
+    // unchanged. clearAccent forces NULL past the COALESCE.
+    let accentHex: string | null = null
+    let clearAccent = false
+    if (typeof accentColor === 'string') {
+      const trimmed = accentColor.trim()
+      if (trimmed === '') clearAccent = true
+      else if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) accentHex = trimmed.toLowerCase()
+    }
     const result = await db.query(
       `UPDATE users SET
          artist_name = COALESCE($2, artist_name),
@@ -578,14 +723,19 @@ router.put('/me', authenticate, requireArtist, async (req, res, next) => {
          artist_url = COALESCE($4, artist_url),
          artist_avatar_url = COALESCE($5, artist_avatar_url),
          artist_banner_url = COALESCE($6, artist_banner_url),
+         artist_background_url = COALESCE($7, artist_background_url),
+         artist_accent_color = CASE WHEN $9 THEN NULL ELSE COALESCE($8, artist_accent_color) END,
          updated_at = NOW()
        WHERE id = $1
        RETURNING id,
          COALESCE(NULLIF(artist_name, ''), display_name) AS name,
          artist_bio AS bio, artist_url,
          artist_avatar_url AS profile_image_url,
-         artist_banner_url AS banner_image_url`,
-      [artistId, name ?? null, bio ?? null, url ?? null, avatar ?? null, banner ?? null],
+         artist_banner_url AS banner_image_url,
+         artist_background_url AS background_image_url,
+         artist_accent_color AS accent_color`,
+      [artistId, name ?? null, bio ?? null, url ?? null, avatar ?? null, banner ?? null,
+       background ?? null, accentHex, clearAccent],
     )
     res.json({ artist: result.rows[0] })
   } catch (error) {

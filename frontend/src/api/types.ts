@@ -250,6 +250,8 @@ export interface ArtistSummary {
   bio?: string
   profileImageUrl?: string
   bannerImageUrl?: string
+  backgroundImageUrl?: string
+  accentColor?: string
   artistUrl?: string
   totalModels?: number
   totalSales?: number
@@ -262,6 +264,17 @@ export interface ArtistSummary {
 
 export interface ArtistDetail extends ArtistSummary {
   totalPurchases?: number
+}
+
+// A published showcase planner surfaced on the artist's brand page.
+export interface ArtistShowcase {
+  id: string
+  name: string
+  description?: string
+  modelCount: number
+  viewCount: number
+  thumbnails: string[]
+  updatedAt?: string
 }
 
 export interface ArtistStats {

@@ -1,7 +1,7 @@
 // src/api/endpoints/artists.ts
 import apiClient from '../client'
-import { ArtistDetail, ArtistStats, ArtistSummary, TerrainModel } from '../types'
-import { mapArtistDetail, mapArtistSummary, mapModelRecord } from '../transformers'
+import { ArtistDetail, ArtistShowcase, ArtistStats, ArtistSummary, TerrainModel } from '../types'
+import { assetUrl, mapArtistDetail, mapArtistSummary, mapModelRecord } from '../transformers'
 
 interface ArtistListParams {
   page?: number
@@ -93,6 +93,34 @@ export const artistsApi = {
     }
   },
 
+  // Public: the artist's hand-picked featured models (carousel order).
+  getFeatured: async (id: string): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`/api/artists/${id}/featured`)
+    return (response.data?.models ?? []).map((m: any) => mapModelRecord(m))
+  },
+
+  // Owner: set the ordered featured list (artist's own published model ids).
+  setFeatured: async (modelIds: string[]): Promise<string[]> => {
+    const response = await apiClient.put('/api/artists/me/featured', { modelIds })
+    return response.data?.modelIds ?? []
+  },
+
+  // Public: the artist's published showcase planner tables.
+  getShowcases: async (id: string): Promise<ArtistShowcase[]> => {
+    const response = await apiClient.get(`/api/artists/${id}/showcases`)
+    return (response.data?.showcases ?? []).map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description ?? undefined,
+      modelCount: Number(s.model_count ?? s.piece_count ?? 0),
+      viewCount: Number(s.view_count ?? 0),
+      thumbnails: (Array.isArray(s.thumbnails) ? s.thumbnails : [])
+        .map((t: string) => assetUrl(t))
+        .filter(Boolean) as string[],
+      updatedAt: s.updated_at ?? undefined,
+    }))
+  },
+
   getDashboardStats: async (): Promise<ArtistStats> => {
     const response = await apiClient.get<{ stats: ArtistStats }>('/api/artists/me/stats')
     return response.data.stats
@@ -111,6 +139,8 @@ export const artistsApi = {
     url?: string
     avatar?: string
     banner?: string
+    background?: string
+    accentColor?: string
   }): Promise<ArtistDetail> => {
     const response = await apiClient.put('/api/artists/me', data)
     return mapArtistDetail(response.data?.artist ?? response.data)

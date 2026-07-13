@@ -19,6 +19,12 @@ CREATE TABLE users (
     artist_name VARCHAR(100),
     artist_bio TEXT,
     artist_url VARCHAR(255),
+    -- Brand-page media (migrations 012 + 035). Avatar/banner/background store R2
+    -- object keys (assetUrl() builds the CDN URL); accent is a hex colour.
+    artist_avatar_url VARCHAR(500),
+    artist_banner_url VARCHAR(500),
+    artist_background_url VARCHAR(500),
+    artist_accent_color VARCHAR(9),
     commission_rate DECIMAL(5,2) DEFAULT 85.00, -- Artist's SHARE percent of each sale (platform keeps the remainder; 85 = 15% platform fee)
     stripe_account_id VARCHAR(255), -- Stripe Connect account
     stripe_onboarding_complete BOOLEAN DEFAULT false,
@@ -193,6 +199,20 @@ CREATE TABLE model_images (
 );
 
 CREATE INDEX idx_model_images_model ON model_images(model_id);
+
+-- ============================================================================
+-- ARTIST FEATURED MODELS (the profile carousel — migration 035)
+-- ============================================================================
+
+CREATE TABLE artist_featured_models (
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    model_id  UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (artist_id, model_id)
+);
+
+CREATE INDEX idx_artist_featured_models ON artist_featured_models(artist_id, position);
 
 -- ============================================================================
 -- MODEL PARTS (Multi-part "set" models — one product, several STL files)

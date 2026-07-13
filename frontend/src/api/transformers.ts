@@ -172,6 +172,9 @@ export const mapArtistSummary = (artist: any): ArtistSummary => ({
     assetUrl(artist.profileImageUrl || artist.profile_image_url || artist.profileImage) || undefined,
   bannerImageUrl:
     assetUrl(artist.bannerImageUrl || artist.banner_image_url || artist.bannerImage) || undefined,
+  backgroundImageUrl:
+    assetUrl(artist.backgroundImageUrl || artist.background_image_url) || undefined,
+  accentColor: artist.accentColor || artist.accent_color || undefined,
   artistUrl: artist.artistUrl || artist.artist_url || undefined,
   totalModels: Number(artist.totalModels ?? artist.model_count ?? artist.total_models ?? 0) || undefined,
   totalSales: artist.totalSales ?? artist.total_purchases ?? undefined,
