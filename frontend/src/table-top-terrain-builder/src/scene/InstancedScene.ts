@@ -212,7 +212,7 @@ export class InstancedScene {
     this.rebuildOutlines()
   }
 
-  private composeMatrix(inst: Instance, partMatrix: THREE.Matrix4, out: THREE.Matrix4) {
+  private composeMatrix(inst: Instance, partMatrix: THREE.Matrix4, out: THREE.Matrix4, aabb?: { x: number; y: number; z: number }) {
     const t = this.liveOverride.get(inst.id)
     const x = t ? t.x : inst.position.x
     const z = t ? t.z : inst.position.z
@@ -230,11 +230,24 @@ export class InstancedScene {
     // stood upright / laid flat. Pivot is the base-centre (base sits on the table).
     tmpQuat.setFromAxisAngle(tmpYAxis, THREE.MathUtils.degToRad(rotDeg))
     const pitchDeg = inst.pitchDeg ?? 0
+    // When a piece is tilted, its base-aligned geometry (y ∈ [0, H]) rotates about
+    // the base-centre and its lowest point drops below the table — re-ground it so
+    // the tilted model still rests on the surface instead of sinking through the floor.
+    let groundOffset = 0
     if (pitchDeg) {
       tmpQuatPitch.setFromAxisAngle(tmpXAxis, THREE.MathUtils.degToRad(pitchDeg))
       tmpQuat.multiply(tmpQuatPitch)
+      if (aabb) {
+        // Yaw about Y preserves world-Y, so only the pitch drives how far the box
+        // dips. Lowest corner Y = min(0, H·cosθ) − (D/2)·|sinθ|; lift by its negative.
+        const th = THREE.MathUtils.degToRad(pitchDeg)
+        const cos = Math.cos(th)
+        const sin = Math.sin(th)
+        const minY = Math.min(0, aabb.y * cos) - (aabb.z / 2) * Math.abs(sin)
+        groundOffset = -minY
+      }
     }
-    tmpPos.set(x, levelToY(inst.level ?? 0) + lift + this.heightAt(x, z), z)
+    tmpPos.set(x, levelToY(inst.level ?? 0) + lift + this.heightAt(x, z) + groundOffset, z)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
   }
@@ -266,7 +279,7 @@ export class InstancedScene {
         order.forEach((id, instIdx) => {
           const inst = instById.get(id)
           if (!inst) return
-          this.composeMatrix(inst, part.matrix, tmpMat)
+          this.composeMatrix(inst, part.matrix, tmpMat, template.aabb)
           im.setMatrixAt(instIdx, tmpMat)
         })
         im.instanceMatrix.needsUpdate = true
