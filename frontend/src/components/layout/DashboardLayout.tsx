@@ -30,7 +30,8 @@ import {
   ShieldCheck,
   MessageSquare,
   Megaphone,
-  Flag
+  Flag,
+  Eye
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
@@ -422,6 +423,17 @@ const DashboardLayout: React.FC = () => {
                 <Settings size={18} className="mr-3" />
                 Artist Profile
               </NavLink>
+              {user?.id && (
+                <a
+                  href={`/artists/${user.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:text-indigo-700 hover:bg-indigo-50"
+                >
+                  <Eye size={18} className="mr-3" />
+                  View public page
+                </a>
+              )}
             </div>
           )}
 

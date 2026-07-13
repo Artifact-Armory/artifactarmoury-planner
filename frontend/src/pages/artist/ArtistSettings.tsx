@@ -1,7 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Star, ArrowUp, ArrowDown, X } from 'lucide-react'
+import { Star, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react'
 import { artistsApi } from '../../api/endpoints/artists'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { useAuthStore } from '../../store/authStore'
@@ -152,14 +152,78 @@ const ArtistSettings: React.FC = () => {
     }
   }
 
+  const accentHex = /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#4f46e5'
+  const featuredThumbs = featuredIds
+    .map((mid) => modelById.get(mid)?.thumbnailUrl)
+    .filter(Boolean) as string[]
+
   if (isLoading) {
     return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
   }
 
   return (
     <div className="px-4 py-10 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-gray-900">Artist Profile</h1>
-      <p className="text-gray-600">Your public brand page — banner, background, avatar, colour, and bio.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Artist Profile</h1>
+          <p className="text-gray-600">Your public brand page — banner, background, avatar, colour, and bio.</p>
+        </div>
+        {user?.id && (
+          <a
+            href={`/artists/${user.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <ExternalLink size={15} />
+            View public page
+          </a>
+        )}
+      </div>
+
+      {/* LIVE PREVIEW — reflects the current (unsaved) edits. */}
+      <div className="mt-6">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Live preview</p>
+        <div className="relative overflow-hidden rounded-2xl border shadow-sm">
+          {/* page background */}
+          <div className="absolute inset-0">
+            {backgroundUrl
+              ? <img src={backgroundUrl} alt="" className="h-full w-full object-cover" />
+              : <div className="h-full w-full bg-gray-100" />}
+            <div className="absolute inset-0 bg-white/75 backdrop-blur-sm" />
+          </div>
+          {/* hero card */}
+          <div className="relative m-3 overflow-hidden rounded-xl bg-white/95 shadow">
+            <div className="h-20 w-full" style={{ backgroundImage: `linear-gradient(to right, ${accentHex}, ${accentHex}cc)` }}>
+              {bannerUrl && <img src={bannerUrl} alt="" className="h-full w-full object-cover" />}
+            </div>
+            <div className="flex items-end gap-3 px-4 pb-4">
+              <div className="-mt-8 h-16 w-16 flex-none overflow-hidden rounded-full border-4 border-white bg-gray-100">
+                {avatarUrl
+                  ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+                  : <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-gray-500">{(name || 'AA').slice(0, 2).toUpperCase()}</div>}
+              </div>
+              <div className="min-w-0 flex-1 pt-2">
+                <h3 className="truncate text-lg font-semibold text-gray-900">{name || 'Your studio name'}</h3>
+                {bio && <p className="mt-1 line-clamp-2 whitespace-pre-line text-xs text-gray-600">{bio}</p>}
+              </div>
+              <span className="mb-1 flex-none rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: accentHex }}>
+                Follow
+              </span>
+            </div>
+          </div>
+          {featuredThumbs.length > 0 && (
+            <div className="relative mx-3 mb-3">
+              <p className="mb-1 text-xs font-medium text-gray-500">Featured</p>
+              <div className="flex gap-2 overflow-hidden">
+                {featuredThumbs.slice(0, 5).map((src, i) => (
+                  <img key={i} src={src} alt="" className="h-16 w-16 flex-none rounded-lg border object-cover" />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       <form className="mt-6 space-y-5" onSubmit={save}>
         {/* Banner */}
