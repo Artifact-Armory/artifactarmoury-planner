@@ -79,7 +79,7 @@ export const artistsApi = {
 
   getArtistModels: async (
     id: string,
-    params: { page?: number; limit?: number; sort?: string } = {}
+    params: { page?: number; limit?: number; sort?: string; q?: string } = {}
   ): Promise<ArtistModelsResponse> => {
     const response = await apiClient.get(`/api/artists/${id}/models`, { params })
     const payload = response.data ?? {}

@@ -155,6 +155,10 @@ router.get('/:id/models', async (req, res, next) => {
     const limitNum = Math.min(parseInt(limit) || 24, 100)
     const offset = (pageNum - 1) * limitNum
 
+    // Optional full-catalogue text search over name / category / tags.
+    const q = ((req.query.q as string) || '').trim()
+    const pattern = q ? `%${q}%` : null
+
     // Build sort clause
     let orderBy = 'm.published_at DESC, m.created_at DESC'
     switch (sort) {
@@ -174,14 +178,20 @@ router.get('/:id/models', async (req, res, next) => {
         orderBy = 'm.published_at DESC, m.created_at DESC'
     }
 
-    // Get total count of the artist's published models
+    // Get total count of the artist's published models (respecting the search).
+    const countSearch = pattern
+      ? ` AND (name ILIKE $2 OR category ILIKE $2 OR array_to_string(tags, ' ') ILIKE $2)`
+      : ''
     const countResult = await db.query(
       `SELECT COUNT(*) AS total FROM models
-       WHERE artist_id = $1 AND status = 'published' AND visibility = 'public'`,
-      [id]
+       WHERE artist_id = $1 AND status = 'published' AND visibility = 'public'${countSearch}`,
+      pattern ? [id, pattern] : [id]
     )
     const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
+    const mainSearch = pattern
+      ? ` AND (m.name ILIKE $4 OR m.category ILIKE $4 OR array_to_string(m.tags, ' ') ILIKE $4)`
+      : ''
     const result = await db.query(
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
@@ -191,10 +201,10 @@ router.get('/:id/models', async (req, res, next) => {
         u.artist_name, u.artist_url
        FROM models m
        JOIN users u ON u.id = m.artist_id
-       WHERE m.artist_id = $1 AND m.status = 'published' AND m.visibility = 'public'
+       WHERE m.artist_id = $1 AND m.status = 'published' AND m.visibility = 'public'${mainSearch}
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
-      [id, limitNum, offset]
+      pattern ? [id, limitNum, offset, pattern] : [id, limitNum, offset]
     )
 
     artistLogger.debug('Artist models fetched', { artistId: id, count: result.rows.length, total })

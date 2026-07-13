@@ -1,7 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Star, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react'
+import { Star, ArrowUp, ArrowDown, X, ExternalLink, Search } from 'lucide-react'
 import { artistsApi } from '../../api/endpoints/artists'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { useAuthStore } from '../../store/authStore'
@@ -9,6 +9,16 @@ import { TerrainModel } from '../../api/types'
 import Spinner from '../../components/ui/Spinner'
 
 const MAX_FEATURED = 12
+
+// Debounce a value so we don't fire a request on every keystroke.
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = React.useState(value)
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(t)
+  }, [value, delayMs])
+  return debounced
+}
 
 const ArtistSettings: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -19,11 +29,18 @@ const ArtistSettings: React.FC = () => {
     enabled: Boolean(user?.id),
   })
 
+  const [modelSearch, setModelSearch] = React.useState('')
+  const debouncedSearch = useDebounced(modelSearch, 300)
+
   // The artist's own published models — the pool to pick featured ones from.
-  const { data: myModels } = useQuery({
-    queryKey: ['artist-self-models', user?.id],
-    queryFn: () => artistsApi.getArtistModels(user!.id as string, { sort: 'recent', limit: 100 }),
+  // Searched server-side so the whole catalogue is reachable, not just page one.
+  const { data: myModels, isFetching: modelsFetching } = useQuery({
+    queryKey: ['artist-self-models', user?.id, debouncedSearch],
+    queryFn: () => artistsApi.getArtistModels(user!.id as string, {
+      sort: 'recent', limit: 100, q: debouncedSearch.trim() || undefined,
+    }),
     enabled: Boolean(user?.id),
+    placeholderData: (prev) => prev,
   })
 
   const { data: initialFeatured } = useQuery({
@@ -64,12 +81,23 @@ const ArtistSettings: React.FC = () => {
     if (initialFeatured) setFeaturedIds(initialFeatured.map((m) => m.id))
   }, [initialFeatured])
 
-  const models = myModels?.models ?? []
-  const modelById = React.useMemo(() => {
-    const map = new Map<string, TerrainModel>()
-    for (const m of models) map.set(m.id, m)
-    return map
-  }, [models])
+  // The current (possibly search-filtered) picker results shown in the grid.
+  const pickerModels = myModels?.models ?? []
+
+  // Accumulate every model we've seen (across searches + the featured fetch) so
+  // the ordered featured list can always resolve names/thumbnails even when the
+  // picker grid is filtered down to a search that excludes them.
+  const [modelCache, setModelCache] = React.useState<Map<string, TerrainModel>>(new Map())
+  React.useEffect(() => {
+    const seen = [...(initialFeatured ?? []), ...pickerModels]
+    if (!seen.length) return
+    setModelCache((prev) => {
+      const next = new Map(prev)
+      for (const m of seen) next.set(m.id, m)
+      return next
+    })
+  }, [initialFeatured, pickerModels])
+  const modelById = modelCache
 
   const upload = async (file: File, which: 'avatar' | 'banner' | 'background') => {
     if (!/^image\//.test(file.type)) {
@@ -346,12 +374,30 @@ const ArtistSettings: React.FC = () => {
           {savingFeatured ? 'Saving…' : 'Save featured'}
         </button>
 
-        <h3 className="mt-8 text-sm font-medium text-gray-900">Your published models</h3>
-        {models.length === 0 ? (
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-medium text-gray-900">Your published models</h3>
+          {(pickerModels.length > 0 || modelSearch.trim()) && (
+            <div className="relative">
+              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={modelSearch}
+                onChange={(e) => setModelSearch(e.target.value)}
+                placeholder="Search your models…"
+                className="w-56 rounded-md border border-gray-300 py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          )}
+        </div>
+        {pickerModels.length === 0 && modelsFetching ? (
+          <p className="mt-3 text-sm text-gray-500">Loading…</p>
+        ) : pickerModels.length === 0 && modelSearch.trim() ? (
+          <p className="mt-3 text-sm text-gray-500">No models match “{modelSearch}”.</p>
+        ) : pickerModels.length === 0 ? (
           <p className="mt-2 text-sm text-gray-500">Publish a model first, then you can feature it here.</p>
         ) : (
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {models.map((m) => {
+          <div className={`mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 ${modelsFetching ? 'opacity-60' : ''}`}>
+            {pickerModels.map((m) => {
               const active = featuredIds.includes(m.id)
               return (
                 <button
