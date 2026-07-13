@@ -31,7 +31,7 @@ import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
-import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream, presignDownload } from '../services/r2';
+import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { analyzeMeshQuality } from '../services/meshQA';
 import { annotateModelsWithSales, recordPrice } from '../services/sales';
@@ -556,16 +556,18 @@ router.get('/my-models',
 );
 
 // ============================================================================
-// SIGNED PREVIEW GLB — short-lived redirect to the preview mesh in R2
+// PREVIEW GLB — stream the preview mesh through the API (raw key stays private)
 // ============================================================================
 // The planner/preview loads the low-poly GLB through here instead of a permanent
-// public CDN URL. We never expose the raw object key; this issues a signed URL
-// that expires, so previews can't be hotlinked or bulk-scraped from a stable path.
-// Published+public models are visible to anyone; drafts only to the owner/admin.
+// public CDN URL, so the raw object key is never exposed and previews can't be
+// hotlinked or bulk-scraped. Published+public models are visible to anyone; drafts
+// only to the owner/admin (the loader sends the JWT). We STREAM the bytes rather
+// than 302-redirecting to a signed R2 URL because the loader sets an Authorization
+// header for drafts, which makes the request preflighted — and browsers refuse to
+// follow a cross-origin redirect on a preflighted request (→ every authed load
+// failed, planner showed box fallbacks). Streaming keeps everything same-origin.
 
-const PREVIEW_URL_TTL = 3600; // seconds
-
-/** Redirect to a signed GLB URL if the viewer may see this model, else 404. */
+/** Stream the GLB if the viewer may see this model, else 404. */
 async function servePreviewGlb(
   req: any,
   res: any,
@@ -581,9 +583,13 @@ async function servePreviewGlb(
     res.redirect(302, `/uploads/${row.glb_file_path.replace(/^\/+/, '')}`);
     return;
   }
-  const url = await presignDownload(row.glb_file_path, PREVIEW_URL_TTL);
-  res.set('Cache-Control', 'private, no-store');
-  res.redirect(302, url);
+  const { stream, size } = await getObjectStream(row.glb_file_path);
+  res.set('Content-Type', 'model/gltf-binary');
+  if (size) res.set('Content-Length', String(size));
+  // Cache the immutable preview in the browser for the session (key is stable per id).
+  res.set('Cache-Control', 'private, max-age=3600');
+  stream.on('error', () => { if (!res.headersSent) res.status(502).end(); else res.destroy(); });
+  stream.pipe(res);
 }
 
 // Primary part (part 1 lives on the model row). Its planner asset id IS the model id.
