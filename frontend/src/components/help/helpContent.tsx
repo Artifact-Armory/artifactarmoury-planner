@@ -110,11 +110,12 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
   {
     test: (p) => p === '/artist',
     entry: {
-      title: 'Artist dashboard',
-      intro: 'Welcome to your studio. This overview surfaces your key numbers; the sidebar gets you to everything else.',
+      title: 'Sales Overview',
+      intro: 'Your studio’s home: earnings, sales and the data behind what to make next, all on one page.',
       sections: [
+        { heading: 'Date range', body: 'Every tile compares the selected range against the previous one — the % chip shows the trend. Click a tile to drill into sales, product funnels, ratings or buyer searches.' },
+        { heading: 'Sales ledger', body: 'The table below the tiles lists every completed sale — item, buyer, order and what you earned (net of the 15% marketplace fee).' },
         { heading: 'Upload models', body: 'Use “Upload New Model” to add an STL — we generate the preview and print estimate automatically.' },
-        { heading: 'The Planner', body: 'The 3D Planner lets you and your buyers lay out a whole table. It has its own guide — press ? inside it for controls.' },
       ],
       showTour: true,
     },

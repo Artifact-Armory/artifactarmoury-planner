@@ -13,8 +13,8 @@ export const artistTourSteps: TourStep[] = [
   },
   {
     target: 'nav-overview',
-    title: 'Your numbers at a glance',
-    body: 'The Overview shows your earnings, sales, views and conversion. Come back here to see what’s selling.',
+    title: 'Your sales at a glance',
+    body: 'Sales Overview shows your earnings, completed sales, views, conversion and top models — plus the full sales ledger — over any date range. Come back here to see what’s selling.',
   },
   {
     target: 'nav-upload',
@@ -40,11 +40,6 @@ export const artistTourSteps: TourStep[] = [
     target: 'nav-showcases',
     title: 'Showcases',
     body: 'Build a full table of your models in the 3D Planner and publish it. Buyers open the showcase and add the whole set — or individual pieces — to their basket.',
-  },
-  {
-    target: 'nav-sales',
-    title: 'Sales & analytics',
-    body: 'Track earnings, top models, planner placements and the searches buyers are running — over any date range.',
   },
   {
     target: 'nav-settings',

@@ -18,7 +18,6 @@ import {
   BarChart2, 
   Grid,
   Settings,
-  DollarSign,
   Plus,
   ChevronLeft,
   Rocket,
@@ -281,7 +280,7 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <Home size={18} className="mr-3" />
-                Overview
+                Sales Overview
               </NavLink>
               <NavLink
                 to="/artist/models"
@@ -354,18 +353,6 @@ const DashboardLayout: React.FC = () => {
               >
                 <Plus size={18} className="mr-3" />
                 Upload New Model
-              </NavLink>
-              <NavLink
-                to="/artist/sales"
-                data-tour="nav-sales"
-                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-                  isActiveRoute('/artist/sales')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
-                }`}
-              >
-                <DollarSign size={18} className="mr-3" />
-                Sales & Analytics
               </NavLink>
               <NavLink
                 to="/artist/promotions"

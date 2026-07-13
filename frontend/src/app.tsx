@@ -62,7 +62,6 @@ import CreateBundle from './pages/artist/CreateBundle';
 import EditBundle from './pages/artist/EditBundle';
 import CreateModel from './pages/artist/CreateModel';
 import EditModel from './pages/artist/EditModel';
-import ArtistSales from './pages/artist/ArtistSales';
 import ArtistPromotions from './pages/artist/ArtistPromotions';
 import SalesDetail from './pages/artist/analytics/SalesDetail';
 import ProductsDetail from './pages/artist/analytics/ProductsDetail';
@@ -254,7 +253,8 @@ function App() {
               <Route path="releases/:id" element={<EditRelease />} />
               <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="collaborations" element={<ArtistCollaborations />} />
-              <Route path="sales" element={<ArtistSales />} />
+              {/* Sales & Analytics merged into the Sales Overview (dashboard root). */}
+              <Route path="sales" element={<Navigate to="/artist" replace />} />
               <Route path="promotions" element={<ArtistPromotions />} />
               <Route path="payouts" element={<ArtistPayouts />} />
               <Route path="reports" element={<ArtistReports />} />

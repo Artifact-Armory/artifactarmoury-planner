@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { PoundSterling, ShoppingBag, Eye, Heart, Target, LayoutGrid, Star, Search, TrendingUp, TrendingDown, ArrowRight, Layers, Wallet } from 'lucide-react'
 import { artistAnalyticsApi, type PeriodTotals } from '../../api/endpoints/artistAnalytics'
+import { artistsApi } from '../../api/endpoints/artists'
 import { payoutsApi } from '../../api/endpoints/payouts'
 import { useAnalyticsRange, DateRangePicker } from '../../components/analytics/dateRange'
 import { formatPrice } from '../../utils/format'
@@ -60,6 +61,12 @@ const ArtistDashboard: React.FC = () => {
     queryFn: () => payoutsApi.getMine(),
   })
 
+  const { data: salesData, isLoading: salesLoading } = useQuery({
+    queryKey: ['artist-sales'],
+    queryFn: () => artistsApi.getSales({ limit: 100 }),
+  })
+  const sales = salesData?.sales ?? []
+
   const t: PeriodTotals | undefined = data?.totals
   const prev = data?.prev
   const conv = (v: PeriodTotals) => (v.conversion * 100)
@@ -68,8 +75,8 @@ const ArtistDashboard: React.FC = () => {
     <div className="px-4 py-8 max-w-6xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Analytics</h1>
-          <p className="text-sm text-gray-500">What to make, how to price, present, and tag — decide from the data.</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Sales Overview</h1>
+          <p className="text-sm text-gray-500">Your earnings and completed sales, with the data behind what to make next.</p>
         </div>
         <div className="flex items-center gap-2">
           {isFetching && <Spinner size="sm" className="text-indigo-500" />}
@@ -176,6 +183,67 @@ const ArtistDashboard: React.FC = () => {
           </Tile>
         </div>
       )}
+
+      {/* SALES — the full ledger of completed sales, merged in from the old
+          "Sales & Analytics" page so this is the single sales hub. */}
+      <section className="mt-12">
+        <div className="flex items-end justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Sales</h2>
+            <p className="text-sm text-gray-500">
+              {salesData?.total ?? 0} completed sale{(salesData?.total ?? 0) === 1 ? '' : 's'}
+              {sales.length < (salesData?.total ?? 0) ? ` · showing latest ${sales.length}` : ''}.
+            </p>
+          </div>
+          <Link to="/artist/analytics/sales" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700">
+            Sales analytics <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {salesLoading ? (
+          <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+        ) : sales.length === 0 ? (
+          <p className="mt-6 rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+            No sales yet. When someone buys one of your models, it'll appear here.
+          </p>
+        ) : (
+          <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Item</th>
+                  <th className="px-4 py-3">Order</th>
+                  <th className="px-4 py-3">Buyer</th>
+                  <th className="px-4 py-3 text-right">Price</th>
+                  <th className="px-4 py-3 text-right">You earned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {sales.map((s) => (
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      {s.model_id ? (
+                        <Link to={`/models/${s.model_id}`} className="hover:text-indigo-600">{s.model_name}</Link>
+                      ) : (
+                        s.model_name
+                      )}
+                      {s.bundle_name && <span className="ml-1 text-xs text-gray-400">({s.bundle_name})</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{s.order_number}</td>
+                    <td className="px-4 py-3 text-gray-500">{s.customer_email}</td>
+                    <td className="px-4 py-3 text-right text-gray-700">{formatPrice(s.total_price)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-green-700">{formatPrice(s.earnings)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }
