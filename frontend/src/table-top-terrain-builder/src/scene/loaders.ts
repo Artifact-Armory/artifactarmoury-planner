@@ -25,6 +25,19 @@ dracoLoader.setDecoderConfig({ type: 'wasm' }) // prefer the shipped wasm decode
 const gltfLoader = new GLTFLoader(assetLoadingManager)
 gltfLoader.setDRACOLoader(dracoLoader)
 
+// Preview GLBs are fetched through the signed /preview.glb endpoint. For a
+// published model that's anonymous; for an artist's own *draft* the endpoint needs
+// the JWT to authorise the owner. The header is sent to our API only — the browser
+// strips it on the cross-origin 302 to R2 (which authorises via the signed query).
+function applyAuthHeader() {
+  try {
+    const token = localStorage.getItem('terrain_builder_token')
+    // setRequestHeader is inherited from THREE.Loader (not in the local jsm typings).
+    if (token) (gltfLoader as any).setRequestHeader({ Authorization: `Bearer ${token}` })
+  } catch { /* no localStorage (SSR/test) — anonymous is fine for public models */ }
+}
+applyAuthHeader()
+
 // Relative model paths (dev manifest) resolve against the asset CDN when configured.
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL || '').replace(/\/$/, '')
 function resolveAssetUrl(p: string): string {
@@ -178,6 +191,7 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
   }
 
   const p = new Promise<AssetTemplate>((resolve) => {
+    applyAuthHeader() // pick up a token acquired after this module first loaded
     gltfLoader.load(
       resolveAssetUrl(asset.model!),
       (gltf) => {

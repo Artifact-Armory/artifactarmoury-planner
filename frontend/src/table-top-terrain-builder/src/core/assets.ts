@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import * as THREE from 'three'
 import { browseApi } from '@/api/endpoints/browse'
 import { modelsApi } from '@/api/endpoints/models'
-import { assetUrl } from '@/api/transformers'
+import { assetUrl, previewGlbUrl, previewPartGlbUrl } from '@/api/transformers'
 
 export const AssetSchema = z.object({
   id: z.string().min(1),
@@ -297,9 +297,9 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
     for (const s of apiSets) {
       const partAssetIds: string[] = []
       for (const part of s.parts) {
-        if (!part.glbPath) continue
+        if (!part.hasGlb) continue
         // The primary part's asset id IS the model id; extras get a namespaced id.
-        const assetId = part.id === s.id ? s.id : `part:${part.id}`
+        const assetId = part.isPrimary ? s.id : `part:${part.id}`
         const wM = part.width != null ? part.width / 1000 : 0.15
         const dM = part.depth != null ? part.depth / 1000 : 0.15
         const hM = part.height != null ? part.height / 1000 : 0.15
@@ -316,7 +316,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           price: assetId === s.id ? s.price : 0,
           fulfillment: 'stl',
           artistId: s.artistId,
-          model: assetUrl(part.glbPath) ?? undefined,
+          model: part.isPrimary ? previewGlbUrl(s.id) : previewPartGlbUrl(part.id),
           thumbnail: assetUrl(s.thumbnailPath ?? undefined),
           scaleToFit: true,
           defaultPitchDeg: s.defaultPitchDeg || undefined,

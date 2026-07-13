@@ -85,7 +85,9 @@ router.post('/',
             id: model.id,
             name: model.name,
             description: model.description,
-            stl_file_path: model.stl_file_path,
+            // NB: deliberately no stl_file_path here. The raw R2 key must never be
+            // persisted where it could later be echoed to a client (the bucket is
+            // public-CDN-served). Downloads resolve the key fresh from the model id.
             dimensions: { width: model.width, height: model.height, depth: model.depth },
           },
           unitPrice: price,
@@ -437,8 +439,17 @@ router.get('/library',
 
     const models = result.rows.map((row: any) => {
       const { my_review_id, my_review_rating, my_review_title, my_review_comment, purchased_at, ...model } = row;
+      // SECURITY: never expose raw R2 keys — even to a buyer who owns the model. The
+      // bucket is public-CDN-served, so a leaked stl_file_path (the `raw/` key) lets
+      // the file be fetched un-watermarked, defeating the per-buyer leak trace. Buyers
+      // download through /models/:id/download, which streams it watermarked.
+      const hasGlb = !!model.glb_file_path;
+      delete model.stl_file_path;
+      delete model.glb_file_path;
+      delete model.source_file_path;
       return {
         ...model,
+        has_glb: hasGlb,
         purchasedAt: purchased_at,
         myReview: my_review_id
           ? {

@@ -374,7 +374,7 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
 
 // Preview meshes above this get decimated down toward it (print STLs are often
 // 100k–1M+ triangles, which crush real-time rendering). Higher = more detail.
-const TARGET_PREVIEW_TRIS = Number(process.env.PREVIEW_TARGET_TRIS ?? 150000)
+const TARGET_PREVIEW_TRIS = Number(process.env.PREVIEW_TARGET_TRIS ?? 80000)
 // Edges sharper than this stay hard (crisp); smoother than this get smoothed.
 const CREASE_ANGLE_DEG = Number(process.env.PREVIEW_CREASE_ANGLE ?? 45)
 

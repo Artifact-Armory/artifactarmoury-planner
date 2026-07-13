@@ -72,7 +72,7 @@ export const modelsApi = {
     thumbnailPath: string | null
     artistId: string
     defaultPitchDeg: number
-    parts: Array<{ id: string; name: string; glbPath: string | null; width: number | null; depth: number | null; height: number | null }>
+    parts: Array<{ id: string; name: string; isPrimary: boolean; hasGlb: boolean; width: number | null; depth: number | null; height: number | null }>
   }>> => {
     const response = await apiClient.get(`${BASE_URL}/sets`)
     return (response.data?.sets ?? []).map((s: any) => ({
@@ -85,7 +85,8 @@ export const modelsApi = {
       parts: (s.parts ?? []).map((p: any) => ({
         id: p.id,
         name: p.name,
-        glbPath: p.glb_file_path ?? null,
+        isPrimary: Boolean(p.is_primary),
+        hasGlb: Boolean(p.has_glb),
         width: p.width != null ? Number(p.width) : null,
         depth: p.depth != null ? Number(p.depth) : null,
         height: p.height != null ? Number(p.height) : null,

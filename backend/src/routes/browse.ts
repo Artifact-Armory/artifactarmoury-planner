@@ -142,7 +142,7 @@ router.get('/',
     const result = await db.query(
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
-        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.print_price, m.print_consent,
         m.width, m.height, m.depth, m.part_count, m.default_pitch_deg,
         m.view_count, m.sale_count,
@@ -159,7 +159,7 @@ router.get('/',
        JOIN users u ON m.artist_id = u.id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        WHERE ${whereClause}
-       GROUP BY m.id, m.glb_file_path, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url
        ORDER BY ${orderBy}
        LIMIT ${limitP} OFFSET ${offsetP}`,
       params

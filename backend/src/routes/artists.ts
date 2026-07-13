@@ -195,7 +195,7 @@ router.get('/:id/models', async (req, res, next) => {
     const result = await db.query(
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
-        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count, m.published_at,
         u.artist_name, u.artist_url
@@ -226,7 +226,7 @@ router.get('/:id/models', async (req, res, next) => {
 // that the frontend `mapModelRecord` transformer expects).
 const MODEL_CARD_FIELDS = `
   m.id, m.name, m.description, m.category, m.tags,
-  m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+  m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
   m.width, m.height, m.depth, m.part_count,
   m.view_count, m.sale_count, m.published_at,
   u.id AS artist_id, u.artist_name, u.artist_url`
@@ -603,7 +603,7 @@ router.get('/me/feed', authenticate, async (req, res, next) => {
     const result = await db.query(
       `SELECT
         m.id, m.name, m.description, m.category, m.tags,
-        m.thumbnail_path, m.glb_file_path, m.base_price, m.fulfillment_type,
+        m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count, m.published_at,
         u.id AS artist_id, u.artist_name, u.artist_url

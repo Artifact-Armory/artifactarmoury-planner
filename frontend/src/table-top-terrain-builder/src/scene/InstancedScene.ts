@@ -13,6 +13,7 @@ import type { Asset } from '@core/assets'
 import type { Instance } from '@state/store'
 import { ensureTemplate, getResolvedTemplate, type AssetTemplate } from './loaders'
 import { levelToY } from '@core/elevation'
+import { watermarkedMaterial, disposeWatermarkMaterials } from './previewWatermark'
 
 const LIFT = 0.012 // metres a selected piece floats above the table
 const POP_MS = 180
@@ -50,6 +51,8 @@ export class InstancedScene {
   private onNeedsTemplate: () => void
   /** Terrain height (m) at a world (x,z) — set by the stage so pieces ride the surface. */
   private heightAt: (x: number, z: number) => number = () => 0
+  /** Whether an asset's placed pieces should show the "preview" watermark (unowned). */
+  private shouldWatermark: (asset: Asset) => boolean = () => false
 
   constructor(onNeedsTemplate: () => void) {
     this.onNeedsTemplate = onNeedsTemplate
@@ -59,6 +62,11 @@ export class InstancedScene {
   /** Provide a terrain-height sampler; call refreshTransforms() after a change. */
   setHeightSampler(fn: (x: number, z: number) => number) {
     this.heightAt = fn
+  }
+
+  /** Set the predicate deciding which assets render with the preview watermark. */
+  setWatermarkPredicate(fn: (asset: Asset) => boolean) {
+    this.shouldWatermark = fn
   }
 
   /** Recompute instance matrices + outlines (e.g. after the terrain was sculpted). */
@@ -165,6 +173,7 @@ export class InstancedScene {
     this.disposeMeshes()
     this.outlines.forEach((o) => o.geometry.dispose())
     this.hoverOutline?.geometry.dispose()
+    disposeWatermarkMaterials()
   }
 
   // ---- internals ----------------------------------------------------------
@@ -199,8 +208,12 @@ export class InstancedScene {
         ensureTemplate(asset).then(() => this.onNeedsTemplate())
         continue
       }
+      // Unowned marketplace pieces show a visible "preview" watermark blended over
+      // the model surface (the template's shared material is never mutated).
+      const watermark = this.shouldWatermark(asset)
       for (const part of template.parts) {
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length)
+        const material = watermark ? watermarkedMaterial(part.material) : part.material
+        const im = new THREE.InstancedMesh(part.geometry, material, list.length)
         im.userData.assetId = assetId
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
         im.frustumCulled = false

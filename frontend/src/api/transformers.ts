@@ -12,6 +12,14 @@ export const assetUrl = (p?: string | null): string | undefined => {
   return ASSET_BASE ? `${ASSET_BASE}/${key}` : `${API_BASE}/uploads/${key}`
 }
 
+// Preview GLBs are served through a signed, expiring redirect (never a permanent
+// public CDN key) so the low-poly mesh can't be hotlinked or bulk-scraped. Keyed by
+// model id (primary part) or model_parts id (extra "set" parts).
+export const previewGlbUrl = (modelId: string): string =>
+  `${API_BASE}/api/models/${modelId}/preview.glb`
+export const previewPartGlbUrl = (partId: string): string =>
+  `${API_BASE}/api/models/parts/${partId}/preview.glb`
+
 export const mapApiUserToUser = (user: ApiUser): User => ({
   ...user,
   name: user.displayName,
@@ -76,7 +84,11 @@ export const mapModelRecord = (model: any): TerrainModel => ({
       }))
     : undefined,
   thumbnailUrl: model.thumbnail_url || model.thumbnailUrl || assetUrl(model.thumbnail_path),
-  glbUrl: model.glb_url || model.glbUrl || assetUrl(model.glb_file_path),
+  // GLB is fetched via the signed preview endpoint (raw key is never exposed). We
+  // only get a `has_glb` boolean now; older direct fields are a dev/legacy fallback.
+  glbUrl:
+    (model.has_glb ?? model.glb_file_path) ? previewGlbUrl(model.id)
+      : (model.glb_url || model.glbUrl || undefined),
   previewImages: model.preview_images || model.previewImages || undefined,
   artistName: model.artist_name || model.artistName || 'Unknown Artist',
   artistUrl: model.artist_url || model.artistUrl,
@@ -144,7 +156,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     id: p.id,
     name: p.name,
     thumbnailUrl: p.thumbnail_url || p.thumbnailUrl || assetUrl(p.thumbnail_path),
-    glbUrl: p.glb_url || p.glbUrl || assetUrl(p.glb_file_path),
+    glbUrl: (p.has_glb ?? p.glb_file_path) ? previewPartGlbUrl(p.id) : undefined,
     width: p.width ?? undefined,
     depth: p.depth ?? undefined,
     height: p.height ?? undefined,

@@ -18,6 +18,12 @@ dracoLoader.setDecoderPath('/draco/')
 dracoLoader.setDecoderConfig({ type: 'wasm' })
 const gltfLoader = new GLTFLoader()
 gltfLoader.setDRACOLoader(dracoLoader)
+// Previews load through the signed /preview.glb endpoint; a draft is owner-gated, so
+// send the JWT to our API (the browser strips it on the cross-origin redirect to R2).
+try {
+  const token = localStorage.getItem('terrain_builder_token')
+  if (token) (gltfLoader as any).setRequestHeader({ Authorization: `Bearer ${token}` })
+} catch { /* anonymous is fine for published models */ }
 
 interface Props {
   /** GLB URL (the planner preview mesh). */

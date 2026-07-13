@@ -31,7 +31,7 @@ import path from 'path';
 import { estimatePrintCost } from '../services/printEstimator';
 import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
-import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream } from '../services/r2';
+import { isR2Enabled, objectSize, downloadObject, deleteObject, getObjectStream, presignDownload } from '../services/r2';
 import { computeGeometryFingerprint, isLikelyDuplicate, fingerprintDistance, MATCH_THRESHOLD, type GeometryFingerprint } from '../services/fingerprint';
 import { analyzeMeshQuality } from '../services/meshQA';
 import { annotateModelsWithSales, recordPrice } from '../services/sales';
@@ -556,6 +556,65 @@ router.get('/my-models',
 );
 
 // ============================================================================
+// SIGNED PREVIEW GLB — short-lived redirect to the preview mesh in R2
+// ============================================================================
+// The planner/preview loads the low-poly GLB through here instead of a permanent
+// public CDN URL. We never expose the raw object key; this issues a signed URL
+// that expires, so previews can't be hotlinked or bulk-scraped from a stable path.
+// Published+public models are visible to anyone; drafts only to the owner/admin.
+
+const PREVIEW_URL_TTL = 3600; // seconds
+
+/** Redirect to a signed GLB URL if the viewer may see this model, else 404. */
+async function servePreviewGlb(
+  req: any,
+  res: any,
+  row: { artist_id: string; status: string; visibility: string; glb_file_path: string | null },
+) {
+  if (!row.glb_file_path) throw new NotFoundError('Preview');
+  const isPublic = row.status === 'published' && row.visibility === 'public';
+  const viewerId = req.userId;
+  const isOwnerOrAdmin = viewerId && (viewerId === row.artist_id || req.user?.role === 'admin');
+  if (!isPublic && !isOwnerOrAdmin) throw new NotFoundError('Preview');
+  if (!isR2Enabled()) {
+    // Dev/local fallback: serve via the public asset path (no R2 configured).
+    res.redirect(302, `/uploads/${row.glb_file_path.replace(/^\/+/, '')}`);
+    return;
+  }
+  const url = await presignDownload(row.glb_file_path, PREVIEW_URL_TTL);
+  res.set('Cache-Control', 'private, no-store');
+  res.redirect(302, url);
+}
+
+// Primary part (part 1 lives on the model row). Its planner asset id IS the model id.
+router.get('/:id/preview.glb',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const row = (await db.query(
+      `SELECT artist_id, status, visibility, glb_file_path FROM models WHERE id = $1`,
+      [req.params.id],
+    )).rows[0];
+    if (!row) throw new NotFoundError('Preview');
+    await servePreviewGlb(req, res, row);
+  })
+);
+
+// An extra "set" part (a model_parts row). Gated by its parent model's visibility.
+router.get('/parts/:partId/preview.glb',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const row = (await db.query(
+      `SELECT m.artist_id, m.status, m.visibility, p.glb_file_path
+       FROM model_parts p JOIN models m ON m.id = p.model_id
+       WHERE p.id = $1`,
+      [req.params.partId],
+    )).rows[0];
+    if (!row) throw new NotFoundError('Preview');
+    await servePreviewGlb(req, res, row);
+  })
+);
+
+// ============================================================================
 // GET SETS (published multi-part models + their parts) — for the planner
 // ============================================================================
 // Each part is its own placeable asset in the planner; the primary STL is part
@@ -580,11 +639,14 @@ router.get('/sets',
          ORDER BY display_order ASC`,
         [m.id]
       )).rows;
+      // NB: never expose the raw glb_file_path (public CDN key). The planner fetches
+      // each part's preview through the signed endpoint, keyed by id (primary part's
+      // id IS the model id; extras are model_parts ids). `is_primary` tells the
+      // frontend which signed route to use.
       const parts = [
-        // Primary part (part 1) lives on the model row; its asset id is the modelId.
-        { id: m.id, name: 'Part 1', glb_file_path: m.glb_file_path, width: m.width, depth: m.depth, height: m.height },
-        ...extra.map((p: any) => ({ id: p.id, name: p.name, glb_file_path: p.glb_file_path, width: p.width, depth: p.depth, height: p.height })),
-      ].filter((p) => p.glb_file_path);
+        { id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path, width: m.width, depth: m.depth, height: m.height },
+        ...extra.map((p: any) => ({ id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path, width: p.width, depth: p.depth, height: p.height })),
+      ].filter((p) => p.has_glb);
       return {
         id: m.id,
         name: m.name,
@@ -612,7 +674,7 @@ router.get('/mine/planner',
   requireArtist,
   asyncHandler(async (req, res) => {
     const models = (await db.query(
-      `SELECT id, name, tags, glb_file_path, thumbnail_path,
+      `SELECT id, name, tags, (glb_file_path IS NOT NULL) AS has_glb, thumbnail_path,
               width, depth, height, base_price, status, default_pitch_deg
        FROM models
        WHERE artist_id = $1 AND part_count = 1 AND glb_file_path IS NOT NULL
@@ -639,7 +701,7 @@ router.get('/planner-assets',
     const ids = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
     if (ids.length === 0) { res.json({ models: [] }); return; }
     const models = (await db.query(
-      `SELECT m.id, m.name, m.tags, m.glb_file_path, m.thumbnail_path,
+      `SELECT m.id, m.name, m.tags, (m.glb_file_path IS NOT NULL) AS has_glb, m.thumbnail_path,
               m.width, m.depth, m.height, m.base_price, m.artist_id, m.default_pitch_deg, u.artist_name
        FROM models m JOIN users u ON u.id = m.artist_id
        WHERE m.id = ANY($1::uuid[]) AND m.part_count = 1 AND m.glb_file_path IS NOT NULL`,
@@ -766,12 +828,28 @@ router.get('/:id',
       [id]
     );
 
+    // SECURITY: never leak the raw R2 object keys in a public response. The bucket
+    // is served by a public CDN domain, so a leaked stl_file_path (the `raw/` key)
+    // would let anyone download the original, un-watermarked STL directly, bypassing
+    // the entitlement + per-buyer watermark on /:id/download. Expose only booleans;
+    // the preview GLB is fetched through the signed /:id/preview.glb endpoint.
+    const hasGlb = !!model.glb_file_path;
+    delete model.stl_file_path;
+    delete model.glb_file_path;
+    delete model.source_file_path;
+    const safeParts = parts.map((p: any) => ({
+      id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
+      processing_status: p.processing_status, display_order: p.display_order,
+      has_glb: !!p.glb_file_path,
+    }));
+
     res.json({
       model: {
         ...model,
+        has_glb: hasGlb,
         images: imagesResult.rows,
         recentReviews: reviewsResult.rows,
-        parts,
+        parts: safeParts,
         versions,
         taxonomyTerms,
         featuredInTables: tablesCount.rows[0]?.c ?? 0,
