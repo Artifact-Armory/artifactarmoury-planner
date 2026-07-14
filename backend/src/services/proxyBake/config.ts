@@ -56,11 +56,35 @@ const DEFAULTS_PATH =
 
 let cachedDefaults: ProxyBakeConfig | null = null
 
-/** Read (and cache) the global defaults file. */
+/** Parse a numeric env var, or undefined if unset/blank/non-numeric. */
+function envNum(name: string): number | undefined {
+  const v = process.env[name]
+  if (v == null || v === '') return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+/**
+ * Read (and cache) the global defaults file, then apply any env-var overrides.
+ * The env overrides let us tune the worker live (a Railway variable change +
+ * redeploy) without rebuilding the Docker image — handy for dialling in quality.
+ */
 export function loadDefaults(): ProxyBakeConfig {
   if (cachedDefaults) return cachedDefaults
   const raw = fs.readFileSync(DEFAULTS_PATH, 'utf8')
-  cachedDefaults = JSON.parse(raw) as ProxyBakeConfig
+  const base = JSON.parse(raw) as ProxyBakeConfig
+  const envOverrides: Partial<Record<keyof ProxyBakeConfig, number | undefined>> = {
+    triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
+    normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
+    aoMapRes: envNum('PROXY_BAKE_AO_RES'),
+    aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),
+    bakeExtrusionPct: envNum('PROXY_BAKE_EXTRUSION_PCT'),
+    maxRayDistancePct: envNum('PROXY_BAKE_MAX_RAY_PCT'),
+  }
+  for (const k of Object.keys(envOverrides) as (keyof ProxyBakeConfig)[]) {
+    if (envOverrides[k] !== undefined) (base as any)[k] = envOverrides[k]
+  }
+  cachedDefaults = base
   return cachedDefaults
 }
 

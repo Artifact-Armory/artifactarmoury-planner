@@ -1,5 +1,5 @@
 {
-  "triangleBudget": 40000,
+  "triangleBudget": 80000,
   "normalMapRes": 2048,
   "aoMapRes": 1024,
   "aoSamples": 64,
