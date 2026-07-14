@@ -1,0 +1,20 @@
+{
+  "triangleBudget": 40000,
+  "normalMapRes": 2048,
+  "aoMapRes": 1024,
+  "aoSamples": 64,
+  "bakeExtrusionPct": 0.75,
+  "maxRayDistancePct": 1.5,
+  "remeshStrategy": "decimate",
+  "joinLooseParts": true,
+  "baseFaceZNormalThreshold": -0.5,
+  "baseFaceHeightMm": 2.0,
+  "targetMaxFileMb": 4,
+  "sourceTriangleCap": 5000000,
+  "bakeTimeoutMinutes": 20,
+  "baseColorRes": 2048,
+  "validationRenderPx": 512,
+  "plannerMinCameraDistanceM": 0.3,
+  "plannerTypicalCameraDistanceM": 2.0,
+  "plannerFullTableCameraDistanceM": 16.0
+}

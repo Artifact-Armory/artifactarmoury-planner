@@ -1,0 +1,57 @@
+# backend/Dockerfile.worker
+#
+# Image for the Preview Proxy Bake WORKER — a SEPARATE Railway service from the
+# web API. It bundles a pinned headless Blender LTS + Node so it can run
+# bake_proxy.py and the gltf-transform post-process on CPU-only infrastructure.
+#
+# IMPORTANT: this file is deliberately NOT named "Dockerfile" so Railway does not
+# auto-switch the existing Nixpacks-built web service to a Docker build. Point the
+# new worker service's builder at this path explicitly (Dockerfile Path =
+# "Dockerfile.worker", Root Directory = "backend").
+
+# ----- build stage: compile TS -> dist -----
+FROM node:20-bookworm AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# ----- runtime stage: Blender + Node + prod deps -----
+FROM node:20-bookworm-slim AS runtime
+
+# Pin a Blender LTS point release. 4.2 LTS is supported into 2027.
+ARG BLENDER_VERSION=4.2.3
+ARG BLENDER_SERIES=4.2
+ENV BLENDER_PATH=/opt/blender/blender \
+    NODE_ENV=production
+
+# Headless Blender still dlopen()s a handful of X/GL libs even with `-b`; install
+# the minimal set plus xz to unpack the release tarball.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget xz-utils ca-certificates \
+      libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxext6 \
+      libgl1 libglu1-mesa libsm6 libxkbcommon0 libgomp1 libtinfo6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download + install Blender to /opt/blender.
+RUN wget -q "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/blender.tar.xz \
+    && mkdir -p /opt/blender \
+    && tar -xf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
+    && rm /tmp/blender.tar.xz \
+    && ln -s /opt/blender/blender /usr/local/bin/blender \
+    && blender --version
+
+WORKDIR /app
+# Production node_modules only (sharp/meshoptimizer/draco3dgltf/gltf-transform).
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# App artefacts the worker needs at runtime.
+COPY --from=build /app/dist ./dist
+COPY blender ./blender
+COPY config ./config
+
+# The worker loop; Railway sends SIGTERM on redeploy and the loop drains cleanly.
+CMD ["node", "dist/worker/proxyBakeWorker.js"]

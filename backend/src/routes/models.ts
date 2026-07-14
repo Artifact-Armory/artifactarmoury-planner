@@ -37,6 +37,7 @@ import { analyzeMeshQuality } from '../services/meshQA';
 import { annotateModelsWithSales, recordPrice } from '../services/sales';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
+import { isBakeWorkerEnabled, enqueueBakeJob } from '../services/proxyBake/queue';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate } from '../services/notifications';
 import { logProductView, logWishlistAdd } from '../services/analytics';
@@ -1639,9 +1640,17 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     }
 
     // 4. Analyse geometry + generate the GLB preview (from the canonical STL).
+    //    Preview generation has two modes: when the bake worker is enabled the GLB
+    //    is produced out-of-process (normal/AO-baked proxy) and glb_file_path is
+    //    filled in later by the worker; otherwise we fall back to the in-process
+    //    pure-Node decimator exactly as before.
     const stlData = await processSTL(stlTmp);
-    const glbPath = await generateGLB(stlTmp);
-    const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    const bakeEnabled = isBakeWorkerEnabled();
+    let glbStoragePath: string | null = null;
+    if (!bakeEnabled) {
+      const glbPath = await generateGLB(stlTmp);
+      glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    }
 
     // Advisory mesh QA (watertight/manifold). Never blocks the upload.
     const meshQA = await analyzeMeshQuality(stlTmp);
@@ -1675,7 +1684,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     // 4. Fill in the derived fields (still 'draft' for moderation).
     await db.query(
       `UPDATE models SET
-         glb_file_path = $1,
+         glb_file_path = COALESCE($1, glb_file_path),
          width = $2, depth = $3, height = $4,
          estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
          recommended_layer_height = 0.2, recommended_infill = 20,
@@ -1710,22 +1719,36 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         meshQA.triangleCount || null,
         meshQA.openEdges,
         JSON.stringify(meshQA),
-        hasParts ? 'processing' : 'ready',
+        // The bake worker keeps the model 'processing' until every bake finishes;
+        // the pure-Node path is ready now (unless it still has parts to convert).
+        bakeEnabled || hasParts ? 'processing' : 'ready',
         modelId,
       ]
     );
 
-    // 5. Extra STL parts (multi-part "set"). On success, flip the model to ready.
+    // 5. Extra STL parts (multi-part "set"). processModelParts either converts them
+    //    inline (pure-Node) or enqueues a bake per part; only the inline path can
+    //    mark the model ready here — the bake path is rolled up by the worker.
     if (hasParts) {
       await processModelParts(modelId);
-      await db.query(
-        `UPDATE models SET processing_status = 'ready', processing_error = NULL, updated_at = NOW()
-         WHERE id = $1 AND processing_status = 'processing'`,
-        [modelId]
-      );
+      if (!bakeEnabled) {
+        await db.query(
+          `UPDATE models SET processing_status = 'ready', processing_error = NULL, updated_at = NOW()
+           WHERE id = $1 AND processing_status = 'processing'`,
+          [modelId]
+        );
+      }
     }
 
-    logger.info('Model processed successfully', { modelId, hasParts });
+    // 6. Preview bake (worker mode): enqueue the primary mesh. Prefer the original
+    //    OBJ (materials survive for the baseColor atlas) over the canonical STL.
+    if (bakeEnabled) {
+      const bakeSourceKey = format === 'obj' ? rawKey : (canonicalStlPath ?? rawKey);
+      const bakeSourceFormat = format === 'obj' ? 'obj' : 'stl';
+      await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
+    }
+
+    logger.info('Model processed successfully', { modelId, hasParts, bakeEnabled });
   } catch (error) {
     logger.error('Model processing failed', { error, modelId });
     await markModelFailed(modelId, (error as Error)?.message?.slice(0, 500) || 'Processing failed');
@@ -1777,8 +1800,14 @@ async function processModelVersionUpdate(
     }
 
     const stlData = await processSTL(stlTmp);
-    const glbPath = await generateGLB(stlTmp);
-    const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    const bakeEnabled = isBakeWorkerEnabled();
+    // Preview GLB: baked out-of-process by the worker, or the pure-Node fallback.
+    // When baking we keep the OLD preview via COALESCE until the new bake lands.
+    let glbStoragePath: string | null = null;
+    if (!bakeEnabled) {
+      const glbPath = await generateGLB(stlTmp);
+      glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    }
     const meshQA = await analyzeMeshQuality(stlTmp);
 
     // Where the buyer-facing STL lives: the raw key for STL uploads, or a stored
@@ -1803,7 +1832,7 @@ async function processModelVersionUpdate(
     // Bump the version and write all derived fields atomically.
     const updated = await db.query(
       `UPDATE models SET
-         glb_file_path = $1,
+         glb_file_path = COALESCE($1, glb_file_path),
          width = $2, depth = $3, height = $4,
          estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
          file_hash = $8,
@@ -1816,7 +1845,7 @@ async function processModelVersionUpdate(
          file_version = file_version + 1,
          version_notes = $19,
          files_updated_at = NOW(),
-         processing_status = 'ready', processing_error = NULL,
+         processing_status = $21, processing_error = NULL,
          updated_at = NOW()
        WHERE id = $20
        RETURNING file_version`,
@@ -1835,10 +1864,20 @@ async function processModelVersionUpdate(
         meshQA.triangleCount || null, meshQA.openEdges, JSON.stringify(meshQA),
         notes,
         modelId,
+        // Baking keeps the model 'processing' until the new proxy is ready; the
+        // pure-Node path already wrote the new preview so it's ready immediately.
+        bakeEnabled ? 'processing' : 'ready',
       ]
     );
 
     const newVersion: number = updated.rows[0]?.file_version ?? 2;
+
+    // Re-bake the preview for the new primary mesh (worker flips it back to ready).
+    if (bakeEnabled) {
+      const bakeSourceKey = format === 'obj' ? rawKey : newStlPath;
+      const bakeSourceFormat = format === 'obj' ? 'obj' : 'stl';
+      await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
+    }
 
     // Record the changelog entry, then notify owners they can re-download free.
     await db.query(
@@ -1848,7 +1887,7 @@ async function processModelVersionUpdate(
     );
     await notifyOwnersOfModelUpdate(modelId, newVersion, notes);
 
-    logger.info('Model version updated', { modelId, newVersion });
+    logger.info('Model version updated', { modelId, newVersion, bakeEnabled });
   } catch (error) {
     logger.error('Model version update failed', { error, modelId });
     await failVersionUpdate(modelId, (error as Error)?.message?.slice(0, 300) || 'Version update failed');
@@ -1902,8 +1941,13 @@ async function processModelParts(modelId: string): Promise<void> {
       }
 
       const stlData = await processSTL(stlTmp);
-      const glbPath = await generateGLB(stlTmp);
-      const glbStoragePath = await uploadToStorage(glbPath, 'previews');
+      // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
+      const bakeEnabled = isBakeWorkerEnabled();
+      let glbStoragePath: string | null = null;
+      if (!bakeEnabled) {
+        const glbPath = await generateGLB(stlTmp);
+        glbStoragePath = await uploadToStorage(glbPath, 'previews');
+      }
 
       // Non-STL part: store the converted STL and keep the original as the source.
       let canonicalStlPath: string | null = null;
@@ -1917,14 +1961,22 @@ async function processModelParts(modelId: string): Promise<void> {
 
       await db.query(
         `UPDATE model_parts SET
-           glb_file_path = $1, width = $2, depth = $3, height = $4,
+           glb_file_path = COALESCE($1, glb_file_path), width = $2, depth = $3, height = $4,
            file_hash = $5, geometry_fingerprint = $6,
            source_format = $7, source_file_path = $8,
            stl_file_path = COALESCE($9, stl_file_path),
-           processing_status = 'ready', processing_error = NULL
+           processing_status = $11, processing_error = NULL
          WHERE id = $10`,
-        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id]
+        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id, bakeEnabled ? 'processing' : 'ready']
       );
+
+      // Worker mode: enqueue a bake for this part (from the original OBJ when we
+      // have one, else the canonical STL). The worker fills in its glb + status.
+      if (bakeEnabled) {
+        const partSourceKey = format === 'obj' ? part.stl_file_path : (canonicalStlPath ?? part.stl_file_path);
+        const partSourceFormat = format === 'obj' ? 'obj' : 'stl';
+        await enqueueBakeJob({ modelId, partId: part.id, sourceKey: partSourceKey, sourceFormat: partSourceFormat });
+      }
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
