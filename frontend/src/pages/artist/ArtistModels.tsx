@@ -1,5 +1,6 @@
 import React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { CheckCircle2, Loader2 } from 'lucide-react'
 import { modelsApi } from '../../api/endpoints/models'
 import { TerrainModel } from '../../api/types'
 
@@ -34,18 +35,37 @@ const StatusBadge: React.FC<{ model: TerrainModel }> = ({ model }) => {
   )
 }
 
-const ProcessingBadge: React.FC<{ model: TerrainModel }> = ({ model }) => {
+/**
+ * The live preview state for a row: "generating…" while the 3D preview bakes,
+ * "failed" if it errored, and a green "Preview ready" flag for models that just
+ * finished during this visit (so existing models don't all carry the badge).
+ */
+const PreviewBadge: React.FC<{ model: TerrainModel; recentlyReady: boolean }> = ({ model, recentlyReady }) => {
   const p = model.processingStatus
-  if (!p || p === 'ready') return null
-  const styles: Record<string, string> = {
-    processing: 'bg-blue-100 text-blue-800',
-    failed: 'bg-red-100 text-red-800',
+  if (p === 'processing') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+        <Loader2 size={12} className="animate-spin" />
+        Preview generating…
+      </span>
+    )
   }
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[p] ?? 'bg-gray-100 text-gray-700'}`}>
-      {p === 'processing' ? 'processing…' : p}
-    </span>
-  )
+  if (p === 'failed') {
+    return (
+      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+        Preview failed
+      </span>
+    )
+  }
+  if (recentlyReady) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+        <CheckCircle2 size={12} />
+        Preview ready
+      </span>
+    )
+  }
+  return null
 }
 
 interface PrintQuote {
@@ -60,6 +80,12 @@ interface PrintQuote {
 
 const ArtistModels: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  // Passed by CreateModel after an upload so we can spotlight the new model and
+  // flag its preview as ready the moment the background processor finishes.
+  const justUploadedId = (location.state as any)?.justUploadedId as string | undefined
+  const justUploadedName = (location.state as any)?.justUploadedName as string | undefined
+
   const [models, setModels] = React.useState<TerrainModel[]>([])
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -67,23 +93,52 @@ const ArtistModels: React.FC = () => {
   const [rowError, setRowError] = React.useState<Record<string, string>>({})
   const [quotingId, setQuotingId] = React.useState<string | null>(null)
   const [quotes, setQuotes] = React.useState<Record<string, PrintQuote>>({})
+  // Models whose preview finished while this page was open — they show a green
+  // "Preview ready" flag (existing already-ready models don't, to avoid clutter).
+  const [recentlyReady, setRecentlyReady] = React.useState<Set<string>>(new Set())
+  const wasProcessing = React.useRef<Set<string>>(new Set(justUploadedId ? [justUploadedId] : []))
 
-  const load = React.useCallback(async () => {
-    setLoading(true)
+  const load = React.useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const { models } = await modelsApi.getMyModels({ limit: 100 })
       setModels(models)
+      // Any model that was processing (or was just uploaded) and is now ready
+      // gets the green flag; refresh the "still processing" set for next poll.
+      const nowProcessing = new Set<string>()
+      const becameReady: string[] = []
+      for (const m of models) {
+        if (m.processingStatus === 'processing') nowProcessing.add(m.id)
+        else if (wasProcessing.current.has(m.id) && m.processingStatus !== 'failed') becameReady.push(m.id)
+      }
+      if (becameReady.length) {
+        setRecentlyReady((prev) => {
+          const next = new Set(prev)
+          becameReady.forEach((id) => next.add(id))
+          return next
+        })
+      }
+      wasProcessing.current = nowProcessing
     } catch (err) {
       setError(errMessage(err, 'Could not load your models'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
     load()
   }, [load])
+
+  // While any model's preview is still generating, quietly re-poll so the badge
+  // flips to "Preview ready" on its own — no manual refresh, no watching a spinner.
+  const anyProcessing = models.some((m) => m.processingStatus === 'processing')
+  React.useEffect(() => {
+    if (!anyProcessing) return
+    const t = setInterval(() => load(true), 4000)
+    return () => clearInterval(t)
+  }, [anyProcessing, load])
 
   async function handlePublish(m: TerrainModel) {
     setBusyId(m.id)
@@ -181,11 +236,38 @@ const ArtistModels: React.FC = () => {
         </Link>
       </div>
 
+      {justUploadedId && (() => {
+        const jm = models.find((m) => m.id === justUploadedId)
+        const label = justUploadedName ? `“${justUploadedName}”` : 'Your model'
+        const state = jm?.processingStatus
+        if (state === 'failed') {
+          return (
+            <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {label} was uploaded but its 3D preview couldn’t be generated. Open it to see why, or re-upload the file.
+            </div>
+          )
+        }
+        if (jm && state !== 'processing') {
+          return (
+            <div className="mt-6 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              <CheckCircle2 size={16} />
+              {label}’s 3D preview is ready. It’s saved as a draft — publish it when you’re ready for buyers to see it.
+            </div>
+          )
+        }
+        return (
+          <div className="mt-6 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            <Loader2 size={16} className="animate-spin" />
+            {label} was uploaded — we’re creating its 3D preview now. You can keep working; it’ll show a green “Preview ready” flag below when it’s done.
+          </div>
+        )
+      })()}
+
       {loading && <p className="mt-8 text-gray-500">Loading your models…</p>}
       {error && !loading && (
         <div className="mt-8">
           <p className="text-red-600">{error}</p>
-          <button className="mt-2 px-3 py-1.5 rounded border" onClick={load}>Retry</button>
+          <button className="mt-2 px-3 py-1.5 rounded border" onClick={() => load()}>Retry</button>
         </div>
       )}
 
@@ -208,7 +290,10 @@ const ArtistModels: React.FC = () => {
             const notReady = !!m.processingStatus && m.processingStatus !== 'ready'
             const quote = quotes[m.id]
             return (
-              <li key={m.id} className="flex items-center gap-4 p-4">
+              <li
+                key={m.id}
+                className={`flex items-center gap-4 p-4 ${m.id === justUploadedId ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' : ''}`}
+              >
                 <div className="w-16 h-16 rounded bg-gray-100 overflow-hidden flex-shrink-0">
                   {m.thumbnailUrl ? (
                     <img src={m.thumbnailUrl} alt="" className="w-full h-full object-cover" />
@@ -221,7 +306,7 @@ const ArtistModels: React.FC = () => {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium truncate">{m.name}</span>
                     <StatusBadge model={m} />
-                    <ProcessingBadge model={m} />
+                    <PreviewBadge model={m} recentlyReady={recentlyReady.has(m.id)} />
                   </div>
                   <p className="text-sm text-gray-500 mt-0.5">
                     £{m.basePrice.toFixed(2)}

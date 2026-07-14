@@ -113,20 +113,8 @@ const CreateModel: React.FC = () => {
   const [phase, setPhase] = React.useState<Phase>('form')
   const [progress, setProgress] = React.useState(0)
   const [error, setError] = React.useState<string | null>(null)
-  const [modelId, setModelId] = React.useState<string | null>(null)
 
   const busy = phase === 'uploading' || phase === 'processing'
-
-  async function pollUntilDone(id: string): Promise<void> {
-    // Poll the background processor until it finishes or fails (~5 min cap).
-    for (let i = 0; i < 150; i++) {
-      await new Promise((r) => setTimeout(r, 2000))
-      const s = await modelsApi.getProcessingStatus(id)
-      if (s.processingStatus === 'ready') return
-      if (s.processingStatus === 'failed') throw new Error(s.processingError || 'Processing failed')
-    }
-    throw new Error('Processing timed out — check the model in your dashboard shortly')
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -187,47 +175,17 @@ const CreateModel: React.FC = () => {
         parts: parts.length ? parts : undefined,
         terms: terms.length ? terms : undefined,
       })
-      setModelId(created.id)
 
-      // 4. Wait for processing (STL→GLB, geometry, print estimate).
-      setPhase('processing')
-      await pollUntilDone(created.id)
-      setPhase('done')
+      // Hand off to My Models so the artist isn't stuck watching a "processing"
+      // line here. The 3D preview is generated in the background; My Models shows
+      // a banner and flips to a green "Preview ready" flag when it's done.
+      navigate('/artist/models', {
+        state: { justUploadedId: created.id, justUploadedName: name.trim() },
+      })
     } catch (err) {
       setError((err as Error).message || 'Something went wrong')
       setPhase('error')
     }
-  }
-
-  if (phase === 'done') {
-    return (
-      <div className="px-4 py-10 max-w-2xl mx-auto">
-        <h1 className="text-xl font-semibold">Model ready 🎉</h1>
-        <p className="text-gray-600 mt-2">
-          Your model was processed successfully. It’s saved as a <strong>draft</strong> — publish it
-          when you’re ready for buyers to see it.
-        </p>
-        <div className="mt-6 flex gap-3">
-          {modelId && (
-            <button
-              className="px-4 py-2 rounded bg-blue-600 text-white"
-              onClick={() => navigate(`/models/${modelId}`)}
-            >
-              View model
-            </button>
-          )}
-          <button
-            className="px-4 py-2 rounded border"
-            onClick={() => {
-              setPhase('form'); setName(''); setDescription(''); setTerms([`${MODEL_CLASS_SLUG}:terrain`]); setBasePrice('')
-              setStlFile(null); setThumbFile(null); setPartFiles([]); setProgress(0); setModelId(null); setError(null)
-            }}
-          >
-            Upload another
-          </button>
-        </div>
-      </div>
-    )
   }
 
   // Sellers must have 2FA on before they can upload (the API enforces this too).
@@ -439,9 +397,6 @@ const CreateModel: React.FC = () => {
             </div>
             <p className="text-sm text-gray-500 mt-1">Uploading… {progress}%</p>
           </div>
-        )}
-        {phase === 'processing' && (
-          <p className="text-sm text-gray-600">Uploaded. Processing your model (generating preview + print estimate)…</p>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
