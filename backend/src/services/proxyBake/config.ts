@@ -13,6 +13,13 @@ import path from 'path'
 export interface ProxyBakeConfig {
   /** Target triangle count for the decimated proxy. */
   triangleBudget: number
+  /** Smoothing passes applied to the proxy to REMOVE printable surface relief
+   *  (the anti-theft core). The detail is re-added as a normal map, which printers
+   *  ignore — so the geometry a thief rips is a smooth blob. 0 disables smoothing
+   *  (the old, broken behaviour where the proxy kept all its detail). */
+  proxySmoothIterations: number
+  /** Per-iteration smoothing factor (0..1) for the smooth modifier. Higher = flatter. */
+  proxySmoothFactor: number
   /** Baked tangent-space normal map resolution (kept PNG — see targetMaxFileMb note). */
   normalMapRes: number
   /** Baked ambient-occlusion map resolution. */
@@ -75,6 +82,8 @@ export function loadDefaults(): ProxyBakeConfig {
   const base = JSON.parse(raw) as ProxyBakeConfig
   const envOverrides: Partial<Record<keyof ProxyBakeConfig, number | undefined>> = {
     triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
+    proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
+    proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),

@@ -296,6 +296,28 @@ def make_proxy(src, src_tris):
                 decimate(proxy, budget / float(triangle_count(proxy)))
             strategy = "voxel"
 
+    # --- Detail removal (the anti-theft core) ---------------------------------
+    # Decimation preserves surface relief (that's its job), so a decimated proxy is
+    # still printable. Smooth the geometry to melt the fine detail OUT of the mesh;
+    # the detail is re-added afterwards as a tangent-space normal map, which a
+    # printer ignores. Result: on-screen it looks detailed, but the geometry a
+    # ripper extracts is a smooth blob. Tunable via proxySmoothIterations/Factor.
+    smooth_iters = int(CFG.get("proxySmoothIterations", 30))
+    smooth_factor = float(CFG.get("proxySmoothFactor", 0.5))
+    if smooth_iters > 0 and smooth_factor > 0.0:
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+        sm = proxy.modifiers.new(name="detail_smooth", type="SMOOTH")
+        sm.factor = max(0.0, min(1.0, smooth_factor))
+        sm.iterations = smooth_iters
+        bpy.ops.object.modifier_apply(modifier=sm.name)
+        REPORT["proxySmoothIterations"] = smooth_iters
+        REPORT["proxySmoothFactor"] = sm.factor
+    else:
+        REPORT["proxySmoothIterations"] = 0
+        warn("Proxy smoothing DISABLED — geometry keeps printable detail (weak protection).")
+
     REPORT["proxyTriangles"] = triangle_count(proxy)
     REPORT["remeshStrategy"] = strategy
     return proxy, strategy

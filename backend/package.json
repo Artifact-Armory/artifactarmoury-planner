@@ -19,6 +19,7 @@
     "upload:r2": "node -r ts-node/register scripts/upload-to-r2.ts",
     "optimize:textures": "node -r ts-node/register/transpile-only scripts/optimize-textures.ts",
     "trace:watermark": "node -r ts-node/register/transpile-only scripts/trace-watermark.ts",
+    "steal:preview": "node -r ts-node/register/transpile-only scripts/steal-preview.ts",
     "test:stage4": "node -r ts-node/register/transpile-only scripts/test-stage4-e2e.ts",
     "test:terrain": "node -r ts-node/register/transpile-only scripts/test-terrain-tiles.ts",
     "test:collab": "node -r ts-node/register/transpile-only scripts/test-collaborations.ts",
