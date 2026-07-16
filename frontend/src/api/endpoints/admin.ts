@@ -25,6 +25,11 @@ export interface AdminDashboard {
     orders_last_7_days: string
     models_last_7_days: string
   }
+  previewQueue?: {
+    queued: number
+    running: number
+    failed: number
+  }
   recentActivity: Array<{
     action: string
     resource_type: string | null

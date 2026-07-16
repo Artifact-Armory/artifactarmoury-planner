@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Users, Package, ShoppingCart, DollarSign, Flag } from 'lucide-react'
+import { Users, Package, ShoppingCart, DollarSign, Flag, Layers } from 'lucide-react'
 import { adminApi } from '../../api/endpoints/admin'
 import { formatPrice } from '../../utils/format'
 
@@ -25,6 +25,8 @@ const AdminDashboard: React.FC = () => {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'dashboard'],
     queryFn: adminApi.getDashboard,
+    // Refresh periodically so the preview-queue depth stays roughly live.
+    refetchInterval: 20000,
   })
 
   if (isLoading) return <div className="text-gray-500">Loading dashboard…</div>
@@ -67,6 +69,18 @@ const AdminDashboard: React.FC = () => {
           value={Number(s.total_orders).toLocaleString()}
           sub={`+${Number(s.orders_last_7_days)} in last 7 days`}
         />
+        {/* Preview bake queue depth (the proxy-bake worker). */}
+        {data!.previewQueue && (
+          <StatCard
+            icon={<Layers size={18} />}
+            label="Preview queue"
+            value={Number(data!.previewQueue.queued).toLocaleString()}
+            sub={
+              `${data!.previewQueue.running} baking now` +
+              (data!.previewQueue.failed ? ` · ${data!.previewQueue.failed} failed` : '')
+            }
+          />
+        )}
         {/* Revenue is owner-only; the backend omits it for regular admins. */}
         {s.total_revenue != null && (
           <StatCard

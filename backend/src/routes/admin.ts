@@ -58,6 +58,27 @@ router.get('/dashboard',
        LIMIT 10`
     );
 
+    // Preview bake queue depth (the proxy-bake worker). Guarded so the dashboard
+    // still loads if the bake pipeline/table isn't present in this environment.
+    let previewQueue = { queued: 0, running: 0, failed: 0 };
+    try {
+      const bake = await db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'queued')  AS queued,
+          COUNT(*) FILTER (WHERE status = 'running') AS running,
+          COUNT(*) FILTER (WHERE status = 'failed')  AS failed
+        FROM proxy_bake_jobs
+      `);
+      const r = bake.rows[0] || {};
+      previewQueue = {
+        queued: Number(r.queued || 0),
+        running: Number(r.running || 0),
+        failed: Number(r.failed || 0),
+      };
+    } catch {
+      /* proxy_bake_jobs missing (pipeline off) — leave zeros */
+    }
+
     // Platform revenue is owner-only. Regular admins see everything else.
     const stats = statsResult.rows[0];
     if (!(req as any).user?.is_super_admin) {
@@ -66,6 +87,7 @@ router.get('/dashboard',
 
     res.json({
       stats,
+      previewQueue,
       recentActivity: activityResult.rows,
       flaggedModels: flaggedResult.rows
     });
