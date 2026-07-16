@@ -70,6 +70,11 @@ export interface ProxyBakeConfig {
   remeshStrategy: 'decimate' | 'voxel'
   /** Join multiple loose parts into one object before baking (records a warning). */
   joinLooseParts: boolean
+  /** Run the poison-pills step (delete base + interior faces → non-watertight so the
+   *  proxy won't slice/print). Toggle off to isolate it when diagnosing a preview that
+   *  looks damaged in the planner — the interior-face heuristic can punch holes in
+   *  visible surfaces on some meshes. */
+  poisonPillsEnabled: boolean
   /** A base face points down when its normal Z is below this. */
   baseFaceZNormalThreshold: number
   /** A base face sits within this many mm of the minimum Z (the table). */

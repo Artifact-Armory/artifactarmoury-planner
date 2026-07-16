@@ -747,7 +747,16 @@ def emboss_watermark(proxy):
 def poison_pills(proxy):
     """Make the proxy deliberately un-printable (invisible cost at planner angles):
     delete downward base faces near the table, delete interior faces, and assert
-    the result is non-watertight (boundary edges > 0)."""
+    the result is non-watertight (boundary edges > 0).
+
+    Toggleable via poisonPillsEnabled so it can be isolated when diagnosing a
+    ruined-looking preview — select_interior_faces is a heuristic and can punch holes
+    in visible surfaces on some meshes."""
+    if not bool(CFG.get("poisonPillsEnabled", True)):
+        REPORT["poisonPillsApplied"] = False
+        warn("Poison pills DISABLED — proxy may be watertight/printable (weak protection).")
+        return
+    REPORT["poisonPillsApplied"] = True
     z_thr = float(CFG.get("baseFaceZNormalThreshold", -0.5))
     base_h = float(CFG.get("baseFaceHeightMm", 2.0))
 
