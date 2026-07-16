@@ -160,6 +160,32 @@ export const generalRateLimit = rateLimit({
 });
 
 /**
+ * Preview GLB rate limit — anti-scrape for the planner's public preview meshes.
+ * A normal planner session loads a preview only when a piece is PLACED (the palette
+ * uses PNG thumbnails), so even heavy use stays well under this; a script trying to
+ * vacuum the whole catalogue's meshes trips it and gets logged (rateLimitHandler
+ * warns with ip/user), turning silent bulk theft into a visible signal.
+ * Tunable via PREVIEW_RATE_LIMIT_MAX (default 150 / 15 min per IP-or-user).
+ */
+export const previewRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: Number(process.env.PREVIEW_RATE_LIMIT_MAX ?? 150),
+  message: 'Too many preview requests, please slow down',
+  handler: rateLimitHandler,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyGenerator,
+  skip: (req) => process.env.NODE_ENV === 'development' && req.ip === '::1',
+  ...(redisClient && {
+    store: new RedisStore({
+      // @ts-expect-error - RedisStore types not perfect
+      client: redisClient,
+      prefix: 'rl:preview:'
+    })
+  })
+});
+
+/**
  * Strict rate limit for authentication endpoints
  * 5 requests per 15 minutes per IP
  */
