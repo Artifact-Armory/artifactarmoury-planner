@@ -20,7 +20,7 @@ import {
   deleteUploadedFile,
   getRelativePath
 } from '../middleware/upload';
-import { uploadRateLimit } from '../middleware/security';
+import { uploadRateLimit, previewRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
 import { processSTL, generateGLB, computeFileHash } from '../services/fileProcessor';
@@ -595,6 +595,7 @@ async function servePreviewGlb(
 
 // Primary part (part 1 lives on the model row). Its planner asset id IS the model id.
 router.get('/:id/preview.glb',
+  previewRateLimit,
   optionalAuth,
   asyncHandler(async (req, res) => {
     const row = (await db.query(
@@ -608,6 +609,7 @@ router.get('/:id/preview.glb',
 
 // An extra "set" part (a model_parts row). Gated by its parent model's visibility.
 router.get('/parts/:partId/preview.glb',
+  previewRateLimit,
   optionalAuth,
   asyncHandler(async (req, res) => {
     const row = (await db.query(

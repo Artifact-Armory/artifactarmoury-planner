@@ -20,6 +20,18 @@ export interface ProxyBakeConfig {
   proxySmoothIterations: number
   /** Per-iteration smoothing factor (0..1) for the smooth modifier. Higher = flatter. */
   proxySmoothFactor: number
+  /** Emboss a watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip carries
+   *  it (a naive print is spoiled; the letters must be manually removed). The paid
+   *  STL is never touched — only the preview proxy. */
+  embossWatermarkEnabled: boolean
+  /** The text embossed into the proxy (e.g. "ARTIFACT ARMOURY · PREVIEW"). */
+  embossWatermarkText: string
+  /** Text cap height as a % of the model's smaller horizontal footprint dimension. */
+  embossHeightPct: number
+  /** Emboss thickness (raised/cut depth) as a % of the bbox diagonal. */
+  embossDepthPct: number
+  /** Cut the text INTO the surface (engrave) instead of raising it. */
+  embossEngrave: boolean
   /** Baked tangent-space normal map resolution (kept PNG — see targetMaxFileMb note). */
   normalMapRes: number
   /** Baked ambient-occlusion map resolution. */
@@ -84,6 +96,8 @@ export function loadDefaults(): ProxyBakeConfig {
     triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
     proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
+    embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
+    embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),

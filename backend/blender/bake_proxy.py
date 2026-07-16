@@ -490,6 +490,128 @@ def wire_material(proxy, normal_img, ao_img, base_img):
     nt.nodes.active = aotex
 
 
+def emboss_watermark(proxy):
+    """Emboss the watermark string into the proxy GEOMETRY so a ripped mesh carries
+    it (survives export/import; a naive print comes out spoiled). Raised letters on
+    the model's top, in a distinct dark material so the mark also reads in the
+    planner. The paid STL is never touched — this is the preview proxy only.
+
+    Boolean-union is the primary path; on failure we fall back to joining the text as
+    loose geometry (weaker, but still in-mesh). Any error is a warning, never a job
+    failure — a bake must never die over the watermark."""
+    import mathutils
+
+    if not bool(CFG.get("embossWatermarkEnabled", True)):
+        REPORT["embossApplied"] = False
+        warn("Emboss watermark DISABLED — a mesh-rip carries no mark.")
+        return
+
+    text = str(CFG.get("embossWatermarkText", "ARTIFACT ARMOURY  PREVIEW")).strip()
+    if not text:
+        REPORT["embossApplied"] = False
+        return
+
+    engrave = bool(CFG.get("embossEngrave", False))
+    height_pct = float(CFG.get("embossHeightPct", 9.0))
+    depth_pct = float(CFG.get("embossDepthPct", 1.5))
+
+    txt_obj = None
+    try:
+        diagp, dimsp, (minz, maxz) = bbox_diagonal(proxy)
+        corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
+        cx = sum(c.x for c in corners) / 8.0
+        cy = sum(c.y for c in corners) / 8.0
+        top_z = maxz
+
+        min_horiz = max(1e-4, min(dimsp[0], dimsp[1]))
+        cap_h = max(1e-4, min_horiz * height_pct / 100.0)
+        emboss_h = max(1e-4, diagp * depth_pct / 100.0)
+
+        # 1) FONT curve -> extruded so the letters have real thickness.
+        cur = bpy.data.curves.new(name="wm_curve", type="FONT")
+        cur.body = text
+        cur.align_x = "CENTER"
+        cur.align_y = "CENTER"
+        cur.size = cap_h
+        cur.extrude = emboss_h  # extends +/-Z from the curve plane -> ~2*emboss_h thick
+        txt_obj = bpy.data.objects.new("wm_text", cur)
+        bpy.context.scene.collection.objects.link(txt_obj)
+
+        # 2) Convert curve -> mesh.
+        deselect_all()
+        txt_obj.select_set(True)
+        set_active(txt_obj)
+        bpy.ops.object.convert(target="MESH")
+        txt_obj = bpy.context.view_layer.objects.active
+
+        # 3) Sit the text on the top surface: centred over the footprint, its mid-plane
+        #    at the model top so half the letter body is inside, half proud (raised).
+        #    For engrave, lift it so the solid cuts down into the surface.
+        z = top_z + emboss_h * 0.5 if engrave else top_z
+        txt_obj.location = (cx, cy, z)
+        bpy.context.view_layer.update()
+
+        # 4) Distinct near-black material so the mark reads clearly in the planner.
+        wm_mat = bpy.data.materials.new("wm_mat")
+        wm_mat.use_nodes = True
+        wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
+        if wm_bsdf:
+            wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
+            if "Roughness" in wm_bsdf.inputs:
+                wm_bsdf.inputs["Roughness"].default_value = 0.75
+        txt_obj.data.materials.clear()
+        txt_obj.data.materials.append(wm_mat)
+
+        # 5) Boolean the text onto the proxy (primary), else join it (fallback).
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+        mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
+        mod.operation = "DIFFERENCE" if engrave else "UNION"
+        mod.object = txt_obj
+        try:
+            mod.solver = "EXACT"
+        except Exception:
+            pass
+
+        try:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            REPORT["embossMethod"] = "boolean-" + ("difference" if engrave else "union")
+            # Boolean leaves the operand object behind — remove it.
+            if txt_obj and txt_obj.name in bpy.data.objects:
+                bpy.data.objects.remove(txt_obj, do_unlink=True)
+                txt_obj = None
+        except Exception as e:
+            warn("Emboss boolean failed, joining text as loose geometry: " + str(e))
+            try:
+                proxy.modifiers.remove(mod)
+            except Exception:
+                pass
+            deselect_all()
+            txt_obj.select_set(True)
+            proxy.select_set(True)
+            set_active(proxy)  # active = join target
+            bpy.ops.object.join()  # consumes txt_obj into proxy
+            txt_obj = None
+            REPORT["embossMethod"] = "join"
+
+        REPORT["embossWatermark"] = text
+        REPORT["embossApplied"] = True
+    except Exception as e:
+        warn("Emboss watermark failed (continuing without it): " + str(e))
+        REPORT["embossApplied"] = False
+    finally:
+        # Ensure the scene is left clean and the proxy is the active object.
+        if txt_obj is not None and txt_obj.name in bpy.data.objects:
+            try:
+                bpy.data.objects.remove(txt_obj, do_unlink=True)
+            except Exception:
+                pass
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+
+
 def poison_pills(proxy):
     """Make the proxy deliberately un-printable (invisible cost at planner angles):
     delete downward base faces near the table, delete interior faces, and assert
@@ -669,6 +791,9 @@ def main():
     configure_cycles_cpu()
     with Stage("bake"):
         bake_maps(src, proxy, diag)
+
+    with Stage("emboss"):
+        emboss_watermark(proxy)
 
     with Stage("poison_pills"):
         poison_pills(proxy)
