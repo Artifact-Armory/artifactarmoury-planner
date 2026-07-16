@@ -7,7 +7,7 @@
   "bakeDisplacementSafety": 1.5,
   "uvAngleLimitDeg": 66,
   "uvIslandMargin": 0.02,
-  "embossWatermarkEnabled": true,
+  "embossWatermarkEnabled": false,
   "embossWatermarkText": "ARTIFACT ARMOURY  ·  PREVIEW",
   "embossHeightPct": 9,
   "embossDepthPct": 1.5,
