@@ -41,10 +41,10 @@ router.get('/dashboard',
 
     // Recent activity
     const activityResult = await db.query(
-      `SELECT action, resource_type, resource_id, metadata, created_at, user_id, u.display_name
+      `SELECT al.action, al.resource_type, al.resource_id, al.metadata, al.created_at, al.user_id, u.display_name
        FROM activity_log al
        LEFT JOIN users u ON al.user_id = u.id
-       ORDER BY created_at DESC
+       ORDER BY al.created_at DESC
        LIMIT 20`
     );
 
