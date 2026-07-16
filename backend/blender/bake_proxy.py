@@ -631,12 +631,24 @@ def emboss_watermark(proxy):
         cap_fit = min_horiz / (max(1, len(text)) * 0.65)
         cap_h = max(1e-4, min(cap_h, cap_fit, dz * 0.5))
 
-        # Straddle the wall: plane inset inward by `inset`, extruded ±extrude so it
-        # reaches `proud` proud outside and (2*inset + proud) deep inside — that inward
-        # reach is what catches a wall standing back from the bbox extreme.
-        inset = max(1e-4, diagp * inset_pct / 100.0)
-        proud = max(1e-4, diagp * depth_pct / 100.0)
-        extrude = inset + proud
+        # Cutter geometry differs by mode:
+        #  • ENGRAVE (difference): a shallow cutter CENTRED on the bbox face. Difference
+        #    only removes material where the cutter overlaps real mesh, so the mark can
+        #    NEVER float — it appears solely on faces that exist. Kept shallow so it's
+        #    subtle and never punches through a thin wall.
+        #  • RAISED (union): plane inset inward and extruded so it reaches `proud` proud
+        #    outside and deep inside — the inward reach catches a wall standing back from
+        #    the bbox extreme, but stray letters over empty space float (why engrave is
+        #    the default now).
+        if engrave:
+            cut = max(1e-4, diagp * depth_pct / 100.0)
+            extrude = cut          # ±cut about the face -> recess up to `cut` deep
+            offs = 0.0             # centred on the face plane; empty space untouched
+        else:
+            inset = max(1e-4, diagp * inset_pct / 100.0)
+            proud = max(1e-4, diagp * depth_pct / 100.0)
+            extrude = inset + proud
+            offs = inset
 
         # Letters hug the base: vertical centre just above min Z.
         z_band = minz + cap_h * 0.65
@@ -645,10 +657,10 @@ def emboss_watermark(proxy):
         # on the wall: local +Y (letter up) -> world +Z, local +Z (extrude) -> ±wall
         # normal, local +X (reading) -> the horizontal face tangent.
         sides = [
-            ("pY", (math.radians(90), 0.0, 0.0),                (cx, max_y - inset, z_band)),
-            ("nY", (math.radians(90), 0.0, math.radians(180)),  (cx, min_y + inset, z_band)),
-            ("pX", (math.radians(90), 0.0, math.radians(90)),   (max_x - inset, cy, z_band)),
-            ("nX", (math.radians(90), 0.0, math.radians(-90)),  (min_x + inset, cy, z_band)),
+            ("pY", (math.radians(90), 0.0, 0.0),                (cx, max_y - offs, z_band)),
+            ("nY", (math.radians(90), 0.0, math.radians(180)),  (cx, min_y + offs, z_band)),
+            ("pX", (math.radians(90), 0.0, math.radians(90)),   (max_x - offs, cy, z_band)),
+            ("nX", (math.radians(90), 0.0, math.radians(-90)),  (min_x + offs, cy, z_band)),
         ]
 
         for name, rot, loc in sides:
@@ -681,16 +693,23 @@ def emboss_watermark(proxy):
         wm = bpy.context.view_layer.objects.active
         made = [wm]
 
-        # Distinct near-black material so the mark reads clearly in the planner.
-        wm_mat = bpy.data.materials.new("wm_mat")
-        wm_mat.use_nodes = True
-        wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
-        if wm_bsdf:
-            wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
-            if "Roughness" in wm_bsdf.inputs:
-                wm_bsdf.inputs["Roughness"].default_value = 0.75
+        # Material: a raised mark gets a distinct near-black so it reads as a logo; an
+        # engraved mark reuses the model's own material so it stays SUBTLE — just fine
+        # recessed relief that the AO bake shades, not a bold band. (For a difference the
+        # operand is consumed anyway; matching materials keeps any transferred cut faces
+        # blended in.)
         wm.data.materials.clear()
-        wm.data.materials.append(wm_mat)
+        if engrave and proxy.data.materials:
+            wm.data.materials.append(proxy.data.materials[0])
+        else:
+            wm_mat = bpy.data.materials.new("wm_mat")
+            wm_mat.use_nodes = True
+            wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
+            if wm_bsdf:
+                wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
+                if "Roughness" in wm_bsdf.inputs:
+                    wm_bsdf.inputs["Roughness"].default_value = 0.75
+            wm.data.materials.append(wm_mat)
 
         # Boolean the bands onto the proxy (primary), else join them (fallback).
         deselect_all()

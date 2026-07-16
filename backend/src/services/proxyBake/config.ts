@@ -45,15 +45,20 @@ export interface ProxyBakeConfig {
   embossWatermarkText: string
   /** Text cap height as a % of the model's smaller horizontal footprint dimension. */
   embossHeightPct: number
-  /** Emboss thickness (how far the letters stand PROUD of the wall) as a % of the
-   *  bbox diagonal. */
+  /** Emboss depth as a % of the bbox diagonal. In engrave mode this is how deep the
+   *  recess is cut; in raised mode it's how far the letters stand PROUD of the wall.
+   *  Keep it modest in engrave mode so the mark stays subtle and never cuts through a
+   *  thin wall. */
   embossDepthPct: number
   /** How far the emboss text plane is inset INWARD from the bbox side, as a % of the
    *  bbox diagonal. The band wraps the bottom edge on all four sides; the inset (plus
    *  the extrude) is what lets the boolean bite a wall standing back from the bbox
    *  extreme, so the mark reliably fuses to real geometry. */
   embossInsetPct: number
-  /** Cut the text INTO the surface (engrave) instead of raising it. */
+  /** Cut the text INTO the surface (engrave) instead of raising it. Default true:
+   *  a boolean difference only removes material where the cutter meets real mesh, so an
+   *  engraved mark can never leave floating text (the failure of the raised bands) and
+   *  doesn't inflate the bounding box (no stacking gap). Subtler, too. */
   embossEngrave: boolean
   /** Baked tangent-space normal map resolution (kept PNG — see targetMaxFileMb note). */
   normalMapRes: number
