@@ -28,8 +28,14 @@ export interface ProxyBakeConfig {
   embossWatermarkText: string
   /** Text cap height as a % of the model's smaller horizontal footprint dimension. */
   embossHeightPct: number
-  /** Emboss thickness (raised/cut depth) as a % of the bbox diagonal. */
+  /** Emboss thickness (how far the letters stand PROUD of the wall) as a % of the
+   *  bbox diagonal. */
   embossDepthPct: number
+  /** How far the emboss text plane is inset INWARD from the bbox side, as a % of the
+   *  bbox diagonal. The band wraps the bottom edge on all four sides; the inset (plus
+   *  the extrude) is what lets the boolean bite a wall standing back from the bbox
+   *  extreme, so the mark reliably fuses to real geometry. */
+  embossInsetPct: number
   /** Cut the text INTO the surface (engrave) instead of raising it. */
   embossEngrave: boolean
   /** Baked tangent-space normal map resolution (kept PNG — see targetMaxFileMb note). */
@@ -98,6 +104,7 @@ export function loadDefaults(): ProxyBakeConfig {
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
     embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
+    embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),

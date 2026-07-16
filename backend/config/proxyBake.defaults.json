@@ -6,6 +6,7 @@
   "embossWatermarkText": "ARTIFACT ARMOURY  ·  PREVIEW",
   "embossHeightPct": 9,
   "embossDepthPct": 1.5,
+  "embossInsetPct": 2.0,
   "embossEngrave": false,
   "normalMapRes": 2048,
   "aoMapRes": 1024,

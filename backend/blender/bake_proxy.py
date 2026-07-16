@@ -491,10 +491,22 @@ def wire_material(proxy, normal_img, ao_img, base_img):
 
 
 def emboss_watermark(proxy):
-    """Emboss the watermark string into the proxy GEOMETRY so a ripped mesh carries
-    it (survives export/import; a naive print comes out spoiled). Raised letters on
-    the model's top, in a distinct dark material so the mark also reads in the
-    planner. The paid STL is never touched — this is the preview proxy only.
+    """Emboss the watermark string into the proxy GEOMETRY, wrapping it around the
+    model's BOTTOM EDGE on all four sides so a ripped mesh reliably carries the mark.
+
+    The old placement laid a single flat plate over the model's TOP surface. That was
+    fragile: an open, hollow or irregular top (ruins, towers, walls with no roof) has
+    no solid geometry under the centred plate, so the boolean union touched nothing
+    and the "watermark" was a free-floating plate that a ripper could delete in one
+    click — no protection at all. The bottom edge is the widest, most solid part of
+    almost every terrain piece (it sits on the table), so a band placed there actually
+    intersects real geometry.
+
+    For each of the four bbox sides we stand the string upright on the wall near the
+    base, its body straddling the wall plane (inset inward, extruded to poke `proud`
+    proud outside and deep inside) so the boolean bites even when the true wall is set
+    back from the bbox extreme. A distinct near-black material makes the mark read in
+    the planner. The paid STL is never touched — this is the preview proxy only.
 
     Boolean-union is the primary path; on failure we fall back to joining the text as
     loose geometry (weaker, but still in-mesh). Any error is a warning, never a job
@@ -514,44 +526,81 @@ def emboss_watermark(proxy):
     engrave = bool(CFG.get("embossEngrave", False))
     height_pct = float(CFG.get("embossHeightPct", 9.0))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
+    inset_pct = float(CFG.get("embossInsetPct", 2.0))
 
-    txt_obj = None
+    made = []
     try:
-        diagp, dimsp, (minz, maxz) = bbox_diagonal(proxy)
+        diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
-        cx = sum(c.x for c in corners) / 8.0
-        cy = sum(c.y for c in corners) / 8.0
-        top_z = maxz
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        dx = max(1e-4, max_x - min_x)
+        dy = max(1e-4, max_y - min_y)
+        dz = max(1e-4, maxz - minz)
 
-        min_horiz = max(1e-4, min(dimsp[0], dimsp[1]))
-        cap_h = max(1e-4, min_horiz * height_pct / 100.0)
-        emboss_h = max(1e-4, diagp * depth_pct / 100.0)
+        # Cap height: footprint-relative, but clamped so the whole string fits across
+        # the NARROWER face (~0.65 em advance per glyph) and stays in the lower half of
+        # the wall — a band that hugs the base, never a full-height billboard.
+        min_horiz = min(dx, dy)
+        cap_h = min_horiz * height_pct / 100.0
+        cap_fit = min_horiz / (max(1, len(text)) * 0.65)
+        cap_h = max(1e-4, min(cap_h, cap_fit, dz * 0.5))
 
-        # 1) FONT curve -> extruded so the letters have real thickness.
-        cur = bpy.data.curves.new(name="wm_curve", type="FONT")
-        cur.body = text
-        cur.align_x = "CENTER"
-        cur.align_y = "CENTER"
-        cur.size = cap_h
-        cur.extrude = emboss_h  # extends +/-Z from the curve plane -> ~2*emboss_h thick
-        txt_obj = bpy.data.objects.new("wm_text", cur)
-        bpy.context.scene.collection.objects.link(txt_obj)
+        # Straddle the wall: plane inset inward by `inset`, extruded ±extrude so it
+        # reaches `proud` proud outside and (2*inset + proud) deep inside — that inward
+        # reach is what catches a wall standing back from the bbox extreme.
+        inset = max(1e-4, diagp * inset_pct / 100.0)
+        proud = max(1e-4, diagp * depth_pct / 100.0)
+        extrude = inset + proud
 
-        # 2) Convert curve -> mesh.
-        deselect_all()
-        txt_obj.select_set(True)
-        set_active(txt_obj)
-        bpy.ops.object.convert(target="MESH")
-        txt_obj = bpy.context.view_layer.objects.active
+        # Letters hug the base: vertical centre just above min Z.
+        z_band = minz + cap_h * 0.65
 
-        # 3) Sit the text on the top surface: centred over the footprint, its mid-plane
-        #    at the model top so half the letter body is inside, half proud (raised).
-        #    For engrave, lift it so the solid cuts down into the surface.
-        z = top_z + emboss_h * 0.5 if engrave else top_z
-        txt_obj.location = (cx, cy, z)
+        # (name, XYZ euler, location) per side. Rotation stands the FONT plane upright
+        # on the wall: local +Y (letter up) -> world +Z, local +Z (extrude) -> ±wall
+        # normal, local +X (reading) -> the horizontal face tangent.
+        sides = [
+            ("pY", (math.radians(90), 0.0, 0.0),                (cx, max_y - inset, z_band)),
+            ("nY", (math.radians(90), 0.0, math.radians(180)),  (cx, min_y + inset, z_band)),
+            ("pX", (math.radians(90), 0.0, math.radians(90)),   (max_x - inset, cy, z_band)),
+            ("nX", (math.radians(90), 0.0, math.radians(-90)),  (min_x + inset, cy, z_band)),
+        ]
+
+        for name, rot, loc in sides:
+            cur = bpy.data.curves.new(name="wm_curve_" + name, type="FONT")
+            cur.body = text
+            cur.align_x = "CENTER"
+            cur.align_y = "CENTER"
+            cur.size = cap_h
+            cur.extrude = extrude  # extends +/-Z from the plane -> ~2*extrude thick
+            o = bpy.data.objects.new("wm_text_" + name, cur)
+            bpy.context.scene.collection.objects.link(o)
+
+            deselect_all()
+            o.select_set(True)
+            set_active(o)
+            bpy.ops.object.convert(target="MESH")
+            o = bpy.context.view_layer.objects.active
+            o.rotation_euler = rot
+            o.location = loc
+            made.append(o)
+
         bpy.context.view_layer.update()
 
-        # 4) Distinct near-black material so the mark reads clearly in the planner.
+        # Join the four bands into one boolean operand.
+        deselect_all()
+        for o in made:
+            o.select_set(True)
+        set_active(made[0])
+        bpy.ops.object.join()
+        wm = bpy.context.view_layer.objects.active
+        made = [wm]
+
+        # Distinct near-black material so the mark reads clearly in the planner.
         wm_mat = bpy.data.materials.new("wm_mat")
         wm_mat.use_nodes = True
         wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
@@ -559,16 +608,16 @@ def emboss_watermark(proxy):
             wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
             if "Roughness" in wm_bsdf.inputs:
                 wm_bsdf.inputs["Roughness"].default_value = 0.75
-        txt_obj.data.materials.clear()
-        txt_obj.data.materials.append(wm_mat)
+        wm.data.materials.clear()
+        wm.data.materials.append(wm_mat)
 
-        # 5) Boolean the text onto the proxy (primary), else join it (fallback).
+        # Boolean the bands onto the proxy (primary), else join them (fallback).
         deselect_all()
         proxy.select_set(True)
         set_active(proxy)
         mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
         mod.operation = "DIFFERENCE" if engrave else "UNION"
-        mod.object = txt_obj
+        mod.object = wm
         try:
             mod.solver = "EXACT"
         except Exception:
@@ -578,9 +627,9 @@ def emboss_watermark(proxy):
             bpy.ops.object.modifier_apply(modifier=mod.name)
             REPORT["embossMethod"] = "boolean-" + ("difference" if engrave else "union")
             # Boolean leaves the operand object behind — remove it.
-            if txt_obj and txt_obj.name in bpy.data.objects:
-                bpy.data.objects.remove(txt_obj, do_unlink=True)
-                txt_obj = None
+            if wm.name in bpy.data.objects:
+                bpy.data.objects.remove(wm, do_unlink=True)
+            made = []
         except Exception as e:
             warn("Emboss boolean failed, joining text as loose geometry: " + str(e))
             try:
@@ -588,25 +637,27 @@ def emboss_watermark(proxy):
             except Exception:
                 pass
             deselect_all()
-            txt_obj.select_set(True)
+            wm.select_set(True)
             proxy.select_set(True)
             set_active(proxy)  # active = join target
-            bpy.ops.object.join()  # consumes txt_obj into proxy
-            txt_obj = None
+            bpy.ops.object.join()  # consumes wm into proxy
+            made = []
             REPORT["embossMethod"] = "join"
 
         REPORT["embossWatermark"] = text
+        REPORT["embossPlacement"] = "bottom-edge-4-sides"
         REPORT["embossApplied"] = True
     except Exception as e:
         warn("Emboss watermark failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
     finally:
         # Ensure the scene is left clean and the proxy is the active object.
-        if txt_obj is not None and txt_obj.name in bpy.data.objects:
-            try:
-                bpy.data.objects.remove(txt_obj, do_unlink=True)
-            except Exception:
-                pass
+        for o in made:
+            if o is not None and o.name in bpy.data.objects:
+                try:
+                    bpy.data.objects.remove(o, do_unlink=True)
+                except Exception:
+                    pass
         deselect_all()
         proxy.select_set(True)
         set_active(proxy)
