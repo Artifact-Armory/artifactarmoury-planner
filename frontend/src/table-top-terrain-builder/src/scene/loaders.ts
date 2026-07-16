@@ -86,16 +86,27 @@ function baseAlign(root: THREE.Object3D): { x: number; y: number; z: number } {
 }
 
 /**
- * Uniformly rescale an object so its bounding box fits the target real-world
- * size (metres), preserving aspect ratio. Used for API models whose GLB is in
- * millimetres (~1000x too large for the metre-scaled scene).
+ * Uniformly rescale an object so it matches the target real-world size (metres).
+ * Used for API models whose GLB is authored in millimetres (~1000x too large for
+ * the metre-scaled scene).
+ *
+ * The scale is derived from the HEIGHT axis alone, not a min-over-all-axes fit.
+ * The preview proxy carries an embossed anti-theft watermark wrapped around the
+ * model's bottom edge; its letters protrude slightly in X/Z, which inflates the
+ * measured footprint. A min-over-all-axes fit would then shrink the WHOLE model
+ * (height included) to swallow that protrusion, so a rendered piece ends up shorter
+ * than the DB height that stacking (surfaceUnits → aabb.y) trusts — leaving a gap
+ * between stacked pieces. The watermark never exceeds the model's height by
+ * construction (it hugs the base, clamped to the lower half of the wall — see
+ * blender/bake_proxy.py emboss_watermark), so Y is the invariant axis: GLB height
+ * and DB height match, giving the exact mm→m ratio.
  */
 function fitToAABB(root: THREE.Object3D, target: { x: number; y: number; z: number }): void {
   root.updateMatrixWorld(true)
   const size = new THREE.Vector3()
   new THREE.Box3().setFromObject(root).getSize(size)
   if (size.x <= 0 || size.y <= 0 || size.z <= 0) return
-  const s = Math.min(target.x / size.x, target.y / size.y, target.z / size.z)
+  const s = target.y / size.y
   if (Number.isFinite(s) && s > 0) {
     root.scale.multiplyScalar(s)
     root.updateMatrixWorld(true)
