@@ -299,23 +299,56 @@ def make_proxy(src, src_tris):
     # --- Detail removal (the anti-theft core) ---------------------------------
     # Decimation preserves surface relief (that's its job), so a decimated proxy is
     # still printable. Smooth the geometry to melt the fine detail OUT of the mesh;
-    # the detail is re-added afterwards as a tangent-space normal map, which a
-    # printer ignores. Result: on-screen it looks detailed, but the geometry a
-    # ripper extracts is a smooth blob. Tunable via proxySmoothIterations/Factor.
-    smooth_iters = int(CFG.get("proxySmoothIterations", 30))
-    smooth_factor = float(CFG.get("proxySmoothFactor", 0.5))
-    if smooth_iters > 0 and smooth_factor > 0.0:
+    # the detail is re-added afterwards as a tangent-space normal map, which a printer
+    # ignores. Result: on-screen it looks detailed, but the geometry a ripper extracts
+    # is a smooth, un-printable surface.
+    #
+    # The plain SMOOTH (Laplacian) modifier used to do this, but it SHRINKS and rounds
+    # the mesh — eroding the silhouette. A normal map can fake surface detail but NOT a
+    # silhouette, so once the outline melts the model stops looking like the product
+    # (this is exactly what ruined the earlier attempt). LAPLACIANSMOOTH with volume
+    # preservation removes the same high-frequency relief WITHOUT the shrinkage, so the
+    # recognisable form survives while the fine detail is what gets flattened.
+    # Tunable via proxySmoothIterations / proxySmoothLambda / proxySmoothVolumePreserve.
+    smooth_iters = int(CFG.get("proxySmoothIterations", 10))
+    if smooth_iters > 0:
         deselect_all()
         proxy.select_set(True)
         set_active(proxy)
-        sm = proxy.modifiers.new(name="detail_smooth", type="SMOOTH")
-        sm.factor = max(0.0, min(1.0, smooth_factor))
-        sm.iterations = smooth_iters
-        bpy.ops.object.modifier_apply(modifier=sm.name)
+        use_vp = bool(CFG.get("proxySmoothVolumePreserve", True))
+        applied = False
+        if use_vp:
+            try:
+                sm = proxy.modifiers.new(name="detail_smooth", type="LAPLACIANSMOOTH")
+                sm.iterations = smooth_iters
+                sm.lambda_factor = max(0.0, float(CFG.get("proxySmoothLambda", 1.0)))
+                sm.lambda_border = 0.0
+                sm.use_volume_preserve = True
+                sm.use_normalized = True
+                bpy.ops.object.modifier_apply(modifier=sm.name)
+                REPORT["proxySmoothMethod"] = "laplacian-volume-preserve"
+                REPORT["proxySmoothLambda"] = sm.lambda_factor
+                applied = True
+            except Exception as e:
+                warn("LaplacianSmooth failed, falling back to plain Smooth: " + str(e))
+                # A half-applied modifier may linger — clear it before the fallback.
+                for m in list(proxy.modifiers):
+                    if m.name == "detail_smooth":
+                        try:
+                            proxy.modifiers.remove(m)
+                        except Exception:
+                            pass
+        if not applied:
+            sm = proxy.modifiers.new(name="detail_smooth", type="SMOOTH")
+            sm.factor = max(0.0, min(1.0, float(CFG.get("proxySmoothFactor", 0.5))))
+            sm.iterations = smooth_iters
+            bpy.ops.object.modifier_apply(modifier=sm.name)
+            REPORT["proxySmoothMethod"] = "smooth-legacy"
+            REPORT["proxySmoothFactor"] = sm.factor
         REPORT["proxySmoothIterations"] = smooth_iters
-        REPORT["proxySmoothFactor"] = sm.factor
     else:
         REPORT["proxySmoothIterations"] = 0
+        REPORT["proxySmoothMethod"] = "none"
         warn("Proxy smoothing DISABLED — geometry keeps printable detail (weak protection).")
 
     REPORT["proxyTriangles"] = triangle_count(proxy)
@@ -324,13 +357,22 @@ def make_proxy(src, src_tris):
 
 
 def unwrap(proxy):
-    """Smart UV Project on the proxy (source UVs are irrelevant for geometry bakes)."""
+    """Smart UV Project on the proxy (source UVs are irrelevant for geometry bakes).
+    Corrected aspect + a repack keep stretching down and texel budget high, so the
+    baked normal map resolves the fine detail rather than smearing it across seams."""
+    angle = math.radians(float(CFG.get("uvAngleLimitDeg", 66.0)))
+    margin = float(CFG.get("uvIslandMargin", 0.02))
     deselect_all()
     proxy.select_set(True)
     set_active(proxy)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(66.0), island_margin=0.02)
+    bpy.ops.uv.smart_project(angle_limit=angle, island_margin=margin, correct_aspect=True)
+    # Repack tightly so islands use the whole 0..1 space (more texels per feature).
+    try:
+        bpy.ops.uv.pack_islands(margin=margin)
+    except Exception as e:
+        warn("UV pack_islands failed (continuing with smart-project layout): " + str(e))
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
@@ -367,8 +409,36 @@ def configure_cycles_cpu():
     scene.cycles.device = "CPU"
 
 
-def bake_pass(src, proxy, img, bake_type, samples, diag, extra=None):
-    """Run one selected-to-active bake from src onto proxy's active image node."""
+def max_surface_displacement(src, proxy):
+    """Largest distance from a proxy vertex to the SOURCE surface (Blender units == mm).
+
+    Smoothing pushes the proxy surface away from the source detail. The bake shoots
+    rays from the proxy out to the source; if a ray is shorter than that gap it finds
+    nothing and the normal map goes flat right where the detail was — the exact reason
+    a smoothed proxy can look under-detailed. Measuring the real max gap lets us size
+    the cage/ray so rays always reach the source."""
+    from mathutils.bvhtree import BVHTree
+    try:
+        deps = bpy.context.evaluated_depsgraph_get()
+        bvh = BVHTree.FromObject(src, deps)
+    except Exception as e:
+        warn("Displacement BVH build failed (using diagonal-based cage): " + str(e))
+        return 0.0
+    inv = src.matrix_world.inverted()
+    mw = proxy.matrix_world
+    maxd = 0.0
+    for v in proxy.data.vertices:
+        co_src = inv @ (mw @ v.co)  # proxy vertex in source local space
+        hit = bvh.find_nearest(co_src)
+        if hit and hit[3] is not None and hit[3] > maxd:
+            maxd = hit[3]
+    return maxd
+
+
+def bake_pass(src, proxy, img, bake_type, samples, cage_extrusion, max_ray_distance, extra=None):
+    """Run one selected-to-active bake from src onto proxy's active image node.
+    cage_extrusion/max_ray_distance are precomputed (see bake_maps) so every pass
+    reaches the source detail regardless of how far smoothing moved the surface."""
     scene = bpy.context.scene
     scene.cycles.samples = max(1, int(samples))
 
@@ -376,10 +446,8 @@ def bake_pass(src, proxy, img, bake_type, samples, diag, extra=None):
 
     bake = scene.render.bake
     bake.use_selected_to_active = True
-    # Cage extrusion + max ray distance are the critical quality knobs; both are a
-    # percentage of the bbox diagonal so thin geometry can be tuned per-model.
-    bake.cage_extrusion = diag * float(CFG.get("bakeExtrusionPct", 0.75)) / 100.0
-    bake.max_ray_distance = diag * float(CFG.get("maxRayDistancePct", 1.5)) / 100.0
+    bake.cage_extrusion = cage_extrusion
+    bake.max_ray_distance = max_ray_distance
 
     # Selection order matters: source(s) selected, proxy active (the target).
     deselect_all()
@@ -388,8 +456,8 @@ def bake_pass(src, proxy, img, bake_type, samples, diag, extra=None):
     set_active(proxy)
 
     kwargs = dict(type=bake_type, use_selected_to_active=True,
-                  cage_extrusion=bake.cage_extrusion,
-                  max_ray_distance=bake.max_ray_distance)
+                  cage_extrusion=cage_extrusion,
+                  max_ray_distance=max_ray_distance)
     if extra:
         kwargs.update(extra)
     bpy.ops.object.bake(**kwargs)
@@ -407,17 +475,30 @@ def bake_maps(src, proxy, diag):
     ao_res = int(CFG.get("aoMapRes", 1024))
     ao_samples = int(CFG.get("aoSamples", 64))
 
+    # Cage extrusion + max ray distance must SPAN the gap smoothing opened between the
+    # proxy surface and the source detail, or the bake reads empty and the normal map
+    # comes out flat (losing the very detail we smoothed away). Floor them at a % of the
+    # bbox diagonal (thin geometry), but raise to the measured max proxy→source
+    # displacement × a safety factor so every ray reaches the source.
+    disp = max_surface_displacement(src, proxy)
+    safety = float(CFG.get("bakeDisplacementSafety", 1.5))
+    cage = max(diag * float(CFG.get("bakeExtrusionPct", 0.75)) / 100.0, disp * safety)
+    ray = max(diag * float(CFG.get("maxRayDistancePct", 1.5)) / 100.0, disp * safety)
+    REPORT["maxProxyDisplacementMm"] = round(disp, 4)
+    REPORT["bakeCageExtrusion"] = round(cage, 4)
+    REPORT["bakeMaxRayDistance"] = round(ray, 4)
+
     normal_img = new_image("proxy_normal", normal_res)
     # Normal maps are data, not colour — keep them linear so PNG values are exact.
     normal_img.colorspace_settings.name = "Non-Color"
     # Normal bakes need only 1 sample; OpenGL/+Y convention matches glTF (Blender default).
-    bake_pass(src, proxy, normal_img, "NORMAL", 1, diag,
+    bake_pass(src, proxy, normal_img, "NORMAL", 1, cage, ray,
               extra=dict(normal_space="TANGENT"))
     save_png(normal_img, "normal.png")
 
     ao_img = new_image("proxy_ao", ao_res)
     ao_img.colorspace_settings.name = "Non-Color"
-    bake_pass(src, proxy, ao_img, "AO", ao_samples, diag)
+    bake_pass(src, proxy, ao_img, "AO", ao_samples, cage, ray)
     save_png(ao_img, "ao.png")
 
     REPORT["textureResolutions"] = {"normal": normal_res, "ao": ao_res}
@@ -431,7 +512,7 @@ def bake_maps(src, proxy, diag):
     if has_materials:
         try:
             base_img = new_image("proxy_basecolor", base_res)
-            bake_pass(src, proxy, base_img, "DIFFUSE", 16, diag,
+            bake_pass(src, proxy, base_img, "DIFFUSE", 16, cage, ray,
                       extra=dict(pass_filter={"COLOR"}))
             save_png(base_img, "basecolor.png")
             REPORT["textureResolutions"]["baseColor"] = base_res

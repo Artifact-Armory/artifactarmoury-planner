@@ -1,7 +1,12 @@
 {
   "triangleBudget": 80000,
-  "proxySmoothIterations": 0,
+  "proxySmoothIterations": 10,
   "proxySmoothFactor": 0.5,
+  "proxySmoothVolumePreserve": true,
+  "proxySmoothLambda": 1.0,
+  "bakeDisplacementSafety": 1.5,
+  "uvAngleLimitDeg": 66,
+  "uvIslandMargin": 0.02,
   "embossWatermarkEnabled": true,
   "embossWatermarkText": "ARTIFACT ARMOURY  ·  PREVIEW",
   "embossHeightPct": 9,

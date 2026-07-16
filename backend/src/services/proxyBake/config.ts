@@ -18,8 +18,25 @@ export interface ProxyBakeConfig {
    *  ignore — so the geometry a thief rips is a smooth blob. 0 disables smoothing
    *  (the old, broken behaviour where the proxy kept all its detail). */
   proxySmoothIterations: number
-  /** Per-iteration smoothing factor (0..1) for the smooth modifier. Higher = flatter. */
+  /** Per-iteration smoothing factor (0..1) for the LEGACY plain Smooth modifier
+   *  (only used when proxySmoothVolumePreserve is false). Higher = flatter. */
   proxySmoothFactor: number
+  /** Use LaplacianSmooth WITH volume preservation instead of the plain Smooth
+   *  modifier. Volume-preserving smoothing removes fine, printable surface relief
+   *  without the shrinkage/corner-rounding that erodes the silhouette — and a normal
+   *  map can fake surface detail but never a silhouette, so this is what keeps the
+   *  proxy looking like the product. Default true. */
+  proxySmoothVolumePreserve: boolean
+  /** Per-iteration strength (lambda_factor) for the LaplacianSmooth path. */
+  proxySmoothLambda: number
+  /** Safety multiplier applied to the measured max proxy→source surface displacement
+   *  when sizing the bake cage/ray distance, so rays always overshoot the source
+   *  detail rather than falling short and baking a flat (detail-less) normal map. */
+  bakeDisplacementSafety: number
+  /** Smart-UV-project angle limit (degrees) for the proxy unwrap. */
+  uvAngleLimitDeg: number
+  /** Smart-UV-project / pack island margin (0..1 of UV space). */
+  uvIslandMargin: number
   /** Emboss a watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip carries
    *  it (a naive print is spoiled; the letters must be manually removed). The paid
    *  STL is never touched — only the preview proxy. */
@@ -102,6 +119,10 @@ export function loadDefaults(): ProxyBakeConfig {
     triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
     proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
+    proxySmoothLambda: envNum('PROXY_BAKE_SMOOTH_LAMBDA'),
+    bakeDisplacementSafety: envNum('PROXY_BAKE_DISPLACEMENT_SAFETY'),
+    uvAngleLimitDeg: envNum('PROXY_BAKE_UV_ANGLE_DEG'),
+    uvIslandMargin: envNum('PROXY_BAKE_UV_MARGIN'),
     embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),
