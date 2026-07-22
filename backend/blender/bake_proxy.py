@@ -571,29 +571,114 @@ def wire_material(proxy, normal_img, ao_img, base_img):
     nt.nodes.active = aotex
 
 
-def emboss_watermark(proxy):
-    """Emboss the watermark string into the proxy GEOMETRY, wrapping it around the
-    model's BOTTOM EDGE on all four sides so a ripped mesh reliably carries the mark.
+# --------------------------------------------------------------------------- #
+# Emboss watermark — helpers
+# --------------------------------------------------------------------------- #
 
-    The old placement laid a single flat plate over the model's TOP surface. That was
-    fragile: an open, hollow or irregular top (ruins, towers, walls with no roof) has
-    no solid geometry under the centred plate, so the boolean union touched nothing
-    and the "watermark" was a free-floating plate that a ripper could delete in one
-    click — no protection at all. The bottom edge is the widest, most solid part of
-    almost every terrain piece (it sits on the table), so a band placed there actually
-    intersects real geometry.
+def _rounded_rect_polyline(rx, ry, r, seg_per_corner=16):
+    """Points (x, y) of a rounded rectangle centred on the origin, half-extents
+    rx/ry, corner radius r, traced COUNTER-clockwise. Straight edges appear as a
+    single long segment between corner arcs (geometrically exact — no need to
+    subdivide a straight run). Returned open (not repeating the first point)."""
+    r = max(1e-5, min(r, rx * 0.999, ry * 0.999))
+    ccx = [rx - r, -(rx - r), -(rx - r), rx - r]      # corner-arc centres
+    ccy = [ry - r, ry - r, -(ry - r), -(ry - r)]
+    start = [0.0, math.pi / 2.0, math.pi, 1.5 * math.pi]
+    pts = []
+    for k in range(4):
+        for j in range(seg_per_corner + 1):
+            a = start[k] + (math.pi / 2.0) * (j / float(seg_per_corner))
+            pts.append((ccx[k] + r * math.cos(a), ccy[k] + r * math.sin(a)))
+    return pts
 
-    For each of the four bbox sides we stand the string upright on the wall near the
-    base, its body straddling the wall plane (inset inward, extruded to poke `proud`
-    proud outside and deep inside) so the boolean bites even when the true wall is set
-    back from the bbox extreme. A distinct near-black material makes the mark read in
-    the planner. The paid STL is never touched — this is the preview proxy only.
 
-    Boolean-union is the primary path; on failure we fall back to joining the text as
-    loose geometry (weaker, but still in-mesh). Any error is a warning, never a job
-    failure — a bake must never die over the watermark."""
+def _polyline_cumlen(pts):
+    """Cumulative 2D arc length at each point plus the closed-loop perimeter."""
+    cum = [0.0]
+    for i in range(1, len(pts)):
+        dx = pts[i][0] - pts[i - 1][0]
+        dy = pts[i][1] - pts[i - 1][1]
+        cum.append(cum[-1] + math.hypot(dx, dy))
+    # close the loop (last point back to first)
+    dx = pts[0][0] - pts[-1][0]
+    dy = pts[0][1] - pts[-1][1]
+    perim = cum[-1] + math.hypot(dx, dy)
+    return cum, perim
+
+
+def _interp_loop(pts, cum, perim, s):
+    """(x, y) at arc-length s around the CLOSED polyline (s wrapped into [0, perim))."""
+    s = s % perim
+    n = len(pts)
+    for i in range(1, n + 1):
+        seg_start = cum[i - 1]
+        seg_end = cum[i] if i < n else perim
+        if s <= seg_end or i == n:
+            a = pts[i - 1]
+            b = pts[i % n]
+            seg_len = max(1e-9, seg_end - seg_start)
+            t = (s - seg_start) / seg_len
+            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+    return pts[0]
+
+
+def _build_text_mesh(body, cap_h, extrude, name):
+    """Create a FONT object → mesh laid along +X (align LEFT), then bake a +90° X
+    rotation into the geometry so its local axes are: +X reading, +Z letter-up,
+    -Y extrude/thickness. Recentre so it starts at X=0 and straddles Y=Z=0. Returns
+    (object, width_x). The baked orientation is what the Curve modifier needs to keep
+    letters upright (local +Z → curve up) with their thickness pointing radially."""
     import mathutils
+    cur = bpy.data.curves.new(name="c_" + name, type="FONT")
+    cur.body = body
+    cur.align_x = "LEFT"
+    cur.align_y = "CENTER"
+    cur.size = cap_h
+    cur.extrude = extrude
+    o = bpy.data.objects.new(name, cur)
+    bpy.context.scene.collection.objects.link(o)
+    deselect_all()
+    o.select_set(True)
+    set_active(o)
+    bpy.ops.object.convert(target="MESH")
+    o = bpy.context.view_layer.objects.active
+    me = o.data
+    if len(me.vertices) == 0:
+        return o, 0.0
+    me.transform(mathutils.Matrix.Rotation(math.radians(90.0), 4, "X"))
+    xs = [v.co.x for v in me.vertices]
+    ys = [v.co.y for v in me.vertices]
+    zs = [v.co.z for v in me.vertices]
+    tx = -min(xs)
+    ty = -(min(ys) + max(ys)) / 2.0
+    tz = -(min(zs) + max(zs)) / 2.0
+    me.transform(mathutils.Matrix.Translation((tx, ty, tz)))
+    me.update()
+    return o, (max(xs) - min(xs))
 
+
+# --------------------------------------------------------------------------- #
+# Emboss watermark — entry point + styles
+# --------------------------------------------------------------------------- #
+
+def emboss_watermark(proxy):
+    """Emboss the watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip
+    carries the mark. Two styles (embossStyle):
+
+      • "swirl" (default): the string wraps the model in a VERTICAL SPIRAL — a fixed
+        number of loops (embossSwirlLoops, default 4) climbing from base to top,
+        following the footprint so the text hugs the walls the whole way round. The
+        letter height is derived from the loop pitch (model height ÷ loops), so it
+        scales with the model: bigger pieces get bigger letters and EVERY model reads
+        the same four consistent swirls. Only four thin ribbons cover the surface, so
+        the model's high-value detail stays visible between them, yet the mark spans
+        the whole height and every side — far harder to trim off than a base band.
+      • "bands": the older placement — four upright bands hugging the bottom edge.
+
+    Both drive one boolean against the proxy: DIFFERENCE (engrave, carve the mark into
+    real geometry — can never float) or UNION (raised, letters stand proud). The paid
+    STL is never touched. Any error is a warning, never a job failure — a bake must
+    never die over the watermark."""
     if not bool(CFG.get("embossWatermarkEnabled", True)):
         REPORT["embossApplied"] = False
         warn("Emboss watermark DISABLED — a mesh-rip carries no mark.")
@@ -605,9 +690,200 @@ def emboss_watermark(proxy):
         return
 
     engrave = bool(CFG.get("embossEngrave", False))
-    height_pct = float(CFG.get("embossHeightPct", 9.0))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
     inset_pct = float(CFG.get("embossInsetPct", 2.0))
+    style = str(CFG.get("embossStyle", "swirl")).strip().lower()
+
+    if style == "bands":
+        _emboss_bands(proxy, text, engrave, float(CFG.get("embossHeightPct", 9.0)),
+                      depth_pct, inset_pct)
+    else:
+        _emboss_swirl(proxy, text, engrave, depth_pct, inset_pct)
+
+
+def _wm_material():
+    """Near-black material so the mark READS in the planner. On a boolean difference
+    the cutter's material is transferred to the freshly cut recess faces (dark carved
+    text); on a union the raised letters carry it directly."""
+    wm_mat = bpy.data.materials.new("wm_mat")
+    wm_mat.use_nodes = True
+    wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
+    if wm_bsdf:
+        wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
+        if "Roughness" in wm_bsdf.inputs:
+            wm_bsdf.inputs["Roughness"].default_value = 0.75
+    return wm_mat
+
+
+def _apply_wm_boolean(proxy, wm, engrave, text, placement):
+    """Boolean the finished watermark operand `wm` onto `proxy` (DIFFERENCE=engrave,
+    UNION=raised). Falls back to joining the text as loose geometry on solver failure
+    (weaker, but still in-mesh). Removes the operand on success. Sets REPORT fields."""
+    wm.data.materials.clear()
+    wm.data.materials.append(_wm_material())
+
+    deselect_all()
+    proxy.select_set(True)
+    set_active(proxy)
+    mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
+    mod.operation = "DIFFERENCE" if engrave else "UNION"
+    mod.object = wm
+    try:
+        mod.solver = "EXACT"
+    except Exception:
+        pass
+
+    try:
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        REPORT["embossMethod"] = "boolean-" + ("difference" if engrave else "union")
+        if wm.name in bpy.data.objects:
+            bpy.data.objects.remove(wm, do_unlink=True)
+    except Exception as e:
+        warn("Emboss boolean failed, joining text as loose geometry: " + str(e))
+        try:
+            proxy.modifiers.remove(mod)
+        except Exception:
+            pass
+        deselect_all()
+        if wm.name in bpy.data.objects:
+            wm.select_set(True)
+            proxy.select_set(True)
+            set_active(proxy)  # active = join target
+            bpy.ops.object.join()  # consumes wm into proxy
+        REPORT["embossMethod"] = "join"
+
+    REPORT["embossWatermark"] = text
+    REPORT["embossPlacement"] = placement
+    REPORT["embossApplied"] = True
+
+
+def _emboss_swirl(proxy, text, engrave, depth_pct, inset_pct):
+    """Wrap `text` around the proxy as a rising spiral of embossSwirlLoops loops."""
+    import mathutils
+    made = []
+    try:
+        loops = max(1, int(CFG.get("embossSwirlLoops", 4)))
+        band_frac = float(CFG.get("embossSwirlBandFrac", 0.5))
+        corner_frac = float(CFG.get("embossSwirlCornerFrac", 0.35))
+        ppl = max(24, int(CFG.get("embossSwirlPointsPerLoop", 96)))
+        max_repeats = max(1, int(CFG.get("embossSwirlMaxRepeats", 240)))
+        flip = bool(CFG.get("embossSwirlFlip", False))
+
+        diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
+        corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        hx = max(1e-4, (max_x - min_x) / 2.0)
+        hy = max(1e-4, (max_y - min_y) / 2.0)
+        dz = max(1e-4, maxz - minz)
+
+        # Radial reach: the ribbon straddles the wall — inset INWARD so the boolean
+        # bites a wall standing back from the bbox extreme, and (for union) pokes
+        # `proud` proud outside so raised letters are visible. Symmetric extrude about
+        # a path that sits `inset` inside the bbox catches surfaces across the band.
+        inset = max(1e-4, diagp * inset_pct / 100.0)
+        proud = max(1e-4, diagp * depth_pct / 100.0)
+        extrude = inset + proud
+        rx = max(1e-4, hx - inset)
+        ry = max(1e-4, hy - inset)
+        corner_r = min(rx, ry) * max(0.0, min(0.9, corner_frac))
+
+        # Letter height from the loop pitch → scales with the model, four equal swirls.
+        z0 = minz + dz * 0.06
+        z1 = maxz - dz * 0.06
+        span = max(1e-4, z1 - z0)
+        pitch = span / loops
+        cap_h = max(diagp * 0.004, pitch * band_frac)
+
+        # Build the footprint loop, then the 3D spiral path (loops climbs from z0→z1).
+        base = _rounded_rect_polyline(rx, ry, corner_r)
+        if flip:
+            base = base[::-1]
+        cum, perim = _polyline_cumlen(base)
+
+        npts = loops * ppl
+        path = []
+        for i in range(npts + 1):
+            f = i / float(npts)
+            px, py = _interp_loop(base, cum, perim, (f * loops) * perim)
+            path.append((cx + px, cy + py, z0 + f * span))
+
+        # Curve length (3D) → how much repeated text fills the spiral exactly once.
+        clen = 0.0
+        for i in range(1, len(path)):
+            a, b = path[i - 1], path[i]
+            clen += math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+        # Measure one "TEXT   " unit at this cap height, then repeat to just under the
+        # spiral length (undershoot so no stray text extrapolates past the curve end).
+        unit_body = text + "   "
+        probe, unit_w = _build_text_mesh(unit_body, cap_h, extrude, "wm_probe")
+        if probe.name in bpy.data.objects:
+            bpy.data.objects.remove(probe, do_unlink=True)
+        if unit_w <= 1e-4:
+            raise RuntimeError("degenerate text width (empty font render?)")
+        repeats = max(1, min(max_repeats, int(clen // unit_w)))
+
+        text_obj, _w = _build_text_mesh(unit_body * repeats, cap_h, extrude, "wm_swirl")
+        made.append(text_obj)
+
+        # Spiral curve (Z_UP twist keeps letter-up close to world +Z the whole way).
+        cu = bpy.data.curves.new("wm_helix", "CURVE")
+        cu.dimensions = "3D"
+        try:
+            cu.twist_mode = "Z_UP"
+        except Exception:
+            pass
+        sp = cu.splines.new("POLY")
+        sp.points.add(len(path) - 1)
+        for i, p in enumerate(path):
+            sp.points[i].co = (p[0], p[1], p[2], 1.0)
+        helix = bpy.data.objects.new("wm_helix", cu)
+        bpy.context.scene.collection.objects.link(helix)
+        made.append(helix)
+
+        # Curve modifier bends the straight text strip onto the spiral (POS_X along it).
+        cmod = text_obj.modifiers.new(name="wm_curve", type="CURVE")
+        cmod.object = helix
+        cmod.deform_axis = "POS_X"
+        deselect_all()
+        text_obj.select_set(True)
+        set_active(text_obj)
+        bpy.ops.object.modifier_apply(modifier=cmod.name)
+
+        # Drop the curve; the deformed text is now standalone world geometry.
+        if helix.name in bpy.data.objects:
+            bpy.data.objects.remove(helix, do_unlink=True)
+        made = [text_obj]
+
+        REPORT["embossSwirlLoops"] = loops
+        REPORT["embossSwirlCapHeightMm"] = round(cap_h, 3)
+        REPORT["embossSwirlRepeats"] = repeats
+        _apply_wm_boolean(proxy, text_obj, engrave, text, "vertical-swirl-%d-loops" % loops)
+        made = []
+    except Exception as e:
+        warn("Emboss swirl failed (continuing without it): " + str(e))
+        REPORT["embossApplied"] = False
+    finally:
+        for o in made:
+            if o is not None and o.name in bpy.data.objects:
+                try:
+                    bpy.data.objects.remove(o, do_unlink=True)
+                except Exception:
+                    pass
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+
+
+def _emboss_bands(proxy, text, engrave, height_pct, depth_pct, inset_pct):
+    """Legacy placement: four upright bands hugging the model's BOTTOM EDGE on all
+    four sides. Kept as a fallback (embossStyle="bands")."""
+    import mathutils
 
     made = []
     try:
@@ -631,15 +907,6 @@ def emboss_watermark(proxy):
         cap_fit = min_horiz / (max(1, len(text)) * 0.65)
         cap_h = max(1e-4, min(cap_h, cap_fit, dz * 0.5))
 
-        # Cutter geometry differs by mode:
-        #  • ENGRAVE (difference): a shallow cutter CENTRED on the bbox face. Difference
-        #    only removes material where the cutter overlaps real mesh, so the mark can
-        #    NEVER float — it appears solely on faces that exist. Kept shallow so it's
-        #    subtle and never punches through a thin wall.
-        #  • RAISED (union): plane inset inward and extruded so it reaches `proud` proud
-        #    outside and deep inside — the inward reach catches a wall standing back from
-        #    the bbox extreme, but stray letters over empty space float (why engrave is
-        #    the default now).
         if engrave:
             cut = max(1e-4, diagp * depth_pct / 100.0)
             extrude = cut          # ±cut about the face -> recess up to `cut` deep
@@ -653,9 +920,6 @@ def emboss_watermark(proxy):
         # Letters hug the base: vertical centre just above min Z.
         z_band = minz + cap_h * 0.65
 
-        # (name, XYZ euler, location) per side. Rotation stands the FONT plane upright
-        # on the wall: local +Y (letter up) -> world +Z, local +Z (extrude) -> ±wall
-        # normal, local +X (reading) -> the horizontal face tangent.
         sides = [
             ("pY", (math.radians(90), 0.0, 0.0),                (cx, max_y - offs, z_band)),
             ("nY", (math.radians(90), 0.0, math.radians(180)),  (cx, min_y + offs, z_band)),
@@ -684,7 +948,6 @@ def emboss_watermark(proxy):
 
         bpy.context.view_layer.update()
 
-        # Join the four bands into one boolean operand.
         deselect_all()
         for o in made:
             o.select_set(True)
@@ -693,65 +956,12 @@ def emboss_watermark(proxy):
         wm = bpy.context.view_layer.objects.active
         made = [wm]
 
-        # Material: a raised mark gets a distinct near-black so it reads as a logo; an
-        # engraved mark reuses the model's own material so it stays SUBTLE — just fine
-        # recessed relief that the AO bake shades, not a bold band. (For a difference the
-        # operand is consumed anyway; matching materials keeps any transferred cut faces
-        # blended in.)
-        wm.data.materials.clear()
-        if engrave and proxy.data.materials:
-            wm.data.materials.append(proxy.data.materials[0])
-        else:
-            wm_mat = bpy.data.materials.new("wm_mat")
-            wm_mat.use_nodes = True
-            wm_bsdf = wm_mat.node_tree.nodes.get("Principled BSDF")
-            if wm_bsdf:
-                wm_bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
-                if "Roughness" in wm_bsdf.inputs:
-                    wm_bsdf.inputs["Roughness"].default_value = 0.75
-            wm.data.materials.append(wm_mat)
-
-        # Boolean the bands onto the proxy (primary), else join them (fallback).
-        deselect_all()
-        proxy.select_set(True)
-        set_active(proxy)
-        mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
-        mod.operation = "DIFFERENCE" if engrave else "UNION"
-        mod.object = wm
-        try:
-            mod.solver = "EXACT"
-        except Exception:
-            pass
-
-        try:
-            bpy.ops.object.modifier_apply(modifier=mod.name)
-            REPORT["embossMethod"] = "boolean-" + ("difference" if engrave else "union")
-            # Boolean leaves the operand object behind — remove it.
-            if wm.name in bpy.data.objects:
-                bpy.data.objects.remove(wm, do_unlink=True)
-            made = []
-        except Exception as e:
-            warn("Emboss boolean failed, joining text as loose geometry: " + str(e))
-            try:
-                proxy.modifiers.remove(mod)
-            except Exception:
-                pass
-            deselect_all()
-            wm.select_set(True)
-            proxy.select_set(True)
-            set_active(proxy)  # active = join target
-            bpy.ops.object.join()  # consumes wm into proxy
-            made = []
-            REPORT["embossMethod"] = "join"
-
-        REPORT["embossWatermark"] = text
-        REPORT["embossPlacement"] = "bottom-edge-4-sides"
-        REPORT["embossApplied"] = True
+        _apply_wm_boolean(proxy, wm, engrave, text, "bottom-edge-4-sides")
+        made = []
     except Exception as e:
         warn("Emboss watermark failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
     finally:
-        # Ensure the scene is left clean and the proxy is the active object.
         for o in made:
             if o is not None and o.name in bpy.data.objects:
                 try:
