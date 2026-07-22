@@ -43,29 +43,23 @@ export interface ProxyBakeConfig {
   embossWatermarkEnabled: boolean
   /** The text embossed into the proxy (e.g. "ARTIFACT ARMOURY · PREVIEW"). */
   embossWatermarkText: string
-  /** Placement style: "swirl" (default) wraps the text around the model in a rising
-   *  vertical spiral of embossSwirlLoops loops; "bands" is the legacy four upright
-   *  bands hugging the bottom edge. */
-  embossStyle: 'swirl' | 'bands'
-  /** Number of full loops the swirl makes from base to top. Fixed across models (the
-   *  letter size scales instead) so every preview reads the same N consistent swirls. */
-  embossSwirlLoops: number
-  /** Swirl letter cap height as a fraction of the loop pitch (model height ÷ loops).
-   *  Bigger models → taller pitch → bigger letters, keeping the four swirls readable. */
-  embossSwirlBandFrac: number
-  /** Corner-rounding of the footprint loop the swirl follows, as a fraction of the
-   *  inset half-extent (0 = sharp box corners, ~0.35 = softly rounded swirl). */
-  embossSwirlCornerFrac: number
-  /** Polyline samples per loop of the swirl path (higher = smoother wrap, heavier). */
-  embossSwirlPointsPerLoop: number
-  /** Hard cap on how many times the text repeats around the whole spiral (bounds the
-   *  boolean cost on tall/large models). */
-  embossSwirlMaxRepeats: number
-  /** Reverse the swirl's wrap direction. Flip this if the letters come out mirrored
-   *  (facing into the model) — it swaps which way the ribbon's faces point. */
-  embossSwirlFlip: boolean
+  /** Placement style: "pillars" (default) embosses N thin vertical text columns spaced
+   *  around the model, each climbing bottom→top with a slight spiral twist; "bands" is
+   *  the legacy four upright bands hugging the bottom edge. */
+  embossStyle: 'pillars' | 'bands'
+  /** Number of vertical pillars spaced evenly around the model (default 4). */
+  embossPillarCount: number
+  /** Pillar letter cap height as a fraction of the narrower footprint dimension. Small
+   *  → slim ribbons that scale with the model without overwhelming the detail. */
+  embossPillarWidthFrac: number
+  /** Total spiral twist (degrees) each pillar sweeps from base to top. Small = a gentle
+   *  spiral; 0 = dead-straight vertical columns. */
+  embossPillarTwistDeg: number
+  /** Hard cap on how many times the text repeats up a pillar (bounds boolean cost on
+   *  tall models). */
+  embossPillarMaxRepeats: number
   /** Text cap height as a % of the model's smaller horizontal footprint dimension.
-   *  Used by the legacy "bands" style only; the swirl derives its height from pitch. */
+   *  Used by the legacy "bands" style only; pillars derive their size from width-frac. */
   embossHeightPct: number
   /** Emboss depth as a % of the bbox diagonal. In engrave mode this is how deep the
    *  recess is cut; in raised mode it's how far the letters stand PROUD of the wall.

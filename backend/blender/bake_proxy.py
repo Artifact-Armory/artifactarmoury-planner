@@ -575,59 +575,15 @@ def wire_material(proxy, normal_img, ao_img, base_img):
 # Emboss watermark — helpers
 # --------------------------------------------------------------------------- #
 
-def _rounded_rect_polyline(rx, ry, r, seg_per_corner=16):
-    """Points (x, y) of a rounded rectangle centred on the origin, half-extents
-    rx/ry, corner radius r, traced COUNTER-clockwise. Straight edges appear as a
-    single long segment between corner arcs (geometrically exact — no need to
-    subdivide a straight run). Returned open (not repeating the first point)."""
-    r = max(1e-5, min(r, rx * 0.999, ry * 0.999))
-    ccx = [rx - r, -(rx - r), -(rx - r), rx - r]      # corner-arc centres
-    ccy = [ry - r, ry - r, -(ry - r), -(ry - r)]
-    start = [0.0, math.pi / 2.0, math.pi, 1.5 * math.pi]
-    pts = []
-    for k in range(4):
-        for j in range(seg_per_corner + 1):
-            a = start[k] + (math.pi / 2.0) * (j / float(seg_per_corner))
-            pts.append((ccx[k] + r * math.cos(a), ccy[k] + r * math.sin(a)))
-    return pts
+def _build_pillar_text(body, cap_h, extrude, name):
+    """Create a FONT object → mesh, then bake it into the canonical PILLAR frame: the
+    string READS UPWARD (advance along +Z), each glyph's vertical runs along +X, and the
+    extrude/thickness faces +Y (outward, for the +Y wall). Recentres so the column starts
+    at Z=0 and straddles X=Y=0. Returns (object, length_z).
 
-
-def _polyline_cumlen(pts):
-    """Cumulative 2D arc length at each point plus the closed-loop perimeter."""
-    cum = [0.0]
-    for i in range(1, len(pts)):
-        dx = pts[i][0] - pts[i - 1][0]
-        dy = pts[i][1] - pts[i - 1][1]
-        cum.append(cum[-1] + math.hypot(dx, dy))
-    # close the loop (last point back to first)
-    dx = pts[0][0] - pts[-1][0]
-    dy = pts[0][1] - pts[-1][1]
-    perim = cum[-1] + math.hypot(dx, dy)
-    return cum, perim
-
-
-def _interp_loop(pts, cum, perim, s):
-    """(x, y) at arc-length s around the CLOSED polyline (s wrapped into [0, perim))."""
-    s = s % perim
-    n = len(pts)
-    for i in range(1, n + 1):
-        seg_start = cum[i - 1]
-        seg_end = cum[i] if i < n else perim
-        if s <= seg_end or i == n:
-            a = pts[i - 1]
-            b = pts[i % n]
-            seg_len = max(1e-9, seg_end - seg_start)
-            t = (s - seg_start) / seg_len
-            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-    return pts[0]
-
-
-def _build_text_mesh(body, cap_h, extrude, name):
-    """Create a FONT object → mesh laid along +X (align LEFT), then bake a +90° X
-    rotation into the geometry so its local axes are: +X reading, +Z letter-up,
-    -Y extrude/thickness. Recentre so it starts at X=0 and straddles Y=Z=0. Returns
-    (object, width_x). The baked orientation is what the Curve modifier needs to keep
-    letters upright (local +Z → curve up) with their thickness pointing radially."""
+    A FONT lays out reading +X, letter-up +Y, extrude +Z. The permutation
+    (x,y,z) → (y, z, x) maps that to the pillar frame in one bake, giving a vertical
+    spine-style column of text we then place on each wall and twist into a slight spiral."""
     import mathutils
     cur = bpy.data.curves.new(name="c_" + name, type="FONT")
     cur.body = body
@@ -645,16 +601,21 @@ def _build_text_mesh(body, cap_h, extrude, name):
     me = o.data
     if len(me.vertices) == 0:
         return o, 0.0
-    me.transform(mathutils.Matrix.Rotation(math.radians(90.0), 4, "X"))
+    # world = (local.y, local.z, local.x): rows pick y→x, z→y, x→z. A pure rotation.
+    perm = mathutils.Matrix(((0.0, 1.0, 0.0, 0.0),
+                             (0.0, 0.0, 1.0, 0.0),
+                             (1.0, 0.0, 0.0, 0.0),
+                             (0.0, 0.0, 0.0, 1.0)))
+    me.transform(perm)
     xs = [v.co.x for v in me.vertices]
     ys = [v.co.y for v in me.vertices]
     zs = [v.co.z for v in me.vertices]
-    tx = -min(xs)
+    tx = -(min(xs) + max(xs)) / 2.0
     ty = -(min(ys) + max(ys)) / 2.0
-    tz = -(min(zs) + max(zs)) / 2.0
+    tz = -min(zs)
     me.transform(mathutils.Matrix.Translation((tx, ty, tz)))
     me.update()
-    return o, (max(xs) - min(xs))
+    return o, (max(zs) - min(zs))
 
 
 # --------------------------------------------------------------------------- #
@@ -665,19 +626,19 @@ def emboss_watermark(proxy):
     """Emboss the watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip
     carries the mark. Two styles (embossStyle):
 
-      • "swirl" (default): the string wraps the model in a VERTICAL SPIRAL — a fixed
-        number of loops (embossSwirlLoops, default 4) climbing from base to top,
-        following the footprint so the text hugs the walls the whole way round. The
-        letter height is derived from the loop pitch (model height ÷ loops), so it
-        scales with the model: bigger pieces get bigger letters and EVERY model reads
-        the same four consistent swirls. Only four thin ribbons cover the surface, so
-        the model's high-value detail stays visible between them, yet the mark spans
-        the whole height and every side — far harder to trim off than a base band.
+      • "pillars" (default): N thin vertical columns of text (embossPillarCount, default
+        4), evenly spaced around the model, each climbing bottom→top with a slight spiral
+        twist (embossPillarTwistDeg). Letter size is a small fraction of the footprint, so
+        the mark reads as four slim ribbons that scale with the model — visible on every
+        side and the full height without overwhelming it, leaving the high-value detail
+        between the ribbons intact.
       • "bands": the older placement — four upright bands hugging the bottom edge.
 
     Both drive one boolean against the proxy: DIFFERENCE (engrave, carve the mark into
-    real geometry — can never float) or UNION (raised, letters stand proud). The paid
-    STL is never touched. Any error is a warning, never a job failure — a bake must
+    real geometry — can never float) or UNION (raised, letters stand proud). Engrave is
+    the default because a difference only removes material where the cutter meets real
+    mesh, so the mark always sticks to the surface and never floats over empty space. The
+    paid STL is never touched. Any error is a warning, never a job failure — a bake must
     never die over the watermark."""
     if not bool(CFG.get("embossWatermarkEnabled", True)):
         REPORT["embossApplied"] = False
@@ -689,16 +650,16 @@ def emboss_watermark(proxy):
         REPORT["embossApplied"] = False
         return
 
-    engrave = bool(CFG.get("embossEngrave", False))
+    engrave = bool(CFG.get("embossEngrave", True))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
     inset_pct = float(CFG.get("embossInsetPct", 2.0))
-    style = str(CFG.get("embossStyle", "swirl")).strip().lower()
+    style = str(CFG.get("embossStyle", "pillars")).strip().lower()
 
     if style == "bands":
         _emboss_bands(proxy, text, engrave, float(CFG.get("embossHeightPct", 9.0)),
                       depth_pct, inset_pct)
     else:
-        _emboss_swirl(proxy, text, engrave, depth_pct, inset_pct)
+        _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct)
 
 
 def _wm_material():
@@ -757,17 +718,25 @@ def _apply_wm_boolean(proxy, wm, engrave, text, placement):
     REPORT["embossApplied"] = True
 
 
-def _emboss_swirl(proxy, text, engrave, depth_pct, inset_pct):
-    """Wrap `text` around the proxy as a rising spiral of embossSwirlLoops loops."""
+def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
+    """Emboss `text` as N thin vertical PILLARS (default 4), evenly spaced around the
+    model, each climbing bottom→top with a slight spiral twist.
+
+    Each pillar is a spine-style column of repeated text standing on one wall, reaching
+    inward so an engrave (difference) boolean carves it into the real surface — where
+    there is no geometry there is nothing to cut, so a pillar can NEVER float (the fix
+    for the old raised swirl drifting off narrow models). The four columns are joined
+    and twisted together about the model's vertical axis, giving every side a matching
+    gentle spiral. Letter size is a small fraction of the footprint so the mark reads as
+    four slim ribbons — visible on every side and the full height, but not overwhelming,
+    leaving the high-value detail between them intact."""
     import mathutils
     made = []
     try:
-        loops = max(1, int(CFG.get("embossSwirlLoops", 4)))
-        band_frac = float(CFG.get("embossSwirlBandFrac", 0.5))
-        corner_frac = float(CFG.get("embossSwirlCornerFrac", 0.35))
-        ppl = max(24, int(CFG.get("embossSwirlPointsPerLoop", 96)))
-        max_repeats = max(1, int(CFG.get("embossSwirlMaxRepeats", 240)))
-        flip = bool(CFG.get("embossSwirlFlip", False))
+        count = max(1, int(CFG.get("embossPillarCount", 4)))
+        width_frac = float(CFG.get("embossPillarWidthFrac", 0.1))
+        twist_deg = float(CFG.get("embossPillarTwistDeg", 35.0))
+        max_repeats = max(1, int(CFG.get("embossPillarMaxRepeats", 120)))
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -777,96 +746,114 @@ def _emboss_swirl(proxy, text, engrave, depth_pct, inset_pct):
         min_y, max_y = min(ys), max(ys)
         cx = (min_x + max_x) / 2.0
         cy = (min_y + max_y) / 2.0
-        hx = max(1e-4, (max_x - min_x) / 2.0)
-        hy = max(1e-4, (max_y - min_y) / 2.0)
+        dx = max(1e-4, max_x - min_x)
+        dy = max(1e-4, max_y - min_y)
         dz = max(1e-4, maxz - minz)
 
-        # Radial reach: the ribbon straddles the wall — inset INWARD so the boolean
-        # bites a wall standing back from the bbox extreme, and (for union) pokes
-        # `proud` proud outside so raised letters are visible. Symmetric extrude about
-        # a path that sits `inset` inside the bbox catches surfaces across the band.
+        # Radial reach: the column sits `inset` inside the bbox wall and extrudes
+        # symmetrically, so it pokes `proud` outside (visible raised letters in union
+        # mode) and reaches deep enough inward that a wall set back from the bbox still
+        # gets bitten. In engrave mode only the inward reach matters (difference).
         inset = max(1e-4, diagp * inset_pct / 100.0)
         proud = max(1e-4, diagp * depth_pct / 100.0)
         extrude = inset + proud
-        rx = max(1e-4, hx - inset)
-        ry = max(1e-4, hy - inset)
-        corner_r = min(rx, ry) * max(0.0, min(0.9, corner_frac))
 
-        # Letter height from the loop pitch → scales with the model, four equal swirls.
+        # Letter size: a small fraction of the narrower footprint → slim ribbons that
+        # scale with the model. Clamped so several letters still fit up short pieces.
+        min_horiz = min(dx, dy)
+        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.14))
+
         z0 = minz + dz * 0.06
         z1 = maxz - dz * 0.06
         span = max(1e-4, z1 - z0)
-        pitch = span / loops
-        cap_h = max(diagp * 0.004, pitch * band_frac)
 
-        # Build the footprint loop, then the 3D spiral path (loops climbs from z0→z1).
-        base = _rounded_rect_polyline(rx, ry, corner_r)
-        if flip:
-            base = base[::-1]
-        cum, perim = _polyline_cumlen(base)
-
-        npts = loops * ppl
-        path = []
-        for i in range(npts + 1):
-            f = i / float(npts)
-            px, py = _interp_loop(base, cum, perim, (f * loops) * perim)
-            path.append((cx + px, cy + py, z0 + f * span))
-
-        # Curve length (3D) → how much repeated text fills the spiral exactly once.
-        clen = 0.0
-        for i in range(1, len(path)):
-            a, b = path[i - 1], path[i]
-            clen += math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
-
-        # Measure one "TEXT   " unit at this cap height, then repeat to just under the
-        # spiral length (undershoot so no stray text extrapolates past the curve end).
-        unit_body = text + "   "
-        probe, unit_w = _build_text_mesh(unit_body, cap_h, extrude, "wm_probe")
+        # Repeat the text up the column to fill the height (undershoot so it never spills
+        # past the top). Length is measured along +Z from a throwaway single unit.
+        unit_body = text + "  "
+        probe, unit_len = _build_pillar_text(unit_body, cap_h, extrude, "wm_probe")
         if probe.name in bpy.data.objects:
             bpy.data.objects.remove(probe, do_unlink=True)
-        if unit_w <= 1e-4:
-            raise RuntimeError("degenerate text width (empty font render?)")
-        repeats = max(1, min(max_repeats, int(clen // unit_w)))
+        if unit_len <= 1e-4:
+            raise RuntimeError("degenerate text height (empty font render?)")
+        repeats = max(1, min(max_repeats, int(span // unit_len)))
+        body = unit_body * repeats
 
-        text_obj, _w = _build_text_mesh(unit_body * repeats, cap_h, extrude, "wm_swirl")
-        made.append(text_obj)
+        # One column per side: bake a Z-rotation + wall placement into each mesh so the
+        # object transforms stay identity (clean join + twist about world axis).
+        # Base column (angle 0) faces +Y; rotating it about Z lands it on the next wall.
+        # (name, z-angle-deg, wall-centre xy) — angle rotates the +Y-facing column to face
+        # the wall's outward normal; wall-centre insets the column inward by `inset`.
+        walls = [
+            (0.0,    (cx,               max_y - inset)),   # +Y
+            (-90.0,  (max_x - inset,    cy)),              # +X
+            (180.0,  (cx,               min_y + inset)),   # -Y
+            (90.0,   (min_x + inset,    cy)),              # -X
+        ]
+        if count != 4:
+            # Fall back to an even angular spread on the bbox's inscribed ellipse.
+            walls = []
+            for k in range(count):
+                theta = 360.0 * k / count      # outward-normal direction of this column
+                rad = math.radians(theta)
+                # base column faces +Y (90°); rotate by (theta-90) to face outward at theta.
+                walls.append((theta - 90.0, (cx + (dx / 2.0 - inset) * math.cos(rad),
+                                             cy + (dy / 2.0 - inset) * math.sin(rad))))
 
-        # Spiral curve (Z_UP twist keeps letter-up close to world +Z the whole way).
-        cu = bpy.data.curves.new("wm_helix", "CURVE")
-        cu.dimensions = "3D"
-        try:
-            cu.twist_mode = "Z_UP"
-        except Exception:
-            pass
-        sp = cu.splines.new("POLY")
-        sp.points.add(len(path) - 1)
-        for i, p in enumerate(path):
-            sp.points[i].co = (p[0], p[1], p[2], 1.0)
-        helix = bpy.data.objects.new("wm_helix", cu)
-        bpy.context.scene.collection.objects.link(helix)
-        made.append(helix)
+        pillars = []
+        for i, (ang, (wx, wy)) in enumerate(walls):
+            o, _l = _build_pillar_text(body, cap_h, extrude, "wm_pillar_%d" % i)
+            me = o.data
+            me.transform(mathutils.Matrix.Rotation(math.radians(ang), 4, "Z"))
+            me.transform(mathutils.Matrix.Translation((wx, wy, z0)))
+            me.update()
+            pillars.append(o)
+            made.append(o)
 
-        # Curve modifier bends the straight text strip onto the spiral (POS_X along it).
-        cmod = text_obj.modifiers.new(name="wm_curve", type="CURVE")
-        cmod.object = helix
-        cmod.deform_axis = "POS_X"
+        # Join the columns into one operand.
         deselect_all()
-        text_obj.select_set(True)
-        set_active(text_obj)
-        bpy.ops.object.modifier_apply(modifier=cmod.name)
+        for o in pillars:
+            o.select_set(True)
+        set_active(pillars[0])
+        bpy.ops.object.join()
+        wm = bpy.context.view_layer.objects.active
+        made = [wm]
 
-        # Drop the curve; the deformed text is now standalone world geometry.
-        if helix.name in bpy.data.objects:
-            bpy.data.objects.remove(helix, do_unlink=True)
-        made = [text_obj]
+        # Slight spiral: twist the whole set about the model's vertical axis. An empty at
+        # the footprint centre is the twist origin so every column spirals around the
+        # model rather than about its own centre.
+        if abs(twist_deg) > 0.01:
+            org = bpy.data.objects.new("wm_twist_origin", None)
+            org.location = (cx, cy, z0)
+            bpy.context.scene.collection.objects.link(org)
+            made.append(org)
+            tw = wm.modifiers.new(name="wm_twist", type="SIMPLE_DEFORM")
+            tw.deform_method = "TWIST"
+            tw.deform_axis = "Z"
+            tw.angle = math.radians(twist_deg)
+            tw.origin = org
+            deselect_all()
+            wm.select_set(True)
+            set_active(wm)
+            try:
+                bpy.ops.object.modifier_apply(modifier=tw.name)
+            except Exception as e:
+                warn("Pillar twist failed (continuing straight): " + str(e))
+                try:
+                    wm.modifiers.remove(tw)
+                except Exception:
+                    pass
+            if org.name in bpy.data.objects:
+                bpy.data.objects.remove(org, do_unlink=True)
+            made = [wm]
 
-        REPORT["embossSwirlLoops"] = loops
-        REPORT["embossSwirlCapHeightMm"] = round(cap_h, 3)
-        REPORT["embossSwirlRepeats"] = repeats
-        _apply_wm_boolean(proxy, text_obj, engrave, text, "vertical-swirl-%d-loops" % loops)
+        REPORT["embossPillarCount"] = count
+        REPORT["embossPillarCapHeightMm"] = round(cap_h, 3)
+        REPORT["embossPillarRepeats"] = repeats
+        REPORT["embossPillarTwistDeg"] = twist_deg
+        _apply_wm_boolean(proxy, wm, engrave, text, "vertical-pillars-%d" % count)
         made = []
     except Exception as e:
-        warn("Emboss swirl failed (continuing without it): " + str(e))
+        warn("Emboss pillars failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
     finally:
         for o in made:
