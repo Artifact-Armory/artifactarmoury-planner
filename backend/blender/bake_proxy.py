@@ -750,13 +750,17 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         dy = max(1e-4, max_y - min_y)
         dz = max(1e-4, maxz - minz)
 
-        # Radial reach: the column sits `inset` inside the bbox wall and extrudes
-        # symmetrically, so it pokes `proud` outside (visible raised letters in union
-        # mode) and reaches deep enough inward that a wall set back from the bbox still
-        # gets bitten. In engrave mode only the inward reach matters (difference).
-        inset = max(1e-4, diagp * inset_pct / 100.0)
+        hx = dx / 2.0
+        hy = dy / 2.0
         proud = max(1e-4, diagp * depth_pct / 100.0)
-        extrude = inset + proud
+        # How far each column reaches INWARD from its wall, as a fraction of that wall's
+        # half-depth toward the centre. ~1.0 reaches the central axis, so however far a
+        # real wall sits back from the bounding box the cutter still crosses it and the
+        # engrave carves onto the actual surface — this is what stops a set-back wall from
+        # getting no mark at all (the "only one partial marker" failure). Preview proxy
+        # only, and it's already made un-printable downstream, so deep cuts are fine.
+        reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
+        inset = max(1e-4, diagp * inset_pct / 100.0)
 
         # Letter size: a small fraction of the narrower footprint → slim ribbons that
         # scale with the model. Clamped so several letters still fit up short pieces.
@@ -770,7 +774,7 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         # Repeat the text up the column to fill the height (undershoot so it never spills
         # past the top). Length is measured along +Z from a throwaway single unit.
         unit_body = text + "  "
-        probe, unit_len = _build_pillar_text(unit_body, cap_h, extrude, "wm_probe")
+        probe, unit_len = _build_pillar_text(unit_body, cap_h, proud, "wm_probe")
         if probe.name in bpy.data.objects:
             bpy.data.objects.remove(probe, do_unlink=True)
         if unit_len <= 1e-4:
@@ -778,16 +782,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         repeats = max(1, min(max_repeats, int(span // unit_len)))
         body = unit_body * repeats
 
-        # One column per side: bake a Z-rotation + wall placement into each mesh so the
-        # object transforms stay identity (clean join + twist about world axis).
-        # Base column (angle 0) faces +Y; rotating it about Z lands it on the next wall.
-        # (name, z-angle-deg, wall-centre xy) — angle rotates the +Y-facing column to face
-        # the wall's outward normal; wall-centre insets the column inward by `inset`.
+        # One column per side. Each is built with its OWN radial thickness (deep inward,
+        # `proud` outward), then offset so the outer face pokes `proud` past the wall and
+        # the inner face reaches `reach_in` toward the centre. Baking the Z-rotation +
+        # placement into each mesh keeps object transforms identity (clean join + twist).
+        # (z-angle, outer-wall-centre xy, wall half-depth toward centre)
         walls = [
-            (0.0,    (cx,               max_y - inset)),   # +Y
-            (-90.0,  (max_x - inset,    cy)),              # +X
-            (180.0,  (cx,               min_y + inset)),   # -Y
-            (90.0,   (min_x + inset,    cy)),              # -X
+            (0.0,    (cx,    max_y), hy),   # +Y
+            (-90.0,  (max_x, cy),    hx),   # +X
+            (180.0,  (cx,    min_y), hy),   # -Y
+            (90.0,   (min_x, cy),    hx),   # -X
         ]
         if count != 4:
             # Fall back to an even angular spread on the bbox's inscribed ellipse.
@@ -795,14 +799,24 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             for k in range(count):
                 theta = 360.0 * k / count      # outward-normal direction of this column
                 rad = math.radians(theta)
+                ox = cx + hx * math.cos(rad)
+                oy = cy + hy * math.sin(rad)
+                hd = math.hypot(hx * math.cos(rad), hy * math.sin(rad))
                 # base column faces +Y (90°); rotate by (theta-90) to face outward at theta.
-                walls.append((theta - 90.0, (cx + (dx / 2.0 - inset) * math.cos(rad),
-                                             cy + (dy / 2.0 - inset) * math.sin(rad))))
+                walls.append((theta - 90.0, (ox, oy), hd))
 
         pillars = []
-        for i, (ang, (wx, wy)) in enumerate(walls):
+        for i, (ang, (wx, wy), half_depth) in enumerate(walls):
+            if engrave:
+                reach_in = max(1e-4, half_depth * reach_frac)   # deep — always hits the wall
+            else:
+                reach_in = inset                                 # shallow raised (may float)
+            extrude = (reach_in + proud) / 2.0
             o, _l = _build_pillar_text(body, cap_h, extrude, "wm_pillar_%d" % i)
             me = o.data
+            # Symmetric extrude is centred on local Y; shift it so outer face = +proud and
+            # inner face = -reach_in (asymmetric: thin outside, deep inside).
+            me.transform(mathutils.Matrix.Translation((0.0, (proud - reach_in) / 2.0, 0.0)))
             me.transform(mathutils.Matrix.Rotation(math.radians(ang), 4, "Z"))
             me.transform(mathutils.Matrix.Translation((wx, wy, z0)))
             me.update()

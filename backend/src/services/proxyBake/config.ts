@@ -55,6 +55,11 @@ export interface ProxyBakeConfig {
   /** Total spiral twist (degrees) each pillar sweeps from base to top. Small = a gentle
    *  spiral; 0 = dead-straight vertical columns. */
   embossPillarTwistDeg: number
+  /** How far (engrave mode) each column reaches INWARD from its wall toward the centre,
+   *  as a fraction of that wall's half-depth. ~1.0 reaches the central axis so a wall set
+   *  back from the bounding box still gets carved (fixes markers that only appear at the
+   *  single widest point). Lower it if the cuts look too deep. */
+  embossPillarReachFrac: number
   /** Hard cap on how many times the text repeats up a pillar (bounds boolean cost on
    *  tall models). */
   embossPillarMaxRepeats: number

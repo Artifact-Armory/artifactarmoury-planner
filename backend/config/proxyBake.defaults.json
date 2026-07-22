@@ -13,6 +13,7 @@
   "embossPillarCount": 4,
   "embossPillarWidthFrac": 0.1,
   "embossPillarTwistDeg": 35,
+  "embossPillarReachFrac": 1.0,
   "embossPillarMaxRepeats": 120,
   "embossHeightPct": 6,
   "embossDepthPct": 0.8,
