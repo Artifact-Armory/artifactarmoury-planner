@@ -40,6 +40,7 @@ import salesRoutes from './routes/sales';
 import messagesRoutes from './routes/messages';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
+import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
 
 // ============================================================================
 // CONFIGURATION
@@ -182,6 +183,10 @@ async function startServer() {
 
     // Start the payout job: clears matured earnings + pays eligible artists on a timer.
     startPayoutScheduler();
+
+    // Keep the artist analytics rollups current. Without this, any day on which
+    // no artist opened a dashboard never gets rolled up and reads as zero.
+    startAnalyticsRollupScheduler();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {
