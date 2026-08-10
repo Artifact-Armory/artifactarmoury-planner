@@ -20,6 +20,14 @@ interface TermPickerProps {
    */
   excludeFacets?: string[]
   /**
+   * Term subtrees to hide, as `facetSlug:path` prefixes (e.g.
+   * `print-files:process`). Use this when only PART of a facet duplicates a
+   * dedicated field — hiding the whole facet would take its other groups with
+   * it. Tokens already in `value` are left untouched, exactly like
+   * `excludeFacets`.
+   */
+  excludeTermPaths?: string[]
+  /**
    * The model's class (terrain / vehicles / characters). When set, only facets
    * applicable to that class are shown; the model-class facet itself is always
    * hidden (it's chosen via a dedicated picker).
@@ -41,7 +49,9 @@ function filterTerms(terms: TaxTerm[], q: string): TaxTerm[] {
   return out
 }
 
-const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excludeFacets, modelClass }) => {
+const TermPicker: React.FC<TermPickerProps> = ({
+  value, onChange, disabled, excludeFacets, excludeTermPaths, modelClass,
+}) => {
   const [facets, setFacets] = React.useState<TaxFacet[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
@@ -161,9 +171,25 @@ const TermPicker: React.FC<TermPickerProps> = ({ value, onChange, disabled, excl
     )
   }
 
+  /** Drop any subtree named in `excludeTermPaths` for this facet. */
+  const prunedTerms = (facet: TaxFacet): TaxTerm[] => {
+    const prefixes = (excludeTermPaths ?? [])
+      .filter((e) => e.startsWith(`${facet.slug}:`))
+      .map((e) => e.slice(facet.slug.length + 1))
+    if (!prefixes.length) return facet.terms
+    const keep = (list: TaxTerm[]): TaxTerm[] =>
+      list
+        .filter((t) => !prefixes.some((p) => t.path === p || t.path.startsWith(`${p}/`)))
+        .map((t) => ({ ...t, children: keep(t.children ?? []) }))
+    return keep(facet.terms)
+  }
+
   const renderFacetBody = (facet: TaxFacet) => {
-    const terms = searching ? filterTerms(facet.terms, query.trim()) : facet.terms
-    if (searching && terms.length === 0) return null
+    const base = prunedTerms(facet)
+    const terms = searching ? filterTerms(base, query.trim()) : base
+    // Nothing left to show — either the search matched nothing, or every term in
+    // this facet was excluded. Either way the outer map hides the whole card.
+    if (terms.length === 0) return null
 
     if (facet.selectionUi === 'tree') {
       return (

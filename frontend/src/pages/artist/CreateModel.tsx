@@ -8,6 +8,7 @@ import TermPicker from '../../components/taxonomy/TermPicker'
 import FacetSelects from '../../components/taxonomy/FacetSelects'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS } from '../../utils/printability'
+import { withPrinterTypeTerm, PRINT_PROCESS_PATH } from '../../utils/derivedTerms'
 import {
   taxonomyApi,
   facetAppliesTo,
@@ -140,6 +141,7 @@ const CreateModel: React.FC = () => {
       setError(`Choose a value for: ${missingFacets.map((s) => requiredFacetLabels[s]).join(', ')}`)
       return
     }
+    const submittedTerms = withPrinterTypeTerm(terms, printerType)
 
     try {
       setPhase('uploading')
@@ -173,7 +175,9 @@ const CreateModel: React.FC = () => {
         printerType: printerType || undefined,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
-        terms: terms.length ? terms : undefined,
+        // The print-process term is derived from the Printer type select above
+        // rather than asked again in the tag picker.
+        terms: submittedTerms.length ? submittedTerms : undefined,
       })
 
       // Hand off to My Models so the artist isn't stuck watching a "processing"
@@ -333,6 +337,7 @@ const CreateModel: React.FC = () => {
             onChange={setTerms}
             disabled={busy}
             excludeFacets={requiredFacetSlugs}
+            excludeTermPaths={[PRINT_PROCESS_PATH]}
             modelClass={modelClass}
           />
         </div>

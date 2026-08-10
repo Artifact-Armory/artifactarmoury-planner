@@ -4,6 +4,7 @@ import { modelsApi } from '../../api/endpoints/models'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { TerrainModel } from '../../api/types'
 import TermPicker from '../../components/taxonomy/TermPicker'
+import { withPrinterTypeTerm, PRINT_PROCESS_PATH } from '../../utils/derivedTerms'
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
@@ -145,7 +146,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
-        terms,
+        terms: withPrinterTypeTerm(terms, printerType),
         thumbnailKey,
       })
       onPickThumb(null)
@@ -221,7 +222,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
-        terms,
+        terms: withPrinterTypeTerm(terms, printerType),
         thumbnailKey,
       })
       await modelsApi.publishModel(id)
@@ -391,7 +392,13 @@ const EditModel: React.FC = () => {
             Fields marked <span className="text-red-500">*</span> are required before publishing. Tag
             generously — a piece can belong to several eras and types.
           </p>
-          <TermPicker value={terms} onChange={setTerms} disabled={busy} modelClass={modelClass} />
+          <TermPicker
+            value={terms}
+            onChange={setTerms}
+            disabled={busy}
+            excludeTermPaths={[PRINT_PROCESS_PATH]}
+            modelClass={modelClass}
+          />
         </div>
 
         <div>
