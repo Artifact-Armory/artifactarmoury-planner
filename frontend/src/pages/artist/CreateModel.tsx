@@ -8,7 +8,7 @@ import TermPicker from '../../components/taxonomy/TermPicker'
 import FacetSelects from '../../components/taxonomy/FacetSelects'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS } from '../../utils/printability'
-import { withPrinterTypeTerm, PRINT_PROCESS_PATH } from '../../utils/derivedTerms'
+import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET } from '../../utils/derivedTerms'
 import {
   taxonomyApi,
   facetAppliesTo,
@@ -141,7 +141,7 @@ const CreateModel: React.FC = () => {
       setError(`Choose a value for: ${missingFacets.map((s) => requiredFacetLabels[s]).join(', ')}`)
       return
     }
-    const submittedTerms = withPrinterTypeTerm(terms, printerType)
+    const submittedTerms = withLicenceTerm(withPrinterTypeTerm(terms, printerType), license)
 
     try {
       setPhase('uploading')
@@ -336,7 +336,7 @@ const CreateModel: React.FC = () => {
             value={terms}
             onChange={setTerms}
             disabled={busy}
-            excludeFacets={requiredFacetSlugs}
+            excludeFacets={[...requiredFacetSlugs, LICENCE_FACET]}
             excludeTermPaths={[PRINT_PROCESS_PATH]}
             modelClass={modelClass}
           />

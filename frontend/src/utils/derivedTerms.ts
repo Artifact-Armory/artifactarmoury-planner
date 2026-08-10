@@ -17,6 +17,29 @@
 /** The `print-files` group whose three terms duplicate the Printer type select. */
 export const PRINT_PROCESS_PATH = 'print-files:process'
 
+/** The taxonomy facet that duplicates the Usage licence select. */
+export const LICENCE_FACET = 'licence'
+
+// models.license is a two-value CHECK constraint (migration 030) and its text is
+// what buyers are actually granted, so it is authoritative. The facet's other four
+// terms (Commercial Display, Free, CC0/CC-BY, Subscription) are not offered — add
+// them to the select AND widen the constraint if they're ever wanted, rather than
+// letting a tag claim rights the licence column doesn't grant.
+const LICENSE_TO_TERM: Record<string, string> = {
+  personal: 'licence:personal-use',
+  commercial: 'licence:merchant-licence-physical-sales',
+}
+
+/**
+ * Replace any licence token in `terms` with the one implied by the Usage licence
+ * select, so the tag can never contradict the column the product page reads.
+ */
+export function withLicenceTerm(terms: string[], license: string): string[] {
+  const kept = terms.filter((t) => !t.startsWith(`${LICENCE_FACET}:`))
+  const token = LICENSE_TO_TERM[license]
+  return token ? [...kept, token] : kept
+}
+
 const PRINTER_TYPE_TO_TERM: Record<string, string> = {
   fdm: 'print-files:process/fdm-optimised',
   resin: 'print-files:process/resin-optimised',
