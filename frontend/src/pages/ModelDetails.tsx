@@ -17,6 +17,7 @@ import { licenseInfo } from '../utils/licenses'
 import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 import ReportModelModal from '../components/reports/ReportModelModal'
+import { FEATURES } from '../config/features'
 
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
@@ -495,7 +496,7 @@ const ModelDetails: React.FC = () => {
 
             {/* Print & Ship reminder — shown when the artist has enabled printing
                 for this model. Lets buyers without a 3D printer order it printed. */}
-            {model.printConsent && model.printPrice != null && (
+            {FEATURES.printAndShip && model.printConsent && model.printPrice != null && (
               <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
                 <div className="flex items-center gap-2">
                   <Printer size={18} className="text-indigo-600" />

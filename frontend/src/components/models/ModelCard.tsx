@@ -5,6 +5,7 @@ import { TerrainModel } from '../../api/types'
 import Button from '../ui/Button'
 import { useCartStore } from '../../store/cartStore'
 import { formatPrice, formatRating } from '../../utils/format'
+import { FEATURES } from '../../config/features'
 
 interface ModelCardProps {
   model: TerrainModel
@@ -84,7 +85,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
               -{model.salePercent}%
             </span>
           )}
-          {model.printConsent && model.printPrice != null && (
+          {FEATURES.printAndShip && model.printConsent && model.printPrice != null && (
             <span className="rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow">
               Print &amp; Ship · {formatPrice(model.printPrice)}
             </span>

@@ -5,8 +5,10 @@ import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
+  Paintbrush,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
+import { FEATURES } from '@/config/features'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
 import { useCartStore, cartKey } from '@/store/cartStore'
@@ -721,7 +723,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <div className="tb-sep" />
             <button
               className={`tb-icon ${terrainPanelOpen || terrainTool !== 'none' ? 'is-active' : ''}`}
-              title="Sculpt the terrain (hills, cliffs, rivers, trenches)"
+              title={FEATURES.terrainSculpt
+                ? 'Sculpt the terrain (hills, cliffs, rivers, trenches)'
+                : 'Paint the ground texture (grass, sand, snow…)'}
               onClick={() => {
                 const open = !terrainPanelOpen
                 setTerrainPanelOpen(open)
@@ -729,7 +733,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 else setTerrainTool('none')
               }}
             >
-              <Mountain size={18} />
+              {FEATURES.terrainSculpt ? <Mountain size={18} /> : <Paintbrush size={18} />}
             </button>
             {selectedInstanceIds.length > 0 && (
               <>
@@ -774,51 +778,63 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             )}
           </div>
 
-          {/* Terrain sculpting panel */}
+          {/* Terrain panel. The sculpt brushes and printable-tile export are gated
+              behind FEATURES.terrainSculpt (parked — clunky, to be rebuilt); the
+              ground-texture painter below is a separate working feature and stays. */}
           {terrainPanelOpen && (
             <div className="tb-terrain">
               <div className="tb-terrain-head">
-                <span><Mountain size={14} /> Terrain sculpt</span>
+                {FEATURES.terrainSculpt
+                  ? <span><Mountain size={14} /> Terrain sculpt</span>
+                  : <span><Paintbrush size={14} /> Ground texture</span>}
                 <button
                   className="tb-icon"
-                  title="Close terrain tools"
+                  title={FEATURES.terrainSculpt ? 'Close terrain tools' : 'Close texture tools'}
                   onClick={() => { setTerrainPanelOpen(false); setTerrainTool('none') }}
                 >
                   <X size={14} />
                 </button>
               </div>
-              <div className="tb-terrain-tools">
-                {([
-                  { tool: 'raise', label: 'Raise', icon: <ArrowUp size={16} /> },
-                  { tool: 'lower', label: 'Lower', icon: <ArrowDown size={16} /> },
-                  { tool: 'smooth', label: 'Smooth', icon: <Waves size={16} /> },
-                  { tool: 'flatten', label: 'Flatten', icon: <Square size={16} /> },
-                ] as Array<{ tool: TerrainTool; label: string; icon: React.ReactNode }>).map((t) => (
-                  <button
-                    key={t.tool}
-                    className={`tb-terrain-tool ${terrainTool === t.tool ? 'is-active' : ''}`}
-                    onClick={() => setTerrainTool(terrainTool === t.tool ? 'none' : t.tool)}
-                  >
-                    {t.icon}<span>{t.label}</span>
-                  </button>
-                ))}
-              </div>
+              {FEATURES.terrainSculpt && (
+                <div className="tb-terrain-tools">
+                  {([
+                    { tool: 'raise', label: 'Raise', icon: <ArrowUp size={16} /> },
+                    { tool: 'lower', label: 'Lower', icon: <ArrowDown size={16} /> },
+                    { tool: 'smooth', label: 'Smooth', icon: <Waves size={16} /> },
+                    { tool: 'flatten', label: 'Flatten', icon: <Square size={16} /> },
+                  ] as Array<{ tool: TerrainTool; label: string; icon: React.ReactNode }>).map((t) => (
+                    <button
+                      key={t.tool}
+                      className={`tb-terrain-tool ${terrainTool === t.tool ? 'is-active' : ''}`}
+                      onClick={() => setTerrainTool(terrainTool === t.tool ? 'none' : t.tool)}
+                    >
+                      {t.icon}<span>{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Brush size drives the paint brush too, so it stays; strength is
+                  sculpt-only (applyPaintBrush takes no strength). */}
               <label className="tb-terrain-row">
                 <span>Brush size</span>
                 <input type="range" min={0.03} max={0.4} step={0.01} value={brushRadius}
                   onChange={(e) => setBrush({ radius: parseFloat(e.target.value) })} />
               </label>
-              <label className="tb-terrain-row">
-                <span>Strength</span>
-                <input type="range" min={0.05} max={1} step={0.05} value={brushStrength}
-                  onChange={(e) => setBrush({ strength: parseFloat(e.target.value) })} />
-              </label>
-              <button
-                className="tb-terrain-reset"
-                onClick={() => { if (window.confirm('Flatten all terrain edits on this table?')) resetTerrain() }}
-              >
-                <Trash2 size={14} /> Reset terrain
-              </button>
+              {FEATURES.terrainSculpt && (
+                <>
+                  <label className="tb-terrain-row">
+                    <span>Strength</span>
+                    <input type="range" min={0.05} max={1} step={0.05} value={brushStrength}
+                      onChange={(e) => setBrush({ strength: parseFloat(e.target.value) })} />
+                  </label>
+                  <button
+                    className="tb-terrain-reset"
+                    onClick={() => { if (window.confirm('Flatten all terrain edits on this table?')) resetTerrain() }}
+                  >
+                    <Trash2 size={14} /> Reset terrain
+                  </button>
+                </>
+              )}
 
               {/* Ground texture brush: paint different table materials onto the surface. */}
               <div className="tb-terrain-paint">
@@ -859,6 +875,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 </button>
               </div>
 
+              {FEATURES.terrainSculpt && (
               <div className="tb-terrain-export">
                 <div className="tb-terrain-export-head">Printable tiles</div>
                 {terrainQuote ? (
@@ -876,11 +893,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   <span>{exportingTiles ? 'Preparing…' : 'Download printable tiles'}</span>
                 </button>
               </div>
+              )}
 
-              <p className="tb-small tb-terrain-hint">
-                Drag on the table to sculpt. Cliffs are steep slopes. Tiles are watertight shells —
-                print with normal infill.
-              </p>
+              {FEATURES.terrainSculpt && (
+                <p className="tb-small tb-terrain-hint">
+                  Drag on the table to sculpt. Cliffs are steep slopes. Tiles are watertight shells —
+                  print with normal infill.
+                </p>
+              )}
             </div>
           )}
 

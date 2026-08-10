@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { modelsApi } from '../../api/endpoints/models'
 import { TerrainModel } from '../../api/types'
+import { FEATURES } from '../../config/features'
 
 /** Pull a human-readable message out of an axios-style error. */
 function errMessage(err: unknown, fallback: string): string {
@@ -316,7 +317,7 @@ const ArtistModels: React.FC = () => {
                   {isDraft && blocker && <p className="text-xs text-amber-700 mt-1">{blocker}</p>}
                   {rowError[m.id] && <p className="text-xs text-red-600 mt-1">{rowError[m.id]}</p>}
 
-                  {(quote || m.printPrice != null) && (
+                  {FEATURES.printAndShip && (quote || m.printPrice != null) && (
                     <div className="mt-2 text-xs text-gray-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5 inline-block">
                       <span className="font-medium">Print price: £{(quote?.total ?? m.printPrice ?? 0).toFixed(2)}</span>
                       {quote ? (
@@ -347,14 +348,16 @@ const ArtistModels: React.FC = () => {
                   >
                     Edit
                   </button>
-                  <button
-                    className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
-                    onClick={() => handlePrintQuote(m)}
-                    disabled={quoting || busy || notReady}
-                    title={notReady ? 'Model must finish processing before it can be priced for print' : 'Get a print-on-demand price from the print service'}
-                  >
-                    {quoting ? 'Pricing…' : m.printPrice != null ? 'Re-quote print' : 'Print price'}
-                  </button>
+                  {FEATURES.printAndShip && (
+                    <button
+                      className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
+                      onClick={() => handlePrintQuote(m)}
+                      disabled={quoting || busy || notReady}
+                      title={notReady ? 'Model must finish processing before it can be priced for print' : 'Get a print-on-demand price from the print service'}
+                    >
+                      {quoting ? 'Pricing…' : m.printPrice != null ? 'Re-quote print' : 'Print price'}
+                    </button>
+                  )}
                   {isDraft ? (
                     <button
                       className="px-3 py-1.5 rounded bg-green-600 text-white text-sm disabled:opacity-50"

@@ -64,7 +64,7 @@ const Home: React.FC = () => {
         {[
           {
             title: 'Design in 3D',
-            body: 'Sculpt hills, trenches and rivers, then drag artist-made terrain onto a virtual table — no account needed to start.',
+            body: 'Drag artist-made terrain onto a virtual table, stack it and lay out your whole board — no account needed to start.',
           },
           {
             title: 'Buy once, print forever',

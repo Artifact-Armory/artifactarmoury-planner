@@ -17,6 +17,7 @@ import {
 } from '../api/endpoints/taxonomy'
 import { SearchFilters } from '../api/types'
 import TrademarkDisclaimer, { mentionsTrademark } from '../components/legal/TrademarkDisclaimer'
+import { FEATURES } from '../config/features'
 
 const sortOptions: { value: SearchFilters['sortBy']; label: string }[] = [
   { value: 'recent', label: 'Newest' },
@@ -38,7 +39,12 @@ const Browse: React.FC = () => {
   const minPriceParam = searchParams.get('minPrice') ?? ''
   const maxPriceParam = searchParams.get('maxPrice') ?? ''
   const sortByParam = (searchParams.get('sortBy') as SearchFilters['sortBy']) ?? 'recent'
-  const fulfillmentParam = (searchParams.get('fulfillment') === 'print' ? 'print' : 'stl') as 'stl' | 'print'
+  // With Print & Ship parked, everything is a digital download — force 'stl' so
+  // an old ?fulfillment=print bookmark can't strand a buyer in an empty filter
+  // with no visible tab to escape it.
+  const fulfillmentParam = (
+    FEATURES.printAndShip && searchParams.get('fulfillment') === 'print' ? 'print' : 'stl'
+  ) as 'stl' | 'print'
   const pageParam = Number(searchParams.get('page') ?? 1)
 
   const [searchTerm, setSearchTerm] = useState(searchTermParam)
@@ -235,7 +241,9 @@ const Browse: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
-      {/* Fulfillment tabs: digital STL download vs third-party print-and-ship. */}
+      {/* Fulfillment tabs: digital STL download vs third-party print-and-ship.
+          Hidden while Print & Ship is parked — with one option the strip is noise. */}
+      {FEATURES.printAndShip && (
       <div className="mb-8 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1">
         {([
           { mode: 'stl' as const, label: 'Digital downloads only' },
@@ -257,6 +265,7 @@ const Browse: React.FC = () => {
           )
         })}
       </div>
+      )}
 
       {fulfillmentParam === 'print' && (
         <p className="mb-6 -mt-4 text-sm text-gray-500">
