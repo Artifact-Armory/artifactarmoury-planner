@@ -11,7 +11,6 @@ import {
 import {
   type PaintMap, createPaintMap, paintFitsTable, applyPaintBrush, clonePaintMap,
 } from '../core/paintmap'
-import type { BasketItem } from '../core/pricing'       // ← And this
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
@@ -96,6 +95,21 @@ function cloneHeightmap(hm: Heightmap | null): Heightmap | null {
   return { cols: hm.cols, rows: hm.rows, heights: new Float32Array(hm.heights) }
 }
 
+/**
+ * A line in the planner's table-derived basket (one entry per distinct asset on
+ * the table). Digital STLs are bought once, so `quantity` is a piece count for
+ * display and `firstQty`/`repeatQty` only ever differ for print fulfilment.
+ * Previously lived in `core/pricing.ts`, which was legacy print-cost maths.
+ */
+export interface BasketItem {
+  assetId: string
+  quantity: number
+  fulfillment?: 'stl' | 'print'
+  isFirstPurchase: boolean
+  firstQty?: number
+  repeatQty?: number
+}
+
 interface AppState {
   table: Table
   scene: THREE.Scene | null
@@ -126,7 +140,9 @@ interface AppState {
   placementManual: boolean     // true when the level is a manual override (PageUp/Down)
   tableMaterial: string        // table surface material id (grass/sand/wood/snow/…)
 
-  // Terrain sculpting (deformable table surface → printable tiles later)
+  // Terrain sculpting (deformable table surface → printable tiles later).
+  // The sculpt UI is hidden behind FEATURES.terrainSculpt; existing sculpted
+  // tables still load and render, so no saved data is lost while it's off.
   heightmap: Heightmap | null  // null = flat table (no surface edits yet)
   terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt/paint brush
   brushRadius: number          // metres

@@ -21,6 +21,13 @@ npm-debug.log*
 frontend/public/assets/models/
 frontend/public/assets/pre converted/
 
+# Python bytecode (Blender bake scripts)
+__pycache__/
+*.pyc
+
+# Red-team / trace scratch output
+backend/stolen-*.stl
+
 # OS
 .DS_Store
 Thumbs.db

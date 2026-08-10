@@ -1,6 +1,0 @@
--- Add dimensions to assets table
-ALTER TABLE assets
-  ADD COLUMN IF NOT EXISTS width DECIMAL(10,2),
-  ADD COLUMN IF NOT EXISTS depth DECIMAL(10,2),
-  ADD COLUMN IF NOT EXISTS height DECIMAL(10,2);
-
