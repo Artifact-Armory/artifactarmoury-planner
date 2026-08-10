@@ -41,7 +41,8 @@ export interface ProxyBakeConfig {
    *  it (a naive print is spoiled; the letters must be manually removed). The paid
    *  STL is never touched — only the preview proxy. */
   embossWatermarkEnabled: boolean
-  /** The text embossed into the proxy (e.g. "ARTIFACT ARMOURY · PREVIEW"). */
+  /** The text embossed into the proxy (e.g. "PREVIEW"). Repeats up the pillar with
+   *  a two-space separator, so a single word tiles legibly without its own. */
   embossWatermarkText: string
   /** Placement style: "pillars" (default) embosses N thin vertical text columns spaced
    *  around the model, each climbing bottom→top with a slight spiral twist; "bands" is

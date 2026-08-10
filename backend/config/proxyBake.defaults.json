@@ -8,7 +8,7 @@
   "uvAngleLimitDeg": 66,
   "uvIslandMargin": 0.02,
   "embossWatermarkEnabled": true,
-  "embossWatermarkText": "ARTIFACT ARMOURY  ·  PREVIEW",
+  "embossWatermarkText": "PREVIEW",
   "embossStyle": "pillars",
   "embossPillarCount": 4,
   "embossPillarWidthFrac": 0.1,

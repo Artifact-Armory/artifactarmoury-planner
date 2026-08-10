@@ -645,7 +645,7 @@ def emboss_watermark(proxy):
         warn("Emboss watermark DISABLED — a mesh-rip carries no mark.")
         return
 
-    text = str(CFG.get("embossWatermarkText", "ARTIFACT ARMOURY  PREVIEW")).strip()
+    text = str(CFG.get("embossWatermarkText", "PREVIEW")).strip()
     if not text:
         REPORT["embossApplied"] = False
         return
