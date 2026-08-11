@@ -132,7 +132,7 @@ const DashboardLayout: React.FC = () => {
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden text-gray-500 hover:text-gray-900 focus:outline-none"
+            className="md:hidden text-gray-500 hover:text-gray-900 focus:outline-hidden"
           >
             <X size={24} />
           </button>
@@ -611,13 +611,13 @@ const DashboardLayout: React.FC = () => {
       {/* Main Content */}
       <div className="md:pl-64 flex flex-col min-h-screen">
         {/* Header */}
-        <header className="sticky top-0 z-10 bg-white shadow-sm">
+        <header className="sticky top-0 z-10 bg-white shadow-xs">
           <div className="px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
             <div className="flex items-center">
               {/* Mobile menu button */}
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="md:hidden mr-3 text-gray-500 hover:text-gray-900 focus:outline-none"
+                className="md:hidden mr-3 text-gray-500 hover:text-gray-900 focus:outline-hidden"
               >
                 <Menu size={24} />
               </button>
@@ -629,7 +629,7 @@ const DashboardLayout: React.FC = () => {
               <HelpButton />
               <button
                 onClick={() => toggleCart()}
-                className="relative p-2 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                className="relative p-2 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
                 aria-label="Shopping Cart"
               >
                 <ShoppingCart size={22} />

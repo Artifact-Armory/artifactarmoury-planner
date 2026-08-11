@@ -97,7 +97,7 @@ const ArtistShowcases: React.FC = () => {
         </div>
         <Link
           to="/planner"
-          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700"
+          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
         >
           New showcase
         </Link>
@@ -106,7 +106,7 @@ const ArtistShowcases: React.FC = () => {
       {!email && <p className="text-gray-600">Please log in to manage your showcases.</p>}
       {email && loading && <p className="text-gray-500">Loading your showcases…</p>}
       {email && error && !loading && (
-        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded border px-3 py-1.5" onClick={load}>Retry</button></div>
+        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border px-3 py-1.5" onClick={load}>Retry</button></div>
       )}
 
       {email && !loading && !error && tables.length === 0 && (
@@ -129,9 +129,9 @@ const ArtistShowcases: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium text-gray-900">{t.name}</span>
                     {t.isPublic ? (
-                      <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">published</span>
+                      <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">published</span>
                     ) : (
-                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">draft</span>
+                      <span className="rounded-sm bg-gray-100 px-2 py-0.5 text-xs text-gray-600">draft</span>
                     )}
                   </div>
                   <p className="mt-0.5 text-sm text-gray-500">
@@ -139,13 +139,13 @@ const ArtistShowcases: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open / edit</button>
+                  <button className="rounded-sm bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open / edit</button>
                   {t.isPublic && (
-                    <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/view/${t.id}`)}>View public page</button>
+                    <button className="rounded-sm border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/view/${t.id}`)}>View public page</button>
                   )}
-                  <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => togglePublish(t)}>{t.isPublic ? 'Unpublish' : 'Publish'}</button>
-                  <button className="rounded border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => copyPublicLink(t)}>Copy link</button>
-                  <button className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50" disabled={busy} onClick={() => handleDelete(t)}>Delete</button>
+                  <button className="rounded-sm border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => togglePublish(t)}>{t.isPublic ? 'Unpublish' : 'Publish'}</button>
+                  <button className="rounded-sm border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => copyPublicLink(t)}>Copy link</button>
+                  <button className="rounded-sm border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50" disabled={busy} onClick={() => handleDelete(t)}>Delete</button>
                 </div>
               </li>
             )

@@ -263,12 +263,12 @@ const EditModel: React.FC = () => {
       <form className="mt-6 space-y-4" onSubmit={handleSave}>
         <div>
           <label className="block text-sm font-medium mb-1">Name</label>
-          <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+          <input className="w-full border rounded-sm px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea className="w-full border rounded px-3 py-2" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
+          <textarea className="w-full border rounded-sm px-3 py-2" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
           <p className="text-xs mt-1 text-gray-500">Optional — a good description helps buyers find your model.</p>
         </div>
 
@@ -277,21 +277,21 @@ const EditModel: React.FC = () => {
           {modelClass === 'terrain' && (
             <div>
               <label className="block text-sm font-medium mb-1">Category</label>
-              <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+              <select className="w-full border rounded-sm px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
                 {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
           )}
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
-            <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
+            <input type="number" min={0} step="0.01" className="w-full border rounded-sm px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Usage licence</label>
           <select
-            className="w-full border rounded px-3 py-2"
+            className="w-full border rounded-sm px-3 py-2"
             value={license}
             onChange={(e) => setLicense(e.target.value as 'personal' | 'commercial')}
             disabled={busy}
@@ -322,7 +322,7 @@ const EditModel: React.FC = () => {
             <div>
               <label className="block text-sm mb-1">Printer type</label>
               <select
-                className="w-full border rounded px-3 py-2"
+                className="w-full border rounded-sm px-3 py-2"
                 value={printerType}
                 onChange={(e) => setPrinterType(e.target.value as '' | 'fdm' | 'resin' | 'both')}
                 disabled={busy}
@@ -344,11 +344,11 @@ const EditModel: React.FC = () => {
             </label>
             <div>
               <label className="block text-sm mb-1">Recommended layer height (mm)</label>
-              <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={layerHeight} onChange={(e) => setLayerHeight(e.target.value)} disabled={busy} placeholder="0.2" />
+              <input type="number" min={0} step="0.01" className="w-full border rounded-sm px-3 py-2" value={layerHeight} onChange={(e) => setLayerHeight(e.target.value)} disabled={busy} placeholder="0.2" />
             </div>
             <div>
               <label className="block text-sm mb-1">Recommended infill (%)</label>
-              <input type="number" min={0} max={100} step="1" className="w-full border rounded px-3 py-2" value={infill} onChange={(e) => setInfill(e.target.value)} disabled={busy} placeholder="20" />
+              <input type="number" min={0} max={100} step="1" className="w-full border rounded-sm px-3 py-2" value={infill} onChange={(e) => setInfill(e.target.value)} disabled={busy} placeholder="20" />
             </div>
           </div>
         </div>
@@ -361,7 +361,7 @@ const EditModel: React.FC = () => {
             will see it. This is applied automatically whenever a buyer places it; the
             downloadable STL is never changed.
           </p>
-          <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded border bg-gradient-to-b from-slate-50 to-slate-100 overflow-hidden" />
+          <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden" />
           <div className="mt-2 flex flex-wrap gap-2">
             {[0, 90, 180, 270].map((deg) => (
               <button
@@ -383,7 +383,7 @@ const EditModel: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
-          <input className="w-full border rounded px-3 py-2" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} />
+          <input className="w-full border rounded-sm px-3 py-2" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} />
         </div>
 
         <div>
@@ -409,10 +409,10 @@ const EditModel: React.FC = () => {
               <img
                 src={thumbPreview || model?.thumbnailUrl}
                 alt="Thumbnail preview"
-                className="h-20 w-20 rounded object-cover border"
+                className="h-20 w-20 rounded-sm object-cover border"
               />
             ) : (
-              <div className="h-20 w-20 rounded border border-dashed flex items-center justify-center text-xs text-gray-400 text-center">
+              <div className="h-20 w-20 rounded-sm border border-dashed flex items-center justify-center text-xs text-gray-400 text-center">
                 No image
               </div>
             )}
@@ -437,13 +437,13 @@ const EditModel: React.FC = () => {
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="flex gap-3 pt-2">
-          <button type="submit" className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+          <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
           {isDraft && (
             <button
               type="button"
-              className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50"
+              className="px-4 py-2 rounded-sm bg-green-600 text-white disabled:opacity-50"
               onClick={handlePublish}
               disabled={busy}
             >
@@ -475,7 +475,7 @@ const EditModel: React.FC = () => {
           <div>
             <label className="block text-sm mb-1">What changed? <span className="font-normal text-gray-400">(optional, shown to buyers)</span></label>
             <textarea
-              className="w-full border rounded px-3 py-2"
+              className="w-full border rounded-sm px-3 py-2"
               rows={2}
               maxLength={1000}
               value={versionNotes}
@@ -488,7 +488,7 @@ const EditModel: React.FC = () => {
           {versionErr && <p className="text-sm text-red-600">{versionErr}</p>}
           <button
             type="submit"
-            className="px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="px-4 py-2 rounded-sm border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             disabled={versionBusy || !versionFile}
           >
             {versionBusy ? 'Publishing new version…' : 'Publish new version'}

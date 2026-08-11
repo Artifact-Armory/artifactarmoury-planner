@@ -74,13 +74,13 @@ const ArtistReleases: React.FC = () => {
 
       <form onSubmit={handleCreate} className="mt-6 flex gap-2">
         <input
-          className="flex-1 border rounded px-3 py-2"
+          className="flex-1 border rounded-sm px-3 py-2"
           placeholder="New release name (e.g. “Winter Ruins Drop”)"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           disabled={creating}
         />
-        <button type="submit" className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50" disabled={creating || !newName.trim()}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-indigo-600 text-white disabled:opacity-50" disabled={creating || !newName.trim()}>
           {creating ? 'Creating…' : 'New release'}
         </button>
       </form>

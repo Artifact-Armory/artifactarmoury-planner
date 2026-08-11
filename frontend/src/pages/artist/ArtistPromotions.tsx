@@ -140,7 +140,7 @@ const ArtistPromotions: React.FC = () => {
         {scope === 'model' && (
           <div className="mt-4">
             <label className="block text-sm font-medium mb-1">Model</label>
-            <select className="w-full border rounded px-3 py-2" value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={busy}>
+            <select className="w-full border rounded-sm px-3 py-2" value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={busy}>
               <option value="">Choose a published model…</option>
               {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
@@ -150,7 +150,7 @@ const ArtistPromotions: React.FC = () => {
         {scope === 'bundle' && (
           <div className="mt-4">
             <label className="block text-sm font-medium mb-1">Bundle</label>
-            <select className="w-full border rounded px-3 py-2" value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={busy}>
+            <select className="w-full border rounded-sm px-3 py-2" value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={busy}>
               <option value="">Choose a published bundle…</option>
               {bundles.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -166,12 +166,12 @@ const ArtistPromotions: React.FC = () => {
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Discount (%)</label>
-            <input type="number" min={5} max={90} step={1} className="w-full border rounded px-3 py-2" value={percent} onChange={(e) => setPercent(e.target.value)} disabled={busy} />
+            <input type="number" min={5} max={90} step={1} className="w-full border rounded-sm px-3 py-2" value={percent} onChange={(e) => setPercent(e.target.value)} disabled={busy} />
             <p className="text-xs text-gray-500 mt-1">Between 5% and 90%.</p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Duration (days)</label>
-            <input type="number" min={1} max={SALE_MAX_DAYS} step={1} className="w-full border rounded px-3 py-2" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} />
+            <input type="number" min={1} max={SALE_MAX_DAYS} step={1} className="w-full border rounded-sm px-3 py-2" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} />
             <p className="text-xs text-gray-500 mt-1">1–{SALE_MAX_DAYS} days.</p>
           </div>
         </div>

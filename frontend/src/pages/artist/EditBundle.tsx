@@ -80,7 +80,7 @@ const EditBundle: React.FC = () => {
     <div className="px-4 py-10 max-w-2xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Edit Bundle</h1>
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${isPublished ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+        <span className={`px-2 py-0.5 rounded-sm text-xs font-medium ${isPublished ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
           {bundle.status}
         </span>
       </div>
@@ -97,13 +97,13 @@ const EditBundle: React.FC = () => {
         onSave={handleSave}
         extraActions={
           isPublished ? (
-            <button type="button" className="px-4 py-2 rounded border disabled:opacity-50" onClick={handleUnpublish} disabled={busy}>
+            <button type="button" className="px-4 py-2 rounded-sm border disabled:opacity-50" onClick={handleUnpublish} disabled={busy}>
               Unpublish
             </button>
           ) : (
             <button
               type="button"
-              className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50"
+              className="px-4 py-2 rounded-sm bg-green-600 text-white disabled:opacity-50"
               onClick={handlePublish}
               disabled={busy || !!blocker}
               title={blocker ?? 'Publish to the marketplace'}

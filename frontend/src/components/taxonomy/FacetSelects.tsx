@@ -137,7 +137,7 @@ const FacetMultiSelect: React.FC<{
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={`Search ${label.toLowerCase()}…`}
-                    className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-8 text-sm focus:border-indigo-500 focus:outline-none"
+                    className="w-full rounded-sm border border-gray-300 py-1.5 pl-8 pr-8 text-sm focus:border-indigo-500 focus:outline-hidden"
                   />
                   {query && (
                     <button

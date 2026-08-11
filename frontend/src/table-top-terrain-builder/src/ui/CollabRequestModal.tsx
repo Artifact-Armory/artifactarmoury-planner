@@ -21,7 +21,7 @@ const CollabRequestModal: React.FC<Props> = ({ artistName, onConfirm, onCancel }
   }, [onConfirm, onCancel])
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-120 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-slate-900/60" onClick={onCancel} />
       <div className="relative w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-2">
@@ -31,7 +31,7 @@ const CollabRequestModal: React.FC<Props> = ({ artistName, onConfirm, onCancel }
             </span>
             <h2 className="text-base font-semibold text-gray-900">Collaborate with {artistName}?</h2>
           </div>
-          <button onClick={onCancel} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancel">
+          <button onClick={onCancel} className="rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Cancel">
             <X size={18} />
           </button>
         </div>

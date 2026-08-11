@@ -44,7 +44,7 @@ const ArtistCollaborations: React.FC = () => {
 
       {loading && <p className="text-gray-500">Loading…</p>}
       {error && !loading && (
-        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded border px-3 py-1.5" onClick={load}>Retry</button></div>
+        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border px-3 py-1.5" onClick={load}>Retry</button></div>
       )}
 
       {!loading && !error && requests.length === 0 && (
@@ -125,7 +125,7 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
   }
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs">
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
           <Users size={16} />
@@ -165,7 +165,7 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
                 on ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'
               } ${mode === 'all' ? 'cursor-default opacity-90' : 'hover:border-indigo-300'}`}
             >
-              <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded bg-gray-100">
+              <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-sm bg-gray-100">
                 {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : <ImageOff size={16} className="text-gray-400" />}
               </span>
               <span className="min-w-0">

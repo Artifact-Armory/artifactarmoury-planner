@@ -226,12 +226,12 @@ const CreateModel: React.FC = () => {
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
         <div>
           <label className="block text-sm font-medium mb-1">Name</label>
-          <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+          <input className="w-full border rounded-sm px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea className="w-full border rounded px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
+          <textarea className="w-full border rounded-sm px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
         </div>
 
         <div>
@@ -262,21 +262,21 @@ const CreateModel: React.FC = () => {
           {modelClass === 'terrain' && (
             <div>
               <label className="block text-sm font-medium mb-1">Category</label>
-              <select className="w-full border rounded px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
+              <select className="w-full border rounded-sm px-3 py-2" value={category} onChange={(e) => setCategory(e.target.value)} disabled={busy}>
                 {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
           )}
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
-            <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
+            <input type="number" min={0} step="0.01" className="w-full border rounded-sm px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Usage licence</label>
           <select
-            className="w-full border rounded px-3 py-2"
+            className="w-full border rounded-sm px-3 py-2"
             value={license}
             onChange={(e) => setLicense(e.target.value as 'personal' | 'commercial')}
             disabled={busy}
@@ -293,7 +293,7 @@ const CreateModel: React.FC = () => {
             Printer type <span className="font-normal text-gray-400">(optional)</span>
           </label>
           <select
-            className="w-full border rounded px-3 py-2"
+            className="w-full border rounded-sm px-3 py-2"
             value={printerType}
             onChange={(e) => setPrinterType(e.target.value as '' | 'fdm' | 'resin' | 'both')}
             disabled={busy}
@@ -352,7 +352,7 @@ const CreateModel: React.FC = () => {
           </p>
         </div>
 
-        <div className="rounded border border-dashed p-3">
+        <div className="rounded-sm border border-dashed p-3">
           <label className="block text-sm font-medium mb-1">Extra parts (optional — makes this a “set”)</label>
           <p className="text-xs text-gray-500 mb-2">
             Add more STL/OBJ/3MF files if this piece comes in several parts (e.g. separate floors).
@@ -397,7 +397,7 @@ const CreateModel: React.FC = () => {
 
         {phase === 'uploading' && (
           <div>
-            <div className="h-2 rounded bg-gray-200 overflow-hidden">
+            <div className="h-2 rounded-sm bg-gray-200 overflow-hidden">
               <div className="h-full bg-blue-600 transition-all" style={{ width: `${Math.max(4, progress)}%` }} />
             </div>
             <p className="text-sm text-gray-500 mt-1">Uploading… {progress}%</p>
@@ -405,7 +405,7 @@ const CreateModel: React.FC = () => {
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <button type="submit" className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
           {phase === 'uploading' ? 'Uploading…' : phase === 'processing' ? 'Processing…' : 'Upload model'}
         </button>
       </form>

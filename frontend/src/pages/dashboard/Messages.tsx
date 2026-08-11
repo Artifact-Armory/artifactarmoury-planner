@@ -84,7 +84,7 @@ const Messages: React.FC = () => {
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-bold text-gray-900">Messages</h1>
-      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:grid-cols-[320px_1fr] md:h-[70vh]">
+      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xs md:grid-cols-[320px_1fr] md:h-[70vh]">
         {/* Conversation list */}
         <aside className={`border-r border-gray-200 md:overflow-y-auto ${selectedId ? 'hidden md:block' : ''}`}>
           {loadingList ? (
@@ -107,7 +107,7 @@ const Messages: React.FC = () => {
                         active ? 'bg-indigo-50' : ''
                       }`}
                     >
-                      <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200">
                         {c.kind === 'system' ? (
                           <ShieldCheck size={18} className="text-indigo-600" />
                         ) : c.otherAvatar ? (
@@ -119,7 +119,7 @@ const Messages: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <p className="truncate text-sm font-medium text-gray-900">{name}</p>
-                          <span className="flex-shrink-0 text-xs text-gray-400">{timeAgo(c.lastMessageAt)}</span>
+                          <span className="shrink-0 text-xs text-gray-400">{timeAgo(c.lastMessageAt)}</span>
                         </div>
                         <p className="truncate text-xs text-gray-500">
                           {c.lastMessagePreview || 'No messages yet'}
@@ -204,7 +204,7 @@ const Messages: React.FC = () => {
                             {m.isSystem ? SITE_NAME : m.senderName || 'User'}
                           </p>
                         )}
-                        <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                        <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
                         <p className={`mt-1 text-[10px] ${isMine ? 'text-indigo-100' : 'text-gray-400'}`}>
                           {timeAgo(m.createdAt)}
                         </p>

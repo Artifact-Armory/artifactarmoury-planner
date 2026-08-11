@@ -62,7 +62,7 @@ const ArtistBundles: React.FC = () => {
           <h1 className="text-xl font-semibold">My Bundles</h1>
           <p className="text-gray-600 mt-1">Group several models under one price. Buyers get every STL in the bundle.</p>
         </div>
-        <Link to="/artist/bundles/new" className="px-4 py-2 rounded bg-blue-600 text-white whitespace-nowrap">
+        <Link to="/artist/bundles/new" className="px-4 py-2 rounded-sm bg-blue-600 text-white whitespace-nowrap">
           + New bundle
         </Link>
       </div>
@@ -71,14 +71,14 @@ const ArtistBundles: React.FC = () => {
       {error && !loading && (
         <div className="mt-8">
           <p className="text-red-600">{error}</p>
-          <button className="mt-2 px-3 py-1.5 rounded border" onClick={load}>Retry</button>
+          <button className="mt-2 px-3 py-1.5 rounded-sm border" onClick={load}>Retry</button>
         </div>
       )}
 
       {!loading && !error && bundles.length === 0 && (
         <div className="mt-10 text-center border rounded-lg py-12">
           <p className="text-gray-600">You haven’t created any bundles yet.</p>
-          <Link to="/artist/bundles/new" className="inline-block mt-4 px-4 py-2 rounded bg-blue-600 text-white">
+          <Link to="/artist/bundles/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-blue-600 text-white">
             Create your first bundle
           </Link>
         </div>
@@ -91,7 +91,7 @@ const ArtistBundles: React.FC = () => {
             const isPublished = b.status === 'published'
             return (
               <li key={b.id} className="flex items-center gap-4 p-4">
-                <div className="w-16 h-16 rounded bg-gray-100 overflow-hidden flex-shrink-0">
+                <div className="w-16 h-16 rounded-sm bg-gray-100 overflow-hidden shrink-0">
                   {b.thumbnailUrl ? (
                     <img src={b.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -101,26 +101,26 @@ const ArtistBundles: React.FC = () => {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium truncate">{b.name}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${isPublished ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+                    <span className={`px-2 py-0.5 rounded-sm text-xs font-medium ${isPublished ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
                       {b.status}
                     </span>
                   </div>
                   <p className="text-sm text-gray-500 mt-0.5">£{b.price.toFixed(2)} · {b.modelCount} models</p>
                   {rowError[b.id] && <p className="text-xs text-red-600 mt-1">{rowError[b.id]}</p>}
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {isPublished && (
-                    <button className="px-3 py-1.5 rounded border text-sm" onClick={() => navigate(`/bundles/${b.id}`)}>View</button>
+                    <button className="px-3 py-1.5 rounded-sm border text-sm" onClick={() => navigate(`/bundles/${b.id}`)}>View</button>
                   )}
-                  <button className="px-3 py-1.5 rounded border text-sm" onClick={() => navigate(`/artist/bundles/${b.id}/edit`)} disabled={busy}>
+                  <button className="px-3 py-1.5 rounded-sm border text-sm" onClick={() => navigate(`/artist/bundles/${b.id}/edit`)} disabled={busy}>
                     Edit
                   </button>
                   {isPublished && (
-                    <button className="px-3 py-1.5 rounded border text-sm disabled:opacity-50" onClick={() => handleUnpublish(b)} disabled={busy}>
+                    <button className="px-3 py-1.5 rounded-sm border text-sm disabled:opacity-50" onClick={() => handleUnpublish(b)} disabled={busy}>
                       {busy ? 'Working…' : 'Unpublish'}
                     </button>
                   )}
-                  <button className="px-3 py-1.5 rounded border border-red-300 text-red-700 text-sm disabled:opacity-50" onClick={() => handleDelete(b)} disabled={busy}>
+                  <button className="px-3 py-1.5 rounded-sm border border-red-300 text-red-700 text-sm disabled:opacity-50" onClick={() => handleDelete(b)} disabled={busy}>
                     Delete
                   </button>
                 </div>

@@ -68,7 +68,7 @@ const NotificationBell: React.FC = () => {
     <div className="relative" ref={ref}>
       <button
         onClick={openPanel}
-        className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
         aria-label="Notifications"
       >
         <Bell size={22} className="text-gray-700" />
@@ -104,7 +104,7 @@ const NotificationBell: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      {!n.isRead && <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-600" />}
+                      {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />}
                       <div className={n.isRead ? 'ml-4' : ''}>
                         <p className="text-sm font-medium text-gray-900">{n.title}</p>
                         {n.body && <p className="text-xs text-gray-500">{n.body}</p>}

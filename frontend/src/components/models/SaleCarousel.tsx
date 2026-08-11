@@ -32,7 +32,7 @@ const SaleCarousel: React.FC = () => {
           <Link
             key={item.id}
             to={`/models/${item.id}`}
-            className="group w-52 flex-shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+            className="group w-52 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs transition hover:-translate-y-1 hover:shadow-lg"
           >
             <div className="relative h-40 w-full bg-gray-100">
               {item.thumbnailUrl ? (
@@ -44,7 +44,7 @@ const SaleCarousel: React.FC = () => {
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">No preview</div>
               )}
-              <span className="absolute left-2 top-2 rounded-full bg-rose-600/95 px-2.5 py-1 text-xs font-semibold text-white shadow">
+              <span className="absolute left-2 top-2 rounded-full bg-rose-600/95 px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
                 -{item.salePercent}%
               </span>
             </div>

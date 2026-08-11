@@ -70,7 +70,7 @@ const BundleDetails: React.FC = () => {
     <div className="mx-auto max-w-5xl px-4 py-10">
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
-          <div className="overflow-hidden rounded-2xl bg-white shadow">
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
             <div className="relative h-80 w-full bg-gray-100">
               {bundle.thumbnailUrl ? (
                 <img src={bundle.thumbnailUrl} alt={bundle.name} className="h-full w-full object-cover" />
@@ -80,17 +80,17 @@ const BundleDetails: React.FC = () => {
             </div>
           </div>
 
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
+          <section className="rounded-2xl bg-white p-6 shadow-xs">
             <h2 className="text-lg font-semibold text-gray-900">About this bundle</h2>
             <p className="mt-3 text-sm leading-relaxed text-gray-600">{bundle.description ?? 'No description provided.'}</p>
           </section>
 
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
+          <section className="rounded-2xl bg-white p-6 shadow-xs">
             <h2 className="text-lg font-semibold text-gray-900">Includes {bundle.models.length} models</h2>
             <ul className="mt-4 divide-y">
               {bundle.models.map((m) => (
                 <li key={m.id} className="flex items-center gap-3 py-3">
-                  <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-gray-100">
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm bg-gray-100">
                     {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                   </div>
                   <Link to={`/models/${m.id}`} className="flex-1 truncate text-sm font-medium text-gray-900 hover:text-indigo-600">
@@ -105,7 +105,7 @@ const BundleDetails: React.FC = () => {
 
         <aside>
           <section className="rounded-2xl bg-white p-6 shadow-md">
-            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">BUNDLE</span>
+            <span className="rounded-sm bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">BUNDLE</span>
             <h1 className="mt-2 text-2xl font-semibold text-gray-900">{bundle.name}</h1>
             {bundle.artistName && <p className="mt-1 text-sm text-gray-500">by {bundle.artistName}</p>}
 

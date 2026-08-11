@@ -212,16 +212,16 @@ const ArtistSettings: React.FC = () => {
       {/* LIVE PREVIEW — reflects the current (unsaved) edits. */}
       <div className="mt-6">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Live preview</p>
-        <div className="relative overflow-hidden rounded-2xl border shadow-sm">
+        <div className="relative overflow-hidden rounded-2xl border shadow-xs">
           {/* page background */}
           <div className="absolute inset-0">
             {backgroundUrl
               ? <img src={backgroundUrl} alt="" className="h-full w-full object-cover" />
               : <div className="h-full w-full bg-gray-100" />}
-            <div className="absolute inset-0 bg-white/75 backdrop-blur-sm" />
+            <div className="absolute inset-0 bg-white/75 backdrop-blur-xs" />
           </div>
           {/* hero card */}
-          <div className="relative m-3 overflow-hidden rounded-xl bg-white/95 shadow">
+          <div className="relative m-3 overflow-hidden rounded-xl bg-white/95 shadow-sm">
             <div className="h-20 w-full" style={{ backgroundImage: `linear-gradient(to right, ${accentHex}, ${accentHex}cc)` }}>
               {bannerUrl && <img src={bannerUrl} alt="" className="h-full w-full object-cover" />}
             </div>
@@ -257,7 +257,7 @@ const ArtistSettings: React.FC = () => {
         {/* Banner */}
         <div>
           <label className="block text-sm font-medium mb-1">Banner</label>
-          <div className="relative h-32 w-full overflow-hidden rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500">
+          <div className="relative h-32 w-full overflow-hidden rounded-lg bg-linear-to-r from-indigo-500 to-purple-500">
             {bannerUrl && <img src={bannerUrl} alt="banner" className="h-full w-full object-cover" />}
           </div>
           <input type="file" accept="image/*" className="mt-2 text-sm" disabled={uploading !== null}
@@ -306,7 +306,7 @@ const ArtistSettings: React.FC = () => {
               type="color"
               value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#4f46e5'}
               onChange={(e) => setAccent(e.target.value)}
-              className="h-9 w-12 cursor-pointer rounded border p-0.5"
+              className="h-9 w-12 cursor-pointer rounded-sm border p-0.5"
             />
             <span className="text-sm text-gray-600">{accent || 'Default theme'}</span>
             {accent && (
@@ -319,18 +319,18 @@ const ArtistSettings: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Studio / artist name</label>
-          <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="w-full border rounded-sm px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Bio</label>
-          <textarea className="w-full border rounded px-3 py-2" rows={5} value={bio} onChange={(e) => setBio(e.target.value)}
+          <textarea className="w-full border rounded-sm px-3 py-2" rows={5} value={bio} onChange={(e) => setBio(e.target.value)}
             placeholder="Tell buyers about your studio, your style, what makes your terrain special…" />
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Link (Patreon, Instagram, website…)</label>
-          <input className="w-full border rounded px-3 py-2" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+          <input className="w-full border rounded-sm px-3 py-2" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
         </div>
 
         <button type="submit" disabled={saving || uploading !== null} className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
@@ -352,13 +352,13 @@ const ArtistSettings: React.FC = () => {
               return (
                 <li key={mid} className="flex items-center gap-3 rounded-lg border bg-white p-2">
                   <span className="w-5 text-center text-sm text-gray-400">{i + 1}</span>
-                  <div className="h-12 w-12 overflow-hidden rounded bg-gray-100">
+                  <div className="h-12 w-12 overflow-hidden rounded-sm bg-gray-100">
                     {m?.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{m?.name ?? 'Model'}</span>
-                  <button type="button" className="rounded p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === 0} onClick={() => moveFeatured(i, -1)}><ArrowUp size={16} /></button>
-                  <button type="button" className="rounded p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === featuredIds.length - 1} onClick={() => moveFeatured(i, 1)}><ArrowDown size={16} /></button>
-                  <button type="button" className="rounded p-1 text-red-600 hover:bg-red-50" onClick={() => toggleFeatured(mid)}><X size={16} /></button>
+                  <button type="button" className="rounded-sm p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === 0} onClick={() => moveFeatured(i, -1)}><ArrowUp size={16} /></button>
+                  <button type="button" className="rounded-sm p-1 hover:bg-gray-100 disabled:opacity-30" disabled={i === featuredIds.length - 1} onClick={() => moveFeatured(i, 1)}><ArrowDown size={16} /></button>
+                  <button type="button" className="rounded-sm p-1 text-red-600 hover:bg-red-50" onClick={() => toggleFeatured(mid)}><X size={16} /></button>
                 </li>
               )
             })}
@@ -384,7 +384,7 @@ const ArtistSettings: React.FC = () => {
                 value={modelSearch}
                 onChange={(e) => setModelSearch(e.target.value)}
                 placeholder="Search your models…"
-                className="w-56 rounded-md border border-gray-300 py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+                className="w-56 rounded-md border border-gray-300 py-1.5 pl-8 pr-3 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
               />
             </div>
           )}

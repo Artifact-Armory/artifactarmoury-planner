@@ -18,7 +18,7 @@ const MainLayout: React.FC = () => {
       <Header />
       <VerifyEmailBanner />
 
-      <main className="flex-grow">
+      <main className="grow">
         <Outlet />
       </main>
       

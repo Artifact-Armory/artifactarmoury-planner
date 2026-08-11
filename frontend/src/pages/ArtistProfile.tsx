@@ -147,14 +147,14 @@ const ArtistProfile: React.FC = () => {
       {background && (
         <div className="pointer-events-none fixed inset-0 -z-10">
           <img src={background} alt="" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-white/75 backdrop-blur-sm" />
+          <div className="absolute inset-0 bg-white/75 backdrop-blur-xs" />
         </div>
       )}
 
       <div className="mx-auto max-w-6xl px-4 py-10">
-        <section className="overflow-hidden rounded-3xl bg-white/95 shadow">
+        <section className="overflow-hidden rounded-3xl bg-white/95 shadow-sm">
           <div
-            className="h-48 w-full bg-gradient-to-r from-indigo-500 to-purple-500"
+            className="h-48 w-full bg-linear-to-r from-indigo-500 to-purple-500"
             style={accent ? { backgroundImage: `linear-gradient(to right, ${accent}, ${accent}cc)` } : undefined}
           >
             {artist.bannerImageUrl ? (
@@ -249,7 +249,7 @@ const ArtistProfile: React.FC = () => {
           <section className="mt-12">
             <h2 className="text-2xl font-semibold text-gray-900">Featured</h2>
             <p className="text-sm text-gray-500">Hand-picked by {artist.name}</p>
-            <div className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto pb-4 [scrollbar-width:thin]">
+            <div className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto pb-4 scrollbar-thin">
               {featured.map((model) => (
                 <div key={model.id} className="w-72 flex-none snap-start">
                   <ModelCard model={model} />
@@ -286,7 +286,7 @@ const ArtistProfile: React.FC = () => {
                   setSortBy(event.target.value)
                   setPage(1)
                 }}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
               >
                 {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -328,7 +328,7 @@ const ArtistProfile: React.FC = () => {
         )}
 
         {models.length > 0 && (
-          <section className="mt-12 rounded-3xl bg-gradient-to-r from-slate-900 to-slate-800 px-6 py-10 text-white shadow-lg">
+          <section className="mt-12 rounded-3xl bg-linear-to-r from-slate-900 to-slate-800 px-6 py-10 text-white shadow-lg">
             <h3 className="text-xl font-semibold">Want this artist to build your next table?</h3>
             <p className="mt-2 max-w-2xl text-sm text-slate-300">
               Reach out to request commissions or custom terrain packs. Premium members get priority responses and
@@ -349,9 +349,9 @@ const ArtistProfile: React.FC = () => {
 const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ table, accent }) => (
   <Link
     to={`/planner/view/${table.id}`}
-    className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md"
+    className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
   >
-    <div className="relative aspect-[16/9] w-full bg-gray-100">
+    <div className="relative aspect-video w-full bg-gray-100">
       {table.thumbnails.length > 0 ? (
         <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px">
           {table.thumbnails.slice(0, 4).map((src, i) => (

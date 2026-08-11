@@ -29,7 +29,7 @@ const PublicTables: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       {/* Hero */}
-      <section className="overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 to-slate-800 px-8 py-10 text-white shadow-lg">
+      <section className="overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 to-slate-800 px-8 py-10 text-white shadow-lg">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-widest text-indigo-300">Shop the look</p>
@@ -41,7 +41,7 @@ const PublicTables: React.FC = () => {
           </div>
           <Link
             to="/planner"
-            className="inline-flex items-center gap-2 self-start rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow hover:bg-slate-100"
+            className="inline-flex items-center gap-2 self-start rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-100"
           >
             <LayoutGrid size={16} /> Open the planner
           </Link>
@@ -63,7 +63,7 @@ const PublicTables: React.FC = () => {
                 setSort(e.target.value as typeof sort)
                 setPage(1)
               }}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
             >
               {sortOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -124,10 +124,10 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
   const thumbs = table.thumbnails.slice(0, 4)
 
   return (
-    <li className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <li className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xs transition hover:-translate-y-0.5 hover:shadow-md">
       <Link to={`/planner/view/${table.id}`} className="block">
         {/* Mosaic preview built from the pieces on the table */}
-        <div className="relative aspect-[4/3] w-full bg-gray-100">
+        <div className="relative aspect-4/3 w-full bg-gray-100">
           {thumbs.length > 0 ? (
             <div
               className={`grid h-full w-full gap-0.5 ${
@@ -150,7 +150,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
               <Layers size={36} />
             </div>
           )}
-          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-xs font-medium text-white backdrop-blur">
+          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
             <Layers size={12} /> {table.pieceCount} {table.pieceCount === 1 ? 'piece' : 'pieces'}
           </span>
         </div>

@@ -45,9 +45,9 @@ export const BarList: React.FC<{
       {data.map((d, i) => (
         <li key={i} className="flex items-center gap-3 text-sm">
           <span className="w-40 shrink-0 truncate text-gray-700" title={d.label}>{d.label}</span>
-          <span className="relative h-4 flex-1 overflow-hidden rounded bg-gray-100">
+          <span className="relative h-4 flex-1 overflow-hidden rounded-sm bg-gray-100">
             <span
-              className={`absolute inset-y-0 left-0 rounded ${d.danger ? 'bg-amber-400' : 'bg-indigo-500'}`}
+              className={`absolute inset-y-0 left-0 rounded-sm ${d.danger ? 'bg-amber-400' : 'bg-indigo-500'}`}
               style={{ width: `${(d.value / max) * 100}%` }}
             />
           </span>

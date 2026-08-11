@@ -1187,7 +1187,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
           {/* Multi-artist credit — the artists whose models feature in this table. */}
           {contributors.length > 0 && (
-            <div className="pointer-events-auto fixed bottom-4 left-4 z-30 flex max-w-[70vw] flex-wrap items-center gap-1.5 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 shadow">
+            <div className="pointer-events-auto fixed bottom-4 left-4 z-30 flex max-w-[70vw] flex-wrap items-center gap-1.5 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 shadow-sm">
               <span className="text-xs font-medium text-gray-500">Featured artists:</span>
               {contributors.map((c) => {
                 const avatar = assetUrl(c.profileImageUrl)

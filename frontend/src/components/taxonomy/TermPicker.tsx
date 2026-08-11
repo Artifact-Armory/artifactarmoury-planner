@@ -236,7 +236,7 @@ const TermPicker: React.FC<TermPickerProps> = ({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search tags (e.g. hedgerow, bunker, 28mm)…"
-          className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-9 text-sm focus:border-indigo-500 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-9 text-sm focus:border-indigo-500 focus:outline-hidden"
           disabled={disabled}
         />
         {query && (

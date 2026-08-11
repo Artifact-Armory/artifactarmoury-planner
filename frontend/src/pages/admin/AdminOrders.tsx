@@ -109,7 +109,7 @@ const AdminOrders: React.FC = () => {
                     <select
                       value={o.fulfillment_status}
                       onChange={(e) => fulfilMut.mutate({ id: o.id, s: e.target.value })}
-                      className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
+                      className="text-xs border border-gray-200 rounded-sm px-2 py-1 bg-white"
                     >
                       {FULFILLMENT.map((f) => (
                         <option key={f} value={f}>

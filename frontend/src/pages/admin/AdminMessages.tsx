@@ -109,7 +109,7 @@ const AdminMessages: React.FC = () => {
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Broadcast */}
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-xs">
           <div className="mb-4 flex items-center gap-2">
             <Megaphone size={20} className="text-indigo-600" />
             <h2 className="text-lg font-semibold text-gray-900">Broadcast announcement</h2>
@@ -153,7 +153,7 @@ const AdminMessages: React.FC = () => {
         </div>
 
         {/* Direct message */}
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-xs">
           <div className="mb-4 flex items-center gap-2">
             <Mail size={20} className="text-indigo-600" />
             <h2 className="text-lg font-semibold text-gray-900">Message a user</h2>
@@ -196,7 +196,7 @@ const AdminMessages: React.FC = () => {
       </div>
 
       {/* Support threads */}
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="rounded-lg border border-gray-200 bg-white shadow-xs">
         <div className="flex items-center gap-2 border-b border-gray-200 px-5 py-4">
           <Inbox size={20} className="text-indigo-600" />
           <h2 className="text-lg font-semibold text-gray-900">Support threads</h2>
@@ -217,7 +217,7 @@ const AdminMessages: React.FC = () => {
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-medium text-gray-900">{t.userName}</p>
                       {t.awaitingReply && (
-                        <span className="flex-shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
                           Needs reply
                         </span>
                       )}
@@ -250,7 +250,7 @@ const AdminMessages: React.FC = () => {
                           <p className="mb-0.5 text-xs font-medium opacity-70">
                             {fromSite ? SITE_NAME : m.senderName || 'User'}
                           </p>
-                          <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                          <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
                           <p className={`mt-1 text-[10px] ${fromSite ? 'text-indigo-100' : 'text-gray-400'}`}>
                             {timeAgo(m.createdAt)}
                           </p>

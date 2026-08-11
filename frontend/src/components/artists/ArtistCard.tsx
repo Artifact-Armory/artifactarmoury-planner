@@ -11,9 +11,9 @@ const ArtistCard: React.FC<ArtistCardProps> = ({ artist }) => {
   return (
     <Link
       to={`/artists/${artist.id}`}
-      className="group flex h-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+      className="group flex h-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:-translate-y-1 hover:shadow-lg"
     >
-      <div className="relative h-32 w-full bg-gradient-to-br from-indigo-200 via-purple-200 to-pink-200">
+      <div className="relative h-32 w-full bg-linear-to-br from-indigo-200 via-purple-200 to-pink-200">
         {artist.bannerImageUrl ? (
           <img src={artist.bannerImageUrl} alt={artist.name} className="h-full w-full object-cover" />
         ) : null}

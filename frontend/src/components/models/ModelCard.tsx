@@ -48,7 +48,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
 
   return (
     <article
-      className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+      className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs transition hover:-translate-y-1 hover:shadow-lg"
       role="button"
       tabIndex={0}
       onClick={() => navigate(`/models/${model.id}`)}
@@ -73,7 +73,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
 
         <button
           onClick={handleFavorite}
-          className="absolute right-3 top-3 rounded-full bg-white/90 p-2 text-gray-500 shadow hover:text-red-500"
+          className="absolute right-3 top-3 rounded-full bg-white/90 p-2 text-gray-500 shadow-sm hover:text-red-500"
           aria-label="Add to wishlist"
         >
           <Heart size={16} />
@@ -81,12 +81,12 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
 
         <div className="absolute left-3 top-3 flex flex-col items-start gap-1.5">
           {model.onSale && model.salePercent != null && (
-            <span className="rounded-full bg-rose-600/95 px-2.5 py-1 text-xs font-semibold text-white shadow">
+            <span className="rounded-full bg-rose-600/95 px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
               -{model.salePercent}%
             </span>
           )}
           {FEATURES.printAndShip && model.printConsent && model.printPrice != null && (
-            <span className="rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow">
+            <span className="rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
               Print &amp; Ship · {formatPrice(model.printPrice)}
             </span>
           )}

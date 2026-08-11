@@ -46,7 +46,7 @@ const MyModels: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow">
+      <section className="rounded-3xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-gray-900">My models</h1>
         <p className="mt-2 text-sm text-gray-600">
           Every model you've purchased — download the STL any time and leave a review.
@@ -65,7 +65,7 @@ const MyModels: React.FC = () => {
             return (
               <article
                 key={model.id}
-                className="flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                className="flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs"
               >
                 <Link to={`/models/${model.id}`} className="relative block h-44 w-full overflow-hidden bg-gray-100">
                   {model.thumbnailUrl ? (

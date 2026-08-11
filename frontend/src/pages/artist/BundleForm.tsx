@@ -78,12 +78,12 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
     <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
       <div>
         <label className="block text-sm font-medium mb-1">Bundle name</label>
-        <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+        <input className="w-full border rounded-sm px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
       </div>
 
       <div>
         <label className="block text-sm font-medium mb-1">Description</label>
-        <textarea className="w-full border rounded px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
+        <textarea className="w-full border rounded-sm px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
         <p className={`text-xs mt-1 ${description.trim().length >= 20 ? 'text-gray-400' : 'text-amber-700'}`}>
           {description.trim().length}/20 characters (needed to publish)
         </p>
@@ -92,13 +92,13 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Bundle price (£)</label>
-          <input type="number" min={0} step="0.01" className="w-full border rounded px-3 py-2" value={price} onChange={(e) => setPrice(e.target.value)} disabled={busy} />
+          <input type="number" min={0} step="0.01" className="w-full border rounded-sm px-3 py-2" value={price} onChange={(e) => setPrice(e.target.value)} disabled={busy} />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Thumbnail {initial?.thumbnailUrl ? '(replace)' : ''}</label>
           <input type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
           {initial?.thumbnailUrl && !thumbFile && (
-            <img src={initial.thumbnailUrl} alt="" className="mt-2 h-16 w-16 rounded object-cover" />
+            <img src={initial.thumbnailUrl} alt="" className="mt-2 h-16 w-16 rounded-sm object-cover" />
           )}
         </div>
       </div>
@@ -110,14 +110,14 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
         ) : models.length === 0 ? (
           <p className="text-sm text-gray-500">You have no finished models yet — upload some first.</p>
         ) : (
-          <ul className="max-h-72 overflow-y-auto rounded border divide-y">
+          <ul className="max-h-72 overflow-y-auto rounded-sm border divide-y">
             {models.map((m) => {
               const checked = selected.includes(m.id)
               return (
                 <li key={m.id}>
                   <label className="flex items-center gap-3 p-2 cursor-pointer hover:bg-gray-50">
                     <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} disabled={busy} />
-                    <div className="h-10 w-10 rounded bg-gray-100 overflow-hidden flex-shrink-0">
+                    <div className="h-10 w-10 rounded-sm bg-gray-100 overflow-hidden shrink-0">
                       {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                     </div>
                     <span className="flex-1 truncate text-sm">{m.name}</span>
@@ -133,7 +133,7 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex items-center gap-3">
-        <button type="submit" className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
           {busy ? 'Saving…' : submitLabel}
         </button>
         {extraActions}

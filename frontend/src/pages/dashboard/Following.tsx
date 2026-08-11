@@ -45,7 +45,7 @@ const Following: React.FC = () => {
               <Link
                 key={a.id}
                 to={`/artists/${a.id}`}
-                className="flex items-center gap-2 rounded-full border border-gray-200 bg-white py-1.5 pl-1.5 pr-4 shadow-sm hover:border-indigo-300"
+                className="flex items-center gap-2 rounded-full border border-gray-200 bg-white py-1.5 pl-1.5 pr-4 shadow-xs hover:border-indigo-300"
               >
                 <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-xs font-semibold text-gray-500">
                   {a.profileImageUrl ? (

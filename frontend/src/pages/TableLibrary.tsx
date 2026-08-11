@@ -41,7 +41,7 @@ export const TableLibrary: React.FC = () => {
         {assets.map((asset) => (
           <article
             key={asset.asset_id}
-            className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+            className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-xs"
           >
             <header className="space-y-1">
               <h2 className="text-lg font-semibold text-gray-900">{asset.name}</h2>

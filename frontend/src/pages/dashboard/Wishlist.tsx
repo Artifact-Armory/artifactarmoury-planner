@@ -25,12 +25,12 @@ const Wishlist: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow">
+      <section className="rounded-3xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-gray-900">Wishlist</h1>
         <p className="mt-2 text-sm text-gray-600">Save models to compare and purchase later.</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
         {wishlistQuery.isLoading ? (
           <div className="flex justify-center py-16">
             <Spinner size="lg" />

@@ -64,7 +64,7 @@ const ProductsDetail: React.FC = () => {
                       {p.isSet && <Layers size={12} className="mr-1 inline text-gray-400" />}
                       {p.name}
                     </Link>
-                    {p.status !== 'published' && <span className="ml-2 rounded bg-gray-100 px-1.5 text-xs text-gray-500">{p.status}</span>}
+                    {p.status !== 'published' && <span className="ml-2 rounded-sm bg-gray-100 px-1.5 text-xs text-gray-500">{p.status}</span>}
                   </td>
                   <td className="px-4 py-3 text-right">{p.units}</td>
                   <td className="px-4 py-3 text-right text-gray-600">{formatPrice(p.gross)}</td>

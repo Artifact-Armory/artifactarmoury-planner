@@ -30,7 +30,7 @@ const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ ti
           <Link
             key={m.id}
             to={`/models/${m.id}`}
-            className="group w-44 flex-shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-sm hover:border-indigo-200 hover:shadow"
+            className="group w-44 shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-xs hover:border-indigo-200 hover:shadow-sm"
           >
             <div className="h-32 w-full overflow-hidden rounded-lg bg-gray-100">
               {m.thumbnailUrl ? (
@@ -234,7 +234,7 @@ const ModelDetails: React.FC = () => {
     <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
-          <div className="overflow-hidden rounded-2xl bg-white shadow">
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
             <div className="relative h-80 w-full bg-gray-100">
               {model.thumbnailUrl ? (
                 <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
@@ -249,7 +249,7 @@ const ModelDetails: React.FC = () => {
                     key={image.id}
                     src={image.imageUrl ?? image.imagePath}
                     alt={image.caption ?? model.name}
-                    className="h-20 w-20 flex-shrink-0 rounded-lg object-cover"
+                    className="h-20 w-20 shrink-0 rounded-lg object-cover"
                   />
                 ))}
               </div>
@@ -257,9 +257,9 @@ const ModelDetails: React.FC = () => {
           </div>
 
           {model.partCount && model.partCount > 1 && (
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
+            <section className="rounded-2xl bg-white p-6 shadow-xs">
               <div className="flex items-center gap-2">
-                <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                <span className="rounded-sm bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
                   SET · {model.partCount} parts
                 </span>
                 <h2 className="text-lg font-semibold text-gray-900">Multi-part model</h2>
@@ -272,7 +272,7 @@ const ModelDetails: React.FC = () => {
                 <ul className="mt-4 divide-y">
                   {[{ id: 'primary', name: 'Part 1', thumbnailUrl: model.thumbnailUrl }, ...model.parts].map((p, i) => (
                     <li key={p.id} className="flex items-center gap-3 py-2">
-                      <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-gray-100">
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-gray-100">
                         {p.thumbnailUrl && <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                       </div>
                       <span className="text-sm text-gray-700">{p.name || `Part ${i + 1}`}</span>
@@ -283,7 +283,7 @@ const ModelDetails: React.FC = () => {
             </section>
           )}
 
-          <section className="rounded-2xl bg-white p-6 shadow-sm">
+          <section className="rounded-2xl bg-white p-6 shadow-xs">
             <h2 className="text-lg font-semibold text-gray-900">Description</h2>
             <p className="mt-3 text-sm leading-relaxed text-gray-600">{model.description ?? 'No description provided.'}</p>
 
@@ -324,7 +324,7 @@ const ModelDetails: React.FC = () => {
           </section>
 
           {tablesQuery.data && tablesQuery.data.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
+            <section className="rounded-2xl bg-white p-6 shadow-xs">
               <h2 className="text-lg font-semibold text-gray-900">
                 Featured in {tablesQuery.data.length} table{tablesQuery.data.length === 1 ? '' : 's'}
               </h2>
@@ -345,7 +345,7 @@ const ModelDetails: React.FC = () => {
           )}
 
           {model.recentReviews && model.recentReviews.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
+            <section className="rounded-2xl bg-white p-6 shadow-xs">
               <h2 className="text-lg font-semibold text-gray-900">Recent reviews</h2>
               <div className="mt-4 space-y-4">
                 {model.recentReviews.map((review) => (
@@ -367,7 +367,7 @@ const ModelDetails: React.FC = () => {
           )}
 
           {model.versions && model.versions.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
+            <section className="rounded-2xl bg-white p-6 shadow-xs">
               <h2 className="text-lg font-semibold text-gray-900">Version history</h2>
               <p className="mt-1 text-sm text-gray-500">
                 Own this model? You can re-download the latest version free from your library.
@@ -507,7 +507,7 @@ const ModelDetails: React.FC = () => {
                 </p>
                 <button
                   onClick={handlePrintAndShip}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:bg-indigo-700"
                 >
                   <Printer size={16} />
                   Order printed &amp; shipped · {formatPrice(model.printPrice)}

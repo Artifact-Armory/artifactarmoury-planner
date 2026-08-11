@@ -31,7 +31,7 @@ const Tile: React.FC<{
   label: string; icon: React.ReactNode; to?: string; children: React.ReactNode; hint?: string
 }> = ({ label, icon, to, children, hint }) => {
   const body = (
-    <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow">
+    <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-xs transition hover:border-indigo-300 hover:shadow-sm">
       <div className="flex items-center gap-2 text-gray-400">
         {icon}
         <span className="text-xs font-medium uppercase tracking-wide">{label}</span>

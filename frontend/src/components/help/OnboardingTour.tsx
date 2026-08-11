@@ -100,7 +100,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
   }
 
   return (
-    <div className="fixed inset-0 z-[100]" role="dialog" aria-modal="true" aria-label="Guided tour">
+    <div className="fixed inset-0 z-100" role="dialog" aria-modal="true" aria-label="Guided tour">
       {/* Click catcher — blocks interaction with the page beneath the tour. */}
       <div className="absolute inset-0" style={{ pointerEvents: 'auto' }} />
 
@@ -129,7 +129,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
           <h3 className="text-sm font-semibold text-gray-900">{step.title}</h3>
           <button
             onClick={finish}
-            className="-mr-1 -mt-1 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="-mr-1 -mt-1 rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
             aria-label="Skip tour"
           >
             <X size={16} />

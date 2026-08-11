@@ -20,14 +20,14 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-10">
-      <section className="rounded-3xl bg-white p-8 shadow">
+      <section className="rounded-3xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-gray-900">Welcome back</h1>
         <p className="mt-2 text-sm text-gray-600">
           Track your recent orders, manage saved tables, and discover new terrain to add to your collection.
         </p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">My models</h2>
           <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/models')}>
@@ -45,7 +45,7 @@ const Dashboard: React.FC = () => {
               <Link
                 key={model.id}
                 to="/dashboard/models"
-                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md"
+                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
               >
                 <div className="relative h-28 w-full overflow-hidden bg-gray-100">
                   {model.thumbnailUrl ? (
@@ -81,7 +81,7 @@ const Dashboard: React.FC = () => {
         )}
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Recent orders</h2>
           <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/purchases')}>
@@ -119,7 +119,7 @@ const Dashboard: React.FC = () => {
         )}
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Recommended for you</h2>
           <Button variant="outline" size="sm" onClick={() => navigate('/browse?sortBy=popular')}>

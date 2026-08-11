@@ -145,7 +145,7 @@ const EditRelease: React.FC = () => {
       <p className="text-gray-600 mt-1">Status: <span className="font-medium">{release.status}</span></p>
 
       {locked && (
-        <div className="mt-4 rounded bg-green-50 text-green-800 text-sm px-3 py-2">
+        <div className="mt-4 rounded-sm bg-green-50 text-green-800 text-sm px-3 py-2">
           This release has gone live and can no longer be edited.
         </div>
       )}
@@ -154,11 +154,11 @@ const EditRelease: React.FC = () => {
       <div className="mt-6 space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">Release name</label>
-          <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy || locked} />
+          <input className="w-full border rounded-sm px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} disabled={busy || locked} />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Go-live date &amp; time</label>
-          <input type="datetime-local" className="border rounded px-3 py-2" value={dateInput} onChange={(e) => setDateInput(e.target.value)} disabled={busy || locked} />
+          <input type="datetime-local" className="border rounded-sm px-3 py-2" value={dateInput} onChange={(e) => setDateInput(e.target.value)} disabled={busy || locked} />
           <p className="text-xs text-gray-500 mt-1">Uses your local time zone.</p>
         </div>
 
@@ -167,13 +167,13 @@ const EditRelease: React.FC = () => {
 
         {!locked && (
           <div className="flex flex-wrap gap-3">
-            <button onClick={saveMeta} className="px-4 py-2 rounded bg-gray-800 text-white disabled:opacity-50" disabled={busy}>Save</button>
+            <button onClick={saveMeta} className="px-4 py-2 rounded-sm bg-gray-800 text-white disabled:opacity-50" disabled={busy}>Save</button>
             {release.status === 'scheduled' ? (
-              <button onClick={doUnschedule} className="px-4 py-2 rounded border disabled:opacity-50" disabled={busy}>Unschedule</button>
+              <button onClick={doUnschedule} className="px-4 py-2 rounded-sm border disabled:opacity-50" disabled={busy}>Unschedule</button>
             ) : (
-              <button onClick={doSchedule} className="px-4 py-2 rounded bg-amber-500 text-white disabled:opacity-50" disabled={busy}>Schedule drop</button>
+              <button onClick={doSchedule} className="px-4 py-2 rounded-sm bg-amber-500 text-white disabled:opacity-50" disabled={busy}>Schedule drop</button>
             )}
-            <button onClick={doPublishNow} className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50" disabled={busy}>Publish now</button>
+            <button onClick={doPublishNow} className="px-4 py-2 rounded-sm bg-green-600 text-white disabled:opacity-50" disabled={busy}>Publish now</button>
           </div>
         )}
       </div>
@@ -186,7 +186,7 @@ const EditRelease: React.FC = () => {
         ) : (
           <ul className="mt-2 space-y-2">
             {items.map((it) => (
-              <li key={it.id} className="flex items-center justify-between border rounded px-3 py-2">
+              <li key={it.id} className="flex items-center justify-between border rounded-sm px-3 py-2">
                 <div>
                   <span className="text-xs uppercase text-gray-400 mr-2">{it.itemType}</span>
                   <span className="text-gray-900">{it.name}</span>
@@ -215,7 +215,7 @@ const EditRelease: React.FC = () => {
                       <button
                         key={row.id}
                         onClick={() => toggle(type, row.id)}
-                        className={`flex items-center justify-between border rounded px-3 py-2 text-left ${added ? 'border-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'}`}
+                        className={`flex items-center justify-between border rounded-sm px-3 py-2 text-left ${added ? 'border-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'}`}
                       >
                         <span className="truncate">
                           {row.name}

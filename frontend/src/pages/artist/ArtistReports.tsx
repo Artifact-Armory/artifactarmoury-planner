@@ -39,16 +39,16 @@ const ArtistReports: React.FC = () => {
           {reports.map((r) => {
             const meta = STATUS_META[r.status] ?? { label: r.status, cls: 'bg-gray-100 text-gray-600' }
             return (
-              <li key={r.id} className="rounded-xl border bg-white p-5 shadow-sm">
+              <li key={r.id} className="rounded-xl border bg-white p-5 shadow-xs">
                 <div className="flex items-start gap-4">
-                  <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
+                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-100">
                     {r.thumbnail_path && <img src={assetUrl(r.thumbnail_path)} alt="" className="h-full w-full object-cover" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-gray-900">{r.model_name ?? 'Model'}</span>
-                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{REASON_LABEL[r.reason] ?? r.reason}</span>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+                      <span className="rounded-sm bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{REASON_LABEL[r.reason] ?? r.reason}</span>
+                      <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                     </div>
                     <p className="mt-1 text-xs text-gray-400">Reported {new Date(r.created_at).toLocaleDateString()}</p>
                     {r.resolution_summary && (

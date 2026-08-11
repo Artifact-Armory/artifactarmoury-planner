@@ -86,19 +86,19 @@ const AdminModeration: React.FC = () => {
 const Tile: React.FC<{ report: ReportTile; onOpen: () => void }> = ({ report: r, onOpen }) => {
   const meta = STATUS_META[r.status] ?? { label: r.status, cls: 'bg-gray-100 text-gray-600' }
   return (
-    <button onClick={onOpen} className="flex flex-col rounded-xl border bg-white p-4 text-left shadow-sm transition hover:border-indigo-300 hover:shadow">
+    <button onClick={onOpen} className="flex flex-col rounded-xl border bg-white p-4 text-left shadow-xs transition hover:border-indigo-300 hover:shadow-sm">
       <div className="flex items-start gap-3">
-        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-100">
           {r.thumbnail_path && <img src={assetUrl(r.thumbnail_path)} alt="" className="h-full w-full object-cover" />}
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-gray-900">{r.model_name ?? 'Deleted model'}</p>
           <p className="truncate text-xs text-gray-400">by {r.artist_name || r.artist_display_name || '—'}</p>
-          <span className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>{meta.label}</span>
+          <span className={`mt-1 inline-block rounded-sm px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>{meta.label}</span>
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between">
-        <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">{r.reason_label}</span>
+        <span className="rounded-sm bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">{r.reason_label}</span>
         <span className="flex items-center gap-2 text-xs text-gray-400">
           {r.attachment_count > 0 && <span className="flex items-center gap-0.5"><Paperclip size={11} />{r.attachment_count}</span>}
           {new Date(r.created_at).toLocaleDateString()}
@@ -153,9 +153,9 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
           <div className="space-y-6 px-6 py-5">
             {/* Reason + status */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded bg-red-50 px-2.5 py-1 text-sm font-semibold text-red-600">{report.reason_label}</span>
-              <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_META[report.status]?.cls ?? 'bg-gray-100'}`}>{STATUS_META[report.status]?.label ?? report.status}</span>
-              {report.model_status && <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">model: {report.model_status}</span>}
+              <span className="rounded-sm bg-red-50 px-2.5 py-1 text-sm font-semibold text-red-600">{report.reason_label}</span>
+              <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_META[report.status]?.cls ?? 'bg-gray-100'}`}>{STATUS_META[report.status]?.label ?? report.status}</span>
+              {report.model_status && <span className="rounded-sm bg-gray-100 px-2 py-0.5 text-xs text-gray-500">model: {report.model_status}</span>}
             </div>
 
             {report.detail && (
@@ -169,7 +169,7 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
             <div className="grid gap-4 sm:grid-cols-2">
               <InfoCard title="Reported model">
                 <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 overflow-hidden rounded bg-gray-100">
+                  <div className="h-12 w-12 overflow-hidden rounded-sm bg-gray-100">
                     {report.thumbnail_path && <img src={assetUrl(report.thumbnail_path)} alt="" className="h-full w-full object-cover" />}
                   </div>
                   <div className="min-w-0">
@@ -189,7 +189,7 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
                 <p className="mt-1 text-xs text-gray-500">
                   {data.context.artist_model_count} models · {data.context.other_reports_on_artist} other report(s)
                   {report.artist_account_status && report.artist_account_status !== 'active' && (
-                    <span className="ml-1 rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">{report.artist_account_status}</span>
+                    <span className="ml-1 rounded-sm bg-red-100 px-1.5 py-0.5 font-medium text-red-700">{report.artist_account_status}</span>
                   )}
                 </p>
               </InfoCard>
@@ -197,7 +197,7 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
               <InfoCard title="Reporter">
                 <p className="text-sm font-medium text-gray-900">{report.reporter_name ?? '—'}</p>
                 <p className="truncate text-xs text-gray-400">{report.reporter_email}</p>
-                {report.reporter_shadow_banned && <span className="mt-1 inline-block rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">shadow-banned</span>}
+                {report.reporter_shadow_banned && <span className="mt-1 inline-block rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">shadow-banned</span>}
               </InfoCard>
 
               <InfoCard title="Context">
@@ -241,7 +241,7 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
                 onChange={(e) => setSummary(e.target.value)}
                 rows={3}
                 placeholder="Summarise your investigation and the outcome…"
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
               />
 
               <div className="mt-4 flex flex-wrap gap-2">

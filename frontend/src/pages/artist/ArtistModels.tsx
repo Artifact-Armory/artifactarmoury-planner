@@ -30,7 +30,7 @@ const StatusBadge: React.FC<{ model: TerrainModel }> = ({ model }) => {
     archived: 'bg-gray-200 text-gray-700',
   }
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[s] ?? 'bg-gray-100 text-gray-700'}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-sm text-xs font-medium ${styles[s] ?? 'bg-gray-100 text-gray-700'}`}>
       {s}
     </span>
   )
@@ -45,7 +45,7 @@ const PreviewBadge: React.FC<{ model: TerrainModel; recentlyReady: boolean }> = 
   const p = model.processingStatus
   if (p === 'processing') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium bg-blue-100 text-blue-800">
         <Loader2 size={12} className="animate-spin" />
         Preview generating…
       </span>
@@ -53,14 +53,14 @@ const PreviewBadge: React.FC<{ model: TerrainModel; recentlyReady: boolean }> = 
   }
   if (p === 'failed') {
     return (
-      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+      <span className="inline-block px-2 py-0.5 rounded-sm text-xs font-medium bg-red-100 text-red-800">
         Preview failed
       </span>
     )
   }
   if (recentlyReady) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium bg-green-100 text-green-800">
         <CheckCircle2 size={12} />
         Preview ready
       </span>
@@ -232,7 +232,7 @@ const ArtistModels: React.FC = () => {
             price + the third-party print cost (+ a £1 site fee), and you earn exactly what you would on a normal sale of this model.
           </p>
         </div>
-        <Link to="/artist/models/new" className="px-4 py-2 rounded bg-blue-600 text-white whitespace-nowrap">
+        <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-blue-600 text-white whitespace-nowrap">
           + New model
         </Link>
       </div>
@@ -268,14 +268,14 @@ const ArtistModels: React.FC = () => {
       {error && !loading && (
         <div className="mt-8">
           <p className="text-red-600">{error}</p>
-          <button className="mt-2 px-3 py-1.5 rounded border" onClick={() => load()}>Retry</button>
+          <button className="mt-2 px-3 py-1.5 rounded-sm border" onClick={() => load()}>Retry</button>
         </div>
       )}
 
       {!loading && !error && models.length === 0 && (
         <div className="mt-10 text-center border rounded-lg py-12">
           <p className="text-gray-600">You haven’t uploaded any models yet.</p>
-          <Link to="/artist/models/new" className="inline-block mt-4 px-4 py-2 rounded bg-blue-600 text-white">
+          <Link to="/artist/models/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-blue-600 text-white">
             Upload your first model
           </Link>
         </div>
@@ -295,7 +295,7 @@ const ArtistModels: React.FC = () => {
                 key={m.id}
                 className={`flex items-center gap-4 p-4 ${m.id === justUploadedId ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' : ''}`}
               >
-                <div className="w-16 h-16 rounded bg-gray-100 overflow-hidden flex-shrink-0">
+                <div className="w-16 h-16 rounded-sm bg-gray-100 overflow-hidden shrink-0">
                   {m.thumbnailUrl ? (
                     <img src={m.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -318,7 +318,7 @@ const ArtistModels: React.FC = () => {
                   {rowError[m.id] && <p className="text-xs text-red-600 mt-1">{rowError[m.id]}</p>}
 
                   {FEATURES.printAndShip && (quote || m.printPrice != null) && (
-                    <div className="mt-2 text-xs text-gray-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5 inline-block">
+                    <div className="mt-2 text-xs text-gray-700 bg-indigo-50 border border-indigo-100 rounded-sm px-2 py-1.5 inline-block">
                       <span className="font-medium">Print price: £{(quote?.total ?? m.printPrice ?? 0).toFixed(2)}</span>
                       {quote ? (
                         <span className="text-gray-500">
@@ -335,14 +335,14 @@ const ArtistModels: React.FC = () => {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {m.status === 'published' && (
-                    <button className="px-3 py-1.5 rounded border text-sm" onClick={() => navigate(`/models/${m.id}`)}>
+                    <button className="px-3 py-1.5 rounded-sm border text-sm" onClick={() => navigate(`/models/${m.id}`)}>
                       View
                     </button>
                   )}
                   <button
-                    className="px-3 py-1.5 rounded border text-sm"
+                    className="px-3 py-1.5 rounded-sm border text-sm"
                     onClick={() => navigate(`/artist/models/${m.id}/edit`)}
                     disabled={busy}
                   >
@@ -350,7 +350,7 @@ const ArtistModels: React.FC = () => {
                   </button>
                   {FEATURES.printAndShip && (
                     <button
-                      className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-sm border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
                       onClick={() => handlePrintQuote(m)}
                       disabled={quoting || busy || notReady}
                       title={notReady ? 'Model must finish processing before it can be priced for print' : 'Get a print-on-demand price from the print service'}
@@ -360,7 +360,7 @@ const ArtistModels: React.FC = () => {
                   )}
                   {isDraft ? (
                     <button
-                      className="px-3 py-1.5 rounded bg-green-600 text-white text-sm disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-sm bg-green-600 text-white text-sm disabled:opacity-50"
                       onClick={() => handlePublish(m)}
                       disabled={busy || !!blocker}
                       title={blocker ?? 'Publish to the marketplace'}
@@ -369,7 +369,7 @@ const ArtistModels: React.FC = () => {
                     </button>
                   ) : (
                     <button
-                      className="px-3 py-1.5 rounded border text-sm disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-sm border text-sm disabled:opacity-50"
                       onClick={() => handleUnpublish(m)}
                       disabled={busy}
                     >
@@ -377,7 +377,7 @@ const ArtistModels: React.FC = () => {
                     </button>
                   )}
                   <button
-                    className="px-3 py-1.5 rounded border border-red-300 text-red-700 text-sm disabled:opacity-50"
+                    className="px-3 py-1.5 rounded-sm border border-red-300 text-red-700 text-sm disabled:opacity-50"
                     onClick={() => handleDelete(m)}
                     disabled={busy}
                   >

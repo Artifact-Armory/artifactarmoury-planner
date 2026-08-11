@@ -92,7 +92,7 @@ const Header: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center gap-8 py-4">
           {/* Logo */}
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <Link to="/" className="flex items-center">
               <img
                 src="/logo.svg"
@@ -204,7 +204,7 @@ const Header: React.FC = () => {
             {/* Cart Button */}
             <button
               onClick={() => toggleCart()}
-              className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
               aria-label="Shopping Cart"
             >
               <ShoppingCart size={22} className="text-gray-700" />
@@ -226,7 +226,7 @@ const Header: React.FC = () => {
               <div className="relative user-menu">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center space-x-1 p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  className="flex items-center space-x-1 p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
                 >
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                     {user?.avatar ? (
@@ -367,7 +367,7 @@ const Header: React.FC = () => {
                 </Link>
                 <Link
                   to="/register"
-                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-sm"
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-xs"
                 >
                   Sign up
                 </Link>
@@ -379,7 +379,7 @@ const Header: React.FC = () => {
           <div className="flex md:hidden">
             <button
               onClick={() => toggleCart()}
-              className="relative p-2 mr-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="relative p-2 mr-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
               aria-label="Shopping Cart"
             >
               <ShoppingCart size={22} className="text-gray-700" />
@@ -392,7 +392,7 @@ const Header: React.FC = () => {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               type="button"
-              className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
               aria-controls="mobile-menu"
               aria-expanded="false"
             >

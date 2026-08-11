@@ -111,7 +111,7 @@ const SecuritySettings: React.FC = () => {
       <h1 className="text-xl font-semibold text-gray-900">Security</h1>
       <p className="mt-1 text-gray-600">Protect your account with two-factor authentication (2FA).</p>
 
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
         <div className="flex items-start gap-3">
           {status?.enabled ? (
             <ShieldCheck className="mt-0.5 shrink-0 text-green-600" />
@@ -187,7 +187,7 @@ const SecuritySettings: React.FC = () => {
                 />
                 <p className="mt-2 text-xs text-gray-500">
                   Can’t scan? Enter this key manually:{' '}
-                  <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-700">{setup.secret}</code>
+                  <code className="rounded-sm bg-gray-100 px-1.5 py-0.5 font-mono text-gray-700">{setup.secret}</code>
                 </p>
               </li>
               <li>

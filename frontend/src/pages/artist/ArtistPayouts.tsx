@@ -102,7 +102,7 @@ const ArtistPayouts: React.FC = () => {
                 <td className="px-4 py-3 text-gray-500">{e.order_number ?? '—'}</td>
                 <td className="px-4 py-3 text-right text-gray-500">{formatPrice(e.gross_amount)}</td>
                 <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatPrice(e.artist_amount)}</td>
-                <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[e.status]}`}>{e.status}</span></td>
+                <td className="px-4 py-3"><span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[e.status]}`}>{e.status}</span></td>
                 <td className="px-4 py-3 text-gray-500">{e.status === 'pending' ? new Date(e.available_at).toLocaleDateString() : '—'}</td>
               </tr>
             ))}
@@ -129,7 +129,7 @@ const ArtistPayouts: React.FC = () => {
                   <tr key={p.id}>
                     <td className="px-4 py-3 text-gray-500">{new Date(p.paid_at ?? p.created_at).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatPrice(p.amount)}</td>
-                    <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status]}`}>{p.status}</span></td>
+                    <td className="px-4 py-3"><span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status]}`}>{p.status}</span></td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-400">{p.stripe_transfer_id ?? '—'}</td>
                   </tr>
                 ))}
@@ -143,7 +143,7 @@ const ArtistPayouts: React.FC = () => {
 }
 
 const SummaryTile: React.FC<{ icon: React.ReactNode; label: string; value: number; sub: string; accent?: string }> = ({ icon, label, value, sub, accent }) => (
-  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs">
     <div className="flex items-center gap-1.5 text-gray-400"><span>{icon}</span><span className="text-xs font-medium uppercase tracking-wide">{label}</span></div>
     <p className={`mt-1 text-xl font-semibold ${accent ?? 'text-gray-900'}`}>{formatPrice(value)}</p>
     <p className="text-xs text-gray-400">{sub}</p>

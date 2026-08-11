@@ -160,7 +160,7 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
   }, [pitchDeg])
 
   return (
-    <div className={className ?? 'relative w-full h-56 rounded border bg-gradient-to-b from-slate-50 to-slate-100 overflow-hidden'}>
+    <div className={className ?? 'relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden'}>
       <div ref={mountRef} className="absolute inset-0" />
       {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">Loading preview…</div>

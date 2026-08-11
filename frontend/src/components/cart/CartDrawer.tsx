@@ -61,7 +61,7 @@ const CartDrawer: React.FC = () => {
           </div>
           <button
             onClick={() => toggleCart()}
-            className="rounded-full p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            className="rounded-full p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
             aria-label="Close cart"
           >
             <X size={20} />
@@ -88,7 +88,7 @@ const CartDrawer: React.FC = () => {
               {items.map((item) => (
                 <li key={cartKey(item.kind, item.id)} className="flex items-start justify-between">
                   <div className="flex">
-                    <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md bg-gray-100">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-gray-100">
                       {item.imageUrl ? (
                         <img
                           src={item.imageUrl}
@@ -105,7 +105,7 @@ const CartDrawer: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium text-gray-900">{item.name}</h3>
                         {item.kind === 'bundle' && (
-                          <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                          <span className="rounded-sm bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
                             BUNDLE
                           </span>
                         )}
@@ -126,7 +126,7 @@ const CartDrawer: React.FC = () => {
 
                   <button
                     onClick={() => removeItem(cartKey(item.kind, item.id))}
-                    className="ml-4 rounded-full p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 focus:outline-none"
+                    className="ml-4 rounded-full p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 focus:outline-hidden"
                     aria-label="Remove item"
                   >
                     <Trash2 size={16} />

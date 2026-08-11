@@ -41,7 +41,7 @@ const AdminModels: React.FC = () => {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search models…"
-            className="pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md w-64 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            className="pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
           />
         </form>
       </div>

@@ -119,7 +119,7 @@ const Checkout: React.FC = () => {
           <ul className="divide-y rounded-lg border bg-white">
             {items.map((item) => (
               <li key={cartKey(item.kind, item.id)} className="flex items-center gap-4 p-4">
-                <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded bg-gray-100">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm bg-gray-100">
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
                   ) : (
@@ -130,7 +130,7 @@ const Checkout: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium text-gray-900">{item.name}</span>
                     {item.kind === 'bundle' && (
-                      <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">BUNDLE</span>
+                      <span className="rounded-sm bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">BUNDLE</span>
                     )}
                   </div>
                   <p className="text-xs text-gray-500">{item.artistName}</p>

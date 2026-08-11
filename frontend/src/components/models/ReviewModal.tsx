@@ -97,7 +97,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
               rows={4}
               maxLength={2000}
               placeholder="How did it print? How's the detail and fit?"
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 

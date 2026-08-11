@@ -42,7 +42,7 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
     return (
       <div>
         <div
-          className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-gray-50"
+          className="flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-gray-50"
           style={{ paddingLeft: indent * 12 }}
         >
           {hasKids ? (
@@ -62,7 +62,7 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
               type="checkbox"
               checked={isSel}
               onChange={() => onToggle(token)}
-              className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-3.5 w-3.5 rounded-sm border-gray-300 text-indigo-600 focus:ring-indigo-500"
             />
             <span className={isSel ? 'font-medium text-indigo-700' : 'text-gray-700'}>
               {term.name}

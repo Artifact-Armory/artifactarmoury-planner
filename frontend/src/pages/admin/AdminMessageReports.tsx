@@ -98,7 +98,7 @@ const AdminMessageReports: React.FC = () => {
         </select>
       </div>
 
-      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:grid-cols-[340px_1fr]">
+      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xs md:grid-cols-[340px_1fr]">
         {/* List */}
         <ul className="max-h-[70vh] divide-y divide-gray-100 overflow-y-auto border-r border-gray-200">
           {reports.length === 0 ? (
@@ -114,7 +114,7 @@ const AdminMessageReports: React.FC = () => {
                     <p className="truncate text-sm font-medium text-gray-900">
                       {REASON_LABELS[r.reason] || r.reason}
                     </p>
-                    <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLES[r.status] || ''}`}>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLES[r.status] || ''}`}>
                       {r.status.replace('_', ' ')}
                     </span>
                   </div>
@@ -177,7 +177,7 @@ const AdminMessageReports: React.FC = () => {
                           {m.isSystem ? 'Artifact Armoury' : m.senderName || 'User'}
                           {fromReported ? ' (reported)' : ''}
                         </p>
-                        <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                        <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
                         <p className="mt-1 text-[10px] text-gray-400">{fmt(m.createdAt)}</p>
                       </div>
                     </div>

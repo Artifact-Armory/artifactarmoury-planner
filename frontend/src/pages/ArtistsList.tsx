@@ -112,7 +112,7 @@ const ArtistsList: React.FC = () => {
         )}
       </section>
 
-      <section className="mt-10 flex flex-col gap-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+      <section className="mt-10 flex flex-col gap-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs lg:flex-row lg:items-end lg:justify-between">
         <form onSubmit={handleSubmit} className="flex-1 space-y-3">
           <Input
             label="Search artists"
@@ -135,7 +135,7 @@ const ArtistsList: React.FC = () => {
           <select
             value={sortParam}
             onChange={(event) => updateParams({ sort: event.target.value, page: 1 })}
-            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
             disabled={Boolean(data?.isSearch)}
           >
             {sortOptions.map((option) => (

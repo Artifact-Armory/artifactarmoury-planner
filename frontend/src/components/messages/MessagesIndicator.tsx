@@ -17,7 +17,7 @@ const MessagesIndicator: React.FC = () => {
   return (
     <Link
       to="/dashboard/messages"
-      className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+      className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
       aria-label="Messages"
     >
       <MessageSquare size={22} className="text-gray-700" />

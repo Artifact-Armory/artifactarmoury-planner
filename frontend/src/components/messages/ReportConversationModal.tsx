@@ -81,7 +81,7 @@ const ReportConversationModal: React.FC<Props> = ({ conversationId, otherName, o
               onChange={(e) => setDetail(e.target.value)}
               rows={3}
               placeholder="Add any context for our team…"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
             />
           </div>
 

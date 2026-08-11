@@ -29,7 +29,7 @@ const HelpButton: React.FC = () => {
       <button
         data-tour="help-button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
         aria-label="Help for this page"
       >
         <HelpCircle size={20} />
@@ -47,7 +47,7 @@ const HelpButton: React.FC = () => {
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
                 aria-label="Close help"
               >
                 <X size={20} />

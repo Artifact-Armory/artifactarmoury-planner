@@ -35,7 +35,7 @@ const Bundles: React.FC = () => {
             <Link
               key={b.id}
               to={`/bundles/${b.id}`}
-              className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md"
+              className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
             >
               <div className="relative h-44 w-full bg-gray-100">
                 {b.thumbnailUrl ? (
@@ -45,7 +45,7 @@ const Bundles: React.FC = () => {
                     <Package size={32} />
                   </div>
                 )}
-                <span className="absolute left-2 top-2 rounded bg-indigo-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                <span className="absolute left-2 top-2 rounded-sm bg-indigo-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
                   BUNDLE · {b.modelCount}
                 </span>
               </div>

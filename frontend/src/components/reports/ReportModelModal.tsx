@@ -72,7 +72,7 @@ const ReportModelModal: React.FC<Props> = ({ modelId, modelName, onClose }) => {
                   <input type="radio" name="reason" value={r.value} checked={reason === r.value} onChange={() => setReason(r.value)} className="mt-0.5" />
                   <span>
                     <span className="font-medium text-gray-900">{r.label}</span>
-                    {r.proofRequired && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">PROOF REQUIRED</span>}
+                    {r.proofRequired && <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">PROOF REQUIRED</span>}
                     {r.hint && <span className="block text-xs text-gray-500">{r.hint}</span>}
                   </span>
                 </label>
@@ -87,7 +87,7 @@ const ReportModelModal: React.FC<Props> = ({ modelId, modelName, onClose }) => {
               onChange={(e) => setDetail(e.target.value)}
               rows={3}
               placeholder="Tell us what's wrong…"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
             />
           </div>
 
@@ -104,7 +104,7 @@ const ReportModelModal: React.FC<Props> = ({ modelId, modelName, onClose }) => {
             {files.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {files.map((f, i) => (
-                  <li key={i} className="flex items-center justify-between rounded bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+                  <li key={i} className="flex items-center justify-between rounded-sm bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
                     <span className="truncate">{f.name}</span>
                     <button onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))} className="text-gray-400 hover:text-red-500"><X size={14} /></button>
                   </li>

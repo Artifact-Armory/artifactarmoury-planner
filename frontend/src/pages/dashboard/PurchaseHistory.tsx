@@ -30,12 +30,12 @@ const PurchaseHistory: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow">
+      <section className="rounded-3xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-gray-900">Purchase history</h1>
         <p className="mt-2 text-sm text-gray-600">All of your digital orders and print requests in one place.</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white shadow-xs">
         {ordersQuery.isLoading ? (
           <div className="flex justify-center py-16">
             <Spinner size="lg" />

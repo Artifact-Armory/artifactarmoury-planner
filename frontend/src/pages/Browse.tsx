@@ -257,7 +257,7 @@ const Browse: React.FC = () => {
               onClick={() => setFulfillment(t.mode)}
               aria-pressed={active}
               className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                active ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                active ? 'bg-white text-indigo-700 shadow-xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               {t.label}
@@ -282,7 +282,7 @@ const Browse: React.FC = () => {
           onChange={(event) => setSearchTerm(event.target.value)}
           placeholder="Search models by name, tag or keyword…"
           aria-label="Search models"
-          className="w-full rounded-xl border border-gray-300 bg-white py-3.5 pl-12 pr-11 text-base shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          className="w-full rounded-xl border border-gray-300 bg-white py-3.5 pl-12 pr-11 text-base shadow-xs focus:border-indigo-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
         />
         {searchTerm && (
           <button
@@ -307,7 +307,7 @@ const Browse: React.FC = () => {
               onClick={() => setClass(c.slug)}
               className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
                 active
-                  ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                  ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
                   : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
               }`}
             >
@@ -318,7 +318,7 @@ const Browse: React.FC = () => {
       </div>
 
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[300px_1fr]">
-        <aside className="space-y-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+        <aside className="space-y-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Price</h2>
             <form onSubmit={handleApplyFilters} className="mt-4 space-y-4">
@@ -368,7 +368,7 @@ const Browse: React.FC = () => {
                 <select
                   value={sortByParam}
                   onChange={(event) => updateParams({ sortBy: event.target.value })}
-                  className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none"
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
                 >
                   {sortOptions.map((option) => (
                     <option key={option.value} value={option.value ?? 'recent'}>{option.label}</option>

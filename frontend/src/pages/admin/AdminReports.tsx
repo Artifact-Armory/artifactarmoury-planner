@@ -56,7 +56,7 @@ const PeakHoursChart: React.FC<{ data: Array<{ hour: number; views: number }> }>
                 style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views > 0 ? 2 : 0 }}
               />
               {/* tooltip */}
-              <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white">
+              <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-gray-900 px-2 py-1 text-[11px] text-white">
                 {fmtHour(d.hour)} · {d.views} views
               </div>
             </div>
@@ -120,7 +120,7 @@ const AdminReports: React.FC = () => {
               key={p.value}
               onClick={() => setPeriod(p.value)}
               className={`px-3 py-1.5 text-sm rounded ${
-                period === p.value ? 'bg-white shadow-sm font-medium text-gray-900' : 'text-gray-600'
+                period === p.value ? 'bg-white shadow-xs font-medium text-gray-900' : 'text-gray-600'
               }`}
             >
               {p.label}
@@ -242,7 +242,7 @@ const AdminReports: React.FC = () => {
                     className="w-full rounded-t bg-indigo-400 hover:bg-indigo-600"
                     style={{ height: `${(d.views / maxDayViews) * 100}%`, minHeight: d.views > 0 ? 2 : 0 }}
                   />
-                  <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] text-white">
+                  <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-gray-900 px-2 py-1 text-[11px] text-white">
                     {new Date(d.date).toLocaleDateString('en-GB')} · {d.views}
                   </div>
                 </div>

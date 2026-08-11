@@ -29,7 +29,7 @@ const Home: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
-      <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-500 px-6 py-16 text-white shadow-lg sm:px-12">
+      <section className="overflow-hidden rounded-3xl bg-linear-to-br from-indigo-600 via-indigo-500 to-purple-500 px-6 py-16 text-white shadow-lg sm:px-12">
         <div className="max-w-3xl">
           <p className="text-sm uppercase tracking-widest text-indigo-200">Artifact Planner</p>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">Build immersive tabletop worlds with premium terrain</h1>
@@ -40,13 +40,13 @@ const Home: React.FC = () => {
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               to="/browse"
-              className="inline-flex items-center justify-center rounded-md bg-white px-6 py-3 text-sm font-semibold text-indigo-600 shadow hover:bg-indigo-50"
+              className="inline-flex items-center justify-center rounded-md bg-white px-6 py-3 text-sm font-semibold text-indigo-600 shadow-sm hover:bg-indigo-50"
             >
               Browse marketplace
             </Link>
             <Link
               to="/planner"
-              className="inline-flex items-center justify-center rounded-md bg-purple-700 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-purple-800"
+              className="inline-flex items-center justify-center rounded-md bg-purple-700 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-purple-800"
             >
               Try the Table Builder
             </Link>
@@ -75,7 +75,7 @@ const Home: React.FC = () => {
             body: 'Every model is uploaded by an independent creator, watermarked to protect their work, and ready to print.',
           },
         ].map((f) => (
-          <div key={f.title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <div key={f.title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-xs">
             <h3 className="text-base font-semibold text-gray-900">{f.title}</h3>
             <p className="mt-2 text-sm text-gray-600">{f.body}</p>
           </div>

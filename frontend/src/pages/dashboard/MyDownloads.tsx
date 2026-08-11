@@ -44,7 +44,7 @@ const MyDownloads: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow">
+      <section className="rounded-3xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-gray-900">My downloads</h1>
         <p className="mt-2 max-w-2xl text-sm text-gray-600">
           Every STL you own, ready to download whenever you like — you only pay once and can
@@ -62,14 +62,14 @@ const MyDownloads: React.FC = () => {
             <Spinner size="lg" />
           </div>
         ) : libraryQuery.isError ? (
-          <div className="rounded-2xl border border-gray-200 bg-white py-16 text-center shadow-sm">
+          <div className="rounded-2xl border border-gray-200 bg-white py-16 text-center shadow-xs">
             <p className="text-sm font-medium text-gray-700">We couldn't load your downloads.</p>
             <Button variant="outline" className="mt-4" onClick={() => libraryQuery.refetch()}>
               Try again
             </Button>
           </div>
         ) : items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center shadow-sm">
+          <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center shadow-xs">
             <Package className="mx-auto text-gray-300" size={40} />
             <p className="mt-3 text-sm font-medium text-gray-700">You don't own any models yet.</p>
             <p className="mt-1 text-xs text-gray-500">Once you buy an STL it'll show up here to download.</p>
@@ -92,9 +92,9 @@ const MyDownloads: React.FC = () => {
                 return (
                   <div
                     key={model.id}
-                    className="flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md"
+                    className="flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
                   >
-                    <Link to={`/models/${model.id}`} className="relative block aspect-[4/3] bg-gray-100">
+                    <Link to={`/models/${model.id}`} className="relative block aspect-4/3 bg-gray-100">
                       {model.thumbnailUrl ? (
                         <img
                           src={model.thumbnailUrl}
@@ -108,7 +108,7 @@ const MyDownloads: React.FC = () => {
                         </div>
                       )}
                       {isSet && (
-                        <span className="absolute left-2 top-2 rounded bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                        <span className="absolute left-2 top-2 rounded-sm bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                           Set · {parts} parts
                         </span>
                       )}
