@@ -9,6 +9,8 @@ import { useAuthStore } from '../store/authStore'
 import { formatPrice } from '../utils/format'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
+import PriceDisplay from '../components/models/PriceDisplay'
+import { Badge } from '../components/shadcn/badge'
 
 const BundleDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -47,8 +49,8 @@ const BundleDetails: React.FC = () => {
   if (bundleQuery.isError || !bundle) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900">Bundle not found</h1>
-        <p className="mt-2 text-sm text-gray-500">It may be unpublished or removed.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Bundle not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">It may be unpublished or removed.</p>
       </div>
     )
   }
@@ -70,33 +72,33 @@ const BundleDetails: React.FC = () => {
     <div className="mx-auto max-w-5xl px-4 py-10">
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-            <div className="relative h-80 w-full bg-gray-100">
+          <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
+            <div className="relative h-80 w-full bg-muted">
               {bundle.thumbnailUrl ? (
                 <img src={bundle.thumbnailUrl} alt={bundle.name} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-gray-400">No thumbnail</div>
+                <div className="flex h-full w-full items-center justify-center text-muted-foreground">No thumbnail</div>
               )}
             </div>
           </div>
 
-          <section className="rounded-2xl bg-white p-6 shadow-xs">
-            <h2 className="text-lg font-semibold text-gray-900">About this bundle</h2>
-            <p className="mt-3 text-sm leading-relaxed text-gray-600">{bundle.description ?? 'No description provided.'}</p>
+          <section className="rounded-2xl bg-card p-6 shadow-xs">
+            <h2 className="text-lg font-semibold text-foreground">About this bundle</h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{bundle.description ?? 'No description provided.'}</p>
           </section>
 
-          <section className="rounded-2xl bg-white p-6 shadow-xs">
-            <h2 className="text-lg font-semibold text-gray-900">Includes {bundle.models.length} models</h2>
-            <ul className="mt-4 divide-y">
+          <section className="rounded-2xl bg-card p-6 shadow-xs">
+            <h2 className="text-lg font-semibold text-foreground">Includes {bundle.models.length} models</h2>
+            <ul className="mt-4 divide-y divide-border">
               {bundle.models.map((m) => (
                 <li key={m.id} className="flex items-center gap-3 py-3">
-                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm bg-gray-100">
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm bg-muted">
                     {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                   </div>
-                  <Link to={`/models/${m.id}`} className="flex-1 truncate text-sm font-medium text-gray-900 hover:text-indigo-600">
+                  <Link to={`/models/${m.id}`} className="flex-1 truncate text-sm font-medium text-foreground hover:text-primary">
                     {m.name}
                   </Link>
-                  <span className="text-xs text-gray-400 line-through">{formatPrice(m.basePrice)}</span>
+                  <span className="text-xs text-muted-foreground line-through">{formatPrice(m.basePrice)}</span>
                 </li>
               ))}
             </ul>
@@ -104,24 +106,21 @@ const BundleDetails: React.FC = () => {
         </div>
 
         <aside>
-          <section className="rounded-2xl bg-white p-6 shadow-md">
-            <span className="rounded-sm bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">BUNDLE</span>
-            <h1 className="mt-2 text-2xl font-semibold text-gray-900">{bundle.name}</h1>
-            {bundle.artistName && <p className="mt-1 text-sm text-gray-500">by {bundle.artistName}</p>}
+          <section className="rounded-2xl bg-card p-6 shadow-md">
+            <Badge>BUNDLE</Badge>
+            <h1 className="mt-2 text-2xl font-semibold text-foreground">{bundle.name}</h1>
+            {bundle.artistName && <p className="mt-1 text-sm text-muted-foreground">by {bundle.artistName}</p>}
 
-            <div className="mt-4">
-              {bundle.onSale && bundle.salePrice != null ? (
-                <span className="inline-flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-rose-600">{formatPrice(bundle.salePrice)}</span>
-                  <span className="text-lg text-gray-400 line-through">{formatPrice(bundle.originalPrice ?? bundle.price)}</span>
-                  {bundle.salePercent != null && (
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">-{bundle.salePercent}%</span>
-                  )}
-                </span>
-              ) : (
-                <span className="text-3xl font-bold text-gray-900">{formatPrice(bundle.price)}</span>
-              )}
-              <span className="ml-2 text-sm text-gray-500">for {bundle.models.length} models</span>
+            <div className="mt-4 flex flex-wrap items-baseline gap-2">
+              <PriceDisplay
+                price={bundle.onSale && bundle.salePrice != null ? bundle.salePrice : bundle.price}
+                originalPrice={
+                  bundle.onSale && bundle.salePrice != null ? bundle.originalPrice ?? bundle.price : undefined
+                }
+                salePercent={bundle.salePercent}
+                size="lg"
+              />
+              <span className="text-sm text-muted-foreground">for {bundle.models.length} models</span>
             </div>
             {bundle.onSale && bundle.saleEndsAt && (
               <p className="mt-1 text-xs font-medium text-rose-600">
@@ -130,7 +129,7 @@ const BundleDetails: React.FC = () => {
             )}
 
             {owned ? (
-              <p className="mt-6 flex items-center justify-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
+              <p className="mt-6 flex items-center justify-center gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
                 <CheckCircle size={16} /> You own every model in this bundle
               </p>
             ) : inCart ? (
@@ -142,7 +141,7 @@ const BundleDetails: React.FC = () => {
                 Add bundle to cart
               </Button>
             )}
-            <p className="mt-3 text-center text-xs text-gray-400">
+            <p className="mt-3 text-center text-xs text-muted-foreground">
               You already own some of these? You still get the whole bundle at this price.
             </p>
           </section>

@@ -40,6 +40,8 @@ import HelpButton from '../help/HelpButton';
 import OnboardingTour from '../help/OnboardingTour';
 import { artistTourSteps } from '../help/tourSteps';
 import { useOnboardingStore, hasSeenArtistTour, markArtistTourSeen } from '../../store/onboardingStore';
+import Logo from '../common/Logo';
+import { SITE_NAME } from '../../config/brand';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -109,39 +111,39 @@ const DashboardLayout: React.FC = () => {
 
   return (
     <>
-      <div className="min-h-screen bg-gray-100">
+      <div className="min-h-screen bg-background">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 z-20 bg-gray-800 bg-opacity-50 md:hidden"
+          className="fixed inset-0 z-20 bg-black bg-opacity-50 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
       
       {/* Sidebar */}
       <div 
-        className={`fixed top-0 left-0 z-30 h-full w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
+        className={`fixed top-0 left-0 z-30 h-full w-64 bg-card shadow-lg transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Sidebar Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <Link to="/" className="flex items-center">
-            <img src="/logo.svg" alt="Terrain Builder" className="h-8 w-auto" />
-            <span className="ml-2 font-bold text-gray-900 text-lg">Terrain Builder</span>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <Link to="/" className="flex items-center text-foreground">
+            <Logo className="h-8 w-8 text-primary" />
+            <span className="ml-2 font-bold text-lg">{SITE_NAME}</span>
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden text-gray-500 hover:text-gray-900 focus:outline-hidden"
+            className="md:hidden text-muted-foreground hover:text-foreground focus:outline-hidden"
           >
             <X size={24} />
           </button>
         </div>
         
         {/* User Info */}
-        <div className="p-4 border-b border-gray-200">
+        <div className="p-4 border-b border-border">
           <div className="flex items-center">
-            <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center mr-3">
+            <div className="w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center mr-3">
               {user?.avatar ? (
                 <img 
                   src={user.avatar} 
@@ -149,12 +151,12 @@ const DashboardLayout: React.FC = () => {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <User size={24} className="text-gray-500" />
+                <User size={24} className="text-muted-foreground" />
               )}
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">{user?.name}</h3>
-              <p className="text-xs text-gray-500">{user?.email}</p>
+              <h3 className="text-sm font-semibold text-foreground">{user?.name}</h3>
+              <p className="text-xs text-muted-foreground">{user?.email}</p>
             </div>
           </div>
         </div>
@@ -168,8 +170,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard') && !location.pathname.includes('/')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Home size={18} className="mr-3" />
@@ -179,8 +181,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/models"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/models')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Download size={18} className="mr-3" />
@@ -190,8 +192,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/downloads"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/downloads')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <DownloadCloud size={18} className="mr-3" />
@@ -201,8 +203,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/purchases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/purchases')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Package size={18} className="mr-3" />
@@ -212,8 +214,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/wishlist"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/wishlist')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Heart size={18} className="mr-3" />
@@ -223,8 +225,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/messages"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/messages')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <MessageSquare size={18} className="mr-3" />
@@ -234,8 +236,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/tables"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/tables')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Grid size={18} className="mr-3" />
@@ -245,8 +247,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/profile"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/profile')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <User size={18} className="mr-3" />
@@ -256,8 +258,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/security"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/security')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <ShieldCheck size={18} className="mr-3" />
@@ -275,8 +277,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-overview"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/artist'
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Home size={18} className="mr-3" />
@@ -287,8 +289,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-models"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/models') && location.pathname !== '/artist/models/new'
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Layout size={18} className="mr-3" />
@@ -299,8 +301,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-bundles"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/bundles')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Grid size={18} className="mr-3" />
@@ -311,8 +313,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-releases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/releases')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Rocket size={18} className="mr-3" />
@@ -323,8 +325,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-showcases"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/showcases')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <List size={18} className="mr-3" />
@@ -335,8 +337,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-collabs"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname.startsWith('/artist/collaborations')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Handshake size={18} className="mr-3" />
@@ -347,8 +349,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-upload"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/artist/models/new'
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Plus size={18} className="mr-3" />
@@ -358,8 +360,8 @@ const DashboardLayout: React.FC = () => {
                 to="/artist/promotions"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/promotions')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Tag size={18} className="mr-3" />
@@ -369,8 +371,8 @@ const DashboardLayout: React.FC = () => {
                 to="/artist/payouts"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/payouts')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Wallet size={18} className="mr-3" />
@@ -380,8 +382,8 @@ const DashboardLayout: React.FC = () => {
                 to="/artist/reports"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/reports')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <ShieldAlert size={18} className="mr-3" />
@@ -391,8 +393,8 @@ const DashboardLayout: React.FC = () => {
                 to="/dashboard/messages"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/dashboard/messages')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <MessageSquare size={18} className="mr-3" />
@@ -403,8 +405,8 @@ const DashboardLayout: React.FC = () => {
                 data-tour="nav-settings"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/artist/settings')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Settings size={18} className="mr-3" />
@@ -415,7 +417,7 @@ const DashboardLayout: React.FC = () => {
                   href={`/artists/${user.id}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:text-indigo-700 hover:bg-indigo-50"
+                  className="flex items-center px-3 py-2 text-sm font-medium rounded-md text-foreground hover:text-primary hover:bg-primary/10"
                 >
                   <Eye size={18} className="mr-3" />
                   View public page
@@ -432,8 +434,8 @@ const DashboardLayout: React.FC = () => {
                 end
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   location.pathname === '/admin'
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Home size={18} className="mr-3" />
@@ -443,8 +445,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/users"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/users')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Users size={18} className="mr-3" />
@@ -454,8 +456,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/models"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/models')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Layout size={18} className="mr-3" />
@@ -465,8 +467,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/orders"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/orders')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <ShoppingCart size={18} className="mr-3" />
@@ -476,8 +478,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/categories"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/categories')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <List size={18} className="mr-3" />
@@ -487,8 +489,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/tags"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/tags')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Tag size={18} className="mr-3" />
@@ -498,8 +500,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/artist-applications"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/artist-applications')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <UserPlus size={18} className="mr-3" />
@@ -509,8 +511,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/moderation"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/moderation')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <ShieldAlert size={18} className="mr-3" />
@@ -520,8 +522,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/messages"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/messages')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Megaphone size={18} className="mr-3" />
@@ -531,8 +533,8 @@ const DashboardLayout: React.FC = () => {
                 to="/admin/message-reports"
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                   isActiveRoute('/admin/message-reports')
-                    ? 'text-indigo-700 bg-indigo-50'
-                    : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
                 }`}
               >
                 <Flag size={18} className="mr-3" />
@@ -543,8 +545,8 @@ const DashboardLayout: React.FC = () => {
                   to="/admin/reports"
                   className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
                     isActiveRoute('/admin/reports')
-                      ? 'text-indigo-700 bg-indigo-50'
-                      : 'text-gray-700 hover:text-indigo-700 hover:bg-indigo-50'
+                      ? 'text-primary bg-primary/10'
+                      : 'text-foreground hover:text-primary hover:bg-primary/10'
                   }`}
                 >
                   <BarChart2 size={18} className="mr-3" />
@@ -555,11 +557,11 @@ const DashboardLayout: React.FC = () => {
           )}
 
           {/* User Actions */}
-          <div className="mt-8 pt-6 border-t border-gray-200 space-y-1">
+          <div className="mt-8 pt-6 border-t border-border space-y-1">
             {location.pathname.startsWith('/admin') || location.pathname.startsWith('/artist') ? (
               <NavLink
                 to="/dashboard"
-                className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:text-indigo-700 hover:bg-indigo-50"
+                className="flex items-center px-3 py-2 text-sm font-medium text-foreground rounded-md hover:text-primary hover:bg-primary/10"
               >
                 <ChevronLeft size={18} className="mr-3" />
                 Back to User Dashboard
@@ -569,7 +571,7 @@ const DashboardLayout: React.FC = () => {
                 {user?.role === 'artist' && (
                   <NavLink
                     to="/artist"
-                    className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:text-indigo-700 hover:bg-indigo-50"
+                    className="flex items-center px-3 py-2 text-sm font-medium text-foreground rounded-md hover:text-primary hover:bg-primary/10"
                   >
                     <UserPlus size={18} className="mr-3" />
                     Artist Dashboard
@@ -578,7 +580,7 @@ const DashboardLayout: React.FC = () => {
                 {!user?.role?.includes('artist') && (
                   <NavLink
                     to="/apply-artist"
-                    className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:text-indigo-700 hover:bg-indigo-50"
+                    className="flex items-center px-3 py-2 text-sm font-medium text-foreground rounded-md hover:text-primary hover:bg-primary/10"
                   >
                     <UserPlus size={18} className="mr-3" />
                     Become an Artist
@@ -590,7 +592,7 @@ const DashboardLayout: React.FC = () => {
             {isAdmin && !location.pathname.startsWith('/admin') && (
               <NavLink
                 to="/admin"
-                className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:text-indigo-700 hover:bg-indigo-50"
+                className="flex items-center px-3 py-2 text-sm font-medium text-foreground rounded-md hover:text-primary hover:bg-primary/10"
               >
                 <Settings size={18} className="mr-3" />
                 Admin Panel
@@ -599,7 +601,7 @@ const DashboardLayout: React.FC = () => {
 
             <button
               onClick={handleLogout}
-              className="flex w-full items-center px-3 py-2 text-sm font-medium text-red-600 rounded-md hover:text-red-700 hover:bg-red-50"
+              className="flex w-full items-center px-3 py-2 text-sm font-medium text-destructive rounded-md hover:bg-destructive/10"
             >
               <LogOut size={18} className="mr-3" />
               Log Out
@@ -611,17 +613,17 @@ const DashboardLayout: React.FC = () => {
       {/* Main Content */}
       <div className="md:pl-64 flex flex-col min-h-screen">
         {/* Header */}
-        <header className="sticky top-0 z-10 bg-white shadow-xs">
+        <header className="sticky top-0 z-10 bg-card shadow-xs">
           <div className="px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
             <div className="flex items-center">
               {/* Mobile menu button */}
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="md:hidden mr-3 text-gray-500 hover:text-gray-900 focus:outline-hidden"
+                className="md:hidden mr-3 text-muted-foreground hover:text-foreground focus:outline-hidden"
               >
                 <Menu size={24} />
               </button>
-              <h1 className="text-xl font-bold text-gray-900">
+              <h1 className="text-xl font-bold text-foreground">
                 {getPageTitle()}
               </h1>
             </div>
@@ -629,14 +631,14 @@ const DashboardLayout: React.FC = () => {
               <HelpButton />
               <button
                 onClick={() => toggleCart()}
-                className="relative p-2 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+                className="relative p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
                 aria-label="Shopping Cart"
               >
                 <ShoppingCart size={22} />
               </button>
               <Link
                 to="/"
-                className="text-gray-500 hover:text-gray-900 p-2 rounded-full hover:bg-gray-100"
+                className="text-muted-foreground hover:text-foreground p-2 rounded-full hover:bg-accent"
                 aria-label="Back to Home"
               >
                 <Home size={22} />
@@ -646,13 +648,13 @@ const DashboardLayout: React.FC = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 bg-gray-50">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 bg-background">
           <Outlet />
         </main>
 
         {/* Footer */}
-        <footer className="bg-white border-t border-gray-200 p-4 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} Terrain Builder. All rights reserved.
+        <footer className="bg-card border-t border-border p-4 text-center text-sm text-muted-foreground">
+          &copy; {new Date().getFullYear()} {SITE_NAME}. All rights reserved.
         </footer>
       </div>
       </div>

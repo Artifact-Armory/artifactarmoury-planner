@@ -8,6 +8,7 @@ import Spinner from '../../components/ui/Spinner'
 import Button from '../../components/ui/Button'
 import ModelGrid from '../../components/models/ModelGrid'
 import { formatPrice } from '../../utils/format'
+import { Card, CardContent } from '../../components/shadcn/card'
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate()
@@ -20,124 +21,130 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-10">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Welcome back</h1>
-        <p className="mt-2 text-sm text-gray-600">
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">Welcome back</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
           Track your recent orders, manage saved tables, and discover new terrain to add to your collection.
         </p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">My models</h2>
-          <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/models')}>
-            View all
-          </Button>
-        </div>
+      <Card>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">My models</h2>
+            <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/models')}>
+              View all
+            </Button>
+          </div>
 
-        {libraryQuery.isLoading ? (
-          <div className="flex justify-center py-12">
-            <Spinner size="lg" />
-          </div>
-        ) : library.length ? (
-          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {library.slice(0, 4).map(({ model, myReview }) => (
-              <Link
-                key={model.id}
-                to="/dashboard/models"
-                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
-              >
-                <div className="relative h-28 w-full overflow-hidden bg-gray-100">
-                  {model.thumbnailUrl ? (
-                    <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                      No preview
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-1 flex-col px-3 py-2">
-                  <p className="line-clamp-1 text-sm font-medium text-gray-900">{model.name}</p>
-                  <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
-                    <span className="inline-flex items-center gap-1 text-indigo-600">
-                      <Download size={13} /> STL
-                    </span>
-                    {myReview ? (
-                      <span className="inline-flex items-center gap-0.5 text-amber-500">
-                        <Star size={13} className="fill-amber-400" /> {myReview.rating}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">Review</span>
-                    )}
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center text-sm text-gray-600">
-            No models yet. Purchased models appear here to download and review.
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Recent orders</h2>
-          <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/purchases')}>
-            View all orders
-          </Button>
-        </div>
-
-        {ordersQuery.isLoading ? (
-          <div className="flex justify-center py-12">
-            <Spinner size="lg" />
-          </div>
-        ) : orders.length ? (
-          <div className="mt-4 divide-y divide-gray-100">
-            {orders.map((order) => (
-              <div key={order.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">Order #{order.orderNumber}</p>
-                  <p className="text-xs text-gray-500">
-                    Placed {new Date(order.createdAt).toLocaleDateString()} • {order.itemCount} item{order.itemCount === 1 ? '' : 's'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-6 text-sm">
-                  <span className="font-semibold text-gray-900">{formatPrice(order.total)}</span>
-                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
-                    {order.fulfillmentStatus ?? 'processing'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center text-sm text-gray-600">
-            No orders yet. Browse the marketplace to place your first order.
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Recommended for you</h2>
-          <Button variant="outline" size="sm" onClick={() => navigate('/browse?sortBy=popular')}>
-            Explore marketplace
-          </Button>
-        </div>
-        <div className="mt-6">
-          {featuredQuery.isLoading ? (
+          {libraryQuery.isLoading ? (
             <div className="flex justify-center py-12">
               <Spinner size="lg" />
             </div>
-          ) : featuredQuery.data && featuredQuery.data.length ? (
-            <ModelGrid models={featuredQuery.data} />
+          ) : library.length ? (
+            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {library.slice(0, 4).map(({ model, myReview }) => (
+                <Link
+                  key={model.id}
+                  to="/dashboard/models"
+                  className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs transition hover:shadow-md"
+                >
+                  <div className="relative h-28 w-full overflow-hidden bg-muted">
+                    {model.thumbnailUrl ? (
+                      <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                        No preview
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-1 flex-col px-3 py-2">
+                    <p className="line-clamp-1 text-sm font-medium text-foreground">{model.name}</p>
+                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 text-primary">
+                        <Download size={13} /> STL
+                      </span>
+                      {myReview ? (
+                        <span className="inline-flex items-center gap-0.5 text-amber-500">
+                          <Star size={13} className="fill-amber-400" /> {myReview.rating}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Review</span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
           ) : (
-            <p className="text-sm text-gray-600">No recommendations yet. Keep browsing to personalize suggestions.</p>
+            <div className="mt-4 rounded-xl border border-dashed border-border bg-muted/50 py-10 text-center text-sm text-muted-foreground">
+              No models yet. Purchased models appear here to download and review.
+            </div>
           )}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Recent orders</h2>
+            <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/purchases')}>
+              View all orders
+            </Button>
+          </div>
+
+          {ordersQuery.isLoading ? (
+            <div className="flex justify-center py-12">
+              <Spinner size="lg" />
+            </div>
+          ) : orders.length ? (
+            <div className="mt-4 divide-y divide-border">
+              {orders.map((order) => (
+                <div key={order.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Order #{order.orderNumber}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Placed {new Date(order.createdAt).toLocaleDateString()} • {order.itemCount} item{order.itemCount === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-6 text-sm">
+                    <span className="font-semibold text-foreground">{formatPrice(order.total)}</span>
+                    <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                      {order.fulfillmentStatus ?? 'processing'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-border bg-muted/50 py-10 text-center text-sm text-muted-foreground">
+              No orders yet. Browse the marketplace to place your first order.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Recommended for you</h2>
+            <Button variant="outline" size="sm" onClick={() => navigate('/browse?sortBy=popular')}>
+              Explore marketplace
+            </Button>
+          </div>
+          <div className="mt-6">
+            {featuredQuery.isLoading ? (
+              <div className="flex justify-center py-12">
+                <Spinner size="lg" />
+              </div>
+            ) : featuredQuery.data && featuredQuery.data.length ? (
+              <ModelGrid models={featuredQuery.data} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No recommendations yet. Keep browsing to personalize suggestions.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

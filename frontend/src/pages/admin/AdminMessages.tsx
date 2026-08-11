@@ -4,7 +4,7 @@ import { Megaphone, Send, Mail, Inbox } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { messagesApi, type ChatMessage } from '../../api/endpoints/messages'
 
-const SITE_NAME = 'Artifact Armoury'
+import { SITE_NAME } from '../../config/brand'
 
 const timeAgo = (iso: string | null): string => {
   if (!iso) return ''

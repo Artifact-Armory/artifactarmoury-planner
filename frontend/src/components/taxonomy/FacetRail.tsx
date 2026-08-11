@@ -42,14 +42,14 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
     return (
       <div>
         <div
-          className="flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-gray-50"
+          className="flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent"
           style={{ paddingLeft: indent * 12 }}
         >
           {hasKids ? (
             <button
               type="button"
               onClick={() => toggleSet(setOpenNodes, nodeKey)}
-              className="p-0.5 text-gray-400 hover:text-gray-700"
+              className="p-0.5 text-muted-foreground hover:text-foreground"
               aria-label={open ? 'Collapse' : 'Expand'}
             >
               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -62,14 +62,14 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
               type="checkbox"
               checked={isSel}
               onChange={() => onToggle(token)}
-              className="h-3.5 w-3.5 rounded-sm border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-3.5 w-3.5 rounded-sm border-border text-primary focus:ring-primary"
             />
-            <span className={isSel ? 'font-medium text-indigo-700' : 'text-gray-700'}>
+            <span className={isSel ? 'font-medium text-primary' : 'text-foreground'}>
               {term.name}
             </span>
-            {term.ratio && <span className="text-xs text-gray-400">{term.ratio}</span>}
+            {term.ratio && <span className="text-xs text-muted-foreground">{term.ratio}</span>}
             {typeof term.count === 'number' && (
-              <span className="ml-auto text-xs text-gray-400">{term.count}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{term.count}</span>
             )}
           </label>
         </div>
@@ -90,7 +90,7 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
         <div className="space-y-2">
           {facet.terms.map((group) => (
             <div key={group.id}>
-              <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {group.name}
               </p>
               {(group.children?.length ? group.children : [group]).map((t) => (
@@ -121,24 +121,24 @@ const FacetRail: React.FC<FacetRailProps> = ({ facets, selected, onToggle, loadi
           ? [...selected].filter((t) => t.startsWith(`${facet.slug}:`)).length
           : 0
         return (
-          <div key={facet.id} className="border-b border-gray-100 pb-3">
+          <div key={facet.id} className="border-b border-border pb-3">
             <button
               type="button"
               onClick={() => toggleSet(setOpenFacets, facet.slug)}
               className="flex w-full items-center justify-between py-1 text-left"
             >
-              <span className="text-sm font-semibold text-gray-900">
+              <span className="text-sm font-semibold text-foreground">
                 {facet.name}
                 {selectedInFacet > 0 && (
-                  <span className="ml-1.5 rounded-full bg-indigo-100 px-1.5 text-xs font-medium text-indigo-700">
+                  <span className="ml-1.5 rounded-full bg-primary/20 px-1.5 text-xs font-medium text-primary">
                     {selectedInFacet}
                   </span>
                 )}
               </span>
               {open ? (
-                <ChevronDown size={16} className="text-gray-400" />
+                <ChevronDown size={16} className="text-muted-foreground" />
               ) : (
-                <ChevronRight size={16} className="text-gray-400" />
+                <ChevronRight size={16} className="text-muted-foreground" />
               )}
             </button>
             {open && <div className="mt-1">{facetBody(facet)}</div>}

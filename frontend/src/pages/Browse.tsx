@@ -244,7 +244,7 @@ const Browse: React.FC = () => {
       {/* Fulfillment tabs: digital STL download vs third-party print-and-ship.
           Hidden while Print & Ship is parked — with one option the strip is noise. */}
       {FEATURES.printAndShip && (
-      <div className="mb-8 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1">
+      <div className="mb-8 inline-flex rounded-xl border border-border bg-accent p-1">
         {([
           { mode: 'stl' as const, label: 'Digital downloads only' },
           { mode: 'print' as const, label: 'Print & Ship' },
@@ -257,7 +257,7 @@ const Browse: React.FC = () => {
               onClick={() => setFulfillment(t.mode)}
               aria-pressed={active}
               className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                active ? 'bg-white text-indigo-700 shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                active ? 'bg-background text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {t.label}
@@ -268,28 +268,28 @@ const Browse: React.FC = () => {
       )}
 
       {fulfillmentParam === 'print' && (
-        <p className="mb-6 -mt-4 text-sm text-gray-500">
+        <p className="mb-6 -mt-4 text-sm text-muted-foreground">
           Models available to order printed and shipped — no 3D printer needed. Price includes the print and delivery.
         </p>
       )}
 
       {/* Prominent, live keyword search — the quickest way to find a specific model. */}
       <div className="relative mb-8">
-        <Search size={20} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search size={20} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
           placeholder="Search models by name, tag or keyword…"
           aria-label="Search models"
-          className="w-full rounded-xl border border-gray-300 bg-white py-3.5 pl-12 pr-11 text-base shadow-xs focus:border-indigo-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+          className="w-full rounded-xl border border-border bg-background py-3.5 pl-12 pr-11 text-base shadow-xs focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-ring"
         />
         {searchTerm && (
           <button
             type="button"
             onClick={() => setSearchTerm('')}
             aria-label="Clear search"
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <X size={18} />
           </button>
@@ -307,8 +307,8 @@ const Browse: React.FC = () => {
               onClick={() => setClass(c.slug)}
               className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
                 active
-                  ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
-                  : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
+                  ? 'border-primary bg-primary text-primary-foreground shadow-xs'
+                  : 'border-border bg-background text-foreground hover:border-primary/50 hover:text-primary'
               }`}
             >
               {c.label}
@@ -318,9 +318,9 @@ const Browse: React.FC = () => {
       </div>
 
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[300px_1fr]">
-        <aside className="space-y-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+        <aside className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-xs lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Price</h2>
+            <h2 className="text-lg font-semibold text-foreground">Price</h2>
             <form onSubmit={handleApplyFilters} className="mt-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Min £" type="number" min={0} value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
@@ -335,8 +335,8 @@ const Browse: React.FC = () => {
 
           <div>
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
-              {facetsFetching && <Spinner size="sm" className="text-indigo-500" />}
+              <h2 className="text-lg font-semibold text-foreground">Filters</h2>
+              {facetsFetching && <Spinner size="sm" className="text-primary" />}
             </div>
             <div className="mt-3">
               {railFacets.length ? (
@@ -347,28 +347,28 @@ const Browse: React.FC = () => {
                   loading={facetsFetching}
                 />
               ) : (
-                <p className="text-sm text-gray-400">Loading filters…</p>
+                <p className="text-sm text-muted-foreground">Loading filters…</p>
               )}
             </div>
           </div>
         </aside>
 
         <section>
-          <header className="flex flex-col gap-4 border-b border-gray-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <header className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Browse models</h1>
-              <p className="text-sm text-gray-500">
+              <h1 className="text-2xl font-semibold text-foreground">Browse models</h1>
+              <p className="text-sm text-muted-foreground">
                 {pagination?.totalItems ?? models.length} results · Page {pagination?.page ?? 1} of {totalPages}
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {isFetching && <Spinner size="sm" className="text-indigo-500" />}
-              <label className="flex items-center gap-2 text-sm text-gray-600">
+              {isFetching && <Spinner size="sm" className="text-primary" />}
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 Sort by
                 <select
                   value={sortByParam}
                   onChange={(event) => updateParams({ sortBy: event.target.value })}
-                  className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
+                  className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:border-primary focus:outline-hidden"
                 >
                   {sortOptions.map((option) => (
                     <option key={option.value} value={option.value ?? 'recent'}>{option.label}</option>
@@ -391,7 +391,7 @@ const Browse: React.FC = () => {
                 <button
                   key={token}
                   onClick={() => toggleTerm(token)}
-                  className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary hover:bg-primary/20"
                 >
                   {labelByToken.get(token) ?? token.split(':').pop()}
                   <X size={13} />
@@ -399,7 +399,7 @@ const Browse: React.FC = () => {
               ))}
               <button
                 onClick={() => setTerms(new Set(selectedClass ? [`${MODEL_CLASS_SLUG}:${selectedClass}`] : []))}
-                className="text-sm text-gray-500 hover:text-gray-800"
+                className="text-sm text-muted-foreground hover:text-foreground"
               >
                 Clear all
               </button>
@@ -419,7 +419,7 @@ const Browse: React.FC = () => {
               <Button variant="outline" onClick={() => handlePageChange((pagination?.page ?? 1) - 1)} disabled={(pagination?.page ?? 1) <= 1}>
                 Previous
               </Button>
-              <span className="text-sm text-gray-600">Page {pagination?.page ?? 1} of {totalPages}</span>
+              <span className="text-sm text-muted-foreground">Page {pagination?.page ?? 1} of {totalPages}</span>
               <Button variant="outline" onClick={() => handlePageChange((pagination?.page ?? 1) + 1)} disabled={(pagination?.page ?? 1) >= totalPages}>
                 Next
               </Button>

@@ -14,7 +14,7 @@ const sizeMap = {
 const LoadingSpinner: React.FC<Props> = ({ size = 'md', fullScreen = false }) => {
   const spinner = (
     <svg
-      className={`animate-spin text-gray-600 ${sizeMap[size]}`}
+      className={`animate-spin text-primary ${sizeMap[size]}`}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"

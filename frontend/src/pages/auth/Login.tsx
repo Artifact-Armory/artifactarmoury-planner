@@ -6,6 +6,7 @@ import { authApi } from '../../api/endpoints/auth'
 import { useAuthStore } from '../../store/authStore'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
+import { Card, CardContent } from '../../components/shadcn/card'
 
 type FormValues = { email: string; password: string }
 
@@ -60,35 +61,39 @@ const Login: React.FC = () => {
   if (challengeToken) {
     return (
       <div className="max-w-md mx-auto px-4 py-10">
-        <h1 className="text-2xl font-semibold text-gray-900">Two-step verification</h1>
-        <p className="mt-2 text-sm text-gray-500">
-          Enter the 6-digit code from your authenticator app. You can also use one of your backup
-          codes.
-        </p>
-        <form onSubmit={onVerify} className="mt-6 space-y-4">
-          <Input
-            label="Authentication code"
-            inputMode="text"
-            autoComplete="one-time-code"
-            autoFocus
-            placeholder="123456"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-          />
-          <Button type="submit" className="w-full" loading={verifying}>
-            Verify &amp; sign in
-          </Button>
-          <button
-            type="button"
-            onClick={() => {
-              setChallengeToken(null)
-              setCode('')
-            }}
-            className="w-full text-sm text-gray-500 hover:text-gray-700"
-          >
-            ← Back to sign in
-          </button>
-        </form>
+        <Card>
+          <CardContent>
+            <h1 className="text-2xl font-semibold text-foreground">Two-step verification</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Enter the 6-digit code from your authenticator app. You can also use one of your backup
+              codes.
+            </p>
+            <form onSubmit={onVerify} className="mt-6 space-y-4">
+              <Input
+                label="Authentication code"
+                inputMode="text"
+                autoComplete="one-time-code"
+                autoFocus
+                placeholder="123456"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              <Button type="submit" className="w-full" loading={verifying}>
+                Verify &amp; sign in
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChallengeToken(null)
+                  setCode('')
+                }}
+                className="w-full text-sm text-muted-foreground hover:text-foreground"
+              >
+                ← Back to sign in
+              </button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -96,27 +101,31 @@ const Login: React.FC = () => {
   // ── First step: email + password ──────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto px-4 py-10">
-      <h1 className="text-2xl font-semibold text-gray-900">Sign in</h1>
-      <p className="mt-2 text-sm text-gray-500">Welcome back! Please enter your details.</p>
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
-        <Input
-          label="Email"
-          type="email"
-          placeholder="you@example.com"
-          required
-          {...register('email', { required: true })}
-        />
-        <Input
-          label="Password"
-          type="password"
-          placeholder="••••••••"
-          required
-          {...register('password', { required: true })}
-        />
-        <Button type="submit" className="w-full" loading={formState.isSubmitting}>
-          Sign in
-        </Button>
-      </form>
+      <Card>
+        <CardContent>
+          <h1 className="text-2xl font-semibold text-foreground">Sign in</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Welcome back! Please enter your details.</p>
+          <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
+            <Input
+              label="Email"
+              type="email"
+              placeholder="you@example.com"
+              required
+              {...register('email', { required: true })}
+            />
+            <Input
+              label="Password"
+              type="password"
+              placeholder="••••••••"
+              required
+              {...register('password', { required: true })}
+            />
+            <Button type="submit" className="w-full" loading={formState.isSubmitting}>
+              Sign in
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

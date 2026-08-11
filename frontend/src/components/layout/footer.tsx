@@ -1,45 +1,47 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { TRADEMARK_DISCLAIMER } from '../legal/TrademarkDisclaimer'
+import Logo from '../common/Logo'
+import { SITE_NAME } from '../../config/brand'
 
 const Footer: React.FC = () => {
   const year = new Date().getFullYear()
 
   return (
-    <footer className="bg-gray-900 text-gray-200">
+    <footer className="bg-background border-t border-border text-foreground">
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-10 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
         <div>
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/logo-white.svg" alt="Terrain Builder" className="h-8 w-auto" />
-            <span className="text-lg font-semibold">Terrain Builder</span>
+          <Link to="/" className="flex items-center gap-2 text-foreground">
+            <Logo className="h-8 w-8 text-primary" />
+            <span className="text-lg font-semibold">{SITE_NAME}</span>
           </Link>
-          <p className="mt-2 text-sm text-gray-400">
+          <p className="mt-2 text-sm text-muted-foreground">
             Craft immersive battlefields, share them with friends, and source the terrain you need.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-gray-400">
-          <Link to="/about" className="hover:text-white">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">
+          <Link to="/about" className="hover:text-foreground">
             About
           </Link>
-          <Link to="/contact" className="hover:text-white">
+          <Link to="/contact" className="hover:text-foreground">
             Contact
           </Link>
-          <Link to="/privacy-policy" className="hover:text-white">
+          <Link to="/privacy-policy" className="hover:text-foreground">
             Privacy Policy
           </Link>
-          <Link to="/terms-of-service" className="hover:text-white">
+          <Link to="/terms-of-service" className="hover:text-foreground">
             Terms of Service
           </Link>
         </div>
 
-        <p className="text-sm text-gray-500 sm:text-right">
-          &copy; {year} Artifact Planner. All rights reserved.
+        <p className="text-sm text-muted-foreground sm:text-right">
+          &copy; {year} {SITE_NAME}. All rights reserved.
         </p>
       </div>
 
-      <div className="border-t border-gray-800">
-        <p className="mx-auto max-w-7xl px-4 py-4 text-xs leading-relaxed text-gray-500 sm:px-6 lg:px-8">
+      <div className="border-t border-border">
+        <p className="mx-auto max-w-7xl px-4 py-4 text-xs leading-relaxed text-muted-foreground sm:px-6 lg:px-8">
           {TRADEMARK_DISCLAIMER}
         </p>
       </div>

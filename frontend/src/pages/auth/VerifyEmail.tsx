@@ -62,18 +62,18 @@ const VerifyEmail: React.FC = () => {
     <div className="max-w-md mx-auto px-4 py-12 text-center">
       {status === 'verifying' && (
         <>
-          <h1 className="text-2xl font-semibold text-gray-900">Verifying your email…</h1>
-          <p className="mt-2 text-sm text-gray-500">This will only take a moment.</p>
+          <h1 className="text-2xl font-semibold text-foreground">Verifying your email…</h1>
+          <p className="mt-2 text-sm text-muted-foreground">This will only take a moment.</p>
         </>
       )}
 
       {status === 'success' && (
         <>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-2xl">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-2xl text-emerald-600 dark:text-emerald-400">
             ✓
           </div>
-          <h1 className="text-2xl font-semibold text-gray-900">Email verified!</h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <h1 className="text-2xl font-semibold text-foreground">Email verified!</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
             Thanks — your account is fully unlocked. You can now upload models and make purchases.
           </p>
           <Link to="/" className="mt-6 inline-block">
@@ -84,18 +84,18 @@ const VerifyEmail: React.FC = () => {
 
       {status === 'error' && (
         <>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-2xl">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/15 text-2xl text-destructive">
             !
           </div>
-          <h1 className="text-2xl font-semibold text-gray-900">Verification failed</h1>
-          <p className="mt-2 text-sm text-gray-500">{message}</p>
+          <h1 className="text-2xl font-semibold text-foreground">Verification failed</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{message}</p>
           {isAuthenticated ? (
             <Button className="mt-6" onClick={resend} loading={resending}>
               Send a new link
             </Button>
           ) : (
-            <p className="mt-6 text-sm text-gray-500">
-              <Link to="/login" className="font-medium text-indigo-600 hover:underline">
+            <p className="mt-6 text-sm text-muted-foreground">
+              <Link to="/login" className="font-medium text-primary hover:underline">
                 Sign in
               </Link>{' '}
               to request a new verification link.
@@ -106,8 +106,8 @@ const VerifyEmail: React.FC = () => {
 
       {status === 'idle' && (
         <>
-          <h1 className="text-2xl font-semibold text-gray-900">Verify your email</h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <h1 className="text-2xl font-semibold text-foreground">Verify your email</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
             We've sent a verification link to your email address. Click it to unlock uploading and
             purchasing.
           </p>
@@ -116,9 +116,9 @@ const VerifyEmail: React.FC = () => {
               Resend verification email
             </Button>
           ) : (
-            <p className="mt-6 text-sm text-gray-500">
+            <p className="mt-6 text-sm text-muted-foreground">
               Didn't get it?{' '}
-              <Link to="/login" className="font-medium text-indigo-600 hover:underline">
+              <Link to="/login" className="font-medium text-primary hover:underline">
                 Sign in
               </Link>{' '}
               to resend.

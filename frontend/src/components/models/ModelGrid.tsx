@@ -10,8 +10,8 @@ interface ModelGridProps {
 const ModelGrid: React.FC<ModelGridProps> = ({ models, emptyMessage }) => {
   if (!models.length) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center">
-        <p className="text-sm font-medium text-gray-700">
+      <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+        <p className="text-sm font-medium text-muted-foreground">
           {emptyMessage ?? 'No models found. Try adjusting your filters.'}
         </p>
       </div>

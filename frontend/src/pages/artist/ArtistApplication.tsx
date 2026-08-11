@@ -1,11 +1,12 @@
 import React from 'react'
 import Button from '../../components/ui/Button'
+import { SITE_NAME } from '../../config/brand'
 
 const ArtistApplication: React.FC = () => {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
       <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-3xl font-semibold text-gray-900">Become an Artifact Planner artist</h1>
+        <h1 className="text-3xl font-semibold text-gray-900">Become an {SITE_NAME} artist</h1>
         <p className="mt-3 text-sm text-gray-600">
           We&apos;re building a curated marketplace of terrain makers. Submit your portfolio and we&apos;ll send an invite code
           if there&apos;s a good fit. Artists keep 80% of every sale and gain access to advanced analytics, customer

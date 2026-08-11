@@ -562,7 +562,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       name,
       price: parentSet ? parentSet.price : asset?.price ?? 0,
       thumbnail: parentSet ? parentSet.thumbnail : asset?.thumbnail,
-      artistName: asset?.artistName ?? 'Artifact Planner',
+      artistName: asset?.artistName ?? 'Artifact Armoury',
       owned: ownedModelIds.has(id),
       inCart: cartItems.some((it) => it.kind === 'model' && it.id === id),
     }

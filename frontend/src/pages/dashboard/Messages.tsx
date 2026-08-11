@@ -7,8 +7,7 @@ import { messagesApi, type ChatMessage } from '../../api/endpoints/messages'
 import { useAuthStore } from '../../store/authStore'
 import { containsAbuse, ABUSE_BLOCK_MESSAGE } from '../../utils/profanity'
 import ReportConversationModal from '../../components/messages/ReportConversationModal'
-
-const SITE_NAME = 'Artifact Armoury'
+import { SITE_NAME } from '../../config/brand'
 
 const timeAgo = (iso: string | null): string => {
   if (!iso) return ''

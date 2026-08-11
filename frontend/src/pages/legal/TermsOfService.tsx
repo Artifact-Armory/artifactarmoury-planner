@@ -112,8 +112,8 @@ const TermsOfService: React.FC = () => {
         <p>
           We may update these terms; material changes will be notified through the site. For
           any questions about these terms, contact us at{' '}
-          <a href="mailto:support@artifactplanner.com" className="text-indigo-600 underline">
-            support@artifactplanner.com
+          <a href="mailto:support@artifactarmoury.com" className="text-indigo-600 underline">
+            support@artifactarmoury.com
           </a>
           .
         </p>

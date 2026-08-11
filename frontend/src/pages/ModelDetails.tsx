@@ -10,6 +10,7 @@ import { messagesApi } from '../api/endpoints/messages'
 import type { TerrainModel } from '../api/types'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
+import PriceDisplay from '../components/models/PriceDisplay'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating } from '../utils/format'
@@ -18,30 +19,31 @@ import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 import ReportModelModal from '../components/reports/ReportModelModal'
 import { FEATURES } from '../config/features'
+import { SITE_NAME } from '../config/brand'
 
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
   if (!models.length) return null
   return (
     <section className="mt-10">
-      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
         {models.map((m) => (
           <Link
             key={m.id}
             to={`/models/${m.id}`}
-            className="group w-44 shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-xs hover:border-indigo-200 hover:shadow-sm"
+            className="group w-44 shrink-0 rounded-xl border border-border bg-card p-2 shadow-xs hover:border-primary/30 hover:shadow-sm"
           >
-            <div className="h-32 w-full overflow-hidden rounded-lg bg-gray-100">
+            <div className="h-32 w-full overflow-hidden rounded-lg bg-muted">
               {m.thumbnailUrl ? (
                 <img src={m.thumbnailUrl} alt={m.name} className="h-full w-full object-cover transition group-hover:scale-105" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">No image</div>
+                <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">No image</div>
               )}
             </div>
-            <p className="mt-2 truncate text-sm font-medium text-gray-900">{m.name}</p>
-            <p className="text-xs text-gray-500">{formatPrice(m.basePrice)}</p>
-            <p className="truncate text-xs text-gray-400">{m.artistName}</p>
+            <p className="mt-2 truncate text-sm font-medium text-foreground">{m.name}</p>
+            <p className="text-xs text-muted-foreground">{formatPrice(m.basePrice)}</p>
+            <p className="truncate text-xs text-muted-foreground">{m.artistName}</p>
           </Link>
         ))}
       </div>
@@ -138,7 +140,7 @@ const ModelDetails: React.FC = () => {
 
   const handleShare = async () => {
     const url = window.location.href
-    const shareData = { title: model?.name ?? 'Artifact Planner model', url }
+    const shareData = { title: model?.name ?? `${SITE_NAME} model`, url }
     try {
       if (navigator.share) {
         await navigator.share(shareData)
@@ -224,8 +226,8 @@ const ModelDetails: React.FC = () => {
   if (modelQuery.isError || !model) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900">Model not found</h1>
-        <p className="mt-2 text-sm text-gray-500">We couldn&apos;t load this model. It may be private or removed.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Model not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">We couldn&apos;t load this model. It may be private or removed.</p>
       </div>
     )
   }
@@ -234,12 +236,12 @@ const ModelDetails: React.FC = () => {
     <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-            <div className="relative h-80 w-full bg-gray-100">
+          <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
+            <div className="relative h-80 w-full bg-muted">
               {model.thumbnailUrl ? (
                 <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-gray-400">No thumbnail available</div>
+                <div className="flex h-full w-full items-center justify-center text-muted-foreground">No thumbnail available</div>
               )}
             </div>
             {model.images && model.images.length > 0 && (
@@ -257,14 +259,14 @@ const ModelDetails: React.FC = () => {
           </div>
 
           {model.partCount && model.partCount > 1 && (
-            <section className="rounded-2xl bg-white p-6 shadow-xs">
+            <section className="rounded-2xl bg-card p-6 shadow-xs">
               <div className="flex items-center gap-2">
-                <span className="rounded-sm bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                <span className="rounded-sm bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
                   SET · {model.partCount} parts
                 </span>
-                <h2 className="text-lg font-semibold text-gray-900">Multi-part model</h2>
+                <h2 className="text-lg font-semibold text-foreground">Multi-part model</h2>
               </div>
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-muted-foreground">
                 This piece comes as {model.partCount} STL files — buy once and download them all as a
                 ZIP. Each part can be placed separately in the planner.
               </p>
@@ -272,10 +274,10 @@ const ModelDetails: React.FC = () => {
                 <ul className="mt-4 divide-y">
                   {[{ id: 'primary', name: 'Part 1', thumbnailUrl: model.thumbnailUrl }, ...model.parts].map((p, i) => (
                     <li key={p.id} className="flex items-center gap-3 py-2">
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-gray-100">
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-muted">
                         {p.thumbnailUrl && <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                       </div>
-                      <span className="text-sm text-gray-700">{p.name || `Part ${i + 1}`}</span>
+                      <span className="text-sm text-foreground">{p.name || `Part ${i + 1}`}</span>
                     </li>
                   ))}
                 </ul>
@@ -283,12 +285,12 @@ const ModelDetails: React.FC = () => {
             </section>
           )}
 
-          <section className="rounded-2xl bg-white p-6 shadow-xs">
-            <h2 className="text-lg font-semibold text-gray-900">Description</h2>
-            <p className="mt-3 text-sm leading-relaxed text-gray-600">{model.description ?? 'No description provided.'}</p>
+          <section className="rounded-2xl bg-card p-6 shadow-xs">
+            <h2 className="text-lg font-semibold text-foreground">Description</h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{model.description ?? 'No description provided.'}</p>
 
             {model.taxonomyTerms?.length ? (
-              <div className="mt-5 space-y-2 border-t border-gray-100 pt-4">
+              <div className="mt-5 space-y-2 border-t border-border pt-4">
                 {Object.entries(
                   model.taxonomyTerms.reduce<Record<string, typeof model.taxonomyTerms>>((acc, t) => {
                     ;(acc[t.facetName] ||= []).push(t)
@@ -296,12 +298,12 @@ const ModelDetails: React.FC = () => {
                   }, {}),
                 ).map(([facetName, terms]) => (
                   <div key={facetName} className="flex flex-wrap items-baseline gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{facetName}</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{facetName}</span>
                     {terms.map((t) => (
                       <Link
                         key={t.termId}
                         to={`/browse?terms=${encodeURIComponent(`${t.facetSlug}:${t.path}`)}`}
-                        className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+                        className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20"
                       >
                         {t.name}
                       </Link>
@@ -309,13 +311,13 @@ const ModelDetails: React.FC = () => {
                   </div>
                 ))}
                 {model.taxonomyTerms.some((t) => t.facetSlug === 'designed-for') && (
-                  <p className="pt-1 text-[11px] leading-relaxed text-gray-400">{TRADEMARK_DISCLAIMER}</p>
+                  <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">{TRADEMARK_DISCLAIMER}</p>
                 )}
               </div>
             ) : model.tags?.length ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {model.tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
+                  <span key={tag} className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                     #{tag}
                   </span>
                 ))}
@@ -324,20 +326,20 @@ const ModelDetails: React.FC = () => {
           </section>
 
           {tablesQuery.data && tablesQuery.data.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-xs">
-              <h2 className="text-lg font-semibold text-gray-900">
+            <section className="rounded-2xl bg-card p-6 shadow-xs">
+              <h2 className="text-lg font-semibold text-foreground">
                 Featured in {tablesQuery.data.length} table{tablesQuery.data.length === 1 ? '' : 's'}
               </h2>
-              <p className="mt-1 text-sm text-gray-500">See this piece in a full build — shop the whole look.</p>
+              <p className="mt-1 text-sm text-muted-foreground">See this piece in a full build — shop the whole look.</p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {tablesQuery.data.map((t) => (
                   <Link
                     key={t.id}
                     to={`/planner/view/${t.id}`}
-                    className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40"
+                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3 hover:border-primary/40 hover:bg-primary/10"
                   >
-                    <span className="text-sm font-medium text-gray-900">{t.name}</span>
-                    <span className="text-xs text-gray-400">{t.modelCount} pieces</span>
+                    <span className="text-sm font-medium text-foreground">{t.name}</span>
+                    <span className="text-xs text-muted-foreground">{t.modelCount} pieces</span>
                   </Link>
                 ))}
               </div>
@@ -345,21 +347,21 @@ const ModelDetails: React.FC = () => {
           )}
 
           {model.recentReviews && model.recentReviews.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-xs">
-              <h2 className="text-lg font-semibold text-gray-900">Recent reviews</h2>
+            <section className="rounded-2xl bg-card p-6 shadow-xs">
+              <h2 className="text-lg font-semibold text-foreground">Recent reviews</h2>
               <div className="mt-4 space-y-4">
                 {model.recentReviews.map((review) => (
-                  <div key={review.id} className="rounded-lg border border-gray-100 p-4">
+                  <div key={review.id} className="rounded-lg border border-border p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm text-amber-500">
-                        <span className="font-semibold text-gray-900">{formatRating(review.rating)}</span>
-                        <span className="text-xs text-gray-500">{review.reviewerName ?? 'Anonymous'}</span>
+                        <span className="font-semibold text-foreground">{formatRating(review.rating)}</span>
+                        <span className="text-xs text-muted-foreground">{review.reviewerName ?? 'Anonymous'}</span>
                       </div>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-muted-foreground">
                         {new Date(review.createdAt).toLocaleDateString()}
                       </span>
                     </div>
-                    {review.comment && <p className="mt-2 text-sm text-gray-600">{review.comment}</p>}
+                    {review.comment && <p className="mt-2 text-sm text-muted-foreground">{review.comment}</p>}
                   </div>
                 ))}
               </div>
@@ -367,21 +369,21 @@ const ModelDetails: React.FC = () => {
           )}
 
           {model.versions && model.versions.length > 0 && (
-            <section className="rounded-2xl bg-white p-6 shadow-xs">
-              <h2 className="text-lg font-semibold text-gray-900">Version history</h2>
-              <p className="mt-1 text-sm text-gray-500">
+            <section className="rounded-2xl bg-card p-6 shadow-xs">
+              <h2 className="text-lg font-semibold text-foreground">Version history</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Own this model? You can re-download the latest version free from your library.
               </p>
               <ul className="mt-4 space-y-3">
                 {model.versions.map((v) => (
-                  <li key={v.version} className="rounded-lg border border-gray-100 p-4">
+                  <li key={v.version} className="rounded-lg border border-border p-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-gray-900">Version {v.version}</span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-sm font-semibold text-foreground">Version {v.version}</span>
+                      <span className="text-xs text-muted-foreground">
                         {new Date(v.createdAt).toLocaleDateString()}
                       </span>
                     </div>
-                    {v.notes && <p className="mt-1 text-sm text-gray-600">{v.notes}</p>}
+                    {v.notes && <p className="mt-1 text-sm text-muted-foreground">{v.notes}</p>}
                   </li>
                 ))}
               </ul>
@@ -390,12 +392,12 @@ const ModelDetails: React.FC = () => {
         </div>
 
         <aside className="space-y-6">
-          <section className="rounded-2xl bg-white p-6 shadow-md">
-            <h1 className="text-2xl font-semibold text-gray-900">{model.name}</h1>
-            <p className="mt-2 text-sm text-gray-500">
+          <section className="rounded-2xl bg-card p-6 shadow-md">
+            <h1 className="text-2xl font-semibold text-foreground">{model.name}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
               by{' '}
               {model.artistId ? (
-                <Link to={`/artists/${model.artistId}`} className="text-indigo-600 hover:text-indigo-700">
+                <Link to={`/artists/${model.artistId}`} className="text-primary hover:text-primary/80">
                   {model.artistName}
                 </Link>
               ) : (
@@ -407,28 +409,23 @@ const ModelDetails: React.FC = () => {
               <button
                 onClick={messageArtist}
                 disabled={messageBusy}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
+                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:border-primary/30 hover:text-primary disabled:opacity-60"
               >
                 <MessageSquare size={16} />
                 Message artist
               </button>
             )}
 
-            <div className="mt-4 flex items-center gap-4">
-              {model.onSale && model.salePrice != null ? (
-                <span className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-rose-600">{formatPrice(model.salePrice)}</span>
-                  <span className="text-lg text-gray-400 line-through">{formatPrice(model.originalPrice ?? model.basePrice)}</span>
-                  {model.salePercent != null && (
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
-                      -{model.salePercent}%
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span className="text-3xl font-bold text-gray-900">{formatPrice(model.basePrice)}</span>
-              )}
-              <span className="text-sm text-gray-500">
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <PriceDisplay
+                price={model.onSale && model.salePrice != null ? model.salePrice : model.basePrice}
+                originalPrice={
+                  model.onSale && model.salePrice != null ? model.originalPrice ?? model.basePrice : undefined
+                }
+                salePercent={model.salePercent}
+                size="lg"
+              />
+              <span className="text-sm text-muted-foreground">
                 Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews
               </span>
             </div>
@@ -454,7 +451,7 @@ const ModelDetails: React.FC = () => {
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
                   liked
                     ? 'border-rose-200 bg-rose-50 text-rose-600'
-                    : 'border-gray-200 text-gray-600 hover:border-rose-200 hover:text-rose-600'
+                    : 'border-border text-muted-foreground hover:border-rose-200 hover:text-rose-600'
                 }`}
               >
                 <Heart size={16} className={liked ? 'fill-rose-500 text-rose-500' : ''} />
@@ -462,7 +459,7 @@ const ModelDetails: React.FC = () => {
               </button>
               <button
                 onClick={handleShare}
-                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:border-indigo-200 hover:text-indigo-600"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:border-primary/30 hover:text-primary"
               >
                 <Share2 size={16} />
                 Share
@@ -482,7 +479,7 @@ const ModelDetails: React.FC = () => {
                 >
                   {downloading ? 'Preparing…' : model.partCount && model.partCount > 1 ? `Download ZIP (${model.partCount} parts)` : 'Download STL'}
                 </Button>
-                {downloadError && <p className="mt-2 text-xs text-red-600">{downloadError}</p>}
+                {downloadError && <p className="mt-2 text-xs text-destructive">{downloadError}</p>}
               </>
             ) : inCart ? (
               <Button className="mt-6 w-full" onClick={() => openCart()} variant="outline" leftIcon={<ShoppingCart size={16} />}>
@@ -497,17 +494,17 @@ const ModelDetails: React.FC = () => {
             {/* Print & Ship reminder — shown when the artist has enabled printing
                 for this model. Lets buyers without a 3D printer order it printed. */}
             {FEATURES.printAndShip && model.printConsent && model.printPrice != null && (
-              <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+              <div className="mt-4 rounded-xl border border-primary/30 bg-primary/10 p-4">
                 <div className="flex items-center gap-2">
-                  <Printer size={18} className="text-indigo-600" />
-                  <h3 className="text-sm font-semibold text-indigo-900">No 3D printer? Print &amp; Ship</h3>
+                  <Printer size={18} className="text-primary" />
+                  <h3 className="text-sm font-semibold text-primary">No 3D printer? Print &amp; Ship</h3>
                 </div>
-                <p className="mt-1.5 text-sm text-indigo-800/80">
+                <p className="mt-1.5 text-sm text-primary/80">
                   Order this model printed and delivered to your door — the price covers the print and postage.
                 </p>
                 <button
                   onClick={handlePrintAndShip}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:bg-indigo-700"
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs transition hover:bg-primary/90"
                 >
                   <Printer size={16} />
                   Order printed &amp; shipped · {formatPrice(model.printPrice)}
@@ -518,22 +515,22 @@ const ModelDetails: React.FC = () => {
             {/* Usage licence + anti-piracy watermark disclosure. The licence defines
                 what a buyer may do with the file; the disclosure is the GDPR notice
                 that downloads embed the buyer's identity for traceability. */}
-            <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="mt-6 rounded-xl border border-border bg-muted p-4">
               <div className="flex items-center gap-2">
-                <FileText size={16} className="text-gray-500" />
-                <h3 className="text-sm font-semibold text-gray-900">
+                <FileText size={16} className="text-muted-foreground" />
+                <h3 className="text-sm font-semibold text-foreground">
                   Licence: {licenseInfo(model.license).label}
                 </h3>
               </div>
-              <p className="mt-1.5 text-sm text-gray-600">{licenseInfo(model.license).description}</p>
-              <div className="mt-3 flex items-start gap-2 border-t border-gray-200 pt-3">
-                <ShieldCheck size={16} className="mt-0.5 shrink-0 text-gray-500" />
-                <p className="text-xs text-gray-500">
+              <p className="mt-1.5 text-sm text-muted-foreground">{licenseInfo(model.license).description}</p>
+              <div className="mt-3 flex items-start gap-2 border-t border-border pt-3">
+                <ShieldCheck size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">
                   For anti-piracy, every file you download is invisibly watermarked with a
                   code tied to your account and order, so a leaked file can be traced back to
                   the buyer. See our{' '}
-                  <Link to="/terms-of-service" className="underline hover:text-gray-700">terms</Link> and{' '}
-                  <Link to="/privacy-policy" className="underline hover:text-gray-700">privacy policy</Link>.
+                  <Link to="/terms-of-service" className="underline hover:text-foreground">terms</Link> and{' '}
+                  <Link to="/privacy-policy" className="underline hover:text-foreground">privacy policy</Link>.
                 </p>
               </div>
             </div>
@@ -544,8 +541,8 @@ const ModelDetails: React.FC = () => {
               const printer = printerTypeLabel(model.printerType)
               if (!mq && !printer && model.supportsRequired === undefined) return null
               return (
-                <div className="mt-6 rounded-xl border border-gray-200 p-4">
-                  <h3 className="text-sm font-semibold text-gray-900">Printability</h3>
+                <div className="mt-6 rounded-xl border border-border p-4">
+                  <h3 className="text-sm font-semibold text-foreground">Printability</h3>
                   {mq && (
                     <p
                       className={`mt-2 text-sm ${
@@ -556,7 +553,7 @@ const ModelDetails: React.FC = () => {
                       <span className="font-medium">{mq.label}.</span> {mq.detail}
                     </p>
                   )}
-                  <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                  <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
                     {printer && <li>Printer type: {printer}</li>}
                     {model.supportsRequired !== undefined && (
                       <li>Supports: {model.supportsRequired ? 'required' : 'not required'}</li>
@@ -572,7 +569,7 @@ const ModelDetails: React.FC = () => {
               )
             })()}
 
-            <ul className="mt-6 space-y-2 text-sm text-gray-600">
+            <ul className="mt-6 space-y-2 text-sm text-muted-foreground">
               <li>Category: {model.category}</li>
               {model.width && model.depth && model.height && (
                 <li>
@@ -588,7 +585,7 @@ const ModelDetails: React.FC = () => {
             {currentUser?.id !== model.artistId && (
               <button
                 onClick={() => (isAuthenticated ? setReportOpen(true) : navigate('/login'))}
-                className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-red-600"
+                className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive"
               >
                 <Flag size={13} /> Report this model
               </button>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Heart, ShoppingCart, Star } from 'lucide-react'
 import { TerrainModel } from '../../api/types'
 import Button from '../ui/Button'
+import PriceDisplay from './PriceDisplay'
 import { useCartStore } from '../../store/cartStore'
 import { formatPrice, formatRating } from '../../utils/format'
 import { FEATURES } from '../../config/features'
@@ -48,7 +49,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
 
   return (
     <article
-      className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs transition hover:-translate-y-1 hover:shadow-lg"
+      className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg"
       role="button"
       tabIndex={0}
       onClick={() => navigate(`/models/${model.id}`)}
@@ -58,7 +59,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
         }
       }}
     >
-      <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+      <div className="relative h-48 w-full overflow-hidden bg-muted">
         {model.thumbnailUrl ? (
           <img
             src={model.thumbnailUrl}
@@ -66,14 +67,14 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
             className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
+          <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
             No preview
           </div>
         )}
 
         <button
           onClick={handleFavorite}
-          className="absolute right-3 top-3 rounded-full bg-white/90 p-2 text-gray-500 shadow-sm hover:text-red-500"
+          className="absolute right-3 top-3 rounded-full bg-background/90 p-2 text-muted-foreground shadow-sm hover:text-rose-500"
           aria-label="Add to wishlist"
         >
           <Heart size={16} />
@@ -86,7 +87,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
             </span>
           )}
           {FEATURES.printAndShip && model.printConsent && model.printPrice != null && (
-            <span className="rounded-full bg-indigo-600/95 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
+            <span className="rounded-full bg-primary/95 px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-sm">
               Print &amp; Ship · {formatPrice(model.printPrice)}
             </span>
           )}
@@ -94,25 +95,24 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
       </div>
 
       <div className="flex flex-1 flex-col px-3 py-4">
-        <h3 className="line-clamp-1 text-lg font-semibold text-gray-900">{model.name}</h3>
-        <p className="line-clamp-1 text-sm text-gray-500">by {model.artistName}</p>
+        <h3 className="line-clamp-1 text-lg font-semibold text-foreground">{model.name}</h3>
+        <p className="line-clamp-1 text-sm text-muted-foreground">by {model.artistName}</p>
 
         <div className="mt-3 flex items-center justify-between">
-          {model.onSale && model.salePrice != null ? (
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-sm font-semibold text-rose-600">{formatPrice(model.salePrice)}</span>
-              <span className="text-xs text-gray-400 line-through">{formatPrice(model.originalPrice ?? model.basePrice)}</span>
-            </div>
-          ) : (
-            <div className="text-sm font-medium text-gray-900">{formatPrice(model.basePrice)}</div>
-          )}
+          {/* No percent badge here — the image corner badge above already shows it. */}
+          <PriceDisplay
+            price={model.onSale && model.salePrice != null ? model.salePrice : model.basePrice}
+            originalPrice={
+              model.onSale && model.salePrice != null ? model.originalPrice ?? model.basePrice : undefined
+            }
+          />
           <div className="flex items-center text-sm text-amber-500">
             <Star size={16} className="mr-1 fill-amber-400" />
-            <span className="text-gray-700">{formatRating(model.averageRating)}</span>
+            <span className="text-muted-foreground">{formatRating(model.averageRating)}</span>
           </div>
         </div>
 
-        <div className="mt-4 flex justify-between text-xs text-gray-500">
+        <div className="mt-4 flex justify-between text-xs text-muted-foreground">
           <span>{model.category}</span>
           {model.reviewCount !== undefined && (
             <span>{model.reviewCount} reviews</span>
@@ -134,4 +134,3 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
 }
 
 export default ModelCard
-

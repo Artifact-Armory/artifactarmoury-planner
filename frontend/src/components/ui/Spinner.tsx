@@ -15,7 +15,7 @@ const sizeMap: Record<Required<SpinnerProps>['size'], string> = {
 const Spinner: React.FC<SpinnerProps> = ({ size = 'md', className }) => {
   return (
     <svg
-      className={cn('animate-spin text-indigo-600', sizeMap[size], className)}
+      className={cn('animate-spin text-primary', sizeMap[size], className)}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"

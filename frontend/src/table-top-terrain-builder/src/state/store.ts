@@ -600,11 +600,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Name/price/thumbnail come from the set (parent) or the placed asset.
       let item
       if (parentSet) {
-        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Planner', price: parentSet.price, imageUrl: parentSet.thumbnail }
+        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Armoury', price: parentSet.price, imageUrl: parentSet.thumbnail }
       } else {
         const asset = s.assets.find(a => a.id === assetId)
         if (!asset) return
-        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Planner', price: asset.price ?? 0, imageUrl: asset.thumbnail }
+        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Armoury', price: asset.price ?? 0, imageUrl: asset.thumbnail }
       }
       cart.addItem(item, false) // don't open the drawer over the planner
     },
@@ -746,7 +746,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           kind: 'model',
           id: assetId,
           name: asset.name,
-          artistName: asset.artistName ?? 'Artifact Planner',
+          artistName: asset.artistName ?? 'Artifact Armoury',
           price: asset.price ?? 0,
           imageUrl: asset.thumbnail,
         })

@@ -153,19 +153,20 @@ function App() {
             toastOptions={{
               duration: 5000,
               style: {
-                background: '#FFFFFF',
-                color: '#1F2937',
+                background: 'var(--popover)',
+                color: 'var(--popover-foreground)',
+                border: '1px solid var(--border)',
               },
               success: {
                 iconTheme: {
                   primary: '#10B981',
-                  secondary: '#FFFFFF',
+                  secondary: 'var(--popover)',
                 },
               },
               error: {
                 iconTheme: {
-                  primary: '#EF4444',
-                  secondary: '#FFFFFF',
+                  primary: 'var(--destructive)',
+                  secondary: 'var(--popover)',
                 },
               },
             }}

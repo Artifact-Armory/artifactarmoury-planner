@@ -6,16 +6,29 @@ import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Hea
 import { authApi } from '../../api/endpoints/auth';
 import NotificationBell from '../notifications/NotificationBell';
 import MessagesIndicator from '../messages/MessagesIndicator';
+import Logo from '../common/Logo';
+import ThemeToggle from '../common/ThemeToggle';
+import { SITE_NAME } from '../../config/brand';
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `text-base font-medium transition-colors ${
+    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+  }`;
+
+const mobileNavLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `block py-2 text-base font-medium transition-colors ${
+    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+  }`;
 
 const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isScrolled, setIsScrolled] = useState(false);
-  
+
   const navigate = useNavigate();
   const { user, isAuthenticated, isAdmin, logout } = useAuthStore();
-  const { items, totalItems, subtotal, toggleCart } = useCartStore();
+  const { totalItems, toggleCart } = useCartStore();
 
   // Handle search form submission
   const handleSearch = (e: React.FormEvent) => {
@@ -85,22 +98,18 @@ const Header: React.FC = () => {
 
   return (
     <header
-      className={`sticky top-0 z-40 transition-all duration-300 ${
-        isScrolled ? 'bg-white shadow-md' : 'bg-transparent'
+      className={`sticky top-0 z-40 bg-background/95 backdrop-blur-sm transition-all duration-300 ${
+        isScrolled ? 'border-b border-border shadow-sm' : 'border-b border-transparent'
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center gap-8 py-4">
           {/* Logo */}
           <div className="shrink-0">
-            <Link to="/" className="flex items-center">
-              <img
-                src="/logo.svg"
-                alt="Artifact Planner"
-                className="h-8 w-auto"
-              />
-              <span className="ml-2 text-xl font-bold text-gray-900">
-                Artifact Planner
+            <Link to="/" className="flex items-center text-foreground">
+              <Logo className="h-8 w-8 text-primary" />
+              <span className="ml-2 text-xl font-bold tracking-tight">
+                {SITE_NAME}
               </span>
             </Link>
           </div>
@@ -108,82 +117,35 @@ const Header: React.FC = () => {
           {/* Desktop Navigation — keep it shallow: Browse · Tables · Artists · Planner.
               The planner is the differentiator, so it's always visible (never gated). */}
           <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
-            <NavLink
-              to="/browse"
-              className={({ isActive }) =>
-                `text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/browse" className={navLinkClass}>
               Browse
             </NavLink>
-            <NavLink
-              to="/tables"
-              className={({ isActive }) =>
-                `text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/tables" className={navLinkClass}>
               Tables
             </NavLink>
-            <NavLink
-              to="/artists"
-              className={({ isActive }) =>
-                `text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/artists" className={navLinkClass}>
               Artists
             </NavLink>
             <NavLink
               to="/planner"
               className={({ isActive }) =>
-                `text-base font-semibold ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-indigo-600 hover:text-indigo-500'
+                `text-base font-semibold text-primary transition-colors ${
+                  isActive ? '' : 'hover:text-primary/80'
                 }`
               }
             >
               Planner
             </NavLink>
-            <NavLink
-              to="/bundles"
-              className={({ isActive }) =>
-                `text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/bundles" className={navLinkClass}>
               Bundles
             </NavLink>
-            <NavLink
-              to="/about"
-              className={({ isActive }) =>
-                `text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/about" className={navLinkClass}>
               About
             </NavLink>
           </nav>
 
           {/* Desktop Search & User Controls */}
-          <div className="hidden md:flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-3">
             {/* Search Form */}
             <form onSubmit={handleSearch} className="relative">
               <input
@@ -191,25 +153,27 @@ const Header: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search terrains..."
-                className="py-2 px-4 pr-10 rounded-full border border-gray-300 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 w-56"
+                className="py-2 px-4 pr-10 rounded-full border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary w-56"
               />
               <button
                 type="submit"
                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
               >
-                <Search size={20} className="text-gray-400" />
+                <Search size={20} className="text-muted-foreground" />
               </button>
             </form>
+
+            <ThemeToggle />
 
             {/* Cart Button */}
             <button
               onClick={() => toggleCart()}
-              className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+              className="relative p-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
               aria-label="Shopping Cart"
             >
-              <ShoppingCart size={22} className="text-gray-700" />
+              <ShoppingCart size={22} className="text-foreground" />
               {totalItems > 0 && (
-                <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
                   {totalItems}
                 </span>
               )}
@@ -226,9 +190,9 @@ const Header: React.FC = () => {
               <div className="relative user-menu">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center space-x-1 p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+                  className="flex items-center space-x-1 p-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
                 >
-                  <div className="w-8 h-8 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-full overflow-hidden bg-muted flex items-center justify-center">
                     {user?.avatar ? (
                       <img
                         src={user.avatar}
@@ -236,27 +200,27 @@ const Header: React.FC = () => {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <User size={20} className="text-gray-500" />
+                      <User size={20} className="text-muted-foreground" />
                     )}
                   </div>
-                  <ChevronDown size={16} className="text-gray-500" />
+                  <ChevronDown size={16} className="text-muted-foreground" />
                 </button>
 
                 {/* User Dropdown Menu */}
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 ring-1 ring-black ring-opacity-5">
-                    <div className="px-4 py-2 border-b border-gray-100">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                  <div className="absolute right-0 mt-2 w-48 bg-popover text-popover-foreground rounded-md shadow-lg py-1 z-50 border border-border">
+                    <div className="px-4 py-2 border-b border-border">
+                      <p className="text-sm font-medium text-foreground truncate">
                         {user?.name}
                       </p>
-                      <p className="text-xs text-gray-500 truncate">
+                      <p className="text-xs text-muted-foreground truncate">
                         {user?.email}
                       </p>
                     </div>
 
                     <Link
                       to="/dashboard"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       Dashboard
@@ -264,7 +228,7 @@ const Header: React.FC = () => {
 
                     <Link
                       to="/dashboard/profile"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
@@ -275,7 +239,7 @@ const Header: React.FC = () => {
 
                     <Link
                       to="/dashboard/models"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
@@ -286,7 +250,7 @@ const Header: React.FC = () => {
 
                     <Link
                       to="/dashboard/purchases"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
@@ -297,7 +261,7 @@ const Header: React.FC = () => {
 
                     <Link
                       to="/dashboard/wishlist"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
@@ -308,7 +272,7 @@ const Header: React.FC = () => {
 
                     <Link
                       to="/dashboard/following"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
@@ -320,7 +284,7 @@ const Header: React.FC = () => {
                     {user?.role === 'artist' && (
                       <Link
                         to="/artist"
-                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         <div className="flex items-center">
@@ -333,7 +297,7 @@ const Header: React.FC = () => {
                     {isAdmin && (
                       <Link
                         to="/admin"
-                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         <div className="flex items-center">
@@ -343,10 +307,10 @@ const Header: React.FC = () => {
                       </Link>
                     )}
 
-                    <div className="border-t border-gray-100 mt-1">
+                    <div className="border-t border-border mt-1">
                       <button
                         onClick={handleLogout}
-                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                        className="block w-full text-left px-4 py-2 text-sm text-destructive hover:bg-accent"
                       >
                         <div className="flex items-center">
                           <LogOut size={16} className="mr-2" />
@@ -361,13 +325,13 @@ const Header: React.FC = () => {
               <div className="flex space-x-2 shrink-0">
                 <Link
                   to="/login"
-                  className="px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 border border-transparent rounded-md whitespace-nowrap"
+                  className="px-4 py-2 text-sm font-medium text-primary hover:text-primary/80 border border-transparent rounded-md whitespace-nowrap"
                 >
                   Log in
                 </Link>
                 <Link
                   to="/register"
-                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-xs whitespace-nowrap"
+                  className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 border border-transparent rounded-md shadow-xs whitespace-nowrap"
                 >
                   Sign up
                 </Link>
@@ -376,15 +340,16 @@ const Header: React.FC = () => {
           </div>
 
           {/* Mobile menu button */}
-          <div className="flex md:hidden">
+          <div className="flex md:hidden items-center">
+            <ThemeToggle className="mr-1" />
             <button
               onClick={() => toggleCart()}
-              className="relative p-2 mr-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+              className="relative p-2 mr-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
               aria-label="Shopping Cart"
             >
-              <ShoppingCart size={22} className="text-gray-700" />
+              <ShoppingCart size={22} className="text-foreground" />
               {totalItems > 0 && (
-                <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
                   {totalItems}
                 </span>
               )}
@@ -392,7 +357,7 @@ const Header: React.FC = () => {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               type="button"
-              className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+              className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
               aria-controls="mobile-menu"
               aria-expanded="false"
             >
@@ -410,7 +375,7 @@ const Header: React.FC = () => {
       {/* Mobile menu */}
       {mobileMenuOpen && (
         <div className="md:hidden" id="mobile-menu">
-          <div className="px-4 pt-2 pb-3 space-y-1 border-t border-gray-200 bg-white shadow-lg">
+          <div className="px-4 pt-2 pb-3 space-y-1 border-t border-border bg-background shadow-lg">
             {/* Mobile Search */}
             <form onSubmit={handleSearch} className="mb-4 mt-2">
               <div className="relative">
@@ -419,100 +384,46 @@ const Header: React.FC = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search terrains..."
-                  className="w-full py-2 px-4 pr-10 rounded-md border border-gray-300 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  className="w-full py-2 px-4 pr-10 rounded-md border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary"
                 />
                 <button
                   type="submit"
                   className="absolute inset-y-0 right-0 pr-3 flex items-center"
                 >
-                  <Search size={20} className="text-gray-400" />
+                  <Search size={20} className="text-muted-foreground" />
                 </button>
               </div>
             </form>
 
             {/* Mobile Navigation Links — same shallow order as desktop */}
-            <NavLink
-              to="/browse"
-              onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/browse" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               Browse
             </NavLink>
-            <NavLink
-              to="/tables"
-              onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/tables" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               Tables
             </NavLink>
-            <NavLink
-              to="/artists"
-              onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/artists" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               Artists
             </NavLink>
             <NavLink
               to="/planner"
               onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-semibold ${
-                  isActive ? 'text-indigo-600' : 'text-indigo-600 hover:text-indigo-500'
-                }`
-              }
+              className="block py-2 text-base font-semibold text-primary hover:text-primary/80"
             >
               Planner
             </NavLink>
-            <NavLink
-              to="/bundles"
-              onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/bundles" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               Bundles
             </NavLink>
-            <NavLink
-              to="/about"
-              onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `block py-2 text-base font-medium ${
-                  isActive
-                    ? 'text-indigo-600'
-                    : 'text-gray-700 hover:text-indigo-500'
-                }`
-              }
-            >
+            <NavLink to="/about" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               About
             </NavLink>
 
             {/* Mobile Auth Links */}
             {isAuthenticated ? (
-              <div className="pt-2 border-t border-gray-200">
+              <div className="pt-2 border-t border-border">
                 <div className="flex items-center py-2">
-                  <div className="w-8 h-8 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center mr-2">
+                  <div className="w-8 h-8 rounded-full overflow-hidden bg-muted flex items-center justify-center mr-2">
                     {user?.avatar ? (
                       <img
                         src={user.avatar}
@@ -520,14 +431,14 @@ const Header: React.FC = () => {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <User size={20} className="text-gray-500" />
+                      <User size={20} className="text-muted-foreground" />
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">
+                    <p className="text-sm font-medium text-foreground">
                       {user?.name}
                     </p>
-                    <p className="text-xs text-gray-500">{user?.email}</p>
+                    <p className="text-xs text-muted-foreground">{user?.email}</p>
                   </div>
                 </div>
 
@@ -535,11 +446,7 @@ const Header: React.FC = () => {
                   to="/dashboard"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `block py-2 text-sm ${
-                      isActive
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-500'
-                    }`
+                    `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                   }
                 >
                   Dashboard
@@ -549,11 +456,7 @@ const Header: React.FC = () => {
                   to="/dashboard/models"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `block py-2 text-sm ${
-                      isActive
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-500'
-                    }`
+                    `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                   }
                 >
                   <div className="flex items-center">
@@ -566,11 +469,7 @@ const Header: React.FC = () => {
                   to="/dashboard/purchases"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `block py-2 text-sm ${
-                      isActive
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-500'
-                    }`
+                    `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                   }
                 >
                   <div className="flex items-center">
@@ -583,11 +482,7 @@ const Header: React.FC = () => {
                   to="/dashboard/wishlist"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `block py-2 text-sm ${
-                      isActive
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-500'
-                    }`
+                    `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                   }
                 >
                   <div className="flex items-center">
@@ -600,9 +495,7 @@ const Header: React.FC = () => {
                   to="/dashboard/following"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `block py-2 text-sm ${
-                      isActive ? 'text-indigo-600' : 'text-gray-700 hover:text-indigo-500'
-                    }`
+                    `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                   }
                 >
                   <div className="flex items-center">
@@ -616,11 +509,7 @@ const Header: React.FC = () => {
                     to="/artist"
                     onClick={() => setMobileMenuOpen(false)}
                     className={({ isActive }) =>
-                      `block py-2 text-sm ${
-                        isActive
-                          ? 'text-indigo-600'
-                          : 'text-gray-700 hover:text-indigo-500'
-                      }`
+                      `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                     }
                   >
                     <div className="flex items-center">
@@ -635,11 +524,7 @@ const Header: React.FC = () => {
                     to="/admin"
                     onClick={() => setMobileMenuOpen(false)}
                     className={({ isActive }) =>
-                      `block py-2 text-sm ${
-                        isActive
-                          ? 'text-indigo-600'
-                          : 'text-gray-700 hover:text-indigo-500'
-                      }`
+                      `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
                     }
                   >
                     <div className="flex items-center">
@@ -654,7 +539,7 @@ const Header: React.FC = () => {
                     handleLogout();
                     setMobileMenuOpen(false);
                   }}
-                  className="block w-full text-left py-2 text-sm text-red-600"
+                  className="block w-full text-left py-2 text-sm text-destructive"
                 >
                   <div className="flex items-center">
                     <LogOut size={16} className="mr-2" />
@@ -663,18 +548,18 @@ const Header: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <div className="pt-2 border-t border-gray-200 flex space-x-4">
+              <div className="pt-2 border-t border-border flex space-x-4">
                 <Link
                   to="/login"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="flex-1 py-2 text-center text-sm font-medium text-indigo-600 hover:text-indigo-500 border border-indigo-600 rounded-md"
+                  className="flex-1 py-2 text-center text-sm font-medium text-primary hover:text-primary/80 border border-primary rounded-md"
                 >
                   Log in
                 </Link>
                 <Link
                   to="/register"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="flex-1 py-2 text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md"
+                  className="flex-1 py-2 text-center text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 border border-transparent rounded-md"
                 >
                   Sign up
                 </Link>
