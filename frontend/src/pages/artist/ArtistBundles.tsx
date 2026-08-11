@@ -60,14 +60,14 @@ const ArtistBundles: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">My Bundles</h1>
-          <p className="text-gray-600 mt-1">Group several models under one price. Buyers get every STL in the bundle.</p>
+          <p className="text-muted-foreground mt-1">Group several models under one price. Buyers get every STL in the bundle.</p>
         </div>
-        <Link to="/artist/bundles/new" className="px-4 py-2 rounded-sm bg-blue-600 text-white whitespace-nowrap">
+        <Link to="/artist/bundles/new" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground whitespace-nowrap">
           + New bundle
         </Link>
       </div>
 
-      {loading && <p className="mt-8 text-gray-500">Loading your bundles…</p>}
+      {loading && <p className="mt-8 text-muted-foreground">Loading your bundles…</p>}
       {error && !loading && (
         <div className="mt-8">
           <p className="text-red-600">{error}</p>
@@ -77,8 +77,8 @@ const ArtistBundles: React.FC = () => {
 
       {!loading && !error && bundles.length === 0 && (
         <div className="mt-10 text-center border rounded-lg py-12">
-          <p className="text-gray-600">You haven’t created any bundles yet.</p>
-          <Link to="/artist/bundles/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-blue-600 text-white">
+          <p className="text-muted-foreground">You haven’t created any bundles yet.</p>
+          <Link to="/artist/bundles/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-primary text-primary-foreground">
             Create your first bundle
           </Link>
         </div>
@@ -91,11 +91,11 @@ const ArtistBundles: React.FC = () => {
             const isPublished = b.status === 'published'
             return (
               <li key={b.id} className="flex items-center gap-4 p-4">
-                <div className="w-16 h-16 rounded-sm bg-gray-100 overflow-hidden shrink-0">
+                <div className="w-16 h-16 rounded-sm bg-muted overflow-hidden shrink-0">
                   {b.thumbnailUrl ? (
                     <img src={b.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full grid place-items-center text-gray-400 text-xs">No image</div>
+                    <div className="w-full h-full grid place-items-center text-muted-foreground text-xs">No image</div>
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -105,7 +105,7 @@ const ArtistBundles: React.FC = () => {
                       {b.status}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 mt-0.5">£{b.price.toFixed(2)} · {b.modelCount} models</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">£{b.price.toFixed(2)} · {b.modelCount} models</p>
                   {rowError[b.id] && <p className="text-xs text-red-600 mt-1">{rowError[b.id]}</p>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

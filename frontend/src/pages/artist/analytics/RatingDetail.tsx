@@ -21,9 +21,9 @@ const RatingDetail: React.FC = () => {
     <div className="px-4 py-8 max-w-3xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <Link to="/artist" className="text-sm text-indigo-600">← Analytics</Link>
-          <h1 className="text-2xl font-semibold text-gray-900">Ratings</h1>
-          <p className="text-sm text-gray-500">A 4.2 of solid 4s and a 4.2 of 5s-and-1s are different problems — read the shape.</p>
+          <Link to="/artist" className="text-sm text-primary">← Analytics</Link>
+          <h1 className="text-2xl font-semibold text-foreground">Ratings</h1>
+          <p className="text-sm text-muted-foreground">A 4.2 of solid 4s and a 4.2 of 5s-and-1s are different problems — read the shape.</p>
         </div>
         <DateRangePicker range={range} setRange={setRange} setPreset={setPreset} />
       </div>
@@ -31,13 +31,13 @@ const RatingDetail: React.FC = () => {
       {isLoading || !r ? (
         <div className="flex justify-center py-20"><Spinner size="lg" /></div>
       ) : r.count === 0 ? (
-        <p className="mt-10 rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">No reviews yet.</p>
+        <p className="mt-10 rounded-lg border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">No reviews yet.</p>
       ) : (
-        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6">
+        <div className="mt-6 rounded-xl border border-border bg-card p-6">
           <div className="mb-5 flex items-end gap-3">
-            <span className="text-4xl font-bold text-gray-900">{r.avg.toFixed(2)}</span>
+            <span className="text-4xl font-bold text-foreground">{r.avg.toFixed(2)}</span>
             <span className="flex items-center gap-1 pb-1 text-amber-500"><Star size={18} fill="currentColor" /></span>
-            <span className="pb-1 text-sm text-gray-500">{r.count} review{r.count === 1 ? '' : 's'} (all-time)</span>
+            <span className="pb-1 text-sm text-muted-foreground">{r.count} review{r.count === 1 ? '' : 's'} (all-time)</span>
           </div>
           <BarList data={dist} />
         </div>

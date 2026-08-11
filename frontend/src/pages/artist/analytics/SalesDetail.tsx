@@ -38,8 +38,8 @@ const SalesDetail: React.FC = () => {
     <div className="px-4 py-8 max-w-5xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <Link to="/artist" className="text-sm text-indigo-600">← Analytics</Link>
-          <h1 className="text-2xl font-semibold text-gray-900">Sales & revenue</h1>
+          <Link to="/artist" className="text-sm text-primary">← Analytics</Link>
+          <h1 className="text-2xl font-semibold text-foreground">Sales & revenue</h1>
         </div>
         <DateRangePicker range={range} setRange={setRange} setPreset={setPreset} />
       </div>
@@ -49,18 +49,18 @@ const SalesDetail: React.FC = () => {
       ) : (
         <>
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-xs uppercase text-gray-400">Gross</p><p className="text-xl font-semibold">{formatPrice(t.gross)}</p></div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-xs uppercase text-gray-400">Platform fee</p><p className="text-xl font-semibold text-gray-500">−{formatPrice(fee)}</p></div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-xs uppercase text-gray-400">Net (you)</p><p className="text-xl font-semibold text-green-700">{formatPrice(t.net)}</p></div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-xs uppercase text-gray-400">Units</p><p className="text-xl font-semibold">{t.sales}</p></div>
+            <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs uppercase text-muted-foreground">Gross</p><p className="text-xl font-semibold">{formatPrice(t.gross)}</p></div>
+            <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs uppercase text-muted-foreground">Platform fee</p><p className="text-xl font-semibold text-muted-foreground">−{formatPrice(fee)}</p></div>
+            <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs uppercase text-muted-foreground">Net (you)</p><p className="text-xl font-semibold text-green-700">{formatPrice(t.net)}</p></div>
+            <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs uppercase text-muted-foreground">Units</p><p className="text-xl font-semibold">{t.sales}</p></div>
           </div>
 
-          <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5">
+          <div className="mt-6 rounded-xl border border-border bg-card p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">Over time</h2>
-              <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm">
+              <h2 className="text-sm font-semibold text-foreground">Over time</h2>
+              <div className="inline-flex overflow-hidden rounded-lg border border-border text-sm">
                 {(['gross', 'net', 'units'] as const).map((m) => (
-                  <button key={m} onClick={() => setMetric(m)} className={`px-3 py-1 capitalize ${metric === m ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600'}`}>{m}</button>
+                  <button key={m} onClick={() => setMetric(m)} className={`px-3 py-1 capitalize ${metric === m ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground'}`}>{m}</button>
                 ))}
               </div>
             </div>
@@ -70,24 +70,24 @@ const SalesDetail: React.FC = () => {
             />
           </div>
 
-          <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5">
+          <div className="mt-6 rounded-xl border border-border bg-card p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">Revenue by product</h2>
-              <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+              <h2 className="text-sm font-semibold text-foreground">Revenue by product</h2>
+              <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-accent">
                 <Download size={14} /> Export CSV
               </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead className="text-left text-xs uppercase text-gray-400">
+                <thead className="text-left text-xs uppercase text-muted-foreground">
                   <tr><th className="py-2">Model</th><th className="py-2 text-right">Units</th><th className="py-2 text-right">Gross</th><th className="py-2 text-right">Net</th></tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="divide-y divide-border">
                   {(productsQ.data ?? []).filter((p) => p.units > 0).map((p) => (
                     <tr key={p.modelId}>
-                      <td className="py-2"><Link to={`/artist/analytics/model/${p.modelId}`} className="font-medium text-gray-900 hover:text-indigo-600">{p.name}</Link></td>
+                      <td className="py-2"><Link to={`/artist/analytics/model/${p.modelId}`} className="font-medium text-foreground hover:text-primary">{p.name}</Link></td>
                       <td className="py-2 text-right">{p.units}</td>
-                      <td className="py-2 text-right text-gray-600">{formatPrice(p.gross)}</td>
+                      <td className="py-2 text-right text-muted-foreground">{formatPrice(p.gross)}</td>
                       <td className="py-2 text-right font-medium text-green-700">{formatPrice(p.net)}</td>
                     </tr>
                   ))}

@@ -221,7 +221,7 @@ const CreateModel: React.FC = () => {
   return (
     <div className="px-4 py-10 max-w-2xl mx-auto">
       <h1 className="text-xl font-semibold">Create Model</h1>
-      <p className="text-gray-600 mt-1">Upload an STL and details. We’ll generate the 3D preview and print estimate for you.</p>
+      <p className="text-muted-foreground mt-1">Upload an STL and details. We’ll generate the 3D preview and print estimate for you.</p>
 
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
         <div>
@@ -238,7 +238,7 @@ const CreateModel: React.FC = () => {
           <label className="block text-sm font-medium mb-1">
             Model class <span className="text-red-500">*</span>
           </label>
-          <p className="text-xs text-gray-500 mb-2">What kind of model is this? It sets which type and filters buyers use to find it.</p>
+          <p className="text-xs text-muted-foreground mb-2">What kind of model is this? It sets which type and filters buyers use to find it.</p>
           <div className="flex flex-wrap gap-2">
             {MODEL_CLASSES.map((c) => (
               <button
@@ -248,8 +248,8 @@ const CreateModel: React.FC = () => {
                 onClick={() => setModelClass(c.slug)}
                 className={`rounded-full border px-4 py-2 text-sm font-medium transition disabled:opacity-60 ${
                   modelClass === c.slug
-                    ? 'border-indigo-600 bg-indigo-600 text-white'
-                    : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-foreground hover:border-primary/50 hover:text-primary'
                 }`}
               >
                 {c.label}
@@ -285,12 +285,12 @@ const CreateModel: React.FC = () => {
               <option key={l.value} value={l.value}>{l.label} — {l.short}</option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">{licenseInfo(license).description}</p>
+          <p className="text-xs text-muted-foreground mt-1">{licenseInfo(license).description}</p>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">
-            Printer type <span className="font-normal text-gray-400">(optional)</span>
+            Printer type <span className="font-normal text-muted-foreground">(optional)</span>
           </label>
           <select
             className="w-full border rounded-sm px-3 py-2"
@@ -303,16 +303,16 @@ const CreateModel: React.FC = () => {
               <option key={p.value} value={p.value}>{p.short}</option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Tell buyers which printer this model is authored for — helps set expectations for detail and supports.
           </p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 p-3">
+        <div className="rounded-lg border border-border p-3">
           <label className="block text-sm font-medium mb-1">
             Classification <span className="text-red-500">*</span>
           </label>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-muted-foreground mb-3">
             Tell buyers what this is — all four are required so your model shows up in the right
             searches. Tick as many as apply in each (a stone barn can be Medieval <em>and</em> WW2).
           </p>
@@ -327,7 +327,7 @@ const CreateModel: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">More tags (optional)</label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-muted-foreground mb-2">
             Add extra tags so buyers find your model — pick several where they apply (a stone barn can
             be Medieval <em>and</em> WW2). Fields marked <span className="text-red-500">*</span> are
             required before you can publish.
@@ -345,8 +345,8 @@ const CreateModel: React.FC = () => {
         <div>
           <label className="block text-sm font-medium mb-1">Model file (.stl, .obj or .3mf)</label>
           <input type="file" accept=".stl,.obj,.3mf" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
-          {stlFile && <p className="text-sm text-gray-500 mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
-          <p className="text-xs text-gray-500 mt-1">
+          {stlFile && <p className="text-sm text-muted-foreground mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
+          <p className="text-xs text-muted-foreground mt-1">
             OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
             Max {MAX_MODEL_FILE_MB}MB per file; decimate very high-poly models before uploading.
           </p>
@@ -354,7 +354,7 @@ const CreateModel: React.FC = () => {
 
         <div className="rounded-sm border border-dashed p-3">
           <label className="block text-sm font-medium mb-1">Extra parts (optional — makes this a “set”)</label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-muted-foreground mb-2">
             Add more STL/OBJ/3MF files if this piece comes in several parts (e.g. separate floors).
             Buyers pay once, download all parts as a ZIP, and can place each part in the planner.
           </p>
@@ -390,22 +390,22 @@ const CreateModel: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Thumbnail <span className="text-red-500">*</span></label>
-          <p className="text-xs text-gray-500 mb-1">A preview image is required — it's what buyers see in the marketplace.</p>
+          <p className="text-xs text-muted-foreground mb-1">A preview image is required — it's what buyers see in the marketplace.</p>
           <input type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
-          {thumbFile && <p className="text-sm text-gray-500 mt-1">{thumbFile.name}</p>}
+          {thumbFile && <p className="text-sm text-muted-foreground mt-1">{thumbFile.name}</p>}
         </div>
 
         {phase === 'uploading' && (
           <div>
-            <div className="h-2 rounded-sm bg-gray-200 overflow-hidden">
-              <div className="h-full bg-blue-600 transition-all" style={{ width: `${Math.max(4, progress)}%` }} />
+            <div className="h-2 rounded-sm bg-muted overflow-hidden">
+              <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(4, progress)}%` }} />
             </div>
-            <p className="text-sm text-gray-500 mt-1">Uploading… {progress}%</p>
+            <p className="text-sm text-muted-foreground mt-1">Uploading… {progress}%</p>
           </div>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground disabled:opacity-50" disabled={busy}>
           {phase === 'uploading' ? 'Uploading…' : phase === 'processing' ? 'Processing…' : 'Upload model'}
         </button>
       </form>

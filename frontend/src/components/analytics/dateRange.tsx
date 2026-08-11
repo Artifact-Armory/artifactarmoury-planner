@@ -50,26 +50,26 @@ export const DateRangePicker: React.FC<{
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex overflow-hidden rounded-lg border border-gray-200">
+      <div className="inline-flex overflow-hidden rounded-lg border border-border">
         {PRESETS.map((p) => (
           <button
             key={p.days}
             onClick={() => setPreset(p.days)}
             className={`px-3 py-1.5 text-sm ${
-              activeDays === p.days ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              activeDays === p.days ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
             }`}
           >
             {p.label}
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-1 text-sm text-gray-500">
+      <div className="flex items-center gap-1 text-sm text-muted-foreground">
         <input
           type="date"
           value={range.from}
           max={range.to}
           onChange={(e) => setRange({ ...range, from: e.target.value })}
-          className="rounded-md border border-gray-300 px-2 py-1"
+          className="rounded-md border border-border px-2 py-1"
         />
         <span>→</span>
         <input
@@ -78,7 +78,7 @@ export const DateRangePicker: React.FC<{
           min={range.from}
           max={daysAgo(0)}
           onChange={(e) => setRange({ ...range, to: e.target.value })}
-          className="rounded-md border border-gray-300 px-2 py-1"
+          className="rounded-md border border-border px-2 py-1"
         />
       </div>
     </div>

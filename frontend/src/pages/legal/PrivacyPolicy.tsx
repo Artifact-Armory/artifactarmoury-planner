@@ -68,7 +68,7 @@ const PrivacyPolicy: React.FC = () => {
           Subject to law, you can request access to, correction or deletion of your personal
           data, object to or restrict certain processing, and request a copy of your data.
           To exercise any right, contact us at{' '}
-          <a href="mailto:privacy@artifactarmoury.com" className="text-indigo-600 underline">
+          <a href="mailto:privacy@artifactarmoury.com" className="text-primary underline">
             privacy@artifactarmoury.com
           </a>
           . You also have the right to complain to your local data-protection authority (in
@@ -86,11 +86,11 @@ const PrivacyPolicy: React.FC = () => {
       <LegalSection heading="9. Contact">
         <p>
           Questions about this policy or your data? Email{' '}
-          <a href="mailto:privacy@artifactarmoury.com" className="text-indigo-600 underline">
+          <a href="mailto:privacy@artifactarmoury.com" className="text-primary underline">
             privacy@artifactarmoury.com
           </a>
           . See also our{' '}
-          <Link to="/terms-of-service" className="text-indigo-600 underline">Terms of Service</Link>.
+          <Link to="/terms-of-service" className="text-primary underline">Terms of Service</Link>.
         </p>
       </LegalSection>
     </LegalLayout>

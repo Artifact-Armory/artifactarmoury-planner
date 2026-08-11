@@ -85,16 +85,16 @@ const Checkout: React.FC = () => {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
         <CheckCircle className="mx-auto text-green-500" size={56} />
-        <h1 className="mt-4 text-2xl font-semibold text-gray-900">Purchase complete</h1>
-        <p className="mt-2 text-gray-600">
+        <h1 className="mt-4 text-2xl font-semibold text-foreground">Purchase complete</h1>
+        <p className="mt-2 text-muted-foreground">
           Your STL files are now unlocked. Download them any time from My Downloads — we've also
           emailed your receipt with download links.
         </p>
         <div className="mt-8 flex justify-center gap-3">
-          <Link to="/dashboard/downloads" className="rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+          <Link to="/dashboard/downloads" className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             My downloads
           </Link>
-          <Link to="/browse" className="rounded-md border px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          <Link to="/browse" className="rounded-md border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent">
             Keep browsing
           </Link>
         </div>
@@ -104,49 +104,49 @@ const Checkout: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
-      <h1 className="text-2xl font-semibold text-gray-900">Checkout</h1>
-      <p className="text-gray-600 mt-1">Digital STL downloads — no shipping. You pay once per item.</p>
+      <h1 className="text-2xl font-semibold text-foreground">Checkout</h1>
+      <p className="text-muted-foreground mt-1">Digital STL downloads — no shipping. You pay once per item.</p>
 
       {items.length === 0 ? (
-        <div className="mt-10 rounded-lg border border-dashed border-gray-300 bg-white p-12 text-center">
-          <p className="text-gray-700 font-medium">Your cart is empty</p>
-          <Link to="/browse" className="mt-4 inline-flex rounded-md bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+        <div className="mt-10 rounded-lg border border-dashed border-border bg-card p-12 text-center">
+          <p className="text-foreground font-medium">Your cart is empty</p>
+          <Link to="/browse" className="mt-4 inline-flex rounded-md bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20">
             Browse models
           </Link>
         </div>
       ) : (
         <div className="mt-6 space-y-6">
-          <ul className="divide-y rounded-lg border bg-white">
+          <ul className="divide-y rounded-lg border bg-card">
             {items.map((item) => (
               <li key={cartKey(item.kind, item.id)} className="flex items-center gap-4 p-4">
-                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm bg-gray-100">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm bg-muted">
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
                   ) : (
-                    <div className="grid h-full w-full place-items-center text-[10px] text-gray-400">No image</div>
+                    <div className="grid h-full w-full place-items-center text-[10px] text-muted-foreground">No image</div>
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-gray-900">{item.name}</span>
+                    <span className="truncate font-medium text-foreground">{item.name}</span>
                     {item.kind === 'bundle' && (
-                      <span className="rounded-sm bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">BUNDLE</span>
+                      <span className="rounded-sm bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">BUNDLE</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500">{item.artistName}</p>
+                  <p className="text-xs text-muted-foreground">{item.artistName}</p>
                 </div>
                 {item.originalPrice != null && item.originalPrice > item.price ? (
                   <span className="flex items-baseline gap-1.5">
                     <span className="font-semibold text-rose-600">{formatPrice(item.price)}</span>
-                    <span className="text-xs text-gray-400 line-through">{formatPrice(item.originalPrice)}</span>
+                    <span className="text-xs text-muted-foreground line-through">{formatPrice(item.originalPrice)}</span>
                   </span>
                 ) : (
-                  <span className="font-semibold text-gray-900">{formatPrice(item.price)}</span>
+                  <span className="font-semibold text-foreground">{formatPrice(item.price)}</span>
                 )}
                 {phase === 'review' && (
                   <button
                     onClick={() => removeItem(cartKey(item.kind, item.id))}
-                    className="rounded-full p-2 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    className="rounded-full p-2 text-muted-foreground hover:bg-red-50 hover:text-red-500"
                     aria-label="Remove item"
                   >
                     <Trash2 size={16} />
@@ -156,10 +156,10 @@ const Checkout: React.FC = () => {
             ))}
           </ul>
 
-          <aside className="h-fit rounded-lg border bg-white p-5">
+          <aside className="h-fit rounded-lg border bg-card p-5">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">Total</span>
-              <span className="text-xl font-bold text-gray-900">{formatPrice(subtotal)}</span>
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-xl font-bold text-foreground">{formatPrice(subtotal)}</span>
             </div>
             {!user && (
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
@@ -167,7 +167,7 @@ const Checkout: React.FC = () => {
 
             {phase === 'review' ? (
               <>
-                <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-gray-600">
+                <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
                     checked={consent}
@@ -188,7 +188,7 @@ const Checkout: React.FC = () => {
                       ? `Continue to payment · ${formatPrice(subtotal)}`
                       : `Pay ${formatPrice(subtotal)} (test)`}
                 </Button>
-                <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-gray-400">
+                <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
                   <Lock size={11} />
                   {stripePromise && !MOCK_CHECKOUT ? 'Payments secured by Stripe' : 'Test checkout — no real payment is taken.'}
                 </p>
@@ -270,11 +270,11 @@ const PaymentForm: React.FC<{
         type="button"
         onClick={onBack}
         disabled={paying}
-        className="mt-2 w-full text-center text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+        className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
       >
         Back to cart
       </button>
-      <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-gray-400">
+      <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
         <Lock size={11} /> Payments secured by Stripe
       </p>
     </form>

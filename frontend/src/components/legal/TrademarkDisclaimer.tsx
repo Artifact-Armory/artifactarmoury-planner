@@ -32,7 +32,7 @@ export function mentionsTrademark(text: string | null | undefined): boolean {
 }
 
 const TrademarkDisclaimer: React.FC<{ className?: string }> = ({ className }) => (
-  <p className={className ?? 'text-xs text-gray-500'}>{TRADEMARK_DISCLAIMER}</p>
+  <p className={className ?? 'text-xs text-muted-foreground'}>{TRADEMARK_DISCLAIMER}</p>
 )
 
 export default TrademarkDisclaimer

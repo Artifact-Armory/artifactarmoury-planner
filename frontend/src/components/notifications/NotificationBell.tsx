@@ -68,47 +68,47 @@ const NotificationBell: React.FC = () => {
     <div className="relative" ref={ref}>
       <button
         onClick={openPanel}
-        className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+        className="relative p-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
         aria-label="Notifications"
       >
-        <Bell size={22} className="text-gray-700" />
+        <Bell size={22} className="text-foreground" />
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
+          <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2">
-            <p className="text-sm font-semibold text-gray-900">Notifications</p>
-            <button onClick={markAll} className="text-xs text-indigo-600 hover:text-indigo-800">
+        <div className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2">
+            <p className="text-sm font-semibold text-foreground">Notifications</p>
+            <button onClick={markAll} className="text-xs text-primary hover:text-primary/80">
               Mark all read
             </button>
           </div>
           {loadingList ? (
-            <p className="px-4 py-6 text-center text-sm text-gray-400">Loading…</p>
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Loading…</p>
           ) : items.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-gray-400">
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               No notifications yet. Follow artists to hear about new releases.
             </p>
           ) : (
-            <ul className="divide-y divide-gray-50">
+            <ul className="divide-y divide-border">
               {items.map((n) => (
                 <li key={n.id}>
                   <button
                     onClick={() => handleClick(n)}
-                    className={`block w-full px-4 py-3 text-left hover:bg-gray-50 ${
-                      n.isRead ? '' : 'bg-indigo-50/50'
+                    className={`block w-full px-4 py-3 text-left hover:bg-accent ${
+                      n.isRead ? '' : 'bg-primary/5'
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />}
+                      {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />}
                       <div className={n.isRead ? 'ml-4' : ''}>
-                        <p className="text-sm font-medium text-gray-900">{n.title}</p>
-                        {n.body && <p className="text-xs text-gray-500">{n.body}</p>}
-                        <p className="mt-0.5 text-xs text-gray-400">{timeAgo(n.createdAt)}</p>
+                        <p className="text-sm font-medium text-foreground">{n.title}</p>
+                        {n.body && <p className="text-xs text-muted-foreground">{n.body}</p>}
+                        <p className="mt-0.5 text-xs text-muted-foreground">{timeAgo(n.createdAt)}</p>
                       </div>
                     </div>
                   </button>

@@ -22,21 +22,21 @@ const Following: React.FC = () => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Following</h1>
-        <p className="text-sm text-gray-500">New releases from the artists you follow.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Following</h1>
+        <p className="text-sm text-muted-foreground">New releases from the artists you follow.</p>
       </div>
 
       {/* Artists you follow */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Artists ({artists.length})
         </h2>
         {followingQuery.isLoading ? (
           <Spinner size="sm" />
         ) : artists.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
+          <p className="rounded-lg border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
             You aren't following anyone yet.{' '}
-            <Link to="/artists" className="font-medium text-indigo-600">Browse artists</Link> and hit
+            <Link to="/artists" className="font-medium text-primary">Browse artists</Link> and hit
             Follow to build your release feed.
           </p>
         ) : (
@@ -45,16 +45,16 @@ const Following: React.FC = () => {
               <Link
                 key={a.id}
                 to={`/artists/${a.id}`}
-                className="flex items-center gap-2 rounded-full border border-gray-200 bg-white py-1.5 pl-1.5 pr-4 shadow-xs hover:border-indigo-300"
+                className="flex items-center gap-2 rounded-full border border-border bg-card py-1.5 pl-1.5 pr-4 shadow-xs hover:border-primary/40"
               >
-                <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-xs font-semibold text-gray-500">
+                <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                   {a.profileImageUrl ? (
                     <img src={a.profileImageUrl} alt={a.name} className="h-full w-full object-cover" />
                   ) : (
                     a.name.slice(0, 2).toUpperCase()
                   )}
                 </span>
-                <span className="text-sm font-medium text-gray-800">{a.name}</span>
+                <span className="text-sm font-medium text-foreground">{a.name}</span>
               </Link>
             ))}
           </div>
@@ -63,11 +63,11 @@ const Following: React.FC = () => {
 
       {/* Release feed */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">Latest releases</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Latest releases</h2>
         {feedQuery.isLoading ? (
           <div className="flex justify-center py-16"><Spinner size="lg" /></div>
         ) : feed.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
+          <p className="rounded-lg border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
             Nothing new yet — releases from artists you follow will show up here.
           </p>
         ) : (

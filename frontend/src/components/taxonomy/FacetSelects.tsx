@@ -108,20 +108,20 @@ const FacetMultiSelect: React.FC<{
           type="button"
           disabled={disabled}
           onClick={() => setOpen((o) => !o)}
-          className={`w-full flex items-center justify-between gap-2 border rounded px-3 py-2 bg-white text-left disabled:opacity-60 ${
-            selectedTokens.length ? 'text-gray-900' : 'text-gray-400'
+          className={`w-full flex items-center justify-between gap-2 border rounded px-3 py-2 bg-card text-left disabled:opacity-60 ${
+            selectedTokens.length ? 'text-foreground' : 'text-muted-foreground'
           }`}
         >
           <span className="truncate">{summary}</span>
           <ChevronDown
             size={16}
-            className={`flex-none text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+            className={`flex-none text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
           />
         </button>
 
         {open && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg">
-            <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 text-xs text-gray-500">
+          <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
+            <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
               <span>Tick one or more</span>
               <span>
                 {selectedTokens.length}
@@ -129,21 +129,21 @@ const FacetMultiSelect: React.FC<{
               </span>
             </div>
             {searchable && (
-              <div className="border-b border-gray-100 p-2">
+              <div className="border-b border-border p-2">
                 <div className="relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input
                     autoFocus
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={`Search ${label.toLowerCase()}…`}
-                    className="w-full rounded-sm border border-gray-300 py-1.5 pl-8 pr-8 text-sm focus:border-indigo-500 focus:outline-hidden"
+                    className="w-full rounded-sm border border-border py-1.5 pl-8 pr-8 text-sm focus:border-primary focus:outline-hidden"
                   />
                   {query && (
                     <button
                       type="button"
                       onClick={() => setQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       aria-label="Clear search"
                     >
                       <X size={14} />
@@ -154,7 +154,7 @@ const FacetMultiSelect: React.FC<{
             )}
             <ul className="max-h-64 overflow-auto py-1">
               {visibleOptions.length === 0 && (
-                <li className="px-3 py-2 text-sm text-gray-400">No matches</li>
+                <li className="px-3 py-2 text-sm text-muted-foreground">No matches</li>
               )}
               {visibleOptions.map((o) => {
                 const checked = selectedSet.has(o.token)
@@ -165,12 +165,12 @@ const FacetMultiSelect: React.FC<{
                       type="button"
                       disabled={disabled || blocked}
                       onClick={() => toggle(o.token)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-indigo-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-primary/10 disabled:opacity-40 disabled:hover:bg-transparent"
                       style={{ paddingLeft: 12 + o.depth * 14 }}
                     >
                       <span
                         className={`flex h-4 w-4 flex-none items-center justify-center rounded border ${
-                          checked ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300'
+                          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
                         }`}
                       >
                         {checked && <Check size={12} />}
@@ -182,7 +182,7 @@ const FacetMultiSelect: React.FC<{
               })}
             </ul>
             {atCap && (
-              <div className="border-t border-gray-100 px-3 py-1.5 text-xs text-amber-600">
+              <div className="border-t border-border px-3 py-1.5 text-xs text-amber-600">
                 Up to {max} — untick one to swap.
               </div>
             )}
@@ -213,7 +213,7 @@ const FacetSelects: React.FC<FacetSelectsProps> = ({ facetSlugs, labels, value, 
   }, [])
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
-  if (!facets) return <p className="text-sm text-gray-500">Loading options…</p>
+  if (!facets) return <p className="text-sm text-muted-foreground">Loading options…</p>
 
   const bySlug = new Map(facets.map((f) => [f.slug, f]))
 

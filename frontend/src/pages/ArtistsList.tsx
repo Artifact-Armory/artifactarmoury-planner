@@ -95,9 +95,9 @@ const ArtistsList: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
-      <section className="rounded-3xl bg-indigo-600 px-6 py-12 text-white shadow-lg sm:px-12">
+      <section className="rounded-3xl bg-primary px-6 py-12 text-primary-foreground shadow-lg sm:px-12">
         <h1 className="text-3xl font-semibold">Artists</h1>
-        <p className="mt-2 max-w-2xl text-indigo-100">
+        <p className="mt-2 max-w-2xl text-primary-foreground/80">
           Discover creators crafting terrain for tabletop adventures. Follow artists to stay up to date with their latest
           releases.
         </p>
@@ -112,7 +112,7 @@ const ArtistsList: React.FC = () => {
         )}
       </section>
 
-      <section className="mt-10 flex flex-col gap-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs lg:flex-row lg:items-end lg:justify-between">
+      <section className="mt-10 flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 shadow-xs lg:flex-row lg:items-end lg:justify-between">
         <form onSubmit={handleSubmit} className="flex-1 space-y-3">
           <Input
             label="Search artists"
@@ -131,11 +131,11 @@ const ArtistsList: React.FC = () => {
         </form>
 
         <div className="w-full lg:w-64">
-          <label className="block text-sm font-medium text-gray-700">Sort by</label>
+          <label className="block text-sm font-medium text-foreground">Sort by</label>
           <select
             value={sortParam}
             onChange={(event) => updateParams({ sort: event.target.value, page: 1 })}
-            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
+            className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm shadow-xs focus:border-primary focus:outline-hidden"
             disabled={Boolean(data?.isSearch)}
           >
             {sortOptions.map((option) => (
@@ -159,9 +159,9 @@ const ArtistsList: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
-            <p className="text-sm font-medium text-gray-700">No artists matched your criteria.</p>
-            <p className="mt-2 text-xs text-gray-500">Try adjusting your filters or clearing the search.</p>
+          <div className="rounded-xl border border-dashed border-border bg-card py-16 text-center">
+            <p className="text-sm font-medium text-foreground">No artists matched your criteria.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Try adjusting your filters or clearing the search.</p>
           </div>
         )}
       </section>
@@ -171,7 +171,7 @@ const ArtistsList: React.FC = () => {
           <Button variant="outline" onClick={() => handlePageChange('prev')} disabled={pageParam <= 1}>
             Previous
           </Button>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             Page {data?.page ?? 1} of {totalPages}
           </span>
           <Button

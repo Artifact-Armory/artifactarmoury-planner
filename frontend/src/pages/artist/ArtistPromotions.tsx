@@ -10,8 +10,8 @@ import Button from '../../components/ui/Button'
 const stateBadge: Record<string, string> = {
   active: 'bg-green-100 text-green-700',
   scheduled: 'bg-blue-100 text-blue-700',
-  ended: 'bg-gray-100 text-gray-500',
-  canceled: 'bg-gray-100 text-gray-400',
+  ended: 'bg-muted text-muted-foreground',
+  canceled: 'bg-muted text-muted-foreground',
 }
 
 const ArtistPromotions: React.FC = () => {
@@ -97,14 +97,14 @@ const ArtistPromotions: React.FC = () => {
 
   return (
     <div className="px-4 py-10 max-w-3xl mx-auto">
-      <h1 className="text-xl font-semibold text-gray-900">Promotions &amp; sales</h1>
-      <p className="mt-1 text-gray-600">
+      <h1 className="text-xl font-semibold text-foreground">Promotions &amp; sales</h1>
+      <p className="mt-1 text-muted-foreground">
         Put a model, a bundle, or your whole portfolio on sale. On-sale items can appear in the
         front-page sale carousel.
       </p>
 
-      <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-        <p className="font-medium text-gray-800">The rules (so sales stay meaningful):</p>
+      <div className="mt-4 rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">The rules (so sales stay meaningful):</p>
         <ul className="mt-1 ml-5 list-disc space-y-0.5">
           <li>A sale runs for up to {SALE_MAX_DAYS} days.</li>
           <li>After a sale ends there's a cooldown before you can run another on the same item.</li>
@@ -113,8 +113,8 @@ const ArtistPromotions: React.FC = () => {
       </div>
 
       {/* Create a sale */}
-      <form onSubmit={submit} className="mt-6 rounded-2xl border border-gray-200 p-5">
-        <h2 className="text-base font-semibold text-gray-900">Start a sale</h2>
+      <form onSubmit={submit} className="mt-6 rounded-2xl border border-border p-5">
+        <h2 className="text-base font-semibold text-foreground">Start a sale</h2>
 
         <div className="mt-3 flex flex-wrap gap-2">
           {([
@@ -128,8 +128,8 @@ const ArtistPromotions: React.FC = () => {
               onClick={() => setScope(value)}
               className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
                 scope === value
-                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:bg-accent'
               }`}
             >
               {label}
@@ -144,7 +144,7 @@ const ArtistPromotions: React.FC = () => {
               <option value="">Choose a published model…</option>
               {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
-            {models.length === 0 && <p className="text-xs text-gray-500 mt-1">You have no published models yet.</p>}
+            {models.length === 0 && <p className="text-xs text-muted-foreground mt-1">You have no published models yet.</p>}
           </div>
         )}
         {scope === 'bundle' && (
@@ -154,11 +154,11 @@ const ArtistPromotions: React.FC = () => {
               <option value="">Choose a published bundle…</option>
               {bundles.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            {bundles.length === 0 && <p className="text-xs text-gray-500 mt-1">You have no published bundles yet.</p>}
+            {bundles.length === 0 && <p className="text-xs text-muted-foreground mt-1">You have no published bundles yet.</p>}
           </div>
         )}
         {scope === 'portfolio' && (
-          <p className="mt-4 text-sm text-gray-600">
+          <p className="mt-4 text-sm text-muted-foreground">
             The discount applies to every published model and bundle you have.
           </p>
         )}
@@ -167,12 +167,12 @@ const ArtistPromotions: React.FC = () => {
           <div>
             <label className="block text-sm font-medium mb-1">Discount (%)</label>
             <input type="number" min={5} max={90} step={1} className="w-full border rounded-sm px-3 py-2" value={percent} onChange={(e) => setPercent(e.target.value)} disabled={busy} />
-            <p className="text-xs text-gray-500 mt-1">Between 5% and 90%.</p>
+            <p className="text-xs text-muted-foreground mt-1">Between 5% and 90%.</p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Duration (days)</label>
             <input type="number" min={1} max={SALE_MAX_DAYS} step={1} className="w-full border rounded-sm px-3 py-2" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} />
-            <p className="text-xs text-gray-500 mt-1">1–{SALE_MAX_DAYS} days.</p>
+            <p className="text-xs text-muted-foreground mt-1">1–{SALE_MAX_DAYS} days.</p>
           </div>
         </div>
 
@@ -183,26 +183,26 @@ const ArtistPromotions: React.FC = () => {
 
       {/* Current + past sales */}
       <div className="mt-8">
-        <h2 className="text-base font-semibold text-gray-900">Your sales</h2>
+        <h2 className="text-base font-semibold text-foreground">Your sales</h2>
         {loading ? (
-          <p className="mt-3 text-sm text-gray-500">Loading…</p>
+          <p className="mt-3 text-sm text-muted-foreground">Loading…</p>
         ) : sales.length === 0 ? (
-          <p className="mt-3 text-sm text-gray-500">No sales yet.</p>
+          <p className="mt-3 text-sm text-muted-foreground">No sales yet.</p>
         ) : (
           <div className="mt-3 space-y-2">
             {[...live, ...past].map((s) => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+              <div key={s.id} className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-gray-900">
+                  <p className="text-sm font-medium text-foreground">
                     {s.discount_percent}% off · {s.target_name ?? 'Entire portfolio'}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-muted-foreground">
                     <span className={`mr-2 rounded-full px-2 py-0.5 font-medium ${stateBadge[s.state]}`}>{s.state}</span>
                     ends {new Date(s.ends_at).toLocaleDateString()}
                   </p>
                 </div>
                 {(s.state === 'active' || s.state === 'scheduled') && (
-                  <button onClick={() => cancel(s.id)} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-red-600">
+                  <button onClick={() => cancel(s.id)} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-red-600">
                     <X size={14} /> End
                   </button>
                 )}

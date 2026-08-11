@@ -46,9 +46,9 @@ const MyModels: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">My models</h1>
-        <p className="mt-2 text-sm text-gray-600">
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">My models</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
           Every model you've purchased — download the STL any time and leave a review.
         </p>
       </section>
@@ -65,13 +65,13 @@ const MyModels: React.FC = () => {
             return (
               <article
                 key={model.id}
-                className="flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs"
+                className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs"
               >
-                <Link to={`/models/${model.id}`} className="relative block h-44 w-full overflow-hidden bg-gray-100">
+                <Link to={`/models/${model.id}`} className="relative block h-44 w-full overflow-hidden bg-muted">
                   {model.thumbnailUrl ? (
                     <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
+                    <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
                       No preview
                     </div>
                   )}
@@ -83,10 +83,10 @@ const MyModels: React.FC = () => {
                 </Link>
 
                 <div className="flex flex-1 flex-col px-4 py-4">
-                  <Link to={`/models/${model.id}`} className="line-clamp-1 text-base font-semibold text-gray-900 hover:text-indigo-700">
+                  <Link to={`/models/${model.id}`} className="line-clamp-1 text-base font-semibold text-foreground hover:text-primary">
                     {model.name}
                   </Link>
-                  <p className="line-clamp-1 text-sm text-gray-500">by {model.artistName}</p>
+                  <p className="line-clamp-1 text-sm text-muted-foreground">by {model.artistName}</p>
 
                   {myReview ? (
                     <div className="mt-3 flex items-center gap-1 text-amber-500">
@@ -94,13 +94,13 @@ const MyModels: React.FC = () => {
                         <Star
                           key={n}
                           size={16}
-                          className={n <= myReview.rating ? 'fill-amber-400' : 'fill-none text-gray-300'}
+                          className={n <= myReview.rating ? 'fill-amber-400' : 'fill-none text-muted-foreground'}
                         />
                       ))}
-                      <span className="ml-1 text-xs text-gray-500">Your rating</span>
+                      <span className="ml-1 text-xs text-muted-foreground">Your rating</span>
                     </div>
                   ) : (
-                    <p className="mt-3 text-xs text-gray-400">You haven't reviewed this yet.</p>
+                    <p className="mt-3 text-xs text-muted-foreground">You haven't reviewed this yet.</p>
                   )}
 
                   <div className="mt-4 flex flex-col gap-2">
@@ -130,10 +130,10 @@ const MyModels: React.FC = () => {
           })}
         </div>
       ) : (
-        <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center">
-          <Package className="mx-auto text-gray-300" size={40} />
-          <p className="mt-4 text-sm font-medium text-gray-700">You haven't purchased any models yet.</p>
-          <p className="mt-1 text-xs text-gray-500">Browse the marketplace to start your collection.</p>
+        <div className="rounded-2xl border border-dashed border-border bg-card py-16 text-center">
+          <Package className="mx-auto text-muted-foreground" size={40} />
+          <p className="mt-4 text-sm font-medium text-foreground">You haven't purchased any models yet.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Browse the marketplace to start your collection.</p>
           <Link to="/browse" className="mt-5 inline-block">
             <Button variant="primary">Browse the marketplace</Button>
           </Link>

@@ -7,8 +7,8 @@ const EditTable: React.FC = () => {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-gray-900">Tabletop Terrain Builder</h1>
-        <p className="text-gray-600">
+        <h1 className="text-2xl font-semibold text-foreground">Tabletop Terrain Builder</h1>
+        <p className="text-muted-foreground">
           Design your table layout, export purchase lists, and save presets for future games.
         </p>
       </header>

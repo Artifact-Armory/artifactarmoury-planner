@@ -8,32 +8,32 @@ const UserProfile: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Your profile</h1>
-        <p className="mt-2 text-sm text-gray-600">Sign in to manage account settings.</p>
+      <div className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">Your profile</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Sign in to manage account settings.</p>
       </div>
     )
   }
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Account settings</h1>
-        <p className="mt-2 text-sm text-gray-600">Manage your contact details and notification preferences.</p>
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">Account settings</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Manage your contact details and notification preferences.</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
+      <section className="rounded-2xl border border-border bg-card p-6 shadow-xs">
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Display name" value={user.name} readOnly />
           <Input label="Email" type="email" value={user.email} readOnly />
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-gray-600">
+        <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
           <div>
-            <span className="font-medium text-gray-900">Role:</span> {user.role}
+            <span className="font-medium text-foreground">Role:</span> {user.role}
           </div>
           <div>
-            <span className="font-medium text-gray-900">Member since:</span>{' '}
+            <span className="font-medium text-foreground">Member since:</span>{' '}
             {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
           </div>
         </div>

@@ -12,37 +12,37 @@ const AdminCategories: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Categories</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-semibold text-foreground">Categories</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Categories in use across the published catalogue, with model counts. Categories are
           assigned by artists at upload time (from the taxonomy) — this is a read-only overview.
         </p>
       </div>
 
-      {isLoading && <div className="text-gray-500">Loading…</div>}
+      {isLoading && <div className="text-muted-foreground">Loading…</div>}
       {isError && <div className="text-red-600">Failed to load categories.</div>}
 
       {data && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-left">
+            <thead className="bg-muted text-muted-foreground text-left">
               <tr>
                 <th className="px-4 py-3 font-medium">Category</th>
                 <th className="px-4 py-3 font-medium text-right">Models</th>
                 <th className="px-4 py-3 font-medium text-right">Browse</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {data.categories
                 .filter((c) => c.category)
                 .map((c) => (
-                  <tr key={c.category} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900 capitalize">{c.category}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{c.model_count}</td>
+                  <tr key={c.category} className="hover:bg-accent">
+                    <td className="px-4 py-3 font-medium text-foreground capitalize">{c.category}</td>
+                    <td className="px-4 py-3 text-right text-foreground">{c.model_count}</td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         to={`/browse?category=${encodeURIComponent(c.category)}`}
-                        className="text-indigo-600 hover:underline text-xs"
+                        className="text-primary hover:underline text-xs"
                       >
                         View →
                       </Link>
@@ -51,7 +51,7 @@ const AdminCategories: React.FC = () => {
                 ))}
               {data.categories.filter((c) => c.category).length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
                     No categories in use yet.
                   </td>
                 </tr>

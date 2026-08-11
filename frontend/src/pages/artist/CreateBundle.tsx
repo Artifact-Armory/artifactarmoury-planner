@@ -15,7 +15,7 @@ const CreateBundle: React.FC = () => {
   return (
     <div className="px-4 py-10 max-w-2xl mx-auto">
       <h1 className="text-xl font-semibold">Create Bundle</h1>
-      <p className="text-gray-600 mt-1">
+      <p className="text-muted-foreground mt-1">
         Group several of your models under one name and one price. Buyers pay once and can
         download every STL in the bundle.
       </p>

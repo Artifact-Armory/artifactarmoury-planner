@@ -16,7 +16,7 @@ const pct = (cur: number, prev: number): number | null => {
 
 const Delta: React.FC<{ cur: number; prev: number; goodUp?: boolean }> = ({ cur, prev, goodUp = true }) => {
   const p = pct(cur, prev)
-  if (p === null) return <span className="text-xs text-gray-400">— vs prev</span>
+  if (p === null) return <span className="text-xs text-muted-foreground">— vs prev</span>
   const up = p >= 0
   const good = up === goodUp
   const Icon = up ? TrendingUp : TrendingDown
@@ -31,21 +31,21 @@ const Tile: React.FC<{
   label: string; icon: React.ReactNode; to?: string; children: React.ReactNode; hint?: string
 }> = ({ label, icon, to, children, hint }) => {
   const body = (
-    <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-xs transition hover:border-indigo-300 hover:shadow-sm">
-      <div className="flex items-center gap-2 text-gray-400">
+    <div className="flex h-full flex-col rounded-xl border border-border bg-card p-5 shadow-xs transition hover:border-primary/40 hover:shadow-sm">
+      <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
         <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
-        {to && <ArrowRight size={13} className="ml-auto text-gray-300" />}
+        {to && <ArrowRight size={13} className="ml-auto text-muted-foreground" />}
       </div>
       <div className="mt-2 flex-1">{children}</div>
-      {hint && <p className="mt-1 text-xs text-gray-400">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
     </div>
   )
   return to ? <Link to={to} className="block h-full">{body}</Link> : body
 }
 
 const Big: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="text-2xl font-semibold text-gray-900">{children}</p>
+  <p className="text-2xl font-semibold text-foreground">{children}</p>
 )
 
 const ArtistDashboard: React.FC = () => {
@@ -75,11 +75,11 @@ const ArtistDashboard: React.FC = () => {
     <div className="px-4 py-8 max-w-6xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Sales Overview</h1>
-          <p className="text-sm text-gray-500">Your earnings and completed sales, with the data behind what to make next.</p>
+          <h1 className="text-2xl font-semibold text-foreground">Sales Overview</h1>
+          <p className="text-sm text-muted-foreground">Your earnings and completed sales, with the data behind what to make next.</p>
         </div>
         <div className="flex items-center gap-2">
-          {isFetching && <Spinner size="sm" className="text-indigo-500" />}
+          {isFetching && <Spinner size="sm" className="text-primary" />}
           <DateRangePicker range={range} setRange={setRange} setPreset={setPreset} />
         </div>
       </div>
@@ -141,25 +141,25 @@ const ArtistDashboard: React.FC = () => {
           <Tile label="Most popular" icon={<TrendingUp size={16} />} to={data.topModels[0] ? `/artist/analytics/model/${data.topModels[0].modelId}` : undefined}>
             {data.topModels[0] ? (
               <>
-                <p className="line-clamp-2 text-sm font-semibold text-gray-900">
-                  {data.topModels[0].isSet && <Layers size={12} className="mr-1 inline text-gray-400" />}
+                <p className="line-clamp-2 text-sm font-semibold text-foreground">
+                  {data.topModels[0].isSet && <Layers size={12} className="mr-1 inline text-muted-foreground" />}
                   {data.topModels[0].name}
                 </p>
-                <p className="text-xs text-gray-400">{data.topModels[0].units} sold · {data.topModels[0].views} views</p>
+                <p className="text-xs text-muted-foreground">{data.topModels[0].units} sold · {data.topModels[0].views} views</p>
               </>
             ) : (
-              <p className="text-sm text-gray-400">No sales yet</p>
+              <p className="text-sm text-muted-foreground">No sales yet</p>
             )}
           </Tile>
 
           <Tile label="Most viewed table" icon={<LayoutGrid size={16} />} to={data.mostViewedTable ? `/planner/view/${data.mostViewedTable.id}` : undefined}>
             {data.mostViewedTable ? (
               <>
-                <p className="line-clamp-2 text-sm font-semibold text-gray-900">{data.mostViewedTable.name}</p>
-                <p className="text-xs text-gray-400">{data.mostViewedTable.viewCount} views</p>
+                <p className="line-clamp-2 text-sm font-semibold text-foreground">{data.mostViewedTable.name}</p>
+                <p className="text-xs text-muted-foreground">{data.mostViewedTable.viewCount} views</p>
               </>
             ) : (
-              <p className="text-sm text-gray-400">Not in any public table yet</p>
+              <p className="text-sm text-muted-foreground">Not in any public table yet</p>
             )}
           </Tile>
 
@@ -169,16 +169,16 @@ const ArtistDashboard: React.FC = () => {
 
           <Tile label="Top searches (site)" icon={<Search size={16} />} to="/artist/analytics/searches">
             {data.topSearches.length ? (
-              <ul className="space-y-0.5 text-xs text-gray-600">
+              <ul className="space-y-0.5 text-xs text-muted-foreground">
                 {data.topSearches.slice(0, 4).map((s) => (
                   <li key={s.query} className="flex justify-between gap-2">
                     <span className="truncate">{s.query}</span>
-                    <span className="text-gray-400">{s.searches}</span>
+                    <span className="text-muted-foreground">{s.searches}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-gray-400">No search data yet</p>
+              <p className="text-sm text-muted-foreground">No search data yet</p>
             )}
           </Tile>
         </div>
@@ -189,13 +189,13 @@ const ArtistDashboard: React.FC = () => {
       <section className="mt-12">
         <div className="flex items-end justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Sales</h2>
-            <p className="text-sm text-gray-500">
+            <h2 className="text-xl font-semibold text-foreground">Sales</h2>
+            <p className="text-sm text-muted-foreground">
               {salesData?.total ?? 0} completed sale{(salesData?.total ?? 0) === 1 ? '' : 's'}
               {sales.length < (salesData?.total ?? 0) ? ` · showing latest ${sales.length}` : ''}.
             </p>
           </div>
-          <Link to="/artist/analytics/sales" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700">
+          <Link to="/artist/analytics/sales" className="inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80">
             Sales analytics <ArrowRight size={14} />
           </Link>
         </div>
@@ -203,13 +203,13 @@ const ArtistDashboard: React.FC = () => {
         {salesLoading ? (
           <div className="flex justify-center py-16"><Spinner size="lg" /></div>
         ) : sales.length === 0 ? (
-          <p className="mt-6 rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+          <p className="mt-6 rounded-lg border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
             No sales yet. When someone buys one of your models, it'll appear here.
           </p>
         ) : (
-          <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200 bg-white">
-            <table className="min-w-full divide-y divide-gray-100 text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
+          <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="min-w-full divide-y divide-border text-sm">
+              <thead className="bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Item</th>
@@ -219,23 +219,23 @@ const ArtistDashboard: React.FC = () => {
                   <th className="px-4 py-3 text-right">You earned</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="divide-y divide-border">
                 {sales.map((s) => (
-                  <tr key={s.id} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                  <tr key={s.id} className="hover:bg-accent">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                       {new Date(s.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">
+                    <td className="px-4 py-3 font-medium text-foreground">
                       {s.model_id ? (
-                        <Link to={`/models/${s.model_id}`} className="hover:text-indigo-600">{s.model_name}</Link>
+                        <Link to={`/models/${s.model_id}`} className="hover:text-primary">{s.model_name}</Link>
                       ) : (
                         s.model_name
                       )}
-                      {s.bundle_name && <span className="ml-1 text-xs text-gray-400">({s.bundle_name})</span>}
+                      {s.bundle_name && <span className="ml-1 text-xs text-muted-foreground">({s.bundle_name})</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{s.order_number}</td>
-                    <td className="px-4 py-3 text-gray-500">{s.customer_email}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{formatPrice(s.total_price)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{s.order_number}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{s.customer_email}</td>
+                    <td className="px-4 py-3 text-right text-foreground">{formatPrice(s.total_price)}</td>
                     <td className="px-4 py-3 text-right font-medium text-green-700">{formatPrice(s.earnings)}</td>
                   </tr>
                 ))}

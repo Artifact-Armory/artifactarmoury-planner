@@ -163,18 +163,18 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
     <div className={className ?? 'relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden'}>
       <div ref={mountRef} className="absolute inset-0" />
       {status === 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">Loading preview…</div>
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">Loading preview…</div>
       )}
       {status === 'empty' && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 text-center px-4">
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground text-center px-4">
           No 3D preview yet — it appears once the model finishes processing.
         </div>
       )}
       {status === 'error' && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">Preview unavailable</div>
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">Preview unavailable</div>
       )}
       {status === 'ready' && (
-        <div className="absolute bottom-1 right-2 text-[10px] text-gray-400 select-none">drag to rotate</div>
+        <div className="absolute bottom-1 right-2 text-[10px] text-muted-foreground select-none">drag to rotate</div>
       )}
     </div>
   )

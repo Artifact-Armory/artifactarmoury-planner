@@ -235,12 +235,12 @@ const EditModel: React.FC = () => {
     }
   }
 
-  if (loading) return <div className="px-4 py-10 max-w-2xl mx-auto text-gray-500">Loading…</div>
+  if (loading) return <div className="px-4 py-10 max-w-2xl mx-auto text-muted-foreground">Loading…</div>
   if (loadError) {
     return (
       <div className="px-4 py-10 max-w-2xl mx-auto">
         <p className="text-red-600">{loadError}</p>
-        <Link to="/artist/models" className="inline-block mt-4 text-blue-600">← Back to My Models</Link>
+        <Link to="/artist/models" className="inline-block mt-4 text-primary">← Back to My Models</Link>
       </div>
     )
   }
@@ -251,9 +251,9 @@ const EditModel: React.FC = () => {
     <div className="px-4 py-10 max-w-2xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Edit Model</h1>
-        <Link to="/artist/models" className="text-sm text-blue-600">← My Models</Link>
+        <Link to="/artist/models" className="text-sm text-primary">← My Models</Link>
       </div>
-      <p className="text-gray-600 mt-1">
+      <p className="text-muted-foreground mt-1">
         Status: <span className="font-medium">{model?.status ?? 'draft'}</span>
         {model?.processingStatus && model.processingStatus !== 'ready' && (
           <span className="ml-2 text-amber-700">({model.processingStatus})</span>
@@ -269,7 +269,7 @@ const EditModel: React.FC = () => {
         <div>
           <label className="block text-sm font-medium mb-1">Description</label>
           <textarea className="w-full border rounded-sm px-3 py-2" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
-          <p className="text-xs mt-1 text-gray-500">Optional — a good description helps buyers find your model.</p>
+          <p className="text-xs mt-1 text-muted-foreground">Optional — a good description helps buyers find your model.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -300,10 +300,10 @@ const EditModel: React.FC = () => {
               <option key={l.value} value={l.value}>{l.label} — {l.short}</option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">{licenseInfo(license).description}</p>
+          <p className="text-xs text-muted-foreground mt-1">{licenseInfo(license).description}</p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+        <div className="rounded-lg border border-border p-3 space-y-3">
           <p className="text-sm font-medium">Printability</p>
 
           {/* Mesh QA result (read-only, from processing). */}
@@ -353,9 +353,9 @@ const EditModel: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 p-3">
+        <div className="rounded-lg border border-border p-3">
           <p className="text-sm font-medium">Planner orientation</p>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             If your model imports lying on its side in the 3D planner, pick the tilt that
             stands it upright — the live preview below sits it on the table exactly as buyers
             will see it. This is applied automatically whenever a buyer places it; the
@@ -371,8 +371,8 @@ const EditModel: React.FC = () => {
                 disabled={busy}
                 className={`px-3 py-1.5 rounded border text-sm ${
                   defaultPitch === deg
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-foreground hover:bg-accent'
                 }`}
               >
                 {deg === 0 ? 'Default (no tilt)' : `Tilt ${deg}°`}
@@ -388,7 +388,7 @@ const EditModel: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Tags & categories</label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-muted-foreground mb-2">
             Fields marked <span className="text-red-500">*</span> are required before publishing. Tag
             generously — a piece can belong to several eras and types.
           </p>
@@ -412,7 +412,7 @@ const EditModel: React.FC = () => {
                 className="h-20 w-20 rounded-sm object-cover border"
               />
             ) : (
-              <div className="h-20 w-20 rounded-sm border border-dashed flex items-center justify-center text-xs text-gray-400 text-center">
+              <div className="h-20 w-20 rounded-sm border border-dashed flex items-center justify-center text-xs text-muted-foreground text-center">
                 No image
               </div>
             )}
@@ -423,7 +423,7 @@ const EditModel: React.FC = () => {
                 disabled={busy}
                 onChange={(e) => onPickThumb(e.target.files?.[0] ?? null)}
               />
-              {thumbFile && <p className="text-xs text-gray-500 mt-1">New image will be uploaded when you save.</p>}
+              {thumbFile && <p className="text-xs text-muted-foreground mt-1">New image will be uploaded when you save.</p>}
             </div>
           </div>
           {!hasThumbnail && (
@@ -437,7 +437,7 @@ const EditModel: React.FC = () => {
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="flex gap-3 pt-2">
-          <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+          <button type="submit" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground disabled:opacity-50" disabled={busy}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
           {isDraft && (
@@ -455,9 +455,9 @@ const EditModel: React.FC = () => {
 
       {/* Upload a new file version — replaces the main model file. Buyers keep
           access and re-download the new version for free; they're notified. */}
-      <div className="mt-8 rounded-lg border border-gray-200 p-4">
-        <h2 className="text-base font-semibold text-gray-900">File version</h2>
-        <p className="mt-1 text-sm text-gray-600">
+      <div className="mt-8 rounded-lg border border-border p-4">
+        <h2 className="text-base font-semibold text-foreground">File version</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
           Currently on <span className="font-medium">v{model?.fileVersion ?? 1}</span>
           {model?.filesUpdatedAt && (
             <> · updated {new Date(model.filesUpdatedAt).toLocaleDateString()}</>
@@ -473,7 +473,7 @@ const EditModel: React.FC = () => {
             onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
           />
           <div>
-            <label className="block text-sm mb-1">What changed? <span className="font-normal text-gray-400">(optional, shown to buyers)</span></label>
+            <label className="block text-sm mb-1">What changed? <span className="font-normal text-muted-foreground">(optional, shown to buyers)</span></label>
             <textarea
               className="w-full border rounded-sm px-3 py-2"
               rows={2}
@@ -488,7 +488,7 @@ const EditModel: React.FC = () => {
           {versionErr && <p className="text-sm text-red-600">{versionErr}</p>}
           <button
             type="submit"
-            className="px-4 py-2 rounded-sm border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="px-4 py-2 rounded-sm border border-border text-foreground hover:bg-accent disabled:opacity-50"
             disabled={versionBusy || !versionFile}
           >
             {versionBusy ? 'Publishing new version…' : 'Publish new version'}

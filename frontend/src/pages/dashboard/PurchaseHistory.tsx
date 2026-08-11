@@ -30,20 +30,20 @@ const PurchaseHistory: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Purchase history</h1>
-        <p className="mt-2 text-sm text-gray-600">All of your digital orders and print requests in one place.</p>
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">Purchase history</h1>
+        <p className="mt-2 text-sm text-muted-foreground">All of your digital orders and print requests in one place.</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white shadow-xs">
+      <section className="rounded-2xl border border-border bg-card shadow-xs">
         {ordersQuery.isLoading ? (
           <div className="flex justify-center py-16">
             <Spinner size="lg" />
           </div>
         ) : orders.length ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+            <table className="min-w-full divide-y divide-border text-sm">
+              <thead className="bg-muted text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 text-left">Order</th>
                   <th className="px-4 py-3 text-left">Placed</th>
@@ -52,25 +52,25 @@ const PurchaseHistory: React.FC = () => {
                   <th className="px-4 py-3 text-right">Total</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50">
+                  <tr key={order.id} className="hover:bg-accent">
                     <td className="px-4 py-4">
-                      <p className="font-medium text-gray-900">#{order.orderNumber}</p>
+                      <p className="font-medium text-foreground">#{order.orderNumber}</p>
                       {order.trackingNumber && (
-                        <p className="text-xs text-gray-500">Tracking: {order.trackingNumber}</p>
+                        <p className="text-xs text-muted-foreground">Tracking: {order.trackingNumber}</p>
                       )}
                     </td>
-                    <td className="px-4 py-4 text-gray-600">
+                    <td className="px-4 py-4 text-muted-foreground">
                       {new Date(order.createdAt).toLocaleString()}
                     </td>
                     <td className="px-4 py-4">
-                      <span className="inline-flex rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
+                      <span className="inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                         {order.fulfillmentStatus ?? 'processing'}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-right text-gray-600">{order.itemCount}</td>
-                    <td className="px-4 py-4 text-right font-medium text-gray-900">
+                    <td className="px-4 py-4 text-right text-muted-foreground">{order.itemCount}</td>
+                    <td className="px-4 py-4 text-right font-medium text-foreground">
                       {formatPrice(order.total)}
                     </td>
                   </tr>
@@ -80,8 +80,8 @@ const PurchaseHistory: React.FC = () => {
           </div>
         ) : (
           <div className="py-16 text-center">
-            <p className="text-sm font-medium text-gray-700">No orders yet.</p>
-            <p className="mt-2 text-xs text-gray-500">Start browsing models to place your first order.</p>
+            <p className="text-sm font-medium text-foreground">No orders yet.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Start browsing models to place your first order.</p>
           </div>
         )}
       </section>
@@ -91,7 +91,7 @@ const PurchaseHistory: React.FC = () => {
           <Button variant="outline" onClick={() => handlePageChange('prev')} disabled={(pagination?.page ?? 1) <= 1}>
             Previous
           </Button>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             Page {pagination?.page ?? pageParam} of {totalPages}
           </span>
           <Button

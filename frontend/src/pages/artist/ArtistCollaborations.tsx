@@ -35,23 +35,23 @@ const ArtistCollaborations: React.FC = () => {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold text-gray-900">Collaboration requests</h1>
-        <p className="mt-1 text-gray-600">
+        <h1 className="text-2xl font-semibold text-foreground">Collaboration requests</h1>
+        <p className="mt-1 text-muted-foreground">
           Other artists who want to feature your models in their showcases. Approve all of your
           models on a table, pick specific ones, or decline.
         </p>
       </header>
 
-      {loading && <p className="text-gray-500">Loading…</p>}
+      {loading && <p className="text-muted-foreground">Loading…</p>}
       {error && !loading && (
         <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border px-3 py-1.5" onClick={load}>Retry</button></div>
       )}
 
       {!loading && !error && requests.length === 0 && (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-12 text-center">
-          <Users className="mx-auto text-gray-300" size={32} />
-          <h2 className="mt-3 text-lg font-medium text-gray-900">No requests yet</h2>
-          <p className="mt-1 text-sm text-gray-600">When another artist adds one of your models to their showcase, it'll show up here.</p>
+        <div className="rounded-lg border border-dashed border-border bg-card p-12 text-center">
+          <Users className="mx-auto text-muted-foreground" size={32} />
+          <h2 className="mt-3 text-lg font-medium text-foreground">No requests yet</h2>
+          <p className="mt-1 text-sm text-muted-foreground">When another artist adds one of your models to their showcase, it'll show up here.</p>
         </div>
       )}
 
@@ -63,22 +63,22 @@ const ArtistCollaborations: React.FC = () => {
 
       {resolved.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-400">Past requests</h2>
-          <ul className="divide-y rounded-lg border bg-white">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Past requests</h2>
+          <ul className="divide-y rounded-lg border bg-card">
             {resolved.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-3 p-4">
                 <div className="min-w-0">
-                  <p className="truncate text-sm text-gray-900">
+                  <p className="truncate text-sm text-foreground">
                     <span className="font-medium">{r.requesterName}</span> · {r.tableName}
                   </p>
-                  <p className="text-xs text-gray-500">{r.models.length} of your model{r.models.length === 1 ? '' : 's'}</p>
+                  <p className="text-xs text-muted-foreground">{r.models.length} of your model{r.models.length === 1 ? '' : 's'}</p>
                 </div>
                 {r.status === 'accepted' ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800">
                     <Check size={12} /> {r.approveAll ? 'Accepted (all)' : 'Accepted (some)'}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
                     <X size={12} /> Declined
                   </span>
                 )}
@@ -125,13 +125,13 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
   }
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs">
+    <div className="rounded-xl border border-border bg-card p-5 shadow-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary">
           <Users size={16} />
         </span>
-        <p className="text-sm text-gray-900">
-          <Link to={`/artists/${request.requesterId}`} className="font-semibold hover:text-indigo-600">{request.requesterName}</Link>
+        <p className="text-sm text-foreground">
+          <Link to={`/artists/${request.requesterId}`} className="font-semibold hover:text-primary">{request.requesterName}</Link>
           {' '}wants to feature your models in{' '}
           <span className="font-medium">{request.tableName}</span>
         </p>
@@ -141,11 +141,11 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
       </div>
 
       <div className="mt-4 space-y-2">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
+        <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="radio" checked={mode === 'all'} onChange={() => setMode('all')} />
           Allow all my models on this table ({request.models.length})
         </label>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
+        <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="radio" checked={mode === 'subset'} onChange={() => setMode('subset')} />
           Choose which models they can use
         </label>
@@ -162,15 +162,15 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
               disabled={mode === 'all'}
               onClick={() => toggle(m.id)}
               className={`flex items-center gap-2 rounded-lg border p-2 text-left transition ${
-                on ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'
-              } ${mode === 'all' ? 'cursor-default opacity-90' : 'hover:border-indigo-300'}`}
+                on ? 'border-primary/50 bg-primary/10' : 'border-border'
+              } ${mode === 'all' ? 'cursor-default opacity-90' : 'hover:border-primary/40'}`}
             >
-              <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-sm bg-gray-100">
-                {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : <ImageOff size={16} className="text-gray-400" />}
+              <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-sm bg-muted">
+                {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : <ImageOff size={16} className="text-muted-foreground" />}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-gray-900">{m.name}</span>
-                {on && <span className="text-[11px] text-indigo-600">Allowed</span>}
+                <span className="block truncate text-xs font-medium text-foreground">{m.name}</span>
+                {on && <span className="text-[11px] text-primary">Allowed</span>}
               </span>
             </button>
           )
@@ -181,14 +181,14 @@ const RequestCard: React.FC<{ request: IncomingCollabRequest; onResolved: () => 
         <button
           onClick={() => respond('decline')}
           disabled={busy}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
         >
           Decline
         </button>
         <button
           onClick={() => respond('accept')}
           disabled={busy}
-          className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {mode === 'all' ? 'Accept all' : `Accept ${selected.size} selected`}
         </button>

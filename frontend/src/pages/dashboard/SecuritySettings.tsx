@@ -103,15 +103,15 @@ const SecuritySettings: React.FC = () => {
   }
 
   if (loading) {
-    return <div className="px-4 py-10 max-w-2xl mx-auto text-gray-500">Loading…</div>
+    return <div className="px-4 py-10 max-w-2xl mx-auto text-muted-foreground">Loading…</div>
   }
 
   return (
     <div className="px-4 py-10 max-w-2xl mx-auto">
-      <h1 className="text-xl font-semibold text-gray-900">Security</h1>
-      <p className="mt-1 text-gray-600">Protect your account with two-factor authentication (2FA).</p>
+      <h1 className="text-xl font-semibold text-foreground">Security</h1>
+      <p className="mt-1 text-muted-foreground">Protect your account with two-factor authentication (2FA).</p>
 
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
+      <div className="mt-6 rounded-2xl border border-border bg-card p-6 shadow-xs">
         <div className="flex items-start gap-3">
           {status?.enabled ? (
             <ShieldCheck className="mt-0.5 shrink-0 text-green-600" />
@@ -119,16 +119,16 @@ const SecuritySettings: React.FC = () => {
             <ShieldAlert className="mt-0.5 shrink-0 text-amber-500" />
           )}
           <div className="flex-1">
-            <h2 className="text-base font-semibold text-gray-900">
+            <h2 className="text-base font-semibold text-foreground">
               Two-factor authentication is {status?.enabled ? 'on' : 'off'}
             </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-muted-foreground">
               {status?.enabled
                 ? 'You’ll enter a code from your authenticator app each time you sign in. This is strongly recommended for sellers — your account holds your earnings.'
                 : 'Add a second step at sign-in using an authenticator app (Google Authenticator, Authy, 1Password…). Strongly recommended if you sell on Artifact Armoury.'}
             </p>
             {status?.enabled && (
-              <p className="mt-2 text-xs text-gray-400">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {status.backupCodesRemaining} backup code{status.backupCodesRemaining === 1 ? '' : 's'} remaining
               </p>
             )}
@@ -137,14 +137,14 @@ const SecuritySettings: React.FC = () => {
 
         {/* ── ENABLED: offer disable ─────────────────────────────────────── */}
         {status?.enabled && phase !== 'showing-codes' && (
-          <div className="mt-5 border-t border-gray-100 pt-5">
+          <div className="mt-5 border-t border-border pt-5">
             {!showDisable ? (
               <Button variant="outline" onClick={() => setShowDisable(true)}>
                 Turn off two-factor authentication
               </Button>
             ) : (
               <form onSubmit={disable2fa} className="space-y-3">
-                <p className="text-sm text-gray-600">Confirm your password to turn 2FA off.</p>
+                <p className="text-sm text-muted-foreground">Confirm your password to turn 2FA off.</p>
                 <Input
                   label="Password"
                   type="password"
@@ -167,7 +167,7 @@ const SecuritySettings: React.FC = () => {
 
         {/* ── DISABLED + idle: offer enable ──────────────────────────────── */}
         {!status?.enabled && phase === 'idle' && (
-          <div className="mt-5 border-t border-gray-100 pt-5">
+          <div className="mt-5 border-t border-border pt-5">
             <Button onClick={startEnrol} loading={busy} leftIcon={<ShieldCheck size={16} />}>
               Set up two-factor authentication
             </Button>
@@ -176,18 +176,18 @@ const SecuritySettings: React.FC = () => {
 
         {/* ── Enrolment: scan QR + confirm a code ────────────────────────── */}
         {phase === 'enrolling' && setup && (
-          <div className="mt-5 border-t border-gray-100 pt-5">
-            <ol className="space-y-4 text-sm text-gray-700">
+          <div className="mt-5 border-t border-border pt-5">
+            <ol className="space-y-4 text-sm text-foreground">
               <li>
                 <p className="font-medium">1. Scan this QR code with your authenticator app</p>
                 <img
                   src={setup.qrDataUrl}
                   alt="2FA QR code"
-                  className="mt-2 h-44 w-44 rounded-lg border border-gray-200"
+                  className="mt-2 h-44 w-44 rounded-lg border border-border"
                 />
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-muted-foreground">
                   Can’t scan? Enter this key manually:{' '}
-                  <code className="rounded-sm bg-gray-100 px-1.5 py-0.5 font-mono text-gray-700">{setup.secret}</code>
+                  <code className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-foreground">{setup.secret}</code>
                 </p>
               </li>
               <li>
@@ -210,7 +210,7 @@ const SecuritySettings: React.FC = () => {
             <button
               type="button"
               onClick={() => { setPhase('idle'); setSetup(null); setCode('') }}
-              className="mt-3 text-sm text-gray-500 hover:text-gray-700"
+              className="mt-3 text-sm text-muted-foreground hover:text-foreground"
             >
               Cancel setup
             </button>
@@ -219,13 +219,13 @@ const SecuritySettings: React.FC = () => {
 
         {/* ── Backup codes (shown once) ──────────────────────────────────── */}
         {phase === 'showing-codes' && (
-          <div className="mt-5 border-t border-gray-100 pt-5">
-            <h3 className="text-sm font-semibold text-gray-900">Save your backup codes</h3>
-            <p className="mt-1 text-sm text-gray-600">
+          <div className="mt-5 border-t border-border pt-5">
+            <h3 className="text-sm font-semibold text-foreground">Save your backup codes</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               Store these somewhere safe. Each code can be used once to sign in if you lose access to
               your authenticator app. <strong>They won’t be shown again.</strong>
             </p>
-            <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-4 font-mono text-sm text-gray-800">
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-muted p-4 font-mono text-sm text-foreground">
               {backupCodes.map((c) => (
                 <div key={c}>{c}</div>
               ))}

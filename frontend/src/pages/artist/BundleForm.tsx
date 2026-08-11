@@ -84,7 +84,7 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
       <div>
         <label className="block text-sm font-medium mb-1">Description</label>
         <textarea className="w-full border rounded-sm px-3 py-2" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} />
-        <p className={`text-xs mt-1 ${description.trim().length >= 20 ? 'text-gray-400' : 'text-amber-700'}`}>
+        <p className={`text-xs mt-1 ${description.trim().length >= 20 ? 'text-muted-foreground' : 'text-amber-700'}`}>
           {description.trim().length}/20 characters (needed to publish)
         </p>
       </div>
@@ -106,22 +106,22 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
       <div>
         <label className="block text-sm font-medium mb-1">Models in this bundle ({selected.length} selected)</label>
         {loadingModels ? (
-          <p className="text-sm text-gray-500">Loading your models…</p>
+          <p className="text-sm text-muted-foreground">Loading your models…</p>
         ) : models.length === 0 ? (
-          <p className="text-sm text-gray-500">You have no finished models yet — upload some first.</p>
+          <p className="text-sm text-muted-foreground">You have no finished models yet — upload some first.</p>
         ) : (
           <ul className="max-h-72 overflow-y-auto rounded-sm border divide-y">
             {models.map((m) => {
               const checked = selected.includes(m.id)
               return (
                 <li key={m.id}>
-                  <label className="flex items-center gap-3 p-2 cursor-pointer hover:bg-gray-50">
+                  <label className="flex items-center gap-3 p-2 cursor-pointer hover:bg-accent">
                     <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} disabled={busy} />
-                    <div className="h-10 w-10 rounded-sm bg-gray-100 overflow-hidden shrink-0">
+                    <div className="h-10 w-10 rounded-sm bg-muted overflow-hidden shrink-0">
                       {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
                     </div>
                     <span className="flex-1 truncate text-sm">{m.name}</span>
-                    <span className="text-xs text-gray-500">£{m.basePrice.toFixed(2)}</span>
+                    <span className="text-xs text-muted-foreground">£{m.basePrice.toFixed(2)}</span>
                   </label>
                 </li>
               )
@@ -133,7 +133,7 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex items-center gap-3">
-        <button type="submit" className="px-4 py-2 rounded-sm bg-blue-600 text-white disabled:opacity-50" disabled={busy}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground disabled:opacity-50" disabled={busy}>
           {busy ? 'Saving…' : submitLabel}
         </button>
         {extraActions}

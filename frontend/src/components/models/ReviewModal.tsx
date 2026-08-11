@@ -47,19 +47,19 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+        className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-foreground">
               {isEditing ? 'Edit your review' : 'Write a review'}
             </h2>
-            <p className="mt-1 text-sm text-gray-500 line-clamp-1">{modelName}</p>
+            <p className="mt-1 text-sm text-muted-foreground line-clamp-1">{modelName}</p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded-full p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Close"
           >
             <X size={20} />
@@ -68,7 +68,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Your rating</label>
+            <label className="block text-sm font-medium text-foreground">Your rating</label>
             <div className="mt-2 flex items-center gap-1">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button
@@ -80,15 +80,15 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                   className="p-1 text-amber-400 transition hover:scale-110"
                   aria-label={`${n} star${n === 1 ? '' : 's'}`}
                 >
-                  <Star size={28} className={n <= active ? 'fill-amber-400' : 'fill-none text-gray-300'} />
+                  <Star size={28} className={n <= active ? 'fill-amber-400' : 'fill-none text-muted-foreground'} />
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <label htmlFor="review-comment" className="block text-sm font-medium text-gray-700">
-              Your review <span className="font-normal text-gray-400">(optional)</span>
+            <label htmlFor="review-comment" className="block text-sm font-medium text-foreground">
+              Your review <span className="font-normal text-muted-foreground">(optional)</span>
             </label>
             <textarea
               id="review-comment"
@@ -97,7 +97,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
               rows={4}
               maxLength={2000}
               placeholder="How did it print? How's the detail and fit?"
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-xs focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary"
             />
           </div>
 

@@ -70,7 +70,7 @@ const EditBundle: React.FC = () => {
     }
   }
 
-  if (loading) return <div className="px-4 py-10 max-w-2xl mx-auto text-gray-500">Loading…</div>
+  if (loading) return <div className="px-4 py-10 max-w-2xl mx-auto text-muted-foreground">Loading…</div>
   if (error || !bundle) return <div className="px-4 py-10 max-w-2xl mx-auto text-red-600">{error ?? 'Not found'}</div>
 
   const isPublished = bundle.status === 'published'

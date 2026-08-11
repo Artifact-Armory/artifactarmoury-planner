@@ -32,7 +32,7 @@ const PublicTables: React.FC = () => {
       <section className="overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 to-slate-800 px-8 py-10 text-white shadow-lg">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-widest text-indigo-300">Shop the look</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary/70">Shop the look</p>
             <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Community tables</h1>
             <p className="mt-3 text-sm text-slate-300">
               Real tabletop builds laid out in the planner. Open one to see every piece, add the
@@ -49,13 +49,13 @@ const PublicTables: React.FC = () => {
       </section>
 
       {/* Toolbar */}
-      <div className="mt-8 flex flex-col gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-gray-500">
+      <div className="mt-8 flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
           {data?.total ?? tables.length} public {(data?.total ?? tables.length) === 1 ? 'table' : 'tables'}
         </p>
         <div className="flex items-center gap-3">
-          {isFetching && <Spinner size="sm" className="text-indigo-500" />}
-          <label className="flex items-center gap-2 text-sm text-gray-600">
+          {isFetching && <Spinner size="sm" className="text-primary" />}
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             Sort by
             <select
               value={sort}
@@ -63,7 +63,7 @@ const PublicTables: React.FC = () => {
                 setSort(e.target.value as typeof sort)
                 setPage(1)
               }}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
+              className="rounded-md border border-border px-3 py-2 text-sm shadow-xs focus:border-primary focus:outline-hidden"
             >
               {sortOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -81,10 +81,10 @@ const PublicTables: React.FC = () => {
           <Spinner size="lg" />
         </div>
       ) : tables.length === 0 ? (
-        <div className="mt-10 rounded-2xl border border-dashed border-gray-300 bg-white py-20 text-center">
-          <LayoutGrid className="mx-auto text-gray-300" size={40} />
-          <p className="mt-4 text-sm font-medium text-gray-700">No public tables yet</p>
-          <p className="mt-1 text-xs text-gray-500">
+        <div className="mt-10 rounded-2xl border border-dashed border-border bg-card py-20 text-center">
+          <LayoutGrid className="mx-auto text-muted-foreground" size={40} />
+          <p className="mt-4 text-sm font-medium text-foreground">No public tables yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">
             Build a layout in the planner and share it to feature it here.
           </p>
           <Link to="/planner" className="mt-6 inline-flex">
@@ -104,7 +104,7 @@ const PublicTables: React.FC = () => {
           <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
             Previous
           </Button>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             Page {page} of {totalPages}
           </span>
           <Button
@@ -124,10 +124,10 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
   const thumbs = table.thumbnails.slice(0, 4)
 
   return (
-    <li className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xs transition hover:-translate-y-0.5 hover:shadow-md">
+    <li className="group overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:-translate-y-0.5 hover:shadow-md">
       <Link to={`/planner/view/${table.id}`} className="block">
         {/* Mosaic preview built from the pieces on the table */}
-        <div className="relative aspect-4/3 w-full bg-gray-100">
+        <div className="relative aspect-4/3 w-full bg-muted">
           {thumbs.length > 0 ? (
             <div
               className={`grid h-full w-full gap-0.5 ${
@@ -137,7 +137,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
               {thumbs.map((src, i) => (
                 <div
                   key={i}
-                  className={`overflow-hidden bg-gray-200 ${
+                  className={`overflow-hidden bg-muted ${
                     thumbs.length === 3 && i === 0 ? 'row-span-2' : ''
                   }`}
                 >
@@ -146,7 +146,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
               ))}
             </div>
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-gray-300">
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
               <Layers size={36} />
             </div>
           )}
@@ -158,22 +158,22 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
 
       <div className="p-4">
         <Link to={`/planner/view/${table.id}`} className="block">
-          <h3 className="truncate text-base font-semibold text-gray-900 group-hover:text-indigo-600">
+          <h3 className="truncate text-base font-semibold text-foreground group-hover:text-primary">
             {table.name || 'Untitled table'}
           </h3>
         </Link>
-        <p className="mt-0.5 text-sm text-gray-500">
+        <p className="mt-0.5 text-sm text-muted-foreground">
           by{' '}
           {table.creatorIsArtist && table.creatorId ? (
-            <Link to={`/artists/${table.creatorId}`} className="font-medium text-indigo-600 hover:underline">
+            <Link to={`/artists/${table.creatorId}`} className="font-medium text-primary hover:underline">
               {table.creatorName}
             </Link>
           ) : (
-            <span className="font-medium text-gray-700">{table.creatorName}</span>
+            <span className="font-medium text-foreground">{table.creatorName}</span>
           )}
         </p>
 
-        <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 text-xs text-gray-400">
+        <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1">
               <Eye size={13} /> {table.viewCount}
@@ -186,7 +186,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
           </span>
           <Link
             to={`/planner/view/${table.id}`}
-            className="inline-flex items-center gap-1 font-medium text-indigo-600 group-hover:gap-1.5"
+            className="inline-flex items-center gap-1 font-medium text-primary group-hover:gap-1.5"
           >
             Shop the look <ArrowRight size={13} />
           </Link>

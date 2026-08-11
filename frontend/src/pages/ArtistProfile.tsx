@@ -132,8 +132,8 @@ const ArtistProfile: React.FC = () => {
   if (!artist || artistQuery.isError) {
     return (
       <div className="mx-auto max-w-4xl px-4 py-16 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900">Artist not found</h1>
-        <p className="mt-2 text-sm text-gray-500">
+        <h1 className="text-2xl font-semibold text-foreground">Artist not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
           The artist you are looking for may have removed their profile or is no longer active.
         </p>
       </div>
@@ -147,14 +147,14 @@ const ArtistProfile: React.FC = () => {
       {background && (
         <div className="pointer-events-none fixed inset-0 -z-10">
           <img src={background} alt="" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-white/75 backdrop-blur-xs" />
+          <div className="absolute inset-0 bg-background/75 backdrop-blur-xs" />
         </div>
       )}
 
       <div className="mx-auto max-w-6xl px-4 py-10">
-        <section className="overflow-hidden rounded-3xl bg-white/95 shadow-sm">
+        <section className="overflow-hidden rounded-3xl bg-card/95 shadow-sm">
           <div
-            className="h-48 w-full bg-linear-to-r from-indigo-500 to-purple-500"
+            className="h-48 w-full bg-linear-to-r from-primary to-purple-500"
             style={accent ? { backgroundImage: `linear-gradient(to right, ${accent}, ${accent}cc)` } : undefined}
           >
             {artist.bannerImageUrl ? (
@@ -163,19 +163,19 @@ const ArtistProfile: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-6 px-6 pb-8 sm:flex-row sm:items-end">
-            <div className="-mt-16 h-32 w-32 overflow-hidden rounded-full border-4 border-white bg-gray-100">
+            <div className="-mt-16 h-32 w-32 overflow-hidden rounded-full border-4 border-card bg-muted">
               {artist.profileImageUrl ? (
                 <img src={artist.profileImageUrl} alt={artist.name} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-gray-500">
+                <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-muted-foreground">
                   {artist.name.slice(0, 2).toUpperCase()}
                 </div>
               )}
             </div>
             <div className="flex-1">
-              <h1 className="text-3xl font-semibold text-gray-900">{artist.name}</h1>
-              <p className="mt-2 text-sm text-gray-500">Joined {artist.createdAt ? new Date(artist.createdAt).toLocaleDateString() : 'recently'}</p>
-              {artist.bio ? <p className="mt-4 whitespace-pre-line text-sm text-gray-700">{artist.bio}</p> : null}
+              <h1 className="text-3xl font-semibold text-foreground">{artist.name}</h1>
+              <p className="mt-2 text-sm text-muted-foreground">Joined {artist.createdAt ? new Date(artist.createdAt).toLocaleDateString() : 'recently'}</p>
+              {artist.bio ? <p className="mt-4 whitespace-pre-line text-sm text-foreground">{artist.bio}</p> : null}
               {artist.artistUrl ? (
                 <a
                   href={artist.artistUrl}
@@ -192,7 +192,7 @@ const ArtistProfile: React.FC = () => {
                 {isOwnProfile ? (
                   <Link
                     to="/artist/settings"
-                    className="inline-flex items-center gap-2 rounded-full border border-gray-300 px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+                    className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
                   >
                     Edit brand page
                   </Link>
@@ -203,7 +203,7 @@ const ArtistProfile: React.FC = () => {
                       disabled={followBusy}
                       className={`inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-60 ${
                         following
-                          ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                          ? 'border border-border text-foreground hover:bg-accent'
                           : 'text-white hover:opacity-90'
                       }`}
                       style={!following ? { backgroundColor: accent ?? '#4f46e5' } : undefined}
@@ -214,7 +214,7 @@ const ArtistProfile: React.FC = () => {
                     <button
                       onClick={startConversation}
                       disabled={messageBusy}
-                      className="inline-flex items-center gap-2 rounded-full border border-gray-300 px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:opacity-60"
                     >
                       <MessageSquare size={16} />
                       Message
@@ -223,22 +223,22 @@ const ArtistProfile: React.FC = () => {
                 )}
               </div>
             </div>
-            <div className="flex gap-8 text-sm text-gray-600">
+            <div className="flex gap-8 text-sm text-muted-foreground">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400">Followers</p>
-                <p className="text-xl font-semibold text-gray-900">{followerCount}</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Followers</p>
+                <p className="text-xl font-semibold text-foreground">{followerCount}</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400">Models</p>
-                <p className="text-xl font-semibold text-gray-900">{artist.totalModels ?? 0}</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Models</p>
+                <p className="text-xl font-semibold text-foreground">{artist.totalModels ?? 0}</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400">Purchases</p>
-                <p className="text-xl font-semibold text-gray-900">{artist.totalPurchases ?? 0}</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Purchases</p>
+                <p className="text-xl font-semibold text-foreground">{artist.totalPurchases ?? 0}</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400">Views</p>
-                <p className="text-xl font-semibold text-gray-900">{artist.totalViews ?? 0}</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Views</p>
+                <p className="text-xl font-semibold text-foreground">{artist.totalViews ?? 0}</p>
               </div>
             </div>
           </div>
@@ -247,8 +247,8 @@ const ArtistProfile: React.FC = () => {
         {/* FEATURED CAROUSEL — the artist's hand-picked highlights, above the shop. */}
         {featured.length > 0 && (
           <section className="mt-12">
-            <h2 className="text-2xl font-semibold text-gray-900">Featured</h2>
-            <p className="text-sm text-gray-500">Hand-picked by {artist.name}</p>
+            <h2 className="text-2xl font-semibold text-foreground">Featured</h2>
+            <p className="text-sm text-muted-foreground">Hand-picked by {artist.name}</p>
             <div className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto pb-4 scrollbar-thin">
               {featured.map((model) => (
                 <div key={model.id} className="w-72 flex-none snap-start">
@@ -262,8 +262,8 @@ const ArtistProfile: React.FC = () => {
         {/* PUBLISHED SHOWCASE TABLES — links to the artist's public planner displays. */}
         {showcases.length > 0 && (
           <section className="mt-12">
-            <h2 className="text-2xl font-semibold text-gray-900">Display tables</h2>
-            <p className="text-sm text-gray-500">See {artist.name}&apos;s models laid out together — open one to shop the whole build.</p>
+            <h2 className="text-2xl font-semibold text-foreground">Display tables</h2>
+            <p className="text-sm text-muted-foreground">See {artist.name}&apos;s models laid out together — open one to shop the whole build.</p>
             <div className="mt-4 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {showcases.map((table) => (
                 <ShowcaseCard key={table.id} table={table} accent={accent} />
@@ -274,11 +274,11 @@ const ArtistProfile: React.FC = () => {
 
         <section className="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-semibold text-gray-900">All models</h2>
-            <p className="text-sm text-gray-500">{modelsQuery.data?.total ?? 0} items</p>
+            <h2 className="text-2xl font-semibold text-foreground">All models</h2>
+            <p className="text-sm text-muted-foreground">{modelsQuery.data?.total ?? 0} items</p>
           </div>
           <div className="flex gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-600">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
               Sort by
               <select
                 value={sortBy}
@@ -286,7 +286,7 @@ const ArtistProfile: React.FC = () => {
                   setSortBy(event.target.value)
                   setPage(1)
                 }}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs focus:border-indigo-500 focus:outline-hidden"
+                className="rounded-md border border-border px-3 py-2 text-sm shadow-xs focus:border-primary focus:outline-hidden"
               >
                 {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -306,9 +306,9 @@ const ArtistProfile: React.FC = () => {
           ) : models.length ? (
             <ModelGrid models={models} />
           ) : (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
-              <p className="text-sm font-medium text-gray-700">No models published yet.</p>
-              <p className="mt-2 text-xs text-gray-500">Check back soon for new releases.</p>
+            <div className="rounded-xl border border-dashed border-border bg-card py-16 text-center">
+              <p className="text-sm font-medium text-foreground">No models published yet.</p>
+              <p className="mt-2 text-xs text-muted-foreground">Check back soon for new releases.</p>
             </div>
           )}
         </section>
@@ -318,7 +318,7 @@ const ArtistProfile: React.FC = () => {
             <Button variant="outline" onClick={() => handlePageChange('prev')} disabled={page <= 1}>
               Previous
             </Button>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-muted-foreground">
               Page {modelsQuery.data?.page ?? page} of {totalPages}
             </span>
             <Button variant="outline" onClick={() => handlePageChange('next')} disabled={page >= totalPages}>
@@ -349,9 +349,9 @@ const ArtistProfile: React.FC = () => {
 const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ table, accent }) => (
   <Link
     to={`/planner/view/${table.id}`}
-    className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
+    className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:shadow-md"
   >
-    <div className="relative aspect-video w-full bg-gray-100">
+    <div className="relative aspect-video w-full bg-muted">
       {table.thumbnails.length > 0 ? (
         <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px">
           {table.thumbnails.slice(0, 4).map((src, i) => (
@@ -359,7 +359,7 @@ const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ ta
           ))}
         </div>
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-gray-400">
+        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
           <LayoutGrid size={32} />
         </div>
       )}
@@ -369,9 +369,9 @@ const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ ta
     </div>
     <div className="flex items-center justify-between gap-2 p-4">
       <div className="min-w-0">
-        <p className="truncate font-medium text-gray-900">{table.name}</p>
+        <p className="truncate font-medium text-foreground">{table.name}</p>
         {table.description ? (
-          <p className="mt-0.5 truncate text-xs text-gray-500">{table.description}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{table.description}</p>
         ) : null}
       </div>
       <span

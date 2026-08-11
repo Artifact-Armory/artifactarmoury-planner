@@ -45,16 +45,16 @@ export const AssetDrawer: React.FC<AssetDrawerProps> = ({ tableId, isOpen, onClo
         onClick={onClose}
       />
       <aside
-        className={`absolute right-0 top-0 h-full w-full max-w-lg bg-white shadow-xl transition-transform duration-300 ${
+        className={`absolute right-0 top-0 h-full w-full max-w-lg bg-card shadow-xl transition-transform duration-300 ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Asset Library</h2>
-            <p className="text-xs text-gray-500">Select an asset to add to the table.</p>
+            <h2 className="text-lg font-semibold text-foreground">Asset Library</h2>
+            <p className="text-xs text-muted-foreground">Select an asset to add to the table.</p>
           </div>
           <Button variant="ghost" onClick={onClose}>
             Close
@@ -69,19 +69,19 @@ export const AssetDrawer: React.FC<AssetDrawerProps> = ({ tableId, isOpen, onClo
           />
 
           <div className="h-[70vh] overflow-y-auto space-y-3 pr-2">
-            {loading && <p className="text-sm text-gray-500">Loading assets…</p>}
+            {loading && <p className="text-sm text-muted-foreground">Loading assets…</p>}
             {!loading && filteredAssets.length === 0 && (
-              <p className="text-sm text-gray-500">No assets match this search.</p>
+              <p className="text-sm text-muted-foreground">No assets match this search.</p>
             )}
             {filteredAssets.map((asset) => (
-              <div key={asset.id} className="rounded-lg border border-gray-200 p-3">
+              <div key={asset.id} className="rounded-lg border border-border p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-900">{asset.name}</h3>
+                    <h3 className="text-sm font-semibold text-foreground">{asset.name}</h3>
                     {asset.category && (
-                      <p className="text-xs uppercase text-gray-500 mt-1">{asset.category}</p>
+                      <p className="text-xs uppercase text-muted-foreground mt-1">{asset.category}</p>
                     )}
-                    <p className="mt-2 text-xs text-gray-600 line-clamp-3">{asset.description}</p>
+                    <p className="mt-2 text-xs text-muted-foreground line-clamp-3">{asset.description}</p>
                   </div>
                   <Button size="sm" onClick={() => handleAdd(asset.id)}>
                     Add

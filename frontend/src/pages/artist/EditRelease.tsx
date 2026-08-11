@@ -128,21 +128,21 @@ const EditRelease: React.FC = () => {
     } finally { setBusy(false) }
   }
 
-  if (loading) return <div className="max-w-3xl mx-auto px-4 py-8 text-gray-500">Loading…</div>
+  if (loading) return <div className="max-w-3xl mx-auto px-4 py-8 text-muted-foreground">Loading…</div>
   if (!release) return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <p className="text-red-600">{error || 'Release not found'}</p>
-      <Link to="/artist/releases" className="inline-block mt-4 text-indigo-600">← Back to Releases</Link>
+      <Link to="/artist/releases" className="inline-block mt-4 text-primary">← Back to Releases</Link>
     </div>
   )
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900">Edit Release</h1>
-        <Link to="/artist/releases" className="text-sm text-indigo-600">← Releases</Link>
+        <h1 className="text-2xl font-semibold text-foreground">Edit Release</h1>
+        <Link to="/artist/releases" className="text-sm text-primary">← Releases</Link>
       </div>
-      <p className="text-gray-600 mt-1">Status: <span className="font-medium">{release.status}</span></p>
+      <p className="text-muted-foreground mt-1">Status: <span className="font-medium">{release.status}</span></p>
 
       {locked && (
         <div className="mt-4 rounded-sm bg-green-50 text-green-800 text-sm px-3 py-2">
@@ -159,7 +159,7 @@ const EditRelease: React.FC = () => {
         <div>
           <label className="block text-sm font-medium mb-1">Go-live date &amp; time</label>
           <input type="datetime-local" className="border rounded-sm px-3 py-2" value={dateInput} onChange={(e) => setDateInput(e.target.value)} disabled={busy || locked} />
-          <p className="text-xs text-gray-500 mt-1">Uses your local time zone.</p>
+          <p className="text-xs text-muted-foreground mt-1">Uses your local time zone.</p>
         </div>
 
         {notice && <p className="text-sm text-green-700">{notice}</p>}
@@ -167,7 +167,7 @@ const EditRelease: React.FC = () => {
 
         {!locked && (
           <div className="flex flex-wrap gap-3">
-            <button onClick={saveMeta} className="px-4 py-2 rounded-sm bg-gray-800 text-white disabled:opacity-50" disabled={busy}>Save</button>
+            <button onClick={saveMeta} className="px-4 py-2 rounded-sm bg-primary text-primary-foreground disabled:opacity-50" disabled={busy}>Save</button>
             {release.status === 'scheduled' ? (
               <button onClick={doUnschedule} className="px-4 py-2 rounded-sm border disabled:opacity-50" disabled={busy}>Unschedule</button>
             ) : (
@@ -180,16 +180,16 @@ const EditRelease: React.FC = () => {
 
       {/* Items currently in the release */}
       <div className="mt-8">
-        <h2 className="text-lg font-medium text-gray-900">In this release ({items.length})</h2>
+        <h2 className="text-lg font-medium text-foreground">In this release ({items.length})</h2>
         {items.length === 0 ? (
-          <p className="text-sm text-gray-500 mt-1">Nothing added yet — pick items below.</p>
+          <p className="text-sm text-muted-foreground mt-1">Nothing added yet — pick items below.</p>
         ) : (
           <ul className="mt-2 space-y-2">
             {items.map((it) => (
               <li key={it.id} className="flex items-center justify-between border rounded-sm px-3 py-2">
                 <div>
-                  <span className="text-xs uppercase text-gray-400 mr-2">{it.itemType}</span>
-                  <span className="text-gray-900">{it.name}</span>
+                  <span className="text-xs uppercase text-muted-foreground mr-2">{it.itemType}</span>
+                  <span className="text-foreground">{it.name}</span>
                   {it.publishError && <span className="block text-xs text-red-600">{it.publishError}</span>}
                 </div>
                 {!locked && <button onClick={() => toggle(it.itemType, it.itemId)} className="text-sm text-red-600">Remove</button>}
@@ -204,9 +204,9 @@ const EditRelease: React.FC = () => {
         <div className="mt-8 space-y-6">
           {(Object.keys(TYPE_LABELS) as ReleaseItemType[]).map((type) => (
             <div key={type}>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">{TYPE_LABELS[type]}</h3>
+              <h3 className="text-sm font-semibold text-foreground mb-2">{TYPE_LABELS[type]}</h3>
               {pickers[type].length === 0 ? (
-                <p className="text-sm text-gray-400">You have no {TYPE_LABELS[type].toLowerCase()} to add.</p>
+                <p className="text-sm text-muted-foreground">You have no {TYPE_LABELS[type].toLowerCase()} to add.</p>
               ) : (
                 <div className="grid sm:grid-cols-2 gap-2">
                   {pickers[type].map((row) => {
@@ -215,13 +215,13 @@ const EditRelease: React.FC = () => {
                       <button
                         key={row.id}
                         onClick={() => toggle(type, row.id)}
-                        className={`flex items-center justify-between border rounded-sm px-3 py-2 text-left ${added ? 'border-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'}`}
+                        className={`flex items-center justify-between border rounded-sm px-3 py-2 text-left ${added ? 'border-primary bg-primary/10' : 'hover:bg-accent'}`}
                       >
                         <span className="truncate">
                           {row.name}
                           {row.status && row.status !== 'published' && <span className="ml-2 text-xs text-amber-600">({row.status})</span>}
                         </span>
-                        <span className={`text-xs ${added ? 'text-indigo-700' : 'text-gray-400'}`}>{added ? '✓ Added' : 'Add'}</span>
+                        <span className={`text-xs ${added ? 'text-primary' : 'text-muted-foreground'}`}>{added ? '✓ Added' : 'Add'}</span>
                       </button>
                     )
                   })}

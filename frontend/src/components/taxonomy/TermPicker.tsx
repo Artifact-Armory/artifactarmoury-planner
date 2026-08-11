@@ -91,7 +91,7 @@ const TermPicker: React.FC<TermPickerProps> = ({
     })
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
-  if (!facets) return <p className="text-sm text-gray-500">Loading tags…</p>
+  if (!facets) return <p className="text-sm text-muted-foreground">Loading tags…</p>
 
   const searching = query.trim().length > 0
 
@@ -107,10 +107,10 @@ const TermPicker: React.FC<TermPickerProps> = ({
         onClick={() => toggle(facet, term.path)}
         className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition ${
           isSel
-            ? 'border-indigo-600 bg-indigo-600 text-white'
+            ? 'border-primary bg-primary text-primary-foreground'
             : atCap
-            ? 'cursor-not-allowed border-gray-200 text-gray-300'
-            : 'border-gray-300 text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
+            ? 'cursor-not-allowed border-border text-muted-foreground'
+            : 'border-border text-foreground hover:border-primary/50 hover:text-primary'
         }`}
         title={term.synonyms?.length ? `Also: ${term.synonyms.join(', ')}` : undefined}
       >
@@ -136,7 +136,7 @@ const TermPicker: React.FC<TermPickerProps> = ({
             <button
               type="button"
               onClick={() => toggleExpand(key)}
-              className="p-0.5 text-gray-400 hover:text-gray-700"
+              className="p-0.5 text-muted-foreground hover:text-foreground"
               aria-label={isOpen ? 'Collapse' : 'Expand'}
             >
               {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -150,10 +150,10 @@ const TermPicker: React.FC<TermPickerProps> = ({
             onClick={() => toggle(facet, term.path)}
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-sm transition ${
               isSel
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-primary text-primary-foreground'
                 : atCap
-                ? 'cursor-not-allowed text-gray-300'
-                : 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-700'
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-primary/10 hover:text-primary'
             }`}
           >
             {isSel && <Check size={13} />}
@@ -205,7 +205,7 @@ const TermPicker: React.FC<TermPickerProps> = ({
         <div className="space-y-3">
           {terms.map((group) => (
             <div key={group.id}>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {group.name}
               </p>
               <div className="flex flex-wrap gap-2">
@@ -231,19 +231,19 @@ const TermPicker: React.FC<TermPickerProps> = ({
   return (
     <div className="space-y-4">
       <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search tags (e.g. hedgerow, bunker, 28mm)…"
-          className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-9 text-sm focus:border-indigo-500 focus:outline-hidden"
+          className="w-full rounded-md border border-border py-2 pl-9 pr-9 text-sm focus:border-primary focus:outline-hidden"
           disabled={disabled}
         />
         {query && (
           <button
             type="button"
             onClick={() => setQuery('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             aria-label="Clear search"
           >
             <X size={16} />
@@ -264,13 +264,13 @@ const TermPicker: React.FC<TermPickerProps> = ({
         const count = countInFacet(facet.slug)
         const needsMore = facet.required && count === 0
         return (
-          <div key={facet.id} className="rounded-lg border border-gray-200 p-3">
+          <div key={facet.id} className="rounded-lg border border-border p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-900">{facet.name}</h3>
+                <h3 className="text-sm font-semibold text-foreground">{facet.name}</h3>
                 {facet.required && <span className="text-red-500" title="Required">*</span>}
                 {facet.maxTerms != null && (
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-muted-foreground">
                     {count}/{facet.maxTerms}
                   </span>
                 )}
@@ -280,7 +280,7 @@ const TermPicker: React.FC<TermPickerProps> = ({
                   type="button"
                   disabled={disabled}
                   onClick={() => onChange(value.filter((t) => !t.startsWith(`${facet.slug}:`)))}
-                  className="text-xs text-gray-400 hover:text-gray-700"
+                  className="text-xs text-muted-foreground hover:text-foreground"
                 >
                   Clear
                 </button>

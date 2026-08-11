@@ -26,27 +26,27 @@ const AdminModels: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Models</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-semibold text-foreground">Models</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Published catalogue. For flagged/reported items use the{' '}
-            <Link to="/admin/moderation" className="text-indigo-600 hover:underline">
+            <Link to="/admin/moderation" className="text-primary hover:underline">
               moderation queue
             </Link>
             .
           </p>
         </div>
         <form onSubmit={onSearch} className="relative">
-          <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+          <Search size={16} className="absolute left-3 top-2.5 text-muted-foreground" />
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search models…"
-            className="pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+            className="pl-9 pr-3 py-2 text-sm border border-border rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-ring"
           />
         </form>
       </div>
 
-      {isLoading && <div className="text-gray-500">Loading…</div>}
+      {isLoading && <div className="text-muted-foreground">Loading…</div>}
       {isError && <div className="text-red-600">Failed to load models.</div>}
 
       {data && (
@@ -56,9 +56,9 @@ const AdminModels: React.FC = () => {
               <Link
                 key={m.id}
                 to={`/models/${m.id}`}
-                className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow"
+                className="bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-shadow"
               >
-                <div className="aspect-square bg-gray-100">
+                <div className="aspect-square bg-muted">
                   {m.thumbnail_path ? (
                     <img
                       src={assetUrl(m.thumbnail_path)}
@@ -66,17 +66,17 @@ const AdminModels: React.FC = () => {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-300 text-sm">
+                    <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
                       No image
                     </div>
                   )}
                 </div>
                 <div className="p-3">
-                  <div className="text-sm font-medium text-gray-900 truncate">{m.name}</div>
-                  <div className="text-xs text-gray-500 truncate">
+                  <div className="text-sm font-medium text-foreground truncate">{m.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
                     {m.artist_name || 'Unknown artist'}
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                  <div className="mt-1 text-sm font-semibold text-foreground">
                     {formatPrice(m.base_price ?? 0)}
                   </div>
                 </div>
@@ -85,12 +85,12 @@ const AdminModels: React.FC = () => {
           </div>
 
           {data.models.length === 0 && (
-            <div className="text-center text-gray-500 py-8">No models found.</div>
+            <div className="text-center text-muted-foreground py-8">No models found.</div>
           )}
 
           {data.pagination.pages > 1 && (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500">
+              <span className="text-muted-foreground">
                 Page {data.pagination.page} of {data.pagination.pages} · {data.pagination.total}{' '}
                 models
               </span>
@@ -98,14 +98,14 @@ const AdminModels: React.FC = () => {
                 <button
                   disabled={page <= 1}
                   onClick={() => setPage((p) => p - 1)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+                  className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
                 >
                   Previous
                 </button>
                 <button
                   disabled={page >= data.pagination.pages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+                  className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
                 >
                   Next
                 </button>

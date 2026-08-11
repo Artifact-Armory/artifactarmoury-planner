@@ -7,8 +7,8 @@ import { useAuthStore } from '../../store/authStore'
 
 const roleBadge: Record<string, string> = {
   admin: 'bg-purple-100 text-purple-700',
-  artist: 'bg-indigo-100 text-indigo-700',
-  customer: 'bg-gray-100 text-gray-700',
+  artist: 'bg-primary/20 text-primary',
+  customer: 'bg-muted text-foreground',
 }
 const statusBadge: Record<string, string> = {
   active: 'bg-green-100 text-green-700',
@@ -81,19 +81,19 @@ const AdminUsers: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Users</h1>
-        <p className="mt-1 text-sm text-gray-500">Search, filter and moderate accounts.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Users</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Search, filter and moderate accounts.</p>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <form onSubmit={onSearch} className="relative">
-          <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+          <Search size={16} className="absolute left-3 top-2.5 text-muted-foreground" />
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search email or name…"
-            className="pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+            className="pl-9 pr-3 py-2 text-sm border border-border rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-ring"
           />
         </form>
         <select
@@ -102,7 +102,7 @@ const AdminUsers: React.FC = () => {
             setPage(1)
             setRole(e.target.value)
           }}
-          className="py-2 px-3 text-sm border border-gray-300 rounded-md"
+          className="py-2 px-3 text-sm border border-border rounded-md"
         >
           <option value="">All roles</option>
           <option value="customer">Customers</option>
@@ -115,7 +115,7 @@ const AdminUsers: React.FC = () => {
             setPage(1)
             setStatus(e.target.value)
           }}
-          className="py-2 px-3 text-sm border border-gray-300 rounded-md"
+          className="py-2 px-3 text-sm border border-border rounded-md"
         >
           <option value="">All statuses</option>
           <option value="active">Active</option>
@@ -125,10 +125,10 @@ const AdminUsers: React.FC = () => {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-left">
+            <thead className="bg-muted text-muted-foreground text-left">
               <tr>
                 <th className="px-4 py-3 font-medium">User</th>
                 <th className="px-4 py-3 font-medium">Role</th>
@@ -139,10 +139,10 @@ const AdminUsers: React.FC = () => {
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                     Loading…
                   </td>
                 </tr>
@@ -155,12 +155,12 @@ const AdminUsers: React.FC = () => {
                 </tr>
               )}
               {data?.users.map((u) => (
-                <tr key={u.id} className="hover:bg-gray-50">
+                <tr key={u.id} className="hover:bg-accent">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">
+                    <div className="font-medium text-foreground">
                       {u.artist_name || u.display_name}
                     </div>
-                    <div className="text-xs text-gray-500">{u.email}</div>
+                    <div className="text-xs text-muted-foreground">{u.email}</div>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge[u.role]}`}>
@@ -174,14 +174,14 @@ const AdminUsers: React.FC = () => {
                       {u.account_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-700">{u.model_count}</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{u.order_count}</td>
-                  <td className="px-4 py-3 text-gray-500">
+                  <td className="px-4 py-3 text-right text-foreground">{u.model_count}</td>
+                  <td className="px-4 py-3 text-right text-foreground">{u.order_count}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
                     {new Date(u.created_at).toLocaleDateString('en-GB')}
                   </td>
                   <td className="px-4 py-3">
                     {u.id === me?.id ? (
-                      <span className="text-xs text-gray-400 italic block text-right">You</span>
+                      <span className="text-xs text-muted-foreground italic block text-right">You</span>
                     ) : (
                       <div className="flex justify-end gap-2 text-xs">
                         {u.account_status === 'active' ? (
@@ -209,7 +209,7 @@ const AdminUsers: React.FC = () => {
                         )}
                         <button
                           onClick={() => confirmDelete(u)}
-                          className="text-gray-400 hover:text-red-600 hover:underline"
+                          className="text-muted-foreground hover:text-red-600 hover:underline"
                         >
                           Delete
                         </button>
@@ -220,7 +220,7 @@ const AdminUsers: React.FC = () => {
               ))}
               {data && data.users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                     No users match your filters.
                   </td>
                 </tr>
@@ -233,21 +233,21 @@ const AdminUsers: React.FC = () => {
       {/* Pagination */}
       {data && data.pagination.pages > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">
+          <span className="text-muted-foreground">
             Page {data.pagination.page} of {data.pagination.pages} · {data.pagination.total} users
           </span>
           <div className="flex gap-2">
             <button
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+              className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
             >
               Previous
             </button>
             <button
               disabled={page >= data.pagination.pages}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+              className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
             >
               Next
             </button>

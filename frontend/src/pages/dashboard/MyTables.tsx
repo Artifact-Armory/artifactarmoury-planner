@@ -69,51 +69,51 @@ const MyTables: React.FC = () => {
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">My Table Layouts</h1>
-          <p className="text-gray-600 mt-1">Your saved tabletop layouts. Open one to keep editing, or share a link.</p>
+          <h1 className="text-2xl font-semibold text-foreground">My Table Layouts</h1>
+          <p className="text-muted-foreground mt-1">Your saved tabletop layouts. Open one to keep editing, or share a link.</p>
         </div>
         <Link
           to="/planner"
-          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
         >
           Open Builder
         </Link>
       </header>
 
-      {!email && <p className="text-gray-600">Please log in to see your saved tables.</p>}
-      {email && loading && <p className="text-gray-500">Loading your tables…</p>}
+      {!email && <p className="text-muted-foreground">Please log in to see your saved tables.</p>}
+      {email && loading && <p className="text-muted-foreground">Loading your tables…</p>}
       {email && error && !loading && (
-        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border px-3 py-1.5" onClick={load}>Retry</button></div>
+        <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border border-border px-3 py-1.5" onClick={load}>Retry</button></div>
       )}
 
       {email && !loading && !error && tables.length === 0 && (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-12 text-center">
-          <h2 className="text-lg font-medium text-gray-900">No saved tables yet</h2>
-          <p className="mt-2 text-sm text-gray-600">Design a table in the builder and hit Save to keep it here.</p>
-          <Link to="/planner" className="mt-6 inline-flex rounded-md bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+        <div className="rounded-lg border border-dashed border-border bg-card p-12 text-center">
+          <h2 className="text-lg font-medium text-foreground">No saved tables yet</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Design a table in the builder and hit Save to keep it here.</p>
+          <Link to="/planner" className="mt-6 inline-flex rounded-md bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20">
             Start building
           </Link>
         </div>
       )}
 
       {email && !loading && !error && tables.length > 0 && (
-        <ul className="divide-y rounded-lg border bg-white">
+        <ul className="divide-y divide-border rounded-lg border border-border bg-card">
           {tables.map((t) => {
             const busy = busyId === t.id
             return (
               <li key={t.id} className="flex items-center gap-4 p-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900 truncate">{t.name}</span>
+                    <span className="font-medium text-foreground truncate">{t.name}</span>
                     {t.isPublic && <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">shared</span>}
                   </div>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p className="text-sm text-muted-foreground mt-0.5">
                     Updated {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : '—'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="rounded-sm bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open</button>
-                  <button className="rounded-sm border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => handleShare(t)}>Share link</button>
+                  <button className="rounded-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open</button>
+                  <button className="rounded-sm border border-border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => handleShare(t)}>Share link</button>
                   <button className="rounded-sm border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50" disabled={busy} onClick={() => handleDelete(t)}>Delete</button>
                 </div>
               </li>

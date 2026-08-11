@@ -10,7 +10,7 @@ const payBadge: Record<string, string> = {
   succeeded: 'bg-green-100 text-green-700',
   pending: 'bg-amber-100 text-amber-700',
   failed: 'bg-red-100 text-red-700',
-  refunded: 'bg-gray-100 text-gray-700',
+  refunded: 'bg-muted text-foreground',
 }
 
 const AdminOrders: React.FC = () => {
@@ -36,8 +36,8 @@ const AdminOrders: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Orders</h1>
-        <p className="mt-1 text-sm text-gray-500">Track orders and fulfillment status.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Orders</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Track orders and fulfillment status.</p>
       </div>
 
       <div className="flex items-center gap-3">
@@ -47,7 +47,7 @@ const AdminOrders: React.FC = () => {
             setPage(1)
             setStatus(e.target.value)
           }}
-          className="py-2 px-3 text-sm border border-gray-300 rounded-md"
+          className="py-2 px-3 text-sm border border-border rounded-md"
         >
           <option value="">All fulfillment statuses</option>
           {FULFILLMENT.map((f) => (
@@ -58,10 +58,10 @@ const AdminOrders: React.FC = () => {
         </select>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-left">
+            <thead className="bg-muted text-muted-foreground text-left">
               <tr>
                 <th className="px-4 py-3 font-medium">Order</th>
                 <th className="px-4 py-3 font-medium">Customer</th>
@@ -72,10 +72,10 @@ const AdminOrders: React.FC = () => {
                 <th className="px-4 py-3 font-medium">Date</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                     Loading…
                   </td>
                 </tr>
@@ -88,18 +88,18 @@ const AdminOrders: React.FC = () => {
                 </tr>
               )}
               {data?.orders.map((o: AdminOrderRow) => (
-                <tr key={o.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{o.order_number}</td>
+                <tr key={o.id} className="hover:bg-accent">
+                  <td className="px-4 py-3 font-medium text-foreground">{o.order_number}</td>
                   <td className="px-4 py-3">
-                    <div className="text-gray-900">{o.customer_name || '—'}</div>
-                    <div className="text-xs text-gray-500">{o.customer_email}</div>
+                    <div className="text-foreground">{o.customer_name || '—'}</div>
+                    <div className="text-xs text-muted-foreground">{o.customer_email}</div>
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-700">{o.item_count}</td>
-                  <td className="px-4 py-3 text-right text-gray-900">{formatPrice(o.total)}</td>
+                  <td className="px-4 py-3 text-right text-foreground">{o.item_count}</td>
+                  <td className="px-4 py-3 text-right text-foreground">{formatPrice(o.total)}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        payBadge[o.payment_status] || 'bg-gray-100 text-gray-700'
+                        payBadge[o.payment_status] || 'bg-muted text-foreground'
                       }`}
                     >
                       {o.payment_status}
@@ -109,7 +109,7 @@ const AdminOrders: React.FC = () => {
                     <select
                       value={o.fulfillment_status}
                       onChange={(e) => fulfilMut.mutate({ id: o.id, s: e.target.value })}
-                      className="text-xs border border-gray-200 rounded-sm px-2 py-1 bg-white"
+                      className="text-xs border border-border rounded-sm px-2 py-1 bg-card"
                     >
                       {FULFILLMENT.map((f) => (
                         <option key={f} value={f}>
@@ -118,14 +118,14 @@ const AdminOrders: React.FC = () => {
                       ))}
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-gray-500">
+                  <td className="px-4 py-3 text-muted-foreground">
                     {new Date(o.created_at).toLocaleDateString('en-GB')}
                   </td>
                 </tr>
               ))}
               {data && data.orders.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                     No orders found.
                   </td>
                 </tr>
@@ -137,21 +137,21 @@ const AdminOrders: React.FC = () => {
 
       {data && data.pagination.pages > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">
+          <span className="text-muted-foreground">
             Page {data.pagination.page} of {data.pagination.pages} · {data.pagination.total} orders
           </span>
           <div className="flex gap-2">
             <button
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+              className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
             >
               Previous
             </button>
             <button
               disabled={page >= data.pagination.pages}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1.5 border border-gray-300 rounded-md disabled:opacity-50"
+              className="px-3 py-1.5 border border-border rounded-md disabled:opacity-50"
             >
               Next
             </button>

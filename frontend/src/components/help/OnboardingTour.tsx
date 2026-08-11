@@ -107,7 +107,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
       {/* Spotlight (box-shadow dims everything but the hole) or a full backdrop. */}
       {highlight ? (
         <div
-          className="pointer-events-none absolute rounded-lg ring-2 ring-indigo-400 transition-all duration-200"
+          className="pointer-events-none absolute rounded-lg ring-2 ring-primary/50 transition-all duration-200"
           style={{
             top: highlight.top,
             left: highlight.left,
@@ -123,19 +123,19 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
       {/* Tooltip card */}
       <div
         style={cardStyle}
-        className="pointer-events-auto rounded-xl border border-gray-200 bg-white p-4 shadow-2xl"
+        className="pointer-events-auto rounded-xl border border-border bg-card p-4 shadow-2xl"
       >
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-semibold text-gray-900">{step.title}</h3>
+          <h3 className="text-sm font-semibold text-foreground">{step.title}</h3>
           <button
             onClick={finish}
-            className="-mr-1 -mt-1 rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="-mr-1 -mt-1 rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Skip tour"
           >
             <X size={16} />
           </button>
         </div>
-        <p className="mt-2 text-sm leading-relaxed text-gray-600">{step.body}</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
 
         <div className="mt-4 flex items-center justify-between">
           <div className="flex gap-1.5" aria-hidden>
@@ -143,7 +143,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
               <span
                 key={idx}
                 className={`h-1.5 rounded-full transition-all ${
-                  idx === i ? 'w-4 bg-indigo-600' : 'w-1.5 bg-gray-300'
+                  idx === i ? 'w-4 bg-primary' : 'w-1.5 bg-border'
                 }`}
               />
             ))}
@@ -152,14 +152,14 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
             {i > 0 && (
               <button
                 onClick={() => setI((v) => Math.max(0, v - 1))}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent"
               >
                 Back
               </button>
             )}
             <button
               onClick={() => (isLast ? finish() : setI((v) => Math.min(steps.length - 1, v + 1)))}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
               {isLast ? 'Done' : 'Next'}
             </button>
@@ -169,7 +169,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, onClose }) => {
         {!isLast && (
           <button
             onClick={finish}
-            className="mt-2 text-xs text-gray-400 hover:text-gray-600"
+            className="mt-2 text-xs text-muted-foreground hover:text-foreground"
           >
             Skip tour
           </button>

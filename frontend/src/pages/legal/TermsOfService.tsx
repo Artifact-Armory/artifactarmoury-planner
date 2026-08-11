@@ -56,7 +56,7 @@ const TermsOfService: React.FC = () => {
           in breach of these terms can be traced back to the account that downloaded it.
           Removing, tampering with or attempting to defeat the watermark is a breach of
           these terms. See our{' '}
-          <Link to="/privacy-policy" className="text-indigo-600 underline">Privacy Policy</Link>{' '}
+          <Link to="/privacy-policy" className="text-primary underline">Privacy Policy</Link>{' '}
           for how this data is handled.
         </p>
       </LegalSection>
@@ -112,7 +112,7 @@ const TermsOfService: React.FC = () => {
         <p>
           We may update these terms; material changes will be notified through the site. For
           any questions about these terms, contact us at{' '}
-          <a href="mailto:support@artifactarmoury.com" className="text-indigo-600 underline">
+          <a href="mailto:support@artifactarmoury.com" className="text-primary underline">
             support@artifactarmoury.com
           </a>
           .

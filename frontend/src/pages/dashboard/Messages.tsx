@@ -82,19 +82,19 @@ const Messages: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-bold text-gray-900">Messages</h1>
-      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xs md:grid-cols-[320px_1fr] md:h-[70vh]">
+      <h1 className="mb-4 text-2xl font-bold text-foreground">Messages</h1>
+      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-border bg-card shadow-xs md:grid-cols-[320px_1fr] md:h-[70vh]">
         {/* Conversation list */}
-        <aside className={`border-r border-gray-200 md:overflow-y-auto ${selectedId ? 'hidden md:block' : ''}`}>
+        <aside className={`border-r border-border md:overflow-y-auto ${selectedId ? 'hidden md:block' : ''}`}>
           {loadingList ? (
-            <p className="p-6 text-center text-sm text-gray-400">Loading…</p>
+            <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>
           ) : conversations.length === 0 ? (
-            <div className="p-6 text-center text-sm text-gray-400">
-              <MessageSquare className="mx-auto mb-2 text-gray-300" size={28} />
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              <MessageSquare className="mx-auto mb-2 text-muted-foreground" size={28} />
               No conversations yet. Message an artist from their page to start one.
             </div>
           ) : (
-            <ul className="divide-y divide-gray-100">
+            <ul className="divide-y divide-border">
               {conversations.map((c) => {
                 const name = c.kind === 'system' ? SITE_NAME : c.otherName || 'Unknown'
                 const active = c.id === selectedId
@@ -102,30 +102,30 @@ const Messages: React.FC = () => {
                   <li key={c.id}>
                     <button
                       onClick={() => setSearchParams({ c: c.id })}
-                      className={`flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 ${
-                        active ? 'bg-indigo-50' : ''
+                      className={`flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-accent ${
+                        active ? 'bg-primary/10' : ''
                       }`}
                     >
-                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
                         {c.kind === 'system' ? (
-                          <ShieldCheck size={18} className="text-indigo-600" />
+                          <ShieldCheck size={18} className="text-primary" />
                         ) : c.otherAvatar ? (
                           <img src={c.otherAvatar} alt={name} className="h-full w-full object-cover" />
                         ) : (
-                          <UserIcon size={18} className="text-gray-500" />
+                          <UserIcon size={18} className="text-muted-foreground" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-sm font-medium text-gray-900">{name}</p>
-                          <span className="shrink-0 text-xs text-gray-400">{timeAgo(c.lastMessageAt)}</span>
+                          <p className="truncate text-sm font-medium text-foreground">{name}</p>
+                          <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(c.lastMessageAt)}</span>
                         </div>
-                        <p className="truncate text-xs text-gray-500">
+                        <p className="truncate text-xs text-muted-foreground">
                           {c.lastMessagePreview || 'No messages yet'}
                         </p>
                       </div>
                       {c.unread > 0 && (
-                        <span className="mt-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-indigo-600 px-1 text-xs text-white">
+                        <span className="mt-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-xs text-primary-foreground">
                           {c.unread > 9 ? '9+' : c.unread}
                         </span>
                       )}
@@ -140,39 +140,39 @@ const Messages: React.FC = () => {
         {/* Thread */}
         <section className={`flex flex-col ${selectedId ? '' : 'hidden md:flex'}`}>
           {!selectedId ? (
-            <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-gray-400">
+            <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
               Select a conversation to read and reply.
             </div>
           ) : (
             <>
-              <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-3">
+              <header className="flex items-center gap-3 border-b border-border px-4 py-3">
                 <button
                   onClick={() => setSearchParams({})}
-                  className="text-sm text-indigo-600 md:hidden"
+                  className="text-sm text-primary md:hidden"
                 >
                   ← Back
                 </button>
-                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-gray-200">
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-muted">
                   {isSystem ? (
-                    <ShieldCheck size={16} className="text-indigo-600" />
+                    <ShieldCheck size={16} className="text-primary" />
                   ) : conv?.otherAvatar ? (
                     <img src={conv.otherAvatar} alt={headerName} className="h-full w-full object-cover" />
                   ) : (
-                    <UserIcon size={16} className="text-gray-500" />
+                    <UserIcon size={16} className="text-muted-foreground" />
                   )}
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-gray-900">{headerName}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{headerName}</p>
                   {isSystem ? (
-                    <p className="text-xs text-indigo-600">Official message</p>
+                    <p className="text-xs text-primary">Official message</p>
                   ) : (
-                    conv?.otherRole === 'artist' && <p className="text-xs text-gray-400">Artist</p>
+                    conv?.otherRole === 'artist' && <p className="text-xs text-muted-foreground">Artist</p>
                   )}
                 </div>
                 {!isSystem && (
                   <button
                     onClick={() => setReportOpen(true)}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:border-red-200 hover:text-red-600"
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-red-200 hover:text-red-600"
                     title="Report this conversation"
                   >
                     <Flag size={14} />
@@ -181,9 +181,9 @@ const Messages: React.FC = () => {
                 )}
               </header>
 
-              <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
+              <div className="flex-1 space-y-3 overflow-y-auto bg-muted p-4">
                 {conv?.subject && isSystem && (
-                  <p className="text-center text-sm font-semibold text-gray-700">{conv.subject}</p>
+                  <p className="text-center text-sm font-semibold text-foreground">{conv.subject}</p>
                 )}
                 {(thread?.messages ?? []).map((m) => {
                   const isMine = mine(m)
@@ -192,10 +192,10 @@ const Messages: React.FC = () => {
                       <div
                         className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
                           isMine
-                            ? 'bg-indigo-600 text-white'
+                            ? 'bg-primary text-primary-foreground'
                             : m.isSystem
-                            ? 'border border-indigo-100 bg-indigo-50 text-gray-800'
-                            : 'border border-gray-200 bg-white text-gray-800'
+                            ? 'border border-primary/20 bg-primary/10 text-foreground'
+                            : 'border border-border bg-card text-foreground'
                         }`}
                       >
                         {!isMine && (
@@ -204,7 +204,7 @@ const Messages: React.FC = () => {
                           </p>
                         )}
                         <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
-                        <p className={`mt-1 text-[10px] ${isMine ? 'text-indigo-100' : 'text-gray-400'}`}>
+                        <p className={`mt-1 text-[10px] ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                           {timeAgo(m.createdAt)}
                         </p>
                       </div>
@@ -215,7 +215,7 @@ const Messages: React.FC = () => {
               </div>
 
               {canReply ? (
-                <div className="flex items-end gap-2 border-t border-gray-200 p-3">
+                <div className="flex items-end gap-2 border-t border-border p-3">
                   <textarea
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -227,19 +227,19 @@ const Messages: React.FC = () => {
                     }}
                     rows={1}
                     placeholder="Write a message…"
-                    className="max-h-32 flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
+                    className="max-h-32 flex-1 resize-none rounded-lg border border-border px-3 py-2 text-sm focus:border-primary/50 focus:ring-2 focus:ring-ring"
                   />
                   <button
                     onClick={handleSend}
                     disabled={!draft.trim() || sending}
-                    className="flex items-center gap-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    className="flex items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                   >
                     <Send size={16} />
                     Send
                   </button>
                 </div>
               ) : (
-                <div className="border-t border-gray-200 p-3 text-center text-xs text-gray-400">
+                <div className="border-t border-border p-3 text-center text-xs text-muted-foreground">
                   This is an announcement — you can’t reply.
                 </div>
               )}

@@ -101,25 +101,25 @@ const AdminMessages: React.FC = () => {
   }
 
   const inputCls =
-    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200'
+    'w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary/50 focus:ring-2 focus:ring-ring'
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Site messages</h1>
+      <h1 className="text-2xl font-bold text-foreground">Site messages</h1>
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Broadcast */}
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-xs">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
           <div className="mb-4 flex items-center gap-2">
-            <Megaphone size={20} className="text-indigo-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Broadcast announcement</h2>
+            <Megaphone size={20} className="text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">Broadcast announcement</h2>
           </div>
-          <p className="mb-4 text-sm text-gray-500">
+          <p className="mb-4 text-sm text-muted-foreground">
             One-way message delivered to every user in the audience. Recipients can’t reply.
           </p>
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Audience</label>
+              <label className="mb-1 block text-sm font-medium text-foreground">Audience</label>
               <select value={audience} onChange={(e) => setAudience(e.target.value as any)} className={inputCls}>
                 <option value="all">All users</option>
                 <option value="customers">Customers only</option>
@@ -144,7 +144,7 @@ const AdminMessages: React.FC = () => {
             <button
               onClick={sendBroadcast}
               disabled={!bSubject.trim() || !bBody.trim() || bSending}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <Send size={16} />
               {bSending ? 'Sending…' : 'Send broadcast'}
@@ -153,12 +153,12 @@ const AdminMessages: React.FC = () => {
         </div>
 
         {/* Direct message */}
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-xs">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
           <div className="mb-4 flex items-center gap-2">
-            <Mail size={20} className="text-indigo-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Message a user</h2>
+            <Mail size={20} className="text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">Message a user</h2>
           </div>
-          <p className="mb-4 text-sm text-gray-500">
+          <p className="mb-4 text-sm text-muted-foreground">
             Sends a message from {SITE_NAME} to one user. They can reply, creating a support thread.
           </p>
           <div className="space-y-3">
@@ -186,7 +186,7 @@ const AdminMessages: React.FC = () => {
             <button
               onClick={sendDm}
               disabled={!email.trim() || !dBody.trim() || dSending}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <Send size={16} />
               {dSending ? 'Sending…' : 'Send message'}
@@ -196,34 +196,34 @@ const AdminMessages: React.FC = () => {
       </div>
 
       {/* Support threads */}
-      <div className="rounded-lg border border-gray-200 bg-white shadow-xs">
-        <div className="flex items-center gap-2 border-b border-gray-200 px-5 py-4">
-          <Inbox size={20} className="text-indigo-600" />
-          <h2 className="text-lg font-semibold text-gray-900">Support threads</h2>
+      <div className="rounded-lg border border-border bg-card shadow-xs">
+        <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+          <Inbox size={20} className="text-primary" />
+          <h2 className="text-lg font-semibold text-foreground">Support threads</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[320px_1fr]">
-          <ul className="max-h-[420px] divide-y divide-gray-100 overflow-y-auto border-r border-gray-200">
+          <ul className="max-h-[420px] divide-y divide-border overflow-y-auto border-r border-border">
             {threads.length === 0 ? (
-              <li className="p-5 text-center text-sm text-gray-400">No support threads yet.</li>
+              <li className="p-5 text-center text-sm text-muted-foreground">No support threads yet.</li>
             ) : (
               threads.map((t) => (
                 <li key={t.id}>
                   <button
                     onClick={() => setOpenThreadId(t.id)}
-                    className={`w-full px-4 py-3 text-left hover:bg-gray-50 ${
-                      t.id === openThreadId ? 'bg-indigo-50' : ''
+                    className={`w-full px-4 py-3 text-left hover:bg-accent ${
+                      t.id === openThreadId ? 'bg-primary/10' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm font-medium text-gray-900">{t.userName}</p>
+                      <p className="truncate text-sm font-medium text-foreground">{t.userName}</p>
                       {t.awaitingReply && (
                         <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
                           Needs reply
                         </span>
                       )}
                     </div>
-                    <p className="truncate text-xs text-gray-500">{t.userEmail}</p>
-                    <p className="truncate text-xs text-gray-400">{t.lastMessagePreview || ''}</p>
+                    <p className="truncate text-xs text-muted-foreground">{t.userEmail}</p>
+                    <p className="truncate text-xs text-muted-foreground">{t.lastMessagePreview || ''}</p>
                   </button>
                 </li>
               ))
@@ -232,26 +232,26 @@ const AdminMessages: React.FC = () => {
 
           <div className="flex min-h-[420px] flex-col">
             {!openThreadId ? (
-              <div className="flex flex-1 items-center justify-center p-6 text-sm text-gray-400">
+              <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
                 Select a thread to view and reply.
               </div>
             ) : (
               <>
-                <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
+                <div className="flex-1 space-y-3 overflow-y-auto bg-muted p-4">
                   {(thread?.messages ?? []).map((m: ChatMessage) => {
                     const fromSite = m.isSystem
                     return (
                       <div key={m.id} className={`flex ${fromSite ? 'justify-end' : 'justify-start'}`}>
                         <div
                           className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
-                            fromSite ? 'bg-indigo-600 text-white' : 'border border-gray-200 bg-white text-gray-800'
+                            fromSite ? 'bg-primary text-primary-foreground' : 'border border-border bg-card text-foreground'
                           }`}
                         >
                           <p className="mb-0.5 text-xs font-medium opacity-70">
                             {fromSite ? SITE_NAME : m.senderName || 'User'}
                           </p>
                           <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
-                          <p className={`mt-1 text-[10px] ${fromSite ? 'text-indigo-100' : 'text-gray-400'}`}>
+                          <p className={`mt-1 text-[10px] ${fromSite ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                             {timeAgo(m.createdAt)}
                           </p>
                         </div>
@@ -259,7 +259,7 @@ const AdminMessages: React.FC = () => {
                     )
                   })}
                 </div>
-                <div className="flex items-end gap-2 border-t border-gray-200 p-3">
+                <div className="flex items-end gap-2 border-t border-border p-3">
                   <textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
@@ -271,12 +271,12 @@ const AdminMessages: React.FC = () => {
                     }}
                     rows={1}
                     placeholder="Reply as Artifact Armoury…"
-                    className="max-h-32 flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
+                    className="max-h-32 flex-1 resize-none rounded-lg border border-border px-3 py-2 text-sm focus:border-primary/50 focus:ring-2 focus:ring-ring"
                   />
                   <button
                     onClick={sendReply}
                     disabled={!reply.trim() || replying}
-                    className="flex items-center gap-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    className="flex items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                   >
                     <Send size={16} />
                     Reply

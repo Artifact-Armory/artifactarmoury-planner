@@ -27,10 +27,10 @@ const StatusBadge: React.FC<{ model: TerrainModel }> = ({ model }) => {
   const styles: Record<string, string> = {
     published: 'bg-green-100 text-green-800',
     draft: 'bg-amber-100 text-amber-800',
-    archived: 'bg-gray-200 text-gray-700',
+    archived: 'bg-muted text-muted-foreground',
   }
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-sm text-xs font-medium ${styles[s] ?? 'bg-gray-100 text-gray-700'}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-sm text-xs font-medium ${styles[s] ?? 'bg-muted text-muted-foreground'}`}>
       {s}
     </span>
   )
@@ -226,13 +226,13 @@ const ArtistModels: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">My Models</h1>
-          <p className="text-gray-600 mt-1">Create and manage your listings. Drafts stay here until you publish them.</p>
-          <p className="text-gray-500 text-sm mt-1">
-            Offer your model as a <span className="text-indigo-700">print</span> for buyers without a 3D printer. They pay your set
+          <p className="text-muted-foreground mt-1">Create and manage your listings. Drafts stay here until you publish them.</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Offer your model as a <span className="text-primary">print</span> for buyers without a 3D printer. They pay your set
             price + the third-party print cost (+ a £1 site fee), and you earn exactly what you would on a normal sale of this model.
           </p>
         </div>
-        <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-blue-600 text-white whitespace-nowrap">
+        <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground whitespace-nowrap">
           + New model
         </Link>
       </div>
@@ -264,7 +264,7 @@ const ArtistModels: React.FC = () => {
         )
       })()}
 
-      {loading && <p className="mt-8 text-gray-500">Loading your models…</p>}
+      {loading && <p className="mt-8 text-muted-foreground">Loading your models…</p>}
       {error && !loading && (
         <div className="mt-8">
           <p className="text-red-600">{error}</p>
@@ -274,8 +274,8 @@ const ArtistModels: React.FC = () => {
 
       {!loading && !error && models.length === 0 && (
         <div className="mt-10 text-center border rounded-lg py-12">
-          <p className="text-gray-600">You haven’t uploaded any models yet.</p>
-          <Link to="/artist/models/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-blue-600 text-white">
+          <p className="text-muted-foreground">You haven’t uploaded any models yet.</p>
+          <Link to="/artist/models/new" className="inline-block mt-4 px-4 py-2 rounded-sm bg-primary text-primary-foreground">
             Upload your first model
           </Link>
         </div>
@@ -295,11 +295,11 @@ const ArtistModels: React.FC = () => {
                 key={m.id}
                 className={`flex items-center gap-4 p-4 ${m.id === justUploadedId ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' : ''}`}
               >
-                <div className="w-16 h-16 rounded-sm bg-gray-100 overflow-hidden shrink-0">
+                <div className="w-16 h-16 rounded-sm bg-muted overflow-hidden shrink-0">
                   {m.thumbnailUrl ? (
                     <img src={m.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full grid place-items-center text-gray-400 text-xs">No image</div>
+                    <div className="w-full h-full grid place-items-center text-muted-foreground text-xs">No image</div>
                   )}
                 </div>
 
@@ -309,7 +309,7 @@ const ArtistModels: React.FC = () => {
                     <StatusBadge model={m} />
                     <PreviewBadge model={m} recentlyReady={recentlyReady.has(m.id)} />
                   </div>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p className="text-sm text-muted-foreground mt-0.5">
                     £{m.basePrice.toFixed(2)}
                     {m.downloadCount != null && <> · {m.downloadCount} downloads</>}
                     {m.saleCount != null && <> · {m.saleCount} sales</>}
@@ -318,16 +318,16 @@ const ArtistModels: React.FC = () => {
                   {rowError[m.id] && <p className="text-xs text-red-600 mt-1">{rowError[m.id]}</p>}
 
                   {FEATURES.printAndShip && (quote || m.printPrice != null) && (
-                    <div className="mt-2 text-xs text-gray-700 bg-indigo-50 border border-indigo-100 rounded-sm px-2 py-1.5 inline-block">
+                    <div className="mt-2 text-xs text-foreground bg-primary/10 border border-primary/20 rounded-sm px-2 py-1.5 inline-block">
                       <span className="font-medium">Print price: £{(quote?.total ?? m.printPrice ?? 0).toFixed(2)}</span>
                       {quote ? (
-                        <span className="text-gray-500">
+                        <span className="text-muted-foreground">
                           {' '}
                           = £{quote.providerCost.toFixed(2)} print + £{quote.artistFee.toFixed(2)} your fee + £{quote.siteFee.toFixed(2)} site
                           {quote.estimatedDays != null && <> · ~{quote.estimatedDays} days</>}
                         </span>
                       ) : (
-                        <span className="text-gray-500">
+                        <span className="text-muted-foreground">
                           {' '}(incl. £{(m.printProviderCost ?? 0).toFixed(2)} print cost) — re-quote to refresh
                         </span>
                       )}
@@ -350,7 +350,7 @@ const ArtistModels: React.FC = () => {
                   </button>
                   {FEATURES.printAndShip && (
                     <button
-                      className="px-3 py-1.5 rounded-sm border border-indigo-300 text-indigo-700 text-sm disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-sm border border-primary/40 text-primary text-sm disabled:opacity-50"
                       onClick={() => handlePrintQuote(m)}
                       disabled={quoting || busy || notReady}
                       title={notReady ? 'Model must finish processing before it can be priced for print' : 'Get a print-on-demand price from the print service'}

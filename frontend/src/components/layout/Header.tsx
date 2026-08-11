@@ -7,7 +7,6 @@ import { authApi } from '../../api/endpoints/auth';
 import NotificationBell from '../notifications/NotificationBell';
 import MessagesIndicator from '../messages/MessagesIndicator';
 import Logo from '../common/Logo';
-import ThemeToggle from '../common/ThemeToggle';
 import { SITE_NAME } from '../../config/brand';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -162,8 +161,6 @@ const Header: React.FC = () => {
                 <Search size={20} className="text-muted-foreground" />
               </button>
             </form>
-
-            <ThemeToggle />
 
             {/* Cart Button */}
             <button
@@ -341,7 +338,6 @@ const Header: React.FC = () => {
 
           {/* Mobile menu button */}
           <div className="flex md:hidden items-center">
-            <ThemeToggle className="mr-1" />
             <button
               onClick={() => toggleCart()}
               className="relative p-2 mr-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"

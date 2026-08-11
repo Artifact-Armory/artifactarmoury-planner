@@ -8,7 +8,7 @@ function errMessage(err: unknown, fallback: string): string {
 }
 
 const STATUS_STYLES: Record<ReleaseStatus, string> = {
-  draft: 'bg-gray-100 text-gray-700',
+  draft: 'bg-muted text-muted-foreground',
   scheduled: 'bg-amber-100 text-amber-800',
   published: 'bg-green-100 text-green-800',
   cancelled: 'bg-red-100 text-red-700',
@@ -66,8 +66,8 @@ const ArtistReleases: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold text-gray-900">Releases</h1>
-      <p className="text-gray-600 mt-1">
+      <h1 className="text-2xl font-semibold text-foreground">Releases</h1>
+      <p className="text-muted-foreground mt-1">
         Group models, bundles and tables into a scheduled “drop” — they all go live together at the
         time you set. Until then they stay as drafts.
       </p>
@@ -80,7 +80,7 @@ const ArtistReleases: React.FC = () => {
           onChange={(e) => setNewName(e.target.value)}
           disabled={creating}
         />
-        <button type="submit" className="px-4 py-2 rounded-sm bg-indigo-600 text-white disabled:opacity-50" disabled={creating || !newName.trim()}>
+        <button type="submit" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground disabled:opacity-50" disabled={creating || !newName.trim()}>
           {creating ? 'Creating…' : 'New release'}
         </button>
       </form>
@@ -89,20 +89,20 @@ const ArtistReleases: React.FC = () => {
 
       <div className="mt-6 space-y-3">
         {loading ? (
-          <p className="text-gray-500">Loading…</p>
+          <p className="text-muted-foreground">Loading…</p>
         ) : releases.length === 0 ? (
-          <p className="text-gray-500">No releases yet. Create one above to schedule a drop.</p>
+          <p className="text-muted-foreground">No releases yet. Create one above to schedule a drop.</p>
         ) : (
           releases.map((r) => (
             <div key={r.id} className="flex items-center justify-between border rounded-lg px-4 py-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <Link to={`/artist/releases/${r.id}`} className="font-medium text-gray-900 hover:text-indigo-700">
+                  <Link to={`/artist/releases/${r.id}`} className="font-medium text-foreground hover:text-primary">
                     {r.name}
                   </Link>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_STYLES[r.status]}`}>{r.status}</span>
                 </div>
-                <div className="text-sm text-gray-500 mt-0.5">
+                <div className="text-sm text-muted-foreground mt-0.5">
                   {r.itemCount ?? 0} item{(r.itemCount ?? 0) === 1 ? '' : 's'}
                   {r.status === 'scheduled' && <> · goes live {fmt(r.scheduledAt)}</>}
                   {r.status === 'published' && <> · published {fmt(r.publishedAt)}</>}
@@ -110,7 +110,7 @@ const ArtistReleases: React.FC = () => {
                 {r.publishError && <div className="text-xs text-red-600 mt-1">Some items didn’t publish: {r.publishError}</div>}
               </div>
               <div className="flex items-center gap-3">
-                <Link to={`/artist/releases/${r.id}`} className="text-sm text-indigo-600">Manage</Link>
+                <Link to={`/artist/releases/${r.id}`} className="text-sm text-primary">Manage</Link>
                 {r.status !== 'published' && (
                   <button onClick={() => handleDelete(r.id)} className="text-sm text-red-600">Delete</button>
                 )}

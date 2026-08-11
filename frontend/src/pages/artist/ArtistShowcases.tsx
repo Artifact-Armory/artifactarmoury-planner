@@ -90,56 +90,56 @@ const ArtistShowcases: React.FC = () => {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Showcase Tables</h1>
-          <p className="mt-1 text-gray-600">
+          <h1 className="text-2xl font-semibold text-foreground">Showcase Tables</h1>
+          <p className="mt-1 text-muted-foreground">
             Build a planner with your models, save it, then publish it so buyers can add the whole set — or pick pieces — to their basket.
           </p>
         </div>
         <Link
           to="/planner"
-          className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
         >
           New showcase
         </Link>
       </header>
 
-      {!email && <p className="text-gray-600">Please log in to manage your showcases.</p>}
-      {email && loading && <p className="text-gray-500">Loading your showcases…</p>}
+      {!email && <p className="text-muted-foreground">Please log in to manage your showcases.</p>}
+      {email && loading && <p className="text-muted-foreground">Loading your showcases…</p>}
       {email && error && !loading && (
         <div><p className="text-red-600">{error}</p><button className="mt-2 rounded-sm border px-3 py-1.5" onClick={load}>Retry</button></div>
       )}
 
       {email && !loading && !error && tables.length === 0 && (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-12 text-center">
-          <h2 className="text-lg font-medium text-gray-900">No showcases yet</h2>
-          <p className="mt-2 text-sm text-gray-600">Open the planner, place your models, and hit Save to create one.</p>
-          <Link to="/planner" className="mt-6 inline-flex rounded-md bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+        <div className="rounded-lg border border-dashed border-border bg-card p-12 text-center">
+          <h2 className="text-lg font-medium text-foreground">No showcases yet</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Open the planner, place your models, and hit Save to create one.</p>
+          <Link to="/planner" className="mt-6 inline-flex rounded-md bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20">
             Start building
           </Link>
         </div>
       )}
 
       {email && !loading && !error && tables.length > 0 && (
-        <ul className="divide-y rounded-lg border bg-white">
+        <ul className="divide-y rounded-lg border bg-card">
           {tables.map((t) => {
             const busy = busyId === t.id
             return (
               <li key={t.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-gray-900">{t.name}</span>
+                    <span className="truncate font-medium text-foreground">{t.name}</span>
                     {t.isPublic ? (
                       <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">published</span>
                     ) : (
-                      <span className="rounded-sm bg-gray-100 px-2 py-0.5 text-xs text-gray-600">draft</span>
+                      <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">draft</span>
                     )}
                   </div>
-                  <p className="mt-0.5 text-sm text-gray-500">
+                  <p className="mt-0.5 text-sm text-muted-foreground">
                     Updated {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : '—'}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className="rounded-sm bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open / edit</button>
+                  <button className="rounded-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open / edit</button>
                   {t.isPublic && (
                     <button className="rounded-sm border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/view/${t.id}`)}>View public page</button>
                   )}

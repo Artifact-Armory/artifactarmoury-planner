@@ -10,8 +10,8 @@ import Spinner from '../../components/ui/Spinner'
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700',
   cleared: 'bg-green-100 text-green-700',
-  paid: 'bg-indigo-100 text-indigo-700',
-  reversed: 'bg-gray-200 text-gray-500',
+  paid: 'bg-primary/20 text-primary',
+  reversed: 'bg-muted text-muted-foreground',
   failed: 'bg-red-100 text-red-700',
 }
 
@@ -40,8 +40,8 @@ const ArtistPayouts: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="text-2xl font-semibold text-gray-900">Payouts</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <h1 className="text-2xl font-semibold text-foreground">Payouts</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
         You keep {100 - 15}% of each sale. Earnings clear after a {config.holdDays}-day hold, then pay
         out automatically once your balance passes {formatPrice(config.minPayout)}.
       </p>
@@ -76,14 +76,14 @@ const ArtistPayouts: React.FC = () => {
         <SummaryTile icon={<Clock size={16} />} label="Pending" value={summary.pending} sub={`in ${config.holdDays}-day hold`} />
         <SummaryTile icon={<Wallet size={16} />} label="Cleared" value={summary.cleared} sub="awaiting payout" accent="text-green-600" />
         <SummaryTile icon={<CheckCircle2 size={16} />} label="Paid out" value={summary.paid} sub="lifetime" />
-        <SummaryTile icon={<XCircle size={16} />} label="Reversed" value={summary.reversed} sub="refunds / takedowns" accent="text-gray-400" />
+        <SummaryTile icon={<XCircle size={16} />} label="Reversed" value={summary.reversed} sub="refunds / takedowns" accent="text-muted-foreground" />
       </div>
 
       {/* Earnings ledger */}
-      <h2 className="mt-10 text-lg font-semibold text-gray-900">Earnings</h2>
-      <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
+      <h2 className="mt-10 text-lg font-semibold text-foreground">Earnings</h2>
+      <div className="mt-3 overflow-x-auto rounded-xl border bg-card">
         <table className="min-w-full divide-y text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
+          <thead className="bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Model</th>
               <th className="px-4 py-3">Order</th>
@@ -95,15 +95,15 @@ const ArtistPayouts: React.FC = () => {
           </thead>
           <tbody className="divide-y">
             {earnings.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No earnings yet — your first sale will show here.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">No earnings yet — your first sale will show here.</td></tr>
             ) : earnings.map((e) => (
               <tr key={e.id}>
-                <td className="px-4 py-3 font-medium text-gray-900">{e.model_name ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-500">{e.order_number ?? '—'}</td>
-                <td className="px-4 py-3 text-right text-gray-500">{formatPrice(e.gross_amount)}</td>
-                <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatPrice(e.artist_amount)}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{e.model_name ?? '—'}</td>
+                <td className="px-4 py-3 text-muted-foreground">{e.order_number ?? '—'}</td>
+                <td className="px-4 py-3 text-right text-muted-foreground">{formatPrice(e.gross_amount)}</td>
+                <td className="px-4 py-3 text-right font-semibold text-foreground">{formatPrice(e.artist_amount)}</td>
                 <td className="px-4 py-3"><span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[e.status]}`}>{e.status}</span></td>
-                <td className="px-4 py-3 text-gray-500">{e.status === 'pending' ? new Date(e.available_at).toLocaleDateString() : '—'}</td>
+                <td className="px-4 py-3 text-muted-foreground">{e.status === 'pending' ? new Date(e.available_at).toLocaleDateString() : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -113,10 +113,10 @@ const ArtistPayouts: React.FC = () => {
       {/* Payout history */}
       {payouts.length > 0 && (
         <>
-          <h2 className="mt-10 text-lg font-semibold text-gray-900">Payout history</h2>
-          <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
+          <h2 className="mt-10 text-lg font-semibold text-foreground">Payout history</h2>
+          <div className="mt-3 overflow-x-auto rounded-xl border bg-card">
             <table className="min-w-full divide-y text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
+              <thead className="bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3 text-right">Amount</th>
@@ -127,10 +127,10 @@ const ArtistPayouts: React.FC = () => {
               <tbody className="divide-y">
                 {payouts.map((p) => (
                   <tr key={p.id}>
-                    <td className="px-4 py-3 text-gray-500">{new Date(p.paid_at ?? p.created_at).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatPrice(p.amount)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{new Date(p.paid_at ?? p.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-foreground">{formatPrice(p.amount)}</td>
                     <td className="px-4 py-3"><span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status]}`}>{p.status}</span></td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-400">{p.stripe_transfer_id ?? '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.stripe_transfer_id ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -143,10 +143,10 @@ const ArtistPayouts: React.FC = () => {
 }
 
 const SummaryTile: React.FC<{ icon: React.ReactNode; label: string; value: number; sub: string; accent?: string }> = ({ icon, label, value, sub, accent }) => (
-  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs">
-    <div className="flex items-center gap-1.5 text-gray-400"><span>{icon}</span><span className="text-xs font-medium uppercase tracking-wide">{label}</span></div>
-    <p className={`mt-1 text-xl font-semibold ${accent ?? 'text-gray-900'}`}>{formatPrice(value)}</p>
-    <p className="text-xs text-gray-400">{sub}</p>
+  <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
+    <div className="flex items-center gap-1.5 text-muted-foreground"><span>{icon}</span><span className="text-xs font-medium uppercase tracking-wide">{label}</span></div>
+    <p className={`mt-1 text-xl font-semibold ${accent ?? 'text-foreground'}`}>{formatPrice(value)}</p>
+    <p className="text-xs text-muted-foreground">{sub}</p>
   </div>
 )
 

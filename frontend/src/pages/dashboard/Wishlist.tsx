@@ -25,12 +25,12 @@ const Wishlist: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Wishlist</h1>
-        <p className="mt-2 text-sm text-gray-600">Save models to compare and purchase later.</p>
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">Wishlist</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Save models to compare and purchase later.</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs">
+      <section className="rounded-2xl border border-border bg-card p-6 shadow-xs">
         {wishlistQuery.isLoading ? (
           <div className="flex justify-center py-16">
             <Spinner size="lg" />
@@ -39,8 +39,8 @@ const Wishlist: React.FC = () => {
           <ModelGrid models={wishlist} />
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <p className="text-sm font-medium text-gray-700">No saved models yet.</p>
-            <p className="text-xs text-gray-500">Tap the heart icon on any model to add it to your wishlist.</p>
+            <p className="text-sm font-medium text-foreground">No saved models yet.</p>
+            <p className="text-xs text-muted-foreground">Tap the heart icon on any model to add it to your wishlist.</p>
             <Button variant="outline" onClick={() => navigate('/browse')}>
               Browse models
             </Button>

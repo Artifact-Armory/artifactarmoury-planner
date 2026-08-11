@@ -44,9 +44,9 @@ const MyDownloads: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">My downloads</h1>
-        <p className="mt-2 max-w-2xl text-sm text-gray-600">
+      <section className="rounded-3xl bg-card p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-foreground">My downloads</h1>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           Every STL you own, ready to download whenever you like — you only pay once and can
           re-download any time.
         </p>
@@ -62,27 +62,27 @@ const MyDownloads: React.FC = () => {
             <Spinner size="lg" />
           </div>
         ) : libraryQuery.isError ? (
-          <div className="rounded-2xl border border-gray-200 bg-white py-16 text-center shadow-xs">
-            <p className="text-sm font-medium text-gray-700">We couldn't load your downloads.</p>
+          <div className="rounded-2xl border border-border bg-card py-16 text-center shadow-xs">
+            <p className="text-sm font-medium text-foreground">We couldn't load your downloads.</p>
             <Button variant="outline" className="mt-4" onClick={() => libraryQuery.refetch()}>
               Try again
             </Button>
           </div>
         ) : items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center shadow-xs">
-            <Package className="mx-auto text-gray-300" size={40} />
-            <p className="mt-3 text-sm font-medium text-gray-700">You don't own any models yet.</p>
-            <p className="mt-1 text-xs text-gray-500">Once you buy an STL it'll show up here to download.</p>
+          <div className="rounded-2xl border border-dashed border-border bg-card py-16 text-center shadow-xs">
+            <Package className="mx-auto text-muted-foreground" size={40} />
+            <p className="mt-3 text-sm font-medium text-foreground">You don't own any models yet.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Once you buy an STL it'll show up here to download.</p>
             <Link
               to="/browse"
-              className="mt-4 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
               Browse models
             </Link>
           </div>
         ) : (
           <>
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="mb-4 text-sm text-muted-foreground">
               {items.length} {items.length === 1 ? 'model' : 'models'}
             </p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -92,9 +92,9 @@ const MyDownloads: React.FC = () => {
                 return (
                   <div
                     key={model.id}
-                    className="flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs transition hover:shadow-md"
+                    className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:shadow-md"
                   >
-                    <Link to={`/models/${model.id}`} className="relative block aspect-4/3 bg-gray-100">
+                    <Link to={`/models/${model.id}`} className="relative block aspect-4/3 bg-muted">
                       {model.thumbnailUrl ? (
                         <img
                           src={model.thumbnailUrl}
@@ -103,7 +103,7 @@ const MyDownloads: React.FC = () => {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="grid h-full w-full place-items-center text-xs text-gray-400">
+                        <div className="grid h-full w-full place-items-center text-xs text-muted-foreground">
                           No preview
                         </div>
                       )}
@@ -117,14 +117,14 @@ const MyDownloads: React.FC = () => {
                     <div className="flex flex-1 flex-col p-4">
                       <Link
                         to={`/models/${model.id}`}
-                        className="truncate font-medium text-gray-900 hover:text-indigo-700"
+                        className="truncate font-medium text-foreground hover:text-primary"
                         title={model.name}
                       >
                         {model.name}
                       </Link>
-                      <p className="truncate text-xs text-gray-500">{model.artistName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{model.artistName}</p>
                       {purchasedAt && (
-                        <p className="mt-1 text-[11px] text-gray-400">
+                        <p className="mt-1 text-[11px] text-muted-foreground">
                           Purchased {new Date(purchasedAt).toLocaleDateString('en-GB')}
                         </p>
                       )}

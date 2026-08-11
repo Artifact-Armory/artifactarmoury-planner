@@ -11,13 +11,13 @@ const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: string; 
   value,
   sub,
 }) => (
-  <div className="bg-white rounded-lg border border-gray-200 p-5">
+  <div className="bg-card rounded-lg border border-border p-5">
     <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-gray-500">{label}</span>
-      <span className="text-gray-400">{icon}</span>
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground">{icon}</span>
     </div>
-    <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
-    {sub && <div className="mt-1 text-xs text-gray-500">{sub}</div>}
+    <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
+    {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
   </div>
 )
 
@@ -29,7 +29,7 @@ const AdminDashboard: React.FC = () => {
     refetchInterval: 20000,
   })
 
-  if (isLoading) return <div className="text-gray-500">Loading dashboard…</div>
+  if (isLoading) return <div className="text-muted-foreground">Loading dashboard…</div>
   if (isError)
     return (
       <div className="text-red-600">
@@ -42,8 +42,8 @@ const AdminDashboard: React.FC = () => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Admin Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-500">System overview and recent activity.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Admin Dashboard</h1>
+        <p className="mt-1 text-sm text-muted-foreground">System overview and recent activity.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -94,23 +94,23 @@ const AdminDashboard: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Flagged models */}
-        <div className="bg-white rounded-lg border border-gray-200">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+        <div className="bg-card rounded-lg border border-border">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+            <h2 className="font-semibold text-foreground flex items-center gap-2">
               <Flag size={16} className="text-amber-500" /> Flagged models
             </h2>
-            <Link to="/admin/moderation" className="text-sm text-indigo-600 hover:underline">
+            <Link to="/admin/moderation" className="text-sm text-primary hover:underline">
               Moderation queue
             </Link>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border">
             {data!.flaggedModels.length === 0 ? (
-              <p className="px-5 py-6 text-sm text-gray-500">Nothing flagged. 🎉</p>
+              <p className="px-5 py-6 text-sm text-muted-foreground">Nothing flagged. 🎉</p>
             ) : (
               data!.flaggedModels.map((m) => (
                 <div key={m.id} className="px-5 py-3">
-                  <div className="text-sm font-medium text-gray-900">{m.name}</div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-sm font-medium text-foreground">{m.name}</div>
+                  <div className="text-xs text-muted-foreground">
                     {m.artist_name || 'Unknown artist'} · {m.flagged_reason || 'No reason given'}
                   </div>
                 </div>
@@ -120,23 +120,23 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         {/* Recent activity */}
-        <div className="bg-white rounded-lg border border-gray-200">
-          <div className="px-5 py-3 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900">Recent activity</h2>
+        <div className="bg-card rounded-lg border border-border">
+          <div className="px-5 py-3 border-b border-border">
+            <h2 className="font-semibold text-foreground">Recent activity</h2>
           </div>
-          <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+          <div className="divide-y divide-border max-h-96 overflow-y-auto">
             {data!.recentActivity.length === 0 ? (
-              <p className="px-5 py-6 text-sm text-gray-500">No recent activity.</p>
+              <p className="px-5 py-6 text-sm text-muted-foreground">No recent activity.</p>
             ) : (
               data!.recentActivity.map((a, i) => (
                 <div key={i} className="px-5 py-2.5 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="text-sm text-gray-800">{a.action}</span>
+                    <span className="text-sm text-foreground">{a.action}</span>
                     {a.display_name && (
-                      <span className="text-xs text-gray-500"> · {a.display_name}</span>
+                      <span className="text-xs text-muted-foreground"> · {a.display_name}</span>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
                     {new Date(a.created_at).toLocaleDateString('en-GB')}
                   </span>
                 </div>

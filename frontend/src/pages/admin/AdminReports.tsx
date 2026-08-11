@@ -27,14 +27,14 @@ const Tile: React.FC<{
   value: string
   sub?: string
   accent?: string
-}> = ({ icon, label, value, sub, accent = 'text-gray-400' }) => (
-  <div className="bg-white rounded-lg border border-gray-200 p-5">
+}> = ({ icon, label, value, sub, accent = 'text-muted-foreground' }) => (
+  <div className="bg-card rounded-lg border border-border p-5">
     <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-gray-500">{label}</span>
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
       <span className={accent}>{icon}</span>
     </div>
-    <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
-    {sub && <div className="mt-1 text-xs text-gray-500">{sub}</div>}
+    <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
+    {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
   </div>
 )
 
@@ -52,11 +52,11 @@ const PeakHoursChart: React.FC<{ data: Array<{ hour: number; views: number }> }>
           return (
             <div key={d.hour} className="flex-1 flex flex-col items-center justify-end group relative">
               <div
-                className={`w-full rounded-t ${isPeak ? 'bg-indigo-600' : 'bg-indigo-300'} transition-colors`}
+                className={`w-full rounded-t ${isPeak ? 'bg-primary' : 'bg-primary/40'} transition-colors`}
                 style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views > 0 ? 2 : 0 }}
               />
               {/* tooltip */}
-              <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-gray-900 px-2 py-1 text-[11px] text-white">
+              <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-foreground px-2 py-1 text-[11px] text-background">
                 {fmtHour(d.hour)} · {d.views} views
               </div>
             </div>
@@ -66,14 +66,14 @@ const PeakHoursChart: React.FC<{ data: Array<{ hour: number; views: number }> }>
       {/* axis: every 3rd hour label */}
       <div className="flex gap-1 mt-1">
         {data.map((d) => (
-          <div key={d.hour} className="flex-1 text-center text-[10px] text-gray-400">
+          <div key={d.hour} className="flex-1 text-center text-[10px] text-muted-foreground">
             {d.hour % 3 === 0 ? d.hour : ''}
           </div>
         ))}
       </div>
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-muted-foreground">
         Views by hour of day (UK time). Peak:{' '}
-        <span className="font-medium text-gray-700">
+        <span className="font-medium text-foreground">
           {fmtHour(peak.hour)} ({peak.views} views)
         </span>
       </p>
@@ -94,7 +94,7 @@ const AdminReports: React.FC = () => {
   // Owner-only. Defence in depth — the backend also 403s this data.
   if (user && !user.isSuperAdmin) return <Navigate to="/admin" replace />
 
-  if (isLoading) return <div className="text-gray-500">Loading analytics…</div>
+  if (isLoading) return <div className="text-muted-foreground">Loading analytics…</div>
   if (isError)
     return (
       <div className="text-red-600">
@@ -109,18 +109,18 @@ const AdminReports: React.FC = () => {
     <div className="space-y-8">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Reports & Analytics</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-semibold text-foreground">Reports & Analytics</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Owner-only. Platform financials, catalogue growth and visitor analytics.
           </p>
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-md p-1">
+        <div className="flex gap-1 bg-muted rounded-md p-1">
           {PERIODS.map((p) => (
             <button
               key={p.value}
               onClick={() => setPeriod(p.value)}
               className={`px-3 py-1.5 text-sm rounded ${
-                period === p.value ? 'bg-white shadow-xs font-medium text-gray-900' : 'text-gray-600'
+                period === p.value ? 'bg-background shadow-xs font-medium text-foreground' : 'text-muted-foreground'
               }`}
             >
               {p.label}
@@ -131,7 +131,7 @@ const AdminReports: React.FC = () => {
 
       {/* Money */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Revenue</h2>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Revenue</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Tile
             icon={<DollarSign size={18} />}
@@ -145,7 +145,7 @@ const AdminReports: React.FC = () => {
             label="Site revenue (your cut)"
             value={formatPrice(t.siteRevenue)}
             sub="Platform fee after artist share"
-            accent="text-indigo-500"
+            accent="text-primary"
           />
           <Tile
             icon={<ShoppingCart size={18} />}
@@ -158,7 +158,7 @@ const AdminReports: React.FC = () => {
 
       {/* Community */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
           Community & catalogue
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -191,7 +191,7 @@ const AdminReports: React.FC = () => {
 
       {/* Traffic */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Traffic</h2>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Traffic</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Tile
             icon={<Eye size={18} />}
@@ -204,7 +204,7 @@ const AdminReports: React.FC = () => {
             label="Views (24h)"
             value={t.views24h.toLocaleString()}
             sub={`${t.views7d.toLocaleString()} in 7d`}
-            accent="text-indigo-500"
+            accent="text-primary"
           />
           <Tile
             icon={<Users size={18} />}
@@ -222,15 +222,15 @@ const AdminReports: React.FC = () => {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white border border-gray-200 rounded-lg p-5">
-          <h3 className="font-semibold text-gray-900 mb-4">Peak view times</h3>
+        <div className="bg-card border border-border rounded-lg p-5">
+          <h3 className="font-semibold text-foreground mb-4">Peak view times</h3>
           <PeakHoursChart data={data!.viewsByHourOfDay} />
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-5">
-          <h3 className="font-semibold text-gray-900 mb-4">Daily views ({period}d)</h3>
+        <div className="bg-card border border-border rounded-lg p-5">
+          <h3 className="font-semibold text-foreground mb-4">Daily views ({period}d)</h3>
           {data!.viewsByDay.length === 0 ? (
-            <p className="text-sm text-gray-500">No views recorded in this period yet.</p>
+            <p className="text-sm text-muted-foreground">No views recorded in this period yet.</p>
           ) : (
             <div className="flex items-end gap-0.5 h-40">
               {data!.viewsByDay.map((d) => (
@@ -239,10 +239,10 @@ const AdminReports: React.FC = () => {
                   className="flex-1 flex flex-col items-center justify-end group relative"
                 >
                   <div
-                    className="w-full rounded-t bg-indigo-400 hover:bg-indigo-600"
+                    className="w-full rounded-t bg-primary/50 hover:bg-primary"
                     style={{ height: `${(d.views / maxDayViews) * 100}%`, minHeight: d.views > 0 ? 2 : 0 }}
                   />
-                  <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-gray-900 px-2 py-1 text-[11px] text-white">
+                  <div className="pointer-events-none absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap rounded-sm bg-foreground px-2 py-1 text-[11px] text-background">
                     {new Date(d.date).toLocaleDateString('en-GB')} · {d.views}
                   </div>
                 </div>
