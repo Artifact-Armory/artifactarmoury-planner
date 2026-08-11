@@ -358,16 +358,16 @@ const Header: React.FC = () => {
                 )}
               </div>
             ) : (
-              <div className="flex space-x-2">
+              <div className="flex space-x-2 shrink-0">
                 <Link
                   to="/login"
-                  className="px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 border border-transparent rounded-md"
+                  className="px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 border border-transparent rounded-md whitespace-nowrap"
                 >
                   Log in
                 </Link>
                 <Link
                   to="/register"
-                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-xs"
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-xs whitespace-nowrap"
                 >
                   Sign up
                 </Link>

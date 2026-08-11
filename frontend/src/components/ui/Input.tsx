@@ -1,5 +1,7 @@
 import React from 'react'
-import { cn } from '../../utils/cn'
+import { cn } from '@/lib/utils'
+import { Input as ShadcnInput } from '@/components/shadcn/input'
+import { Label } from '@/components/shadcn/label'
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -7,6 +9,9 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   error?: string
 }
 
+// Thin wrapper over the shadcn / Base UI input that keeps this project's own API
+// (label / description / error), so the existing call sites don't change.
+//
 // forwardRef is required so react-hook-form (and any ref-based caller) reaches
 // the real <input>. Without it, RHF can't read the field values and every
 // field validates as empty ("… is required") even when filled in.
@@ -15,24 +20,28 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     const inputId = id ?? props.name
 
     return (
-      <div className="space-y-1">
-        {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
-            {label}
-          </label>
-        )}
-        <input
+      <div className="space-y-1.5">
+        {label && <Label htmlFor={inputId}>{label}</Label>}
+        <ShadcnInput
           id={inputId}
           ref={ref}
-          className={cn(
-            'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-xs placeholder:text-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200',
-            error && 'border-red-500 focus:border-red-500 focus:ring-red-200',
-            className,
-          )}
+          // Drives the destructive border/ring in the shadcn input, and tells
+          // screen readers the field is invalid — the old version only coloured it.
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error || description ? `${inputId}-hint` : undefined}
+          className={cn('h-9', className)}
           {...props}
         />
-        {description && !error && <p className="text-xs text-gray-500">{description}</p>}
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {description && !error && (
+          <p id={`${inputId}-hint`} className="text-xs text-muted-foreground">
+            {description}
+          </p>
+        )}
+        {error && (
+          <p id={`${inputId}-hint`} className="text-xs text-destructive">
+            {error}
+          </p>
+        )}
       </div>
     )
   },
@@ -41,4 +50,3 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 Input.displayName = 'Input'
 
 export default Input
-

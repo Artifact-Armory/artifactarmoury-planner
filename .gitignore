@@ -35,3 +35,6 @@ Thumbs.db
 # IDE
 .vscode/settings.json
 .idea/
+
+# Local UI screenshots (screenshot.mjs)
+.screenshots/
