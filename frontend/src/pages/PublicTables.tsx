@@ -29,19 +29,19 @@ const PublicTables: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       {/* Hero */}
-      <section className="overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 to-slate-800 px-8 py-10 text-white shadow-lg">
+      <section className="overflow-hidden rounded-3xl bg-primary px-8 py-10 text-primary-foreground shadow-lg">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary/70">Shop the look</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary-foreground/70">Shop the look</p>
             <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Community tables</h1>
-            <p className="mt-3 text-sm text-slate-300">
+            <p className="mt-3 text-sm text-primary-foreground/80">
               Real tabletop builds laid out in the planner. Open one to see every piece, add the
               whole board to your basket, or remix it into your own build.
             </p>
           </div>
           <Link
             to="/planner"
-            className="inline-flex items-center gap-2 self-start rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-100"
+            className="inline-flex items-center gap-2 self-start rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-primary shadow-sm hover:bg-white/90"
           >
             <LayoutGrid size={16} /> Open the planner
           </Link>

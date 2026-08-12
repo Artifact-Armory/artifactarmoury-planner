@@ -328,13 +328,13 @@ const ArtistProfile: React.FC = () => {
         )}
 
         {models.length > 0 && (
-          <section className="mt-12 rounded-3xl bg-linear-to-r from-slate-900 to-slate-800 px-6 py-10 text-white shadow-lg">
+          <section className="mt-12 rounded-3xl bg-primary px-6 py-10 text-primary-foreground shadow-lg">
             <h3 className="text-xl font-semibold">Want this artist to build your next table?</h3>
-            <p className="mt-2 max-w-2xl text-sm text-slate-300">
+            <p className="mt-2 max-w-2xl text-sm text-primary-foreground/80">
               Reach out to request commissions or custom terrain packs. Premium members get priority responses and
               discounted rates.
             </p>
-            <Button className="mt-4 bg-white text-slate-900 hover:bg-slate-100" variant="primary">
+            <Button className="mt-4 bg-white text-primary hover:bg-white/90" variant="primary">
               Request commission
             </Button>
           </section>

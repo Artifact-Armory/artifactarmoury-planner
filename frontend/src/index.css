@@ -86,78 +86,99 @@ html, body, #root {
   ---break---
 */
 /*
-  Artifact Armoury brand palette — "dark forge/armoury": warm charcoal +
-  bronze/amber accent. Dark is the primary experience (applied via the
-  `.dark` class below, on by default — see themeStore.ts); :root here is the
-  light-mode fallback used only when a visitor toggles it.
+  Motion tokens — shared curves for anything that animates. Extend these,
+  don't add ad-hoc cubic-beziers at the call site. Same in light/dark since
+  they're timing, not color.
 */
 :root {
-  --background: oklch(0.985 0.006 75);
-  --foreground: oklch(0.2 0.02 55);
-  --card: oklch(0.99 0.004 75);
-  --card-foreground: oklch(0.2 0.02 55);
-  --popover: oklch(0.99 0.004 75);
-  --popover-foreground: oklch(0.2 0.02 55);
-  --primary: oklch(0.55 0.15 50);
-  --primary-foreground: oklch(0.99 0.006 75);
-  --secondary: oklch(0.94 0.012 60);
-  --secondary-foreground: oklch(0.25 0.02 55);
-  --muted: oklch(0.95 0.008 65);
-  --muted-foreground: oklch(0.48 0.02 55);
-  --accent: oklch(0.92 0.025 55);
-  --accent-foreground: oklch(0.25 0.02 55);
-  --destructive: oklch(0.55 0.22 27);
-  --border: oklch(0.88 0.015 60);
-  --input: oklch(0.88 0.015 60);
-  --ring: oklch(0.55 0.15 50 / 50%);
-  --chart-1: oklch(0.74 0.14 55);
-  --chart-2: oklch(0.6 0.12 40);
-  --chart-3: oklch(0.48 0.02 55);
-  --chart-4: oklch(0.65 0.1 90);
-  --chart-5: oklch(0.35 0.02 55);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+/*
+  ---break---
+*/
+/*
+  Artifact Armoury brand palette — "white/blue": white/stone-neutral surfaces +
+  blue-600 accent (superseded the "dark forge" bronze/amber palette 2026-08-12,
+  see memory project_ui_overhaul_dark_forge for that history). Values below are
+  Tailwind's own stone- and blue- oklch values, reused verbatim so hand-written
+  stone- and blue- utility classes elsewhere (e.g. Home.tsx) match the tokens
+  exactly rather than drifting.
+
+  The `.dark` class stays hardcoded on <html> (see index.html) purely so any
+  leftover `dark:` utility from the pre-2026-08-11 Tailwind v3→v4 migration
+  keeps resolving — it does NOT mean "dark mode" any more, it's just where the
+  active palette lives. :root below is unused dead code (no toggle exists to
+  ever select it — themeStore.ts was deleted); kept only as a fallback should
+  the `.dark` class ever be removed from index.html.
+*/
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.216 0.006 56.043);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.216 0.006 56.043);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.216 0.006 56.043);
+  --primary: oklch(0.546 0.245 262.881);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.97 0.001 106.423);
+  --secondary-foreground: oklch(0.216 0.006 56.043);
+  --muted: oklch(0.97 0.001 106.423);
+  --muted-foreground: oklch(0.444 0.011 73.639);
+  --accent: oklch(0.97 0.014 254.604);
+  --accent-foreground: oklch(0.488 0.243 264.376);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.923 0.003 48.717);
+  --input: oklch(0.923 0.003 48.717);
+  --ring: oklch(0.546 0.245 262.881 / 50%);
+  --chart-1: oklch(0.546 0.245 262.881);
+  --chart-2: oklch(0.707 0.165 254.624);
+  --chart-3: oklch(0.444 0.011 73.639);
+  --chart-4: oklch(0.809 0.105 251.813);
+  --chart-5: oklch(0.268 0.007 34.298);
   --radius: 0.625rem;
-  --sidebar: oklch(0.97 0.006 70);
-  --sidebar-foreground: oklch(0.2 0.02 55);
-  --sidebar-primary: oklch(0.55 0.15 50);
-  --sidebar-primary-foreground: oklch(0.99 0.006 75);
-  --sidebar-accent: oklch(0.92 0.025 55);
-  --sidebar-accent-foreground: oklch(0.25 0.02 55);
-  --sidebar-border: oklch(0.88 0.015 60);
-  --sidebar-ring: oklch(0.55 0.15 50 / 50%);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.216 0.006 56.043);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.97 0.014 254.604);
+  --sidebar-accent-foreground: oklch(0.488 0.243 264.376);
+  --sidebar-border: oklch(0.923 0.003 48.717);
+  --sidebar-ring: oklch(0.546 0.245 262.881 / 50%);
 }
 /*
   ---break---
 */
 .dark {
-  --background: oklch(0.16 0.014 55);
-  --foreground: oklch(0.95 0.012 75);
-  --card: oklch(0.2 0.016 55);
-  --card-foreground: oklch(0.95 0.012 75);
-  --popover: oklch(0.2 0.016 55);
-  --popover-foreground: oklch(0.95 0.012 75);
-  --primary: oklch(0.74 0.14 55);
-  --primary-foreground: oklch(0.16 0.02 55);
-  --secondary: oklch(0.27 0.02 50);
-  --secondary-foreground: oklch(0.95 0.012 75);
-  --muted: oklch(0.24 0.015 55);
-  --muted-foreground: oklch(0.68 0.02 60);
-  --accent: oklch(0.3 0.03 55);
-  --accent-foreground: oklch(0.95 0.012 75);
-  --destructive: oklch(0.6 0.2 25);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.74 0.14 55 / 55%);
-  --chart-1: oklch(0.74 0.14 55);
-  --chart-2: oklch(0.6 0.12 40);
-  --chart-3: oklch(0.68 0.02 60);
-  --chart-4: oklch(0.5 0.1 90);
-  --chart-5: oklch(0.4 0.02 55);
-  --sidebar: oklch(0.185 0.015 55);
-  --sidebar-foreground: oklch(0.95 0.012 75);
-  --sidebar-primary: oklch(0.74 0.14 55);
-  --sidebar-primary-foreground: oklch(0.16 0.02 55);
-  --sidebar-accent: oklch(0.3 0.03 55);
-  --sidebar-accent-foreground: oklch(0.95 0.012 75);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.74 0.14 55 / 55%);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.216 0.006 56.043);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.216 0.006 56.043);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.216 0.006 56.043);
+  --primary: oklch(0.546 0.245 262.881);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.97 0.001 106.423);
+  --secondary-foreground: oklch(0.216 0.006 56.043);
+  --muted: oklch(0.97 0.001 106.423);
+  --muted-foreground: oklch(0.444 0.011 73.639);
+  --accent: oklch(0.97 0.014 254.604);
+  --accent-foreground: oklch(0.488 0.243 264.376);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.923 0.003 48.717);
+  --input: oklch(0.923 0.003 48.717);
+  --ring: oklch(0.546 0.245 262.881 / 50%);
+  --chart-1: oklch(0.546 0.245 262.881);
+  --chart-2: oklch(0.707 0.165 254.624);
+  --chart-3: oklch(0.444 0.011 73.639);
+  --chart-4: oklch(0.809 0.105 251.813);
+  --chart-5: oklch(0.268 0.007 34.298);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.216 0.006 56.043);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.97 0.014 254.604);
+  --sidebar-accent-foreground: oklch(0.488 0.243 264.376);
+  --sidebar-border: oklch(0.923 0.003 48.717);
+  --sidebar-ring: oklch(0.546 0.245 262.881 / 50%);
 }
