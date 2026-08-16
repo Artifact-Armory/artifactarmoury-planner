@@ -216,12 +216,35 @@ def preprocess():
     # physical footprint, so we never rescale.
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
-    # Recalculate normals consistently outward (fixes flipped/inside-out faces
-    # that would make the selected-to-active bake sample the wrong side).
+    # Weld coincident/near-coincident verts BEFORE anything else touches the mesh.
+    # STL has no shared-vertex topology (every triangle owns its own 3 verts), so a
+    # model built from many separate touching shells — individual roof tiles, floor
+    # planks — imports as fully disconnected islands even after the join above (join
+    # only merges them into one object/datablock, it doesn't fuse touching verts).
+    # DECIMATE + volume-preserving LaplacianSmooth downstream is unstable on tiny
+    # disconnected islands: they can shrink/invert and scatter into fragments instead
+    # of smoothing cleanly — this is what shattered the "Japan houses" mid/top parts
+    # (2026-08-15) while the single-shell bottom part baked fine. Welding first fuses
+    # touching shells into one connected manifold so decimate/smooth see a normal mesh.
+    weld_dist = float(CFG.get("weldMergeDistanceMm", 0.05))
+    verts_before = len(src.data.vertices)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
+    if weld_dist > 0:
+        bpy.ops.mesh.remove_doubles(threshold=weld_dist)
+        bpy.ops.mesh.select_all(action="SELECT")
+
+    # Recalculate normals consistently outward (fixes flipped/inside-out faces
+    # that would make the selected-to-active bake sample the wrong side).
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
+
+    if weld_dist > 0:
+        welded = verts_before - len(src.data.vertices)
+        if welded > 0:
+            REPORT["weldedVertices"] = welded
+            print("Welded %d coincident vertices (merge distance %.4fmm)."
+                  % (welded, weld_dist))
 
     src_tris = triangle_count(src)
     REPORT["sourceTriangles"] = src_tris

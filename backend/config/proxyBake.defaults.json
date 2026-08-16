@@ -1,5 +1,6 @@
 {
   "triangleBudget": 80000,
+  "weldMergeDistanceMm": 0.05,
   "proxySmoothIterations": 4,
   "proxySmoothFactor": 0.5,
   "proxySmoothVolumePreserve": true,

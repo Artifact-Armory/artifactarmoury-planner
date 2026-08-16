@@ -13,6 +13,16 @@ import path from 'path'
 export interface ProxyBakeConfig {
   /** Target triangle count for the decimated proxy. */
   triangleBudget: number
+  /** Merge-by-distance threshold (mm) run on the imported source BEFORE decimate/
+   *  smooth. STL has no shared-vertex topology — every triangle owns its own verts —
+   *  so a model built from many separate touching shells (individual roof tiles,
+   *  floor planks, etc.) imports as fully disconnected islands. DECIMATE followed by
+   *  volume-preserving LaplacianSmooth is unstable on tiny disconnected islands: they
+   *  can shrink/invert and scatter into fragments (shipped-as-"ready" on 2026-08-15's
+   *  "Japan houses" mid/top parts — see incident notes). Welding fuses touching/
+   *  near-coincident shells into one connected manifold first, so smoothing sees a
+   *  normal mesh instead of hundreds of near-degenerate islands. 0 disables welding. */
+  weldMergeDistanceMm: number
   /** Smoothing passes applied to the proxy to REMOVE printable surface relief
    *  (the anti-theft core). The detail is re-added as a normal map, which printers
    *  ignore — so the geometry a thief rips is a smooth blob. 0 disables smoothing
@@ -149,6 +159,7 @@ export function loadDefaults(): ProxyBakeConfig {
   const base = JSON.parse(raw) as ProxyBakeConfig
   const envOverrides: Partial<Record<keyof ProxyBakeConfig, number | undefined>> = {
     triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
+    weldMergeDistanceMm: envNum('PROXY_BAKE_WELD_DISTANCE_MM'),
     proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
     proxySmoothLambda: envNum('PROXY_BAKE_SMOOTH_LAMBDA'),
