@@ -10,7 +10,8 @@ import { serializeHeightmap, deserializeHeightmap } from '../core/heightmap'
 import type { PaintMap } from '../core/paintmap'
 import { serializePaint, deserializePaint } from '../core/paintmap'
 
-const DEFAULT_TABLE: Table = { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0254 }
+// Keep in sync with the store's default (state/store.ts) — 0.0127m = 1/2" grid.
+const DEFAULT_TABLE: Table = { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0127 }
 
 /** Planner scene → server { tableConfig, layoutData }. */
 export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], heightmap?: Heightmap | null, paint?: PaintMap | null) {

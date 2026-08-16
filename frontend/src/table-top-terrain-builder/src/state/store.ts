@@ -291,7 +291,10 @@ function saveHistory(state: AppState): Partial<AppState> {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  table: { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0254 },
+  // gridSize is the snap/movement increment in metres (also the visible minor-line
+  // spacing — see scene/helpers.ts GridHelper). 0.0127m = 1/2" — halved from 1" so
+  // pieces can be nudged into finer positions.
+  table: { width: 1.8288, height: 1.2192, unitDisplay: 'ft', gridSize: 0.0127 },
   scene: null,
   camera: null,
   renderer: null,
