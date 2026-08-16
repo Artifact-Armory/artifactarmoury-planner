@@ -49,32 +49,38 @@ const Home: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
-      <section className="relative overflow-hidden rounded-3xl border border-border bg-card px-6 py-16 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-24px_rgba(15,23,42,0.12)] sm:px-12">
+      <section className="relative isolate overflow-hidden rounded-3xl border border-border px-6 py-20 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-24px_rgba(15,23,42,0.12)] sm:px-12 sm:py-28">
+        <video
+          className="absolute inset-0 -z-10 h-full w-full object-cover"
+          src="/videos/hero-loop.mp4"
+          poster="/videos/hero-poster.jpg"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+        />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
         <div className="max-w-3xl">
-          <p className="text-sm uppercase tracking-widest text-primary">{SITE_NAME}</p>
-          <h1 className="mt-4 text-3xl font-bold text-foreground sm:text-4xl">Premium terrain, built for the table.</h1>
-          <p className="mt-4 text-muted-foreground">
+          <p className="text-sm uppercase tracking-widest text-sky-300">{SITE_NAME}</p>
+          <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Premium terrain, built for the table.</h1>
+          <p className="mt-4 text-white/80">
             {SITE_TAGLINE} Browse artist-made 3D models, arrange your battlefield in the table builder, and buy
             each STL once — print it as many times as you like.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
-              to="/browse"
+              to="/planner"
               className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 motion-safe:active:scale-[0.98]"
             >
+              Open the Table Builder
+            </Link>
+            <Link
+              to="/browse"
+              className="inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20"
+            >
               Browse marketplace
-            </Link>
-            <Link
-              to="/planner"
-              className="inline-flex items-center justify-center rounded-md border border-primary/20 bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground shadow-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-primary/15"
-            >
-              Try the Table Builder
-            </Link>
-            <Link
-              to="/about"
-              className="inline-flex items-center justify-center rounded-md border border-primary/20 px-6 py-3 text-sm font-semibold text-accent-foreground transition-colors duration-150 ease-[var(--ease-out)] hover:bg-accent"
-            >
-              Learn more
             </Link>
           </div>
         </div>
