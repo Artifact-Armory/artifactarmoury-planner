@@ -1,6 +1,12 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { useParams } from 'react-router-dom'
-import TerrainBuilder from '@ui/App'
+
+// Lazy — also loaded statically-elsewhere would defeat code-splitting for
+// pages/Planner.tsx's own dynamic import of the same module (Rollup can only
+// chunk-split a module that every importer reaches via import()), and it
+// keeps this legacy embedded view from pulling the Three.js bundle into pages
+// that don't need it.
+const TerrainBuilder = lazy(() => import('@ui/App'))
 
 const EditTable: React.FC = () => {
   const { id } = useParams<{ id?: string }>()
@@ -15,7 +21,15 @@ const EditTable: React.FC = () => {
 
       <div className="rounded-xl shadow-lg overflow-hidden bg-black/30 border border-gray-900/40">
         <div style={{ minHeight: '640px', height: 'calc(100vh - 280px)' }}>
-          <TerrainBuilder tableId={id} />
+          <Suspense
+            fallback={
+              <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">
+                Loading planner…
+              </div>
+            }
+          >
+            <TerrainBuilder tableId={id} />
+          </Suspense>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { modelsApi } from '../../api/endpoints/models'
 import { uploadsApi } from '../../api/endpoints/uploads'
@@ -8,7 +8,12 @@ import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
-import ModelOrientationPreview from '../../components/ModelOrientationPreview'
+
+// Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
+// EditModel is statically imported by app.tsx (every page is), so a static import here
+// would put all of three.js in the main bundle for every visitor, not just artists
+// editing a model — the same leak the planner route was just fixed for.
+const ModelOrientationPreview = lazy(() => import('../../components/ModelOrientationPreview'))
 
 const CATEGORIES = [
   { value: 'buildings', label: 'Buildings' },
@@ -361,7 +366,15 @@ const EditModel: React.FC = () => {
             will see it. This is applied automatically whenever a buyer places it; the
             downloadable STL is never changed.
           </p>
-          <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden" />
+          <Suspense
+            fallback={
+              <div className="mt-3 flex w-full h-56 items-center justify-center rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 text-sm text-muted-foreground">
+                Loading preview…
+              </div>
+            }
+          >
+            <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden" />
+          </Suspense>
           <div className="mt-2 flex flex-wrap gap-2">
             {[0, 90, 180, 270].map((deg) => (
               <button
