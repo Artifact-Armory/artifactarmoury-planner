@@ -232,6 +232,17 @@ def preprocess():
     bpy.ops.mesh.select_all(action="SELECT")
     if weld_dist > 0:
         bpy.ops.mesh.remove_doubles(threshold=weld_dist)
+        # remove_doubles merges some of a triangle's verts but not always all of
+        # them, which can leave razor-thin/zero-area sliver faces right at the weld
+        # seam. Left alone, those slivers ride through decimate/smooth and go on to
+        # confuse the emboss boolean's EXACT solver later (stray protruding
+        # fragments instead of a clean carve — see make_proxy()'s cleanup pass,
+        # which catches whatever this one misses). Cheap to do here too since it
+        # stops the slivers from ever reaching decimate/smooth in the first place.
+        try:
+            bpy.ops.mesh.dissolve_degenerate(threshold=1e-4)
+        except Exception as e:
+            warn("Post-weld dissolve_degenerate failed (continuing): " + str(e))
         bpy.ops.mesh.select_all(action="SELECT")
 
     # Recalculate normals consistently outward (fixes flipped/inside-out faces
@@ -344,13 +355,18 @@ def make_proxy(src, src_tris):
             try:
                 sm = proxy.modifiers.new(name="detail_smooth", type="LAPLACIANSMOOTH")
                 sm.iterations = smooth_iters
-                sm.lambda_factor = max(0.0, float(CFG.get("proxySmoothLambda", 1.0)))
+                lambda_val = max(0.0, float(CFG.get("proxySmoothLambda", 1.0)))
+                sm.lambda_factor = lambda_val
                 sm.lambda_border = 0.0
                 sm.use_volume_preserve = True
                 sm.use_normalized = True
+                # Read the value BEFORE modifier_apply — apply() folds the modifier
+                # into mesh data and frees it, so `sm` is a dangling reference
+                # afterward; reading sm.lambda_factor post-apply returned garbage
+                # (e.g. 2.95e-41) instead of the real value.
                 bpy.ops.object.modifier_apply(modifier=sm.name)
                 REPORT["proxySmoothMethod"] = "laplacian-volume-preserve"
-                REPORT["proxySmoothLambda"] = sm.lambda_factor
+                REPORT["proxySmoothLambda"] = lambda_val
                 applied = True
             except Exception as e:
                 warn("LaplacianSmooth failed, falling back to plain Smooth: " + str(e))
@@ -363,16 +379,45 @@ def make_proxy(src, src_tris):
                             pass
         if not applied:
             sm = proxy.modifiers.new(name="detail_smooth", type="SMOOTH")
-            sm.factor = max(0.0, min(1.0, float(CFG.get("proxySmoothFactor", 0.5))))
+            factor_val = max(0.0, min(1.0, float(CFG.get("proxySmoothFactor", 0.5))))
+            sm.factor = factor_val
             sm.iterations = smooth_iters
             bpy.ops.object.modifier_apply(modifier=sm.name)
             REPORT["proxySmoothMethod"] = "smooth-legacy"
-            REPORT["proxySmoothFactor"] = sm.factor
+            REPORT["proxySmoothFactor"] = factor_val
         REPORT["proxySmoothIterations"] = smooth_iters
     else:
         REPORT["proxySmoothIterations"] = 0
         REPORT["proxySmoothMethod"] = "none"
         warn("Proxy smoothing DISABLED — geometry keeps printable detail (weak protection).")
+
+    # Clean up degenerate geometry before this mesh goes anywhere near the emboss
+    # boolean. The weld (remove_doubles, in preprocess()) and DECIMATE/LAPLACIANSMOOTH
+    # above can each leave zero-area/near-zero-length sliver faces behind — welding
+    # collapses some verts of a triangle but not all of them, decimate COLLAPSE can
+    # leave a razor-thin leftover at a seam, and volume-preserving smoothing on the
+    # now-connected (post-weld) topology can pinch faces down further. The emboss
+    # boolean's EXACT solver is precision-sensitive: fed a sliver right where the
+    # "PREVIEW" cutter crosses it, it doesn't cleanly carve — it leaves a fragment of
+    # the cutter unresolved, which shows up as a long thin strand poking OUT of the
+    # surface instead of a carved-in recess (the bug this fixes). dissolve_degenerate
+    # removes those slivers; delete_loose sweeps up any resulting orphaned verts/edges.
+    deselect_all()
+    proxy.select_set(True)
+    set_active(proxy)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    try:
+        bpy.ops.mesh.dissolve_degenerate(threshold=1e-4)
+    except Exception as e:
+        warn("Post-smooth dissolve_degenerate failed (continuing): " + str(e))
+    try:
+        bpy.ops.mesh.delete_loose(use_verts=True, use_edges=True, use_faces=False)
+    except Exception as e:
+        warn("Post-smooth delete_loose failed (continuing): " + str(e))
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
 
     REPORT["proxyTriangles"] = triangle_count(proxy)
     REPORT["remeshStrategy"] = strategy
@@ -595,53 +640,6 @@ def wire_material(proxy, normal_img, ao_img, base_img):
 
 
 # --------------------------------------------------------------------------- #
-# Emboss watermark — helpers
-# --------------------------------------------------------------------------- #
-
-def _build_pillar_text(body, cap_h, extrude, name):
-    """Create a FONT object → mesh, then bake it into the canonical PILLAR frame: the
-    string READS UPWARD (advance along +Z), each glyph's vertical runs along +X, and the
-    extrude/thickness faces +Y (outward, for the +Y wall). Recentres so the column starts
-    at Z=0 and straddles X=Y=0. Returns (object, length_z).
-
-    A FONT lays out reading +X, letter-up +Y, extrude +Z. The permutation
-    (x,y,z) → (y, z, x) maps that to the pillar frame in one bake, giving a vertical
-    spine-style column of text we then place on each wall and twist into a slight spiral."""
-    import mathutils
-    cur = bpy.data.curves.new(name="c_" + name, type="FONT")
-    cur.body = body
-    cur.align_x = "LEFT"
-    cur.align_y = "CENTER"
-    cur.size = cap_h
-    cur.extrude = extrude
-    o = bpy.data.objects.new(name, cur)
-    bpy.context.scene.collection.objects.link(o)
-    deselect_all()
-    o.select_set(True)
-    set_active(o)
-    bpy.ops.object.convert(target="MESH")
-    o = bpy.context.view_layer.objects.active
-    me = o.data
-    if len(me.vertices) == 0:
-        return o, 0.0
-    # world = (local.y, local.z, local.x): rows pick y→x, z→y, x→z. A pure rotation.
-    perm = mathutils.Matrix(((0.0, 1.0, 0.0, 0.0),
-                             (0.0, 0.0, 1.0, 0.0),
-                             (1.0, 0.0, 0.0, 0.0),
-                             (0.0, 0.0, 0.0, 1.0)))
-    me.transform(perm)
-    xs = [v.co.x for v in me.vertices]
-    ys = [v.co.y for v in me.vertices]
-    zs = [v.co.z for v in me.vertices]
-    tx = -(min(xs) + max(xs)) / 2.0
-    ty = -(min(ys) + max(ys)) / 2.0
-    tz = -min(zs)
-    me.transform(mathutils.Matrix.Translation((tx, ty, tz)))
-    me.update()
-    return o, (max(zs) - min(zs))
-
-
-# --------------------------------------------------------------------------- #
 # Emboss watermark — entry point + styles
 # --------------------------------------------------------------------------- #
 
@@ -741,25 +739,348 @@ def _apply_wm_boolean(proxy, wm, engrave, text, placement):
     REPORT["embossApplied"] = True
 
 
-def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
-    """Emboss `text` as N thin vertical PILLARS (default 4), evenly spaced around the
-    model, each climbing bottom→top with a slight spiral twist.
+_WM_TILE_CACHE = {}
 
-    Each pillar is a spine-style column of repeated text standing on one wall, reaching
-    inward so an engrave (difference) boolean carves it into the real surface — where
-    there is no geometry there is nothing to cut, so a pillar can NEVER float (the fix
-    for the old raised swirl drifting off narrow models). The four columns are joined
-    and twisted together about the model's vertical axis, giving every side a matching
-    gentle spiral. Letter size is a small fraction of the footprint so the mark reads as
-    four slim ribbons — visible on every side and the full height, but not overwhelming,
-    leaving the high-value detail between them intact."""
-    import mathutils
+
+def _watermark_tile_cache_path(text):
+    """Disk path for the cached heightmap tile. Lives next to this script (not in
+    the per-job OUT_DIR, which gets deleted after every job) so it survives across
+    bake jobs on the same worker container. The text is always "PREVIEW" — the
+    same tile is reusable across every model forever, so this render (a few
+    hundred ms) happens at most once per worker-container lifetime, not once per
+    bake, which matters at upload-volume scale."""
+    import hashlib
+    h = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".wm_cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, "wm_tile_%s.png" % h)
+    except Exception:
+        # No write access next to the script — fall back to the job's own
+        # out-dir (loses cross-job caching, still correct for this job).
+        return out_path("wm_tile_%s.png" % h)
+
+
+def _get_watermark_tile(text):
+    """Return (png_path, unit_width, unit_height) for one vertically-tileable
+    repeat unit of `text + "  "`, rendered flat (font size=1.0) top-down, white
+    text on black. Cached in-process and on disk keyed by text."""
+    if text in _WM_TILE_CACHE:
+        return _WM_TILE_CACHE[text]
+    cache_path = _watermark_tile_cache_path(text)
+    meta_path = cache_path + ".meta.json"
+    if os.path.exists(cache_path) and os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            result = (cache_path, float(meta["w"]), float(meta["h"]))
+            _WM_TILE_CACHE[text] = result
+            return result
+        except Exception:
+            pass  # corrupt/partial cache entry — fall through and re-render
+    result = _render_watermark_tile(text, cache_path)
+    try:
+        with open(meta_path, "w") as f:
+            json.dump({"w": result[1], "h": result[2]}, f)
+    except Exception:
+        pass
+    _WM_TILE_CACHE[text] = result
+    return result
+
+
+def _render_watermark_tile(text, out_png):
+    """Render one flat repeat-unit of `text + "  "` (font size=1.0, not tied to
+    any model) top-down onto a black background as white emissive text. Real-
+    world scale is applied later, per wall, via the Displace modifier's
+    projector transform — this image is dimensionless."""
     made = []
+    scene = bpy.context.scene
+    saved_camera, saved_world = scene.camera, scene.world
+    # This runs mid-pipeline, after src/proxy are already in the scene — a fresh
+    # camera+tiny-text-plane sitting near world origin would otherwise be shot
+    # from INSIDE or right next to the model itself (both span roughly that
+    # region in real mm), photographing the model's own surface instead of the
+    # text. Hide everything else in the scene for the duration of this render.
+    hidden_prev = {}
+    for obj in scene.objects:
+        hidden_prev[obj.name] = obj.hide_render
+        obj.hide_render = True
+    try:
+        cur = bpy.data.curves.new(name="wm_tile_curve", type="FONT")
+        cur.body = text + "  "
+        cur.align_x = "LEFT"
+        cur.align_y = "BOTTOM_BASELINE"
+        cur.size = 1.0
+        o = bpy.data.objects.new("wm_tile_text", cur)
+        scene.collection.objects.link(o)
+        made.append(o)
+        deselect_all()
+        o.select_set(True)
+        set_active(o)
+        bpy.ops.object.convert(target="MESH")
+        o = bpy.context.view_layer.objects.active
+        me = o.data
+        if len(me.vertices) == 0:
+            raise RuntimeError("degenerate watermark tile (empty font render?)")
+        xs = [v.co.x for v in me.vertices]
+        ys = [v.co.y for v in me.vertices]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        w = max(1e-4, max_x - min_x)
+        h = max(1e-4, max_y - min_y)
+
+        mat = bpy.data.materials.new("wm_tile_mat")
+        mat.use_nodes = True
+        nt = mat.node_tree
+        for n in list(nt.nodes):
+            nt.nodes.remove(n)
+        em = nt.nodes.new("ShaderNodeEmission")
+        em.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+        em.inputs["Strength"].default_value = 1.0
+        out_node = nt.nodes.new("ShaderNodeOutputMaterial")
+        nt.links.new(em.outputs["Emission"], out_node.inputs["Surface"])
+        me.materials.append(mat)
+
+        scene.render.engine = "CYCLES"
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = 8
+        scene.render.film_transparent = False
+        scene.render.image_settings.file_format = "PNG"
+        scene.render.image_settings.color_mode = "RGB"
+        px_w = 256
+        px_h = max(32, int(round(px_w * (h / w))))
+        scene.render.resolution_x = px_w
+        scene.render.resolution_y = px_h
+
+        world = bpy.data.worlds.new("wm_tile_world")
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get("Background")
+        if bg:
+            bg.inputs[0].default_value = (0.0, 0.0, 0.0, 1.0)
+            bg.inputs[1].default_value = 1.0
+        scene.world = world
+
+        cam_data = bpy.data.cameras.new("wm_tile_cam")
+        cam_data.type = "ORTHO"
+        cam_data.sensor_fit = "HORIZONTAL"
+        pad = 0.08
+        cam_data.ortho_scale = w * (1.0 + 2.0 * pad)
+        cam = bpy.data.objects.new("wm_tile_cam", cam_data)
+        scene.collection.objects.link(cam)
+        made.append(cam)
+        scene.camera = cam
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        cam.location = (cx, cy, 10.0)
+        cam.rotation_euler = (0.0, 0.0, 0.0)  # looks straight down -Z at the flat text
+
+        scene.render.filepath = out_png
+        bpy.ops.render.render(write_still=True)
+        if not os.path.exists(out_png):
+            raise RuntimeError("watermark tile render produced no file")
+        return (out_png, w, h)
+    finally:
+        for obj in made:
+            if obj is not None and obj.name in bpy.data.objects:
+                try:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                except Exception:
+                    pass
+        scene.camera, scene.world = saved_camera, saved_world
+        for obj in scene.objects:
+            if obj.name in hidden_prev:
+                obj.hide_render = hidden_prev[obj.name]
+        deselect_all()
+
+
+def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
+                         cap_h, depth_mm, reach_mm, engrave, idx):
+    """Engrave (or raise) one wall's worth of watermark text by directly moving
+    vertices near that wall along its surface normal, weighted by a cached
+    heightmap image sampled in Python — no boolean (can't leave a stray
+    unresolved cutter fragment behind on degenerate geometry, the "strand poking
+    out" bug this whole rewrite replaces) and no Displace modifier (see the
+    comment above the sampling loop below for why: `direction='NORMAL'` shears
+    text into a blob on a noisy surface). Proximity-based vertex selection means
+    this can't fail to find the right wall the way a boolean could fail to find
+    the right cut — it's the same selection idea either way, just no fragile
+    solver in the path."""
+    import mathutils
+    wx, wy = wxy
+    rad = math.radians(ang)
+    # Same wall convention as before: unrotated pillar frame faces +Y; rotating
+    # by `ang` about Z gives this wall's outward normal and its lateral axis.
+    normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
+    lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
+    up = mathutils.Vector((0.0, 0.0, 1.0))
+    z1 = z0 + span
+    wall_centre = mathutils.Vector((wx, wy, (z0 + z1) / 2.0))
+    # The V-axis (lateral) maps to the image with period = cap_h exactly (see the
+    # projector scale below) — that's ONE column of glyphs. A selection wider than
+    # that repeats the column side-by-side via REPEAT tiling; at cap_h*1.6 (a
+    # selection ~3.2 periods wide) three overlapping copies of "PREVIEW" all
+    # displaced the same wall blurred into an unreadable diamond/chevron pattern —
+    # confirmed by directly sampling the mapping in isolation (a wide ASCII/image
+    # dump of the sampled texture values showed perfectly legible letter blocks;
+    # the bug was never resolution, it was sampling >1 period into one column).
+    # Slightly under one full period keeps a clean single, un-tiled column.
+    lateral_reach = max(cap_h * 0.48, 1e-3)
+    z_margin = max(1e-3, span * 0.1)
+    # `reach_mm` (up to the wall's full half-depth) is sized for the OLD boolean
+    # cutter, which needed to reach deep enough to guarantee hitting a wall set
+    # back from the bbox extreme. For vertex SELECTION it only needs to find the
+    # actual surface — using the full half-depth here selected huge swaths of
+    # interior geometry nowhere near the visible wall, which then got locally
+    # subdivided along with everything else (a real vertex-count explosion this
+    # caught in testing: one wall alone went from ~600 to ~86,000 verts). Capped
+    # to a small multiple of the recess depth / letter size instead.
+    select_reach_mm = min(reach_mm, max(depth_mm * 4.0, cap_h * 0.6))
+
+    def select_near_wall(bm):
+        hit = 0
+        for v in bm.verts:
+            rel = v.co - wall_centre
+            d_normal = rel.dot(normal)
+            d_lateral = rel.dot(lateral)
+            near = (-select_reach_mm <= d_normal <= max(2.0, select_reach_mm * 0.3)
+                    and abs(d_lateral) <= lateral_reach
+                    and (z0 - z_margin) <= v.co.z <= (z1 + z_margin))
+            v.select = near
+            if near:
+                hit += 1
+        # Setting vertex .select alone doesn't propagate to edges/faces — ops
+        # like subdivide act on selected edges/faces, so without this flush they
+        # see nothing to do even though the vertex selection itself looks right.
+        bm.select_flush(True)
+        return hit
+
+    try:
+        # 1) Select verts near this wall and locally subdivide — the vertex
+        #    displacement below is capped by whatever vertex density already
+        #    exists there (unlike a boolean, which builds brand-new topology
+        #    along the cut), and the decimated proxy's global resolution is too
+        #    coarse on its own to resolve letterforms.
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bm = bmesh.from_edit_mesh(proxy.data)
+        bm.verts.ensure_lookup_table()
+        n0 = select_near_wall(bm)
+        bmesh.update_edit_mesh(proxy.data)
+        if n0 == 0:
+            bpy.ops.object.mode_set(mode="OBJECT")
+            warn("Watermark wall %d: no nearby vertices found, skipping" % idx)
+            return False
+        try:
+            bpy.ops.mesh.subdivide(number_cuts=6, smoothness=0)
+        except Exception as e:
+            warn("Watermark wall %d subdivide failed (continuing): %s" % (idx, e))
+        bpy.ops.mesh.select_all(action="DESELECT")
+
+        # 2) Re-select on the now-denser mesh — this is the exact vertex set
+        #    that gets displaced below.
+        bm = bmesh.from_edit_mesh(proxy.data)
+        bm.verts.ensure_lookup_table()
+        select_near_wall(bm)
+        bmesh.update_edit_mesh(proxy.data)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        verts_sel = [v.index for v in proxy.data.vertices if v.select]
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+        if not verts_sel:
+            warn("Watermark wall %d: selection vanished after subdivide, skipping" % idx)
+            return False
+
+        # 3) Displace each selected vertex directly, along the wall's single
+        #    FIXED outward normal, sampling the cached heightmap by hand instead
+        #    of going through a Blender Displace modifier.
+        #
+        #    This started as a Displace modifier with direction='NORMAL' (each
+        #    vertex along its OWN normal) driven by an image Texture through a
+        #    projector Empty's OBJECT texture coordinates. Two real problems
+        #    with that, found by testing against actual Blender renders:
+        #      (a) on a noisy/bumpy surface neighbouring vertices' normals
+        #          diverge enough that even correctly-patterned texture values
+        #          displace in inconsistent directions, shearing legible text
+        #          into an unreadable blob (confirmed: swapping to a fixed
+        #          world axis on a test wall immediately resolved the blob into
+        #          much cleaner geometry — direction='NORMAL' was the actual
+        #          bug, not resolution, tiling width, or anything else tried
+        #          first);
+        #      (b) Blender's OBJECT-coordinate image sampling turned out to be
+        #          centred on the projector's origin (local (0,0) samples the
+        #          image CENTRE, not its corner) — an undocumented-enough quirk
+        #          that it's simpler to not depend on at all.
+        #    Sampling the image in Python and moving vertices directly sidesteps
+        #    both: one shared direction per wall (no shear), and a mapping this
+        #    file fully controls (no modifier-internals quirk to compensate for).
+        #    It also means no Empty object and no Texture datablock — simpler,
+        #    matching the point of this rewrite.
+        img = bpy.data.images.load(tile_path, check_existing=True)
+        tw, th = img.size
+        px = img.pixels[:]
+
+        def sample(u, v):
+            u %= 1.0  # REPEAT tiling
+            v %= 1.0
+            xi = min(tw - 1, int(u * tw))
+            yi = min(th - 1, int(v * th))
+            i = (yi * tw + xi) * 4
+            return px[i]  # R channel; image is greyscale (R=G=B)
+
+        # U (image width / reading direction) = "up" the wall, one tile = one
+        # "PREVIEW  " period, derived from the tile's own aspect ratio so glyphs
+        # never distort. V (image height / cap-height direction) = "lateral",
+        # one tile = cap_h exactly, centred on the wall (+0.5) since the
+        # selection is already only ~one period wide.
+        period_up_mm = max(1e-3, cap_h * (tw / max(th, 1e-6)))
+        wall_origin = mathutils.Vector((wx, wy, z0))
+        strength = -depth_mm if engrave else depth_mm
+        me = proxy.data
+        for i in verts_sel:
+            vert = me.vertices[i]
+            rel = vert.co - wall_origin
+            u = rel.dot(up) / period_up_mm
+            v = rel.dot(lateral) / cap_h + 0.5
+            val = sample(u, v)
+            vert.co = vert.co + normal * (strength * val)
+        me.update()
+        return True
+    finally:
+        # Nothing extra to clean up — no Empty/Texture/vertex-group objects are
+        # created by this approach (that was the boolean/Displace-modifier
+        # version's overhead), just verts moved directly on `proxy` itself.
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+
+
+def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
+    """Emboss `text` as N thin vertical PILLARS (default 4), evenly spaced around
+    the model, each climbing bottom→top.
+
+    Real geometry (a mesh-rip still carries it), but built with a Displace
+    modifier driven by a cached text heightmap instead of a boolean CSG cut —
+    Displace just offsets whatever vertices exist along their own normals, so it
+    can't fail the way a boolean solver can on degenerate/sliver geometry left
+    behind by weld/decimate/smooth (see _displace_wall_text). Letter size is a
+    small fraction of the footprint so the mark reads as four slim ribbons —
+    visible on every side and the full height, but not overwhelming, leaving the
+    high-value detail between them intact.
+
+    NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — it doesn't
+    have a clean equivalent for an image-projected displacement without a much
+    more involved sheared/curved UV mapping, and straight vertical columns are
+    simpler and just as legible. embossPillarReachFrac and embossPillarMaxRepeats
+    no longer apply (Displace can't overshoot a wall the way a boolean cutter's
+    reach could, and REPEAT tiling fills the span without needing a precomputed
+    repeat count)."""
+    import mathutils
     try:
         count = max(1, int(CFG.get("embossPillarCount", 4)))
         width_frac = float(CFG.get("embossPillarWidthFrac", 0.1))
-        twist_deg = float(CFG.get("embossPillarTwistDeg", 35.0))
-        max_repeats = max(1, int(CFG.get("embossPillarMaxRepeats", 120)))
+        reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -775,15 +1096,7 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
         hx = dx / 2.0
         hy = dy / 2.0
-        proud = max(1e-4, diagp * depth_pct / 100.0)
-        # How far each column reaches INWARD from its wall, as a fraction of that wall's
-        # half-depth toward the centre. ~1.0 reaches the central axis, so however far a
-        # real wall sits back from the bounding box the cutter still crosses it and the
-        # engrave carves onto the actual surface — this is what stops a set-back wall from
-        # getting no mark at all (the "only one partial marker" failure). Preview proxy
-        # only, and it's already made un-printable downstream, so deep cuts are fine.
-        reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
-        inset = max(1e-4, diagp * inset_pct / 100.0)
+        depth_mm = max(1e-4, diagp * depth_pct / 100.0)
 
         # Letter size: a small fraction of the narrower footprint → slim ribbons that
         # scale with the model. Clamped so several letters still fit up short pieces.
@@ -794,21 +1107,6 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         z1 = maxz - dz * 0.06
         span = max(1e-4, z1 - z0)
 
-        # Repeat the text up the column to fill the height (undershoot so it never spills
-        # past the top). Length is measured along +Z from a throwaway single unit.
-        unit_body = text + "  "
-        probe, unit_len = _build_pillar_text(unit_body, cap_h, proud, "wm_probe")
-        if probe.name in bpy.data.objects:
-            bpy.data.objects.remove(probe, do_unlink=True)
-        if unit_len <= 1e-4:
-            raise RuntimeError("degenerate text height (empty font render?)")
-        repeats = max(1, min(max_repeats, int(span // unit_len)))
-        body = unit_body * repeats
-
-        # One column per side. Each is built with its OWN radial thickness (deep inward,
-        # `proud` outward), then offset so the outer face pokes `proud` past the wall and
-        # the inner face reaches `reach_in` toward the centre. Baking the Z-rotation +
-        # placement into each mesh keeps object transforms identity (clean join + twist).
         # (z-angle, outer-wall-centre xy, wall half-depth toward centre)
         walls = [
             (0.0,    (cx,    max_y), hy),   # +Y
@@ -817,88 +1115,44 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             (90.0,   (min_x, cy),    hx),   # -X
         ]
         if count != 4:
-            # Fall back to an even angular spread on the bbox's inscribed ellipse.
             walls = []
             for k in range(count):
-                theta = 360.0 * k / count      # outward-normal direction of this column
+                theta = 360.0 * k / count
                 rad = math.radians(theta)
                 ox = cx + hx * math.cos(rad)
                 oy = cy + hy * math.sin(rad)
                 hd = math.hypot(hx * math.cos(rad), hy * math.sin(rad))
-                # base column faces +Y (90°); rotate by (theta-90) to face outward at theta.
                 walls.append((theta - 90.0, (ox, oy), hd))
 
-        pillars = []
-        for i, (ang, (wx, wy), half_depth) in enumerate(walls):
-            if engrave:
-                reach_in = max(1e-4, half_depth * reach_frac)   # deep — always hits the wall
-            else:
-                reach_in = inset                                 # shallow raised (may float)
-            extrude = (reach_in + proud) / 2.0
-            o, _l = _build_pillar_text(body, cap_h, extrude, "wm_pillar_%d" % i)
-            me = o.data
-            # Symmetric extrude is centred on local Y; shift it so outer face = +proud and
-            # inner face = -reach_in (asymmetric: thin outside, deep inside).
-            me.transform(mathutils.Matrix.Translation((0.0, (proud - reach_in) / 2.0, 0.0)))
-            me.transform(mathutils.Matrix.Rotation(math.radians(ang), 4, "Z"))
-            me.transform(mathutils.Matrix.Translation((wx, wy, z0)))
-            me.update()
-            pillars.append(o)
-            made.append(o)
-
-        # Join the columns into one operand.
+        tile_path, _tile_w, _tile_h = _get_watermark_tile(text)
+        # _get_watermark_tile builds/removes its own temp objects and can leave no
+        # active object behind — _displace_wall_text needs `proxy` active to enter
+        # edit mode for its vertex selection.
         deselect_all()
-        for o in pillars:
-            o.select_set(True)
-        set_active(pillars[0])
-        bpy.ops.object.join()
-        wm = bpy.context.view_layer.objects.active
-        made = [wm]
+        proxy.select_set(True)
+        set_active(proxy)
 
-        # Slight spiral: twist the whole set about the model's vertical axis. An empty at
-        # the footprint centre is the twist origin so every column spirals around the
-        # model rather than about its own centre.
-        if abs(twist_deg) > 0.01:
-            org = bpy.data.objects.new("wm_twist_origin", None)
-            org.location = (cx, cy, z0)
-            bpy.context.scene.collection.objects.link(org)
-            made.append(org)
-            tw = wm.modifiers.new(name="wm_twist", type="SIMPLE_DEFORM")
-            tw.deform_method = "TWIST"
-            tw.deform_axis = "Z"
-            tw.angle = math.radians(twist_deg)
-            tw.origin = org
-            deselect_all()
-            wm.select_set(True)
-            set_active(wm)
-            try:
-                bpy.ops.object.modifier_apply(modifier=tw.name)
-            except Exception as e:
-                warn("Pillar twist failed (continuing straight): " + str(e))
-                try:
-                    wm.modifiers.remove(tw)
-                except Exception:
-                    pass
-            if org.name in bpy.data.objects:
-                bpy.data.objects.remove(org, do_unlink=True)
-            made = [wm]
+        applied = 0
+        for i, (ang, (wx, wy), half_depth) in enumerate(walls):
+            reach_mm = max(1e-4, half_depth * reach_frac)
+            if _displace_wall_text(proxy, tile_path, ang, (wx, wy),
+                                    z0, span, cap_h, depth_mm, reach_mm, engrave, i):
+                applied += 1
 
         REPORT["embossPillarCount"] = count
         REPORT["embossPillarCapHeightMm"] = round(cap_h, 3)
-        REPORT["embossPillarRepeats"] = repeats
-        REPORT["embossPillarTwistDeg"] = twist_deg
-        _apply_wm_boolean(proxy, wm, engrave, text, "vertical-pillars-%d" % count)
-        made = []
+        REPORT["embossMethod"] = "displace"
+        REPORT["embossWatermark"] = text
+        REPORT["embossPlacement"] = "vertical-pillars-%d" % count
+        REPORT["embossApplied"] = applied > 0
+        if applied == 0:
+            warn("Watermark applied to 0 of %d walls" % count)
+        elif applied < count:
+            warn("Watermark applied to only %d of %d walls" % (applied, count))
     except Exception as e:
         warn("Emboss pillars failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
     finally:
-        for o in made:
-            if o is not None and o.name in bpy.data.objects:
-                try:
-                    bpy.data.objects.remove(o, do_unlink=True)
-                except Exception:
-                    pass
         deselect_all()
         proxy.select_set(True)
         set_active(proxy)

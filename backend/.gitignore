@@ -19,6 +19,10 @@ uploads/*
 logs/
 *.log
 
+# Proxy bake worker's cached watermark heightmap tile (regenerated at runtime,
+# per-worker-container — see blender/bake_proxy.py _get_watermark_tile)
+blender/.wm_cache/
+
 # OS files
 .DS_Store
 Thumbs.db
