@@ -277,9 +277,52 @@ def preprocess():
     return src, src_tris, diag
 
 
+def compute_adaptive_budget(src_tris):
+    """Target proxy triangle count, scaled to source complexity instead of one fixed
+    number for every model. A flat budget hits detail-dense sources hardest: on a
+    ratio basis, decimating a 2.5M-tri architectural model (window lattices, roof
+    tiles) down to a fixed 120k is a 4.8% retain — while a 90k-tri simple terrain
+    tile keeps 100%. The LaplacianSmooth pass right after this (see make_proxy)
+    melts fine RELIEF into a normal map on purpose (anti-theft), but it can't fake
+    topology — a collapsed window opening stays collapsed no matter how good the
+    normal map is — so triangle count is what keeps small openings/features
+    resolvable on the busiest sources, not just "smoothness".
+
+    Formula: retainRatio of the source, floored at triangleBudget (today's flat
+    number — keeps small/typical sources decimating exactly as before, since the
+    floor wins whenever src_tris * retainRatio < triangleBudget) and capped at
+    triangleBudgetCeiling (protects the 20-min bake timeout / worker throughput on
+    the very densest sources — the single-worker queue means every extra minute
+    here is a minute added to every OTHER upload's wait, not just this one's).
+
+    Defaults (retainRatio=0.09, ceiling=200000) were chosen from real production
+    proxy_report data on the actual "Japan houses" set (see incident notes): its
+    densest part was baking at 4.8% retain under the old flat 120k; this roughly
+    doubles that to ~7-9% while keeping the ceiling well within the timeout margin
+    those same real bakes showed (~50-90s wall time at the old budget, non-decimate
+    stages dominated by proxy triangle count — see max_surface_displacement and the
+    UV unwrap, neither of which scale cheaply past a few hundred k triangles).
+    A prior attempt at a 30%-retain floor was bake-tested against the real 2.5M-tri
+    source and did not complete in a reasonable time even locally — 9% was picked
+    to stay comfortably inside proven-safe territory, not as a final ceiling; raise
+    retainRatio/triangleBudgetCeiling later once a real worker-side bake confirms
+    a higher number is safe."""
+    floor_budget = int(CFG.get("triangleBudget", 40000))
+    retain_ratio = float(CFG.get("triangleRetainRatio", 0.09))
+    ceiling_budget = max(floor_budget, int(CFG.get("triangleBudgetCeiling", 200000)))
+    ratio_budget = int(round(src_tris * retain_ratio))
+    budget = max(floor_budget, min(ratio_budget, ceiling_budget))
+    REPORT["triangleBudgetFloor"] = floor_budget
+    REPORT["triangleRetainRatio"] = retain_ratio
+    REPORT["triangleBudgetCeiling"] = ceiling_budget
+    REPORT["triangleBudgetEffective"] = budget
+    return budget
+
+
 def make_proxy(src, src_tris):
-    """Duplicate the source and reduce it to the triangle budget. Returns (proxy, strategy)."""
-    budget = int(CFG.get("triangleBudget", 40000))
+    """Duplicate the source and reduce it to the (adaptive) triangle budget. Returns
+    (proxy, strategy)."""
+    budget = compute_adaptive_budget(src_tris)
 
     deselect_all()
     src.select_set(True)
@@ -893,58 +936,299 @@ def _render_watermark_tile(text, out_png):
         deselect_all()
 
 
-def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
-                         cap_h, depth_mm, reach_mm, engrave, idx):
-    """Engrave (or raise) one wall's worth of watermark text by directly moving
-    vertices near that wall along its surface normal, weighted by a cached
-    heightmap image sampled in Python — no boolean (can't leave a stray
-    unresolved cutter fragment behind on degenerate geometry, the "strand poking
-    out" bug this whole rewrite replaces) and no Displace modifier (see the
-    comment above the sampling loop below for why: `direction='NORMAL'` shears
-    text into a blob on a noisy surface). Proximity-based vertex selection means
-    this can't fail to find the right wall the way a boolean could fail to find
-    the right cut — it's the same selection idea either way, just no fragile
-    solver in the path."""
+def _box_support(hx, hy, direction):
+    """Half-extent of an axis-aligned XY box (half-dims hx,hy) projected onto a
+    unit XY `direction` — how far the box extends from its centre along that
+    direction. For the four axis-aligned pillar walls this reduces exactly to
+    hy/hx (matching the old hardcoded per-wall table); it also gives the wall's
+    real LATERAL width for any azimuth, which the old code never computed at
+    all — it only ever searched a fixed ~cap_h-wide column at the wall's literal
+    centre point, which is exactly what put a pillar in the middle of a doorway/
+    window on real (non-box) building geometry. See _locate_wall_text."""
+    return abs(hx * direction.x) + abs(hy * direction.y)
+
+
+def _build_local_bvh(obj):
+    """BVH of `obj`'s mesh in LOCAL coordinates — the same space every vertex
+    loop in this file already works in (`vert.co` directly; the proxy carries an
+    identity transform by this point, preprocess() having applied rotation/scale
+    up front). Built once per emboss pass and reused for every wall's raycasts."""
+    from mathutils.bvhtree import BVHTree
+    me = obj.data
+    me.calc_loop_triangles()
+    coords = [v.co.copy() for v in me.vertices]
+    tris = [(t.vertices[0], t.vertices[1], t.vertices[2]) for t in me.loop_triangles]
+    return BVHTree.FromPolygons(coords, tris)
+
+
+_MAX_WALL_GRID_CELLS = 30000
+
+
+def _wall_solidity_grid(bvh, wall_centre, normal, read_axis, read0, read1,
+                         cross_axis, cross_half, reach_mm, cell_mm):
+    """Raycast a (read x cross) grid of sample points across a candidate
+    placement plane, firing each ray from just outside the model back in along
+    `-normal`. A cell counts SOLID only if the first thing the ray hits is close
+    to the nominal plane (within `reach_mm`) AND that hit's own face normal
+    roughly agrees with `normal` — i.e. it's real outward-facing wall material,
+    not a window-frame reveal (normal points sideways, into the opening), the
+    room's interior surface glimpsed through an open window (normal points the
+    wrong way), or wall material the smoothing pass tucked deeper than
+    `reach_mm` away.
+
+    This is the direct fix for "assumes a flat solid wall at the bbox edge":
+    tested against a real production model with lattice windows on every wall
+    (see model 222c8daa, the "Japan houses" set), this grid comes back ~90%
+    empty/misaligned almost everywhere except a thin band near the base —
+    instead of the old code's blind guess that the whole bbox-edge plane was
+    fair game, which is exactly what put a pillar in a doorway opening on one
+    wall and scattered it across window mullions on the other three.
+
+    Returns (grid, read_n, cross_n, cell_read, cell_cross); grid[r][c] is a
+    bool, r=0 at read0, c=0 at -cross_half. Grid resolution is capped
+    (_MAX_WALL_GRID_CELLS) so a very large or very finely-sized model can't
+    blow up raycast count — the cell size coarsens proportionally instead."""
+    read_n = max(6, int(math.ceil((read1 - read0) / cell_mm)))
+    cross_n = max(6, int(math.ceil((cross_half * 2) / cell_mm)))
+    if read_n * cross_n > _MAX_WALL_GRID_CELLS:
+        scale = math.sqrt((read_n * cross_n) / float(_MAX_WALL_GRID_CELLS))
+        cell_mm = cell_mm * scale
+        read_n = max(6, int(math.ceil((read1 - read0) / cell_mm)))
+        cross_n = max(6, int(math.ceil((cross_half * 2) / cell_mm)))
+    cell_read = (read1 - read0) / read_n
+    cell_cross = (cross_half * 2) / cross_n
+    start = reach_mm * 2.5 + 2.0
+    max_dist = start + reach_mm * 3.0
+    grid = [[False] * cross_n for _ in range(read_n)]
+    for r in range(read_n):
+        rd = read0 + (r + 0.5) * cell_read
+        base = wall_centre + read_axis * rd
+        for c in range(cross_n):
+            cr = -cross_half + (c + 0.5) * cell_cross
+            origin = base + cross_axis * cr + normal * start
+            hit = bvh.ray_cast(origin, -normal, max_dist)
+            if hit and hit[0] is not None:
+                _loc, hit_n, _idx, dist = hit
+                depth = start - dist  # distance from the nominal plane
+                if hit_n.dot(normal) > 0.3 and -reach_mm <= depth <= reach_mm:
+                    grid[r][c] = True
+    return grid, read_n, cross_n, cell_read, cell_cross
+
+
+def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
+    """Longest run of rows (the READ axis, the direction the text will run) for
+    which some contiguous `strip_cross_cells`-wide window (the CROSS axis, the
+    glyph cap-height direction) stays >= min_coverage solid for the whole run.
+    Requiring coverage rather than 100% solid absorbs raycast-grid discretisation
+    noise and the odd mullion crossing a cell without treating it as a break,
+    while a genuine gap (a window, a doorway, the notch between two wings of an
+    L-shaped building) still fails every window that overlaps it, because it
+    drags the average well below the threshold for its whole width.
+    Returns (run_len_cells, read_start_cell, cross_start_cell) or None."""
+    w = max(1, min(strip_cross_cells, cross_n))
+    best = None
+    for cs in range(0, cross_n - w + 1):
+        usable = []
+        for r in range(read_n):
+            row = grid[r]
+            cnt = 0
+            for c in range(cs, cs + w):
+                if row[c]:
+                    cnt += 1
+            usable.append(cnt >= w * min_coverage)
+        run_start = None
+        r = 0
+        while r <= read_n:
+            if r < read_n and usable[r]:
+                if run_start is None:
+                    run_start = r
+                r += 1
+            else:
+                if run_start is not None:
+                    length = r - run_start
+                    if best is None or length > best[0]:
+                        best = (length, run_start, cs)
+                    run_start = None
+                r += 1
+    return best
+
+
+def _select_reach_mm(reach_mm, depth_mm, cap_h):
+    """Depth-of-search clamp shared by _locate_wall_text (what counts as a
+    'solid, in-reach' raycast hit) and _displace_wall_text (what vertices are
+    later close enough to actually select/displace) — they MUST agree, or a
+    spot the locator accepts as solid can sit just outside what the displacer
+    is willing to grab. Confirmed by testing: computed differently (locator
+    using the wall's full reach, displacer using this tighter clamp), a real
+    baseboard surface sitting ~11mm inside the nominal wall plane was accepted
+    by the locator every time and then excluded by the displacer every time —
+    "no nearby vertices" despite a located patch that really was there, just a
+    couple of mm past the depth this function clamps to.
+    `reach_mm` (up to the wall's full half-depth) is sized for the OLD boolean
+    cutter, which needed to reach deep enough to guarantee hitting a wall set
+    back from the bounding box; for actual vertex work it only needs to find
+    the real surface — the full half-depth would pull in interior geometry far
+    from anything visible (a real vertex-count explosion caught in testing:
+    one wall alone went from ~600 to ~86,000 verts), so it's capped to a small
+    multiple of the recess depth / letter size instead."""
+    return min(reach_mm, max(depth_mm * 4.0, cap_h * 0.6))
+
+
+def _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
+                       cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
+    """Find where on this wall there's actually room for the watermark, trying
+    the letter size down a few notches if the nominal one doesn't fit anywhere.
+
+    A facade's only flat band (a baseboard/eave trim — see _locate_wall_text_at)
+    is very often THINNER than the "ideal" cap height derived from the model's
+    footprint: confirmed against the real "Japan houses" model, the baseboard is
+    a clean, almost fully solid ~5-row band, but the nominal letter height
+    needed a 6-row window — so every window that includes even one row of the
+    window lattice immediately above dragged coverage below threshold almost
+    everywhere, leaving only a handful of short, accidental runs instead of the
+    long, clean run the baseboard actually offers. Shrinking the window to match
+    what's really there fixes this directly (and shrinks the text's own repeat
+    period to match, so a short run still shows most of "PREVIEW" rather than a
+    fragment) instead of forcing a fixed size onto geometry that doesn't have
+    room for it. Stops at the largest size that clears the legibility floor —
+    smaller text that reads beats full-size text that's a scatter of fragments.
+    `tile_aspect` (the cached watermark tile's width/height, from
+    _get_watermark_tile) is what lets _locate_wall_text_at judge "enough run to
+    actually read" rather than just "enough run for one glyph row" — see there.
+    Returns a dict (orientation/lateral_centre/z_centre/run_mm/cap_h), or None
+    if nothing legible fits at any tried size."""
+    for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32):
+        result = _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half,
+                                       z0, z1, cap_h * shrink, tile_aspect, select_reach_mm,
+                                       min_coverage, cell_divisor)
+        if result is not None:
+            result["cap_h"] = cap_h * shrink
+            return result
+    return None
+
+
+def _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
+                          cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
+    """One trial of _locate_wall_text at a fixed `cap_h`: try BOTH readable
+    orientations against the real geometry instead of assuming "climb straight
+    up the middle of the bbox edge" — a tall clear column (the pillar style's
+    original always-vertical look) AND a horizontal run along whatever flat
+    band exists. Whichever orientation finds the longer clear run wins — more
+    run length means more of "PREVIEW" actually resolves instead of a fragment
+    of one glyph or nothing at all.
+
+    `select_reach_mm` (the SAME clamped depth _displace_wall_text will later
+    select vertices within — see _select_reach_mm) bounds how deep a raycast
+    hit may sit and still count as "solid" here. Using the wall's full reach
+    instead would find patches _displace_wall_text can't actually reach.
+
+    Returns a dict (orientation/lateral_centre/z_centre/run_mm), or None if
+    neither orientation clears the legibility floor anywhere on this wall at
+    this cap_h."""
     import mathutils
-    wx, wy = wxy
-    rad = math.radians(ang)
-    # Same wall convention as before: unrotated pillar frame faces +Y; rotating
-    # by `ang` about Z gives this wall's outward normal and its lateral axis.
-    normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
-    lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
     up = mathutils.Vector((0.0, 0.0, 1.0))
-    z1 = z0 + span
-    wall_centre = mathutils.Vector((wx, wy, (z0 + z1) / 2.0))
-    # The V-axis (lateral) maps to the image with period = cap_h exactly (see the
-    # projector scale below) — that's ONE column of glyphs. A selection wider than
-    # that repeats the column side-by-side via REPEAT tiling; at cap_h*1.6 (a
-    # selection ~3.2 periods wide) three overlapping copies of "PREVIEW" all
-    # displaced the same wall blurred into an unreadable diamond/chevron pattern —
-    # confirmed by directly sampling the mapping in isolation (a wide ASCII/image
-    # dump of the sampled texture values showed perfectly legible letter blocks;
-    # the bug was never resolution, it was sampling >1 period into one column).
-    # Slightly under one full period keeps a clean single, un-tiled column.
+    cell = max(0.6, cap_h / max(1.0, cell_divisor))
+    # One full trip through the tile (period_read_mm — the same period
+    # _displace_wall_text samples with) is "PREVIEW  " top to bottom; requiring
+    # only cap_h*1.15 (one glyph ROW) passed a run as short as 17mm against a
+    # ~44mm period — plenty of real vertices to displace, but only a meaningless
+    # fragment of the word (confirmed by rendering it — see git history around
+    # this function). Requiring most of a period is what actually makes the
+    # located run legible; the shrink loop in _locate_wall_text is what lets a
+    # short run still clear this by shrinking the period to match, rather than
+    # this floor just failing every wall with a short flat band.
+    period_read_mm = max(1e-3, cap_h * tile_aspect)
+    min_run_mm = max(cap_h * 1.15, period_read_mm * 0.6)
+
+    grid, read_n, cross_n, cell_read, cell_cross = _wall_solidity_grid(
+        bvh, wall_centre, normal, up, z0, z1, lateral, lateral_half, select_reach_mm, cell)
+
+    if os.environ.get("WM_DEBUG"):
+        solid_count = sum(1 for row in grid for c in row if c)
+        print("WMDEBUG locate read_n=%d cross_n=%d cell_read=%.3f cell_cross=%.3f "
+              "select_reach_mm=%.3f solid_total=%d/%d"
+              % (read_n, cross_n, cell_read, cell_cross, select_reach_mm,
+                 solid_count, read_n * cross_n))
+
+    # Vertical: read axis = Z (the original climb), cross axis = lateral.
+    vert_w = max(1, int(math.ceil(cap_h * 0.96 / cell_cross)))
+    vert = _best_strip(grid, read_n, cross_n, vert_w, min_coverage)
+    vert_mm = vert[0] * cell_read if vert else 0.0
+
+    # Horizontal: transpose so lateral becomes the read axis and Z the cross axis.
+    grid_t = [[grid[r][c] for r in range(read_n)] for c in range(cross_n)]
+    horiz_w = max(1, int(math.ceil(cap_h * 0.96 / cell_read)))
+    horiz = _best_strip(grid_t, cross_n, read_n, horiz_w, min_coverage)
+    horiz_mm = horiz[0] * cell_cross if horiz else 0.0
+
+    if os.environ.get("WM_DEBUG"):
+        print("WMDEBUG locate vert_w=%d vert=%r vert_mm=%.2f  horiz_w=%d horiz=%r horiz_mm=%.2f"
+              % (vert_w, vert, vert_mm, horiz_w, horiz, horiz_mm))
+
+    if vert_mm < min_run_mm and horiz_mm < min_run_mm:
+        return None
+
+    if horiz_mm >= vert_mm:
+        run_len, lat_start, z_start = horiz
+        return dict(
+            orientation="horizontal",
+            lateral_centre=-lateral_half + (lat_start + run_len / 2.0) * cell_cross,
+            z_centre=z0 + (z_start + horiz_w / 2.0) * cell_read,
+            run_mm=run_len * cell_cross,
+        )
+    run_len, z_start, lat_start = vert
+    return dict(
+        orientation="vertical",
+        lateral_centre=-lateral_half + (lat_start + vert_w / 2.0) * cell_cross,
+        z_centre=z0 + (z_start + run_len / 2.0) * cell_read,
+        run_mm=run_len * cell_read,
+    )
+
+
+def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor,
+                         run_mm, cap_h, depth_mm, select_reach_mm, engrave, label):
+    """Engrave (or raise) one pillar's worth of watermark text by directly
+    moving vertices near `anchor` along `normal`, weighted by a cached heightmap
+    image sampled in Python — no boolean (can't leave a stray unresolved cutter
+    fragment behind on degenerate geometry, the "strand poking out" bug this
+    whole rewrite replaced) and no Displace modifier (see the comment above the
+    sampling loop below for why: `direction='NORMAL'` shears text into a blob on
+    a noisy surface).
+
+    `read_axis` is the direction the text climbs/runs — Z for the original
+    vertical-pillar look, or the wall's own in-plane direction for a horizontal
+    band; `height_axis` is always the glyph cap-height direction (whichever of
+    the two isn't the read axis). `anchor` is the CENTRE of an already-located
+    solid patch (see _locate_wall_text) and `run_mm` is how long that patch is
+    along `read_axis` — both come from actually measuring the geometry, not
+    from the wall's bounding-box centre/full span like the old blind version.
+    Proximity-based vertex selection around that anchor means this can't fail
+    to find material the way a boolean could fail to find the right cut — it's
+    the same selection idea as before, just anchored somewhere real."""
     lateral_reach = max(cap_h * 0.48, 1e-3)
-    z_margin = max(1e-3, span * 0.1)
-    # `reach_mm` (up to the wall's full half-depth) is sized for the OLD boolean
-    # cutter, which needed to reach deep enough to guarantee hitting a wall set
-    # back from the bbox extreme. For vertex SELECTION it only needs to find the
-    # actual surface — using the full half-depth here selected huge swaths of
-    # interior geometry nowhere near the visible wall, which then got locally
-    # subdivided along with everything else (a real vertex-count explosion this
-    # caught in testing: one wall alone went from ~600 to ~86,000 verts). Capped
-    # to a small multiple of the recess depth / letter size instead.
-    select_reach_mm = min(reach_mm, max(depth_mm * 4.0, cap_h * 0.6))
+    read_half = max(1e-3, run_mm / 2.0 + max(1e-3, run_mm * 0.06))
+    # `select_reach_mm` is pre-clamped by the caller (_select_reach_mm) — the
+    # SAME clamp _locate_wall_text used to decide this patch was "solid" in the
+    # first place. It must not be recomputed from a wider raw reach here: doing
+    # so let the locator accept surfaces the displacer would then reject as
+    # just-out-of-reach (see _select_reach_mm's docstring for the failure this
+    # caused in testing).
+    if os.environ.get("WM_DEBUG"):
+        print("WMDEBUG %s anchor=%r normal=%r read_axis=%r height_axis=%r "
+              "read_half=%.3f lateral_reach=%.3f select_reach_mm=%.3f run_mm=%.3f"
+              % (label, tuple(anchor), tuple(normal), tuple(read_axis), tuple(height_axis),
+                 read_half, lateral_reach, select_reach_mm, run_mm))
 
     def select_near_wall(bm):
         hit = 0
         for v in bm.verts:
-            rel = v.co - wall_centre
+            rel = v.co - anchor
             d_normal = rel.dot(normal)
-            d_lateral = rel.dot(lateral)
+            d_read = rel.dot(read_axis)
+            d_height = rel.dot(height_axis)
             near = (-select_reach_mm <= d_normal <= max(2.0, select_reach_mm * 0.3)
-                    and abs(d_lateral) <= lateral_reach
-                    and (z0 - z_margin) <= v.co.z <= (z1 + z_margin))
+                    and abs(d_height) <= lateral_reach
+                    and abs(d_read) <= read_half)
             v.select = near
             if near:
                 hit += 1
@@ -954,34 +1238,108 @@ def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
         bm.select_flush(True)
         return hit
 
-    try:
-        # 1) Select verts near this wall and locally subdivide — the vertex
-        #    displacement below is capped by whatever vertex density already
-        #    exists there (unlike a boolean, which builds brand-new topology
-        #    along the cut), and the decimated proxy's global resolution is too
-        #    coarse on its own to resolve letterforms.
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="DESELECT")
-        bm = bmesh.from_edit_mesh(proxy.data)
-        bm.verts.ensure_lookup_table()
-        n0 = select_near_wall(bm)
-        bmesh.update_edit_mesh(proxy.data)
-        if n0 == 0:
-            bpy.ops.object.mode_set(mode="OBJECT")
-            warn("Watermark wall %d: no nearby vertices found, skipping" % idx)
-            return False
-        try:
-            bpy.ops.mesh.subdivide(number_cuts=6, smoothness=0)
-        except Exception as e:
-            warn("Watermark wall %d subdivide failed (continuing): %s" % (idx, e))
-        bpy.ops.mesh.select_all(action="DESELECT")
+    def select_faces_touching_wall(bm):
+        """Bootstrap pass: select whole FACES whose vertex extents straddle the
+        target box, rather than individual verts inside it. On a flat, sparsely
+        decimated patch (exactly the baseboard/eave bands _locate_wall_text
+        finds on busy facades) one huge triangle can legitimately cover the
+        whole search box without any of ITS OWN 3 vertices — all out at the
+        triangle's far corners — landing inside it, so the plain vertex test
+        above finds nothing to subdivide even though the anchor point sits
+        right on that triangle's surface (confirmed: this is exactly what
+        happened on the "Japan houses" baseboard once the placement search
+        started correctly finding it — see the git history around this
+        function). A face overlaps the box if it does on EVERY axis (normal/
+        read/height), which is guaranteed for the face the locating raycast
+        actually hit, since the hit point is a convex combination of that
+        face's 3 vertices and therefore lies between their per-axis min/max."""
+        hit = 0
+        for f in bm.faces:
+            d_normals, d_reads, d_heights = [], [], []
+            for v in f.verts:
+                rel = v.co - anchor
+                d_normals.append(rel.dot(normal))
+                d_reads.append(rel.dot(read_axis))
+                d_heights.append(rel.dot(height_axis))
+            overlaps = (
+                min(d_normals) <= max(2.0, select_reach_mm * 0.3) and max(d_normals) >= -select_reach_mm
+                and min(d_reads) <= read_half and max(d_reads) >= -read_half
+                and min(d_heights) <= lateral_reach and max(d_heights) >= -lateral_reach
+            )
+            if overlaps:
+                f.select = True
+                for v in f.verts:
+                    v.select = True
+                hit += 1
+        bm.select_flush(True)
+        return hit
 
-        # 2) Re-select on the now-denser mesh — this is the exact vertex set
-        #    that gets displaced below.
-        bm = bmesh.from_edit_mesh(proxy.data)
-        bm.verts.ensure_lookup_table()
-        select_near_wall(bm)
-        bmesh.update_edit_mesh(proxy.data)
+    try:
+        # 1) Locally subdivide until the tight, precise check (select_near_wall)
+        #    actually finds vertices to displace — the vertex displacement below
+        #    is capped by whatever vertex density exists there (unlike a
+        #    boolean, which builds brand-new topology along the cut), and the
+        #    decimated proxy's global resolution is too coarse on its own to
+        #    resolve letterforms. A flat, sparsely-decimated patch (exactly the
+        #    baseboard/eave bands _locate_wall_text finds on busy facades) can
+        #    be one or two huge triangles, so a SINGLE fixed subdivide pass
+        #    isn't always fine enough — confirmed by testing: one round left
+        #    every resulting sub-triangle edge coarser than the tight cross-
+        #    axis window, so the tight check found nothing even with real
+        #    material right there ("selection vanished after subdivide").
+        #    Looping — check density first, stop once it's dense enough, only
+        #    bootstrap+subdivide again when it isn't — converges in a couple of
+        #    rounds without over-subdividing: sizing the subdivision from the
+        #    touching faces' own (possibly huge, possibly tiny) edge lengths was
+        #    tried and tended to blast an already-fine patch with the same
+        #    aggressive cut count a single huge outlier face needed, exploding
+        #    triangle count for no legibility gain (measured: one wall alone
+        #    reached 137,000+ selected verts). Stopping at the first NON-EMPTY
+        #    selection (rather than a density target) was also tried and
+        #    compiles/runs fine, but the vertex spacing that leaves is nowhere
+        #    near fine enough to resolve actual letterforms — confirmed by
+        #    rendering it: recognisable as "some texture was displaced here",
+        #    not as "PREVIEW" (see git history around this function). Requiring
+        #    a target vertex COUNT sized from the patch's own area — enough
+        #    for a genuinely legible spacing, not just a non-empty selection —
+        #    is what actually produces readable text. A fixed, modest per-round
+        #    cut (6, ~7x finer each round) applied only as many times as
+        #    actually needed keeps triangle growth in check. The FACE-overlap
+        #    test (select_faces_touching_wall) is what each round's subdivide
+        #    operates on, so a triangle spanning the whole search box still
+        #    gets subdivided even though none of its own vertices sit inside
+        #    it yet.
+        target_spacing = max(0.25, cap_h / 12.0)
+        target_count = max(60, int((2 * read_half) * (2 * lateral_reach) / (target_spacing * target_spacing)))
+        bpy.ops.object.mode_set(mode="EDIT")
+        max_rounds = 7
+        n_tight = 0
+        for round_i in range(max_rounds + 1):
+            bpy.ops.mesh.select_all(action="DESELECT")
+            bm = bmesh.from_edit_mesh(proxy.data)
+            bm.verts.ensure_lookup_table()
+            n_tight = select_near_wall(bm)
+            bmesh.update_edit_mesh(proxy.data)
+            if n_tight >= target_count or round_i == max_rounds:
+                break
+            bpy.ops.mesh.select_all(action="DESELECT")
+            bm = bmesh.from_edit_mesh(proxy.data)
+            bm.verts.ensure_lookup_table()
+            n_faces = select_faces_touching_wall(bm)
+            bmesh.update_edit_mesh(proxy.data)
+            if n_faces == 0:
+                if n_tight > 0:
+                    break  # nothing left to refine further — use what we have
+                bpy.ops.object.mode_set(mode="OBJECT")
+                warn("Watermark %s: no nearby geometry found despite a located solid patch, skipping" % label)
+                return False
+            try:
+                bpy.ops.mesh.subdivide(number_cuts=6, smoothness=0)
+            except Exception as e:
+                warn("Watermark %s subdivide round %d failed (continuing): %s" % (label, round_i, e))
+                break
+        if os.environ.get("WM_DEBUG"):
+            print("WMDEBUG %s final tight select=%d target=%d rounds<=%d" % (label, n_tight, target_count, max_rounds))
         bpy.ops.object.mode_set(mode="OBJECT")
 
         verts_sel = [v.index for v in proxy.data.vertices if v.select]
@@ -989,7 +1347,7 @@ def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
         proxy.select_set(True)
         set_active(proxy)
         if not verts_sel:
-            warn("Watermark wall %d: selection vanished after subdivide, skipping" % idx)
+            warn("Watermark %s: selection vanished after subdivide, skipping" % label)
             return False
 
         # 3) Displace each selected vertex directly, along the wall's single
@@ -1029,20 +1387,18 @@ def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
             i = (yi * tw + xi) * 4
             return px[i]  # R channel; image is greyscale (R=G=B)
 
-        # U (image width / reading direction) = "up" the wall, one tile = one
-        # "PREVIEW  " period, derived from the tile's own aspect ratio so glyphs
-        # never distort. V (image height / cap-height direction) = "lateral",
-        # one tile = cap_h exactly, centred on the wall (+0.5) since the
-        # selection is already only ~one period wide.
-        period_up_mm = max(1e-3, cap_h * (tw / max(th, 1e-6)))
-        wall_origin = mathutils.Vector((wx, wy, z0))
+        # U (read axis) = the reading direction, one tile = one "PREVIEW  "
+        # period, derived from the tile's own aspect ratio so glyphs never
+        # distort. V (height axis) = the glyph cap-height direction, one tile =
+        # cap_h exactly, centred on the anchor (+0.5).
+        period_read_mm = max(1e-3, cap_h * (tw / max(th, 1e-6)))
         strength = -depth_mm if engrave else depth_mm
         me = proxy.data
         for i in verts_sel:
             vert = me.vertices[i]
-            rel = vert.co - wall_origin
-            u = rel.dot(up) / period_up_mm
-            v = rel.dot(lateral) / cap_h + 0.5
+            rel = vert.co - anchor
+            u = rel.dot(read_axis) / period_read_mm
+            v = rel.dot(height_axis) / cap_h + 0.5
             val = sample(u, v)
             vert.co = vert.co + normal * (strength * val)
         me.update()
@@ -1057,30 +1413,31 @@ def _displace_wall_text(proxy, tile_path, ang, wxy, z0, span,
 
 
 def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
-    """Emboss `text` as N thin vertical PILLARS (default 4), evenly spaced around
-    the model, each climbing bottom→top.
+    """Emboss `text` at N wall positions (default 4), evenly spaced around the
+    model. Each wall's actual placement — vertical climb (the original look) or
+    a horizontal band, and exactly where along the wall — is chosen by
+    _locate_wall_text after raycast-sampling that wall for real flat, solid,
+    outward-facing material, rather than assumed from the model's bounding box.
 
-    Real geometry (a mesh-rip still carries it), but built with a Displace
-    modifier driven by a cached text heightmap instead of a boolean CSG cut —
-    Displace just offsets whatever vertices exist along their own normals, so it
-    can't fail the way a boolean solver can on degenerate/sliver geometry left
-    behind by weld/decimate/smooth (see _displace_wall_text). Letter size is a
-    small fraction of the footprint so the mark reads as four slim ribbons —
-    visible on every side and the full height, but not overwhelming, leaving the
-    high-value detail between them intact.
+    Real geometry (a mesh-rip still carries it), via direct vertex displacement
+    driven by a cached text heightmap — no boolean CSG cut, so it can't fail the
+    way a boolean solver can on degenerate/sliver geometry left behind by weld/
+    decimate/smooth (see _displace_wall_text). Letter size is a small fraction
+    of the footprint so the mark reads as slim ribbons/bands — visible without
+    overwhelming the high-value detail around it.
 
     NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — it doesn't
     have a clean equivalent for an image-projected displacement without a much
-    more involved sheared/curved UV mapping, and straight vertical columns are
-    simpler and just as legible. embossPillarReachFrac and embossPillarMaxRepeats
-    no longer apply (Displace can't overshoot a wall the way a boolean cutter's
-    reach could, and REPEAT tiling fills the span without needing a precomputed
-    repeat count)."""
+    more involved sheared/curved UV mapping. embossPillarMaxRepeats no longer
+    applies (REPEAT tiling fills whatever run was located without needing a
+    precomputed repeat count)."""
     import mathutils
     try:
         count = max(1, int(CFG.get("embossPillarCount", 4)))
         width_frac = float(CFG.get("embossPillarWidthFrac", 0.1))
         reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
+        min_coverage = min(1.0, max(0.05, float(CFG.get("embossWallMinCoverage", 0.65))))
+        cell_divisor = max(1.0, float(CFG.get("embossWallCellDivisor", 6.0)))
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -1105,26 +1462,34 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
         z0 = minz + dz * 0.06
         z1 = maxz - dz * 0.06
-        span = max(1e-4, z1 - z0)
 
-        # (z-angle, outer-wall-centre xy, wall half-depth toward centre)
-        walls = [
-            (0.0,    (cx,    max_y), hy),   # +Y
-            (-90.0,  (max_x, cy),    hx),   # +X
-            (180.0,  (cx,    min_y), hy),   # -Y
-            (90.0,   (min_x, cy),    hx),   # -X
+        # Evenly-spaced azimuths. For the default 4 this is the cardinal
+        # +Y/+X/-Y/-X order the old hardcoded table used (kept identical so
+        # existing bakes don't shuffle which wall is "wall 0"); for any other
+        # count it's N evenly spaced angles. Each wall's centre point and its
+        # reach (into the model) / lateral half-extent (across its own face) are
+        # then derived uniformly via the box-support function — this REPLACES
+        # the old N-gon branch's separate ellipse-inscribed formula with the
+        # same exact math the default 4-wall case already implied, and (unlike
+        # the old code) actually gives every wall its true lateral width instead
+        # of just a fixed narrow search column.
+        angles = [0.0, -90.0, 180.0, 90.0] if count == 4 else [
+            360.0 * k / count - 90.0 for k in range(count)
         ]
-        if count != 4:
-            walls = []
-            for k in range(count):
-                theta = 360.0 * k / count
-                rad = math.radians(theta)
-                ox = cx + hx * math.cos(rad)
-                oy = cy + hy * math.sin(rad)
-                hd = math.hypot(hx * math.cos(rad), hy * math.sin(rad))
-                walls.append((theta - 90.0, (ox, oy), hd))
 
-        tile_path, _tile_w, _tile_h = _get_watermark_tile(text)
+        walls = []
+        for ang in angles:
+            rad = math.radians(ang)
+            normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
+            lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
+            reach_depth = _box_support(hx, hy, normal)
+            lateral_half = _box_support(hx, hy, lateral)
+            wx = cx + normal.x * reach_depth
+            wy = cy + normal.y * reach_depth
+            walls.append((normal, lateral, (wx, wy), reach_depth, lateral_half))
+
+        tile_path, tile_w, tile_h = _get_watermark_tile(text)
+        tile_aspect = max(1e-3, tile_w / max(tile_h, 1e-6))
         # _get_watermark_tile builds/removes its own temp objects and can leave no
         # active object behind — _displace_wall_text needs `proxy` active to enter
         # edit mode for its vertex selection.
@@ -1132,18 +1497,49 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         proxy.select_set(True)
         set_active(proxy)
 
+        bvh = _build_local_bvh(proxy)
+
         applied = 0
-        for i, (ang, (wx, wy), half_depth) in enumerate(walls):
-            reach_mm = max(1e-4, half_depth * reach_frac)
-            if _displace_wall_text(proxy, tile_path, ang, (wx, wy),
-                                    z0, span, cap_h, depth_mm, reach_mm, engrave, i):
+        placements = []
+        for i, (normal, lateral, (wx, wy), reach_depth, lateral_half) in enumerate(walls):
+            reach_mm = max(1e-4, reach_depth * reach_frac)
+            # Computed ONCE and used for both the search (_locate_wall_text) and
+            # the actual selection (_displace_wall_text) — they must agree, see
+            # _select_reach_mm's docstring for the bug this fixes.
+            select_reach_mm = _select_reach_mm(reach_mm, depth_mm, cap_h)
+            wall_centre = mathutils.Vector((wx, wy, 0.0))
+            label = "wall %d" % i
+            loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
+                                     z0, z1, cap_h, tile_aspect, select_reach_mm,
+                                     min_coverage, cell_divisor)
+            if loc is None:
+                warn("Watermark %s: no usable solid patch found across %.0fmm of wall, skipping"
+                     % (label, lateral_half * 2))
+                placements.append("skipped")
+                continue
+
+            anchor = wall_centre + lateral * loc["lateral_centre"] \
+                + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
+            up = mathutils.Vector((0.0, 0.0, 1.0))
+            if loc["orientation"] == "horizontal":
+                read_axis, height_axis = lateral, up
+            else:
+                read_axis, height_axis = up, lateral
+
+            if _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
+                                    anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
+                                    engrave, label):
                 applied += 1
+                placements.append("%s@%.1fmm" % (loc["orientation"], loc["cap_h"]))
+            else:
+                placements.append("failed")
 
         REPORT["embossPillarCount"] = count
         REPORT["embossPillarCapHeightMm"] = round(cap_h, 3)
         REPORT["embossMethod"] = "displace"
         REPORT["embossWatermark"] = text
         REPORT["embossPlacement"] = "vertical-pillars-%d" % count
+        REPORT["embossWallPlacements"] = placements
         REPORT["embossApplied"] = applied > 0
         if applied == 0:
             warn("Watermark applied to 0 of %d walls" % count)

@@ -99,7 +99,9 @@ remesh used, size near-miss). This feeds a future admin/artist review UI.
 
 | Key | Meaning |
 |---|---|
-| `triangleBudget` | Target proxy triangle count. |
+| `triangleBudget` | **Floor** on the proxy triangle target (sources at/under it skip decimation). The actual target for anything denser is adaptive — see below. |
+| `triangleRetainRatio` | Fraction of source triangles the adaptive target keeps for sources above the floor (default 0.09 = ~9%). Fixes a flat budget hitting detail-dense sources hardest (a 2.5M-tri model was retaining ~4.8% under the old fixed 120k while a simple 90k-tri tile kept 100%). |
+| `triangleBudgetCeiling` | Hard cap on the adaptive target (default 200000), protecting the 20-min timeout and the single-worker queue's throughput on the very densest sources. |
 | `normalMapRes` / `aoMapRes` / `baseColorRes` | Baked texture resolutions. Normal stays PNG; AO/baseColor become WebP q80. |
 | `aoSamples` | Cycles samples for the AO bake. |
 | `bakeExtrusionPct` / `maxRayDistancePct` | Cage + ray distance as a % of the bbox diagonal — **the critical quality knobs** for thin parts. |

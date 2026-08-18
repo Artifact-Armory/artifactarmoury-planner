@@ -1,5 +1,7 @@
 {
   "triangleBudget": 80000,
+  "triangleRetainRatio": 0.09,
+  "triangleBudgetCeiling": 200000,
   "weldMergeDistanceMm": 0.05,
   "proxySmoothIterations": 4,
   "proxySmoothFactor": 0.5,
@@ -16,6 +18,8 @@
   "embossPillarTwistDeg": 35,
   "embossPillarReachFrac": 1.0,
   "embossPillarMaxRepeats": 120,
+  "embossWallMinCoverage": 0.65,
+  "embossWallCellDivisor": 6.0,
   "embossHeightPct": 6,
   "embossDepthPct": 0.8,
   "embossInsetPct": 1.5,

@@ -116,7 +116,14 @@ async function main() {
     const report = JSON.parse(await fsp.readFile(path.join(outDir, 'report.json'), 'utf8'))
     console.log('Report:', JSON.stringify(report, null, 2))
     assert(report.status === 'ok', 'bake reported status ok')
-    assert(report.proxyTriangles <= cfg.triangleBudget, `proxy tris (${report.proxyTriangles}) <= budget (${cfg.triangleBudget})`)
+    // triangleBudget is now just the FLOOR — the real per-job target is adaptive
+    // (see bake_proxy.py's compute_adaptive_budget) and is reported back as
+    // triangleBudgetEffective; fall back to the floor if an older script ran.
+    const effectiveBudget = report.triangleBudgetEffective ?? cfg.triangleBudget
+    assert(
+      report.proxyTriangles <= effectiveBudget,
+      `proxy tris (${report.proxyTriangles}) <= effective budget (${effectiveBudget})`,
+    )
     assert(report.boundaryEdgeCount > 0, `proxy is non-watertight (boundary edges ${report.boundaryEdgeCount} > 0)`)
 
     console.log('Post-processing GLB (prune + textures + Draco)…')

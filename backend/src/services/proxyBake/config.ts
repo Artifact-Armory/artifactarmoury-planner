@@ -11,8 +11,28 @@ import fs from 'fs'
 import path from 'path'
 
 export interface ProxyBakeConfig {
-  /** Target triangle count for the decimated proxy. */
+  /** FLOOR on the decimated proxy's triangle count — the minimum target regardless
+   *  of source complexity. Sources at/under this skip decimation entirely (unchanged
+   *  from before adaptive budgeting). For anything above it, the actual target is
+   *  computed adaptively from triangleRetainRatio/triangleBudgetCeiling (see
+   *  bake_proxy.py's compute_adaptive_budget) — this field alone no longer decides
+   *  the target for a dense source. A flat target hit detail-dense sources hardest
+   *  (a 2.5M-tri architectural model was collapsing to a ~4.8% retain while a simple
+   *  90k-tri tile kept 100%), so scaling by source size fixes the inversion. */
   triangleBudget: number
+  /** Fraction of SOURCE triangles the adaptive budget targets for sources above the
+   *  triangleBudget floor (e.g. 0.09 = keep ~9%). Only takes effect once
+   *  src_tris * triangleRetainRatio exceeds triangleBudget — typical/simple sources
+   *  are unaffected and keep decimating to the flat floor as before. */
+  triangleRetainRatio: number
+  /** Hard cap on the adaptive proxy triangle target, regardless of how large
+   *  triangleRetainRatio * sourceTriangles gets. Protects the 20-min bake timeout
+   *  and — since the worker is a single-threaded serial queue (proxyBakeWorker.ts)
+   *  — protects every OTHER queued upload's wait time too, not just this one's.
+   *  Chosen from real production timings on the densest known sources (~50-90s
+   *  wall time at a ~120k proxy); raise only after a real worker-side bake confirms
+   *  a higher number stays comfortably under the timeout. */
+  triangleBudgetCeiling: number
   /** Merge-by-distance threshold (mm) run on the imported source BEFORE decimate/
    *  smooth. STL has no shared-vertex topology — every triangle owns its own verts —
    *  so a model built from many separate touching shells (individual roof tiles,
@@ -74,6 +94,18 @@ export interface ProxyBakeConfig {
   /** Hard cap on how many times the text repeats up a pillar (bounds boolean cost on
    *  tall models). */
   embossPillarMaxRepeats: number
+  /** Minimum solid-cell coverage (0..1) a candidate strip must hold across the whole
+   *  glyph-height/width window before a wall placement counts it as usable. Each wall
+   *  is raycast-sampled into a grid first (see bake_proxy.py's _locate_wall_text) to
+   *  find real flat, outward-facing material instead of trusting the bbox blindly —
+   *  this threshold is how much discretisation/mullion noise that search tolerates
+   *  before treating a run as broken. Lower = more forgiving of gappy surfaces (windows,
+   *  lattice) but risks landing partly on a real opening; higher = stricter but more
+   *  walls get skipped as "no usable patch". */
+  embossWallMinCoverage: number
+  /** Raycast grid cell size = pillar cap height / this divisor. Higher = finer grid
+   *  (better at finding thin solid strips like window mullions, more raycasts). */
+  embossWallCellDivisor: number
   /** Text cap height as a % of the model's smaller horizontal footprint dimension.
    *  Used by the legacy "bands" style only; pillars derive their size from width-frac. */
   embossHeightPct: number
@@ -159,6 +191,8 @@ export function loadDefaults(): ProxyBakeConfig {
   const base = JSON.parse(raw) as ProxyBakeConfig
   const envOverrides: Partial<Record<keyof ProxyBakeConfig, number | undefined>> = {
     triangleBudget: envNum('PROXY_BAKE_TRIANGLE_BUDGET'),
+    triangleRetainRatio: envNum('PROXY_BAKE_TRIANGLE_RETAIN_RATIO'),
+    triangleBudgetCeiling: envNum('PROXY_BAKE_TRIANGLE_CEILING'),
     weldMergeDistanceMm: envNum('PROXY_BAKE_WELD_DISTANCE_MM'),
     proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
