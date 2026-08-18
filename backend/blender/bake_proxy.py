@@ -1455,10 +1455,12 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         hy = dy / 2.0
         depth_mm = max(1e-4, diagp * depth_pct / 100.0)
 
-        # Letter size: a small fraction of the narrower footprint → slim ribbons that
-        # scale with the model. Clamped so several letters still fit up short pieces.
+        # Letter size: a fraction of the narrower footprint → ribbons that scale with
+        # the model. Clamped so several letters still fit up short pieces (the ceiling
+        # was raised alongside embossPillarWidthFrac's default so the bigger letters
+        # aren't clamped back down on shorter models).
         min_horiz = min(dx, dy)
-        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.14))
+        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.20))
 
         z0 = minz + dz * 0.06
         z1 = maxz - dz * 0.06
