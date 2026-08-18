@@ -295,18 +295,25 @@ def compute_adaptive_budget(src_tris):
     the very densest sources — the single-worker queue means every extra minute
     here is a minute added to every OTHER upload's wait, not just this one's).
 
-    Defaults (retainRatio=0.09, ceiling=200000) were chosen from real production
-    proxy_report data on the actual "Japan houses" set (see incident notes): its
-    densest part was baking at 4.8% retain under the old flat 120k; this roughly
-    doubles that to ~7-9% while keeping the ceiling well within the timeout margin
-    those same real bakes showed (~50-90s wall time at the old budget, non-decimate
-    stages dominated by proxy triangle count — see max_surface_displacement and the
-    UV unwrap, neither of which scale cheaply past a few hundred k triangles).
-    A prior attempt at a 30%-retain floor was bake-tested against the real 2.5M-tri
-    source and did not complete in a reasonable time even locally — 9% was picked
-    to stay comfortably inside proven-safe territory, not as a final ceiling; raise
-    retainRatio/triangleBudgetCeiling later once a real worker-side bake confirms
-    a higher number is safe."""
+    Defaults (retainRatio=0.09, ceiling=200000) were originally chosen from real
+    production proxy_report data on the actual "Japan houses" set (see incident
+    notes): its densest part was baking at 4.8% retain under the old flat 120k;
+    9% roughly doubled that while keeping the ceiling well within the timeout
+    margin those same real bakes showed (~50-90s wall time, non-decimate stages
+    dominated by proxy triangle count — see max_surface_displacement and the UV
+    unwrap, neither of which scale cheaply past a few hundred k triangles). A
+    prior attempt at a 30%-retain FLOOR (no ceiling) was bake-tested against the
+    real 2.5M-tri source and did not complete in a reasonable time even locally.
+
+    Raised 2026-08-18 to retainRatio=0.22 (per-user decision to keep more detail —
+    was too aggressively decimated at 9%) with ceiling raised only to 300000, NOT
+    scaled proportionally (0.22/0.09 would imply ~490k) — this deliberately keeps
+    the worst case for the known pathological 2.5M-tri source well clear of the
+    30%/750k configuration that already failed to complete, while still giving
+    every source below ~1.36M tris (300000/0.22) the full 22% retain. If a future
+    source times out at this ceiling, lower triangleBudgetCeiling (or raise
+    bakeTimeoutMinutes) rather than assuming 0.22 is universally safe — it has not
+    been re-tested against the 2.5M-tri case at this ratio."""
     floor_budget = int(CFG.get("triangleBudget", 40000))
     retain_ratio = float(CFG.get("triangleRetainRatio", 0.09))
     ceiling_budget = max(floor_budget, int(CFG.get("triangleBudgetCeiling", 200000)))

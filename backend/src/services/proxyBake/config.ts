@@ -21,17 +21,23 @@ export interface ProxyBakeConfig {
    *  90k-tri tile kept 100%), so scaling by source size fixes the inversion. */
   triangleBudget: number
   /** Fraction of SOURCE triangles the adaptive budget targets for sources above the
-   *  triangleBudget floor (e.g. 0.09 = keep ~9%). Only takes effect once
+   *  triangleBudget floor (default 0.22 = keep ~22%, raised 2026-08-18 from 0.09 —
+   *  models were too aggressively decimated). Only takes effect once
    *  src_tris * triangleRetainRatio exceeds triangleBudget — typical/simple sources
-   *  are unaffected and keep decimating to the flat floor as before. */
+   *  are unaffected and keep decimating to the flat floor as before. See
+   *  bake_proxy.py's compute_adaptive_budget docstring for why the ceiling was NOT
+   *  scaled up proportionally with this. */
   triangleRetainRatio: number
   /** Hard cap on the adaptive proxy triangle target, regardless of how large
    *  triangleRetainRatio * sourceTriangles gets. Protects the 20-min bake timeout
    *  and — since the worker is a single-threaded serial queue (proxyBakeWorker.ts)
    *  — protects every OTHER queued upload's wait time too, not just this one's.
-   *  Chosen from real production timings on the densest known sources (~50-90s
-   *  wall time at a ~120k proxy); raise only after a real worker-side bake confirms
-   *  a higher number stays comfortably under the timeout. */
+   *  Default 300000, chosen deliberately BELOW what triangleRetainRatio=0.22 would
+   *  imply for the densest known real source (~2.5M tris → ~490k) — that ratio has
+   *  only been proven safe up to this ceiling; a prior 30%-retain/no-ceiling attempt
+   *  on that same source did not complete in a reasonable time. Raise only after a
+   *  real worker-side bake confirms a higher number stays comfortably under the
+   *  timeout. */
   triangleBudgetCeiling: number
   /** Merge-by-distance threshold (mm) run on the imported source BEFORE decimate/
    *  smooth. STL has no shared-vertex topology — every triangle owns its own verts —
