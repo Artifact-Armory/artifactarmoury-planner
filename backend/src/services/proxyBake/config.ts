@@ -118,15 +118,22 @@ export interface ProxyBakeConfig {
   embossHoleSafetyMm: number
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
-  /** Pillar letter cap height as a fraction of the narrower footprint dimension (default
-   *  0.64, doubled 2026-08-19 from 0.32 — was still too small to clearly see through
-   *  the through-holes, per-user decision; 0.32 itself was raised 2026-08-18 from
-   *  0.17). Also clamped against the model's own height (see bake_proxy.py's
-   *  _emboss_pillars, `dz * 0.64`, kept aligned with this value) so it can't ask for
-   *  taller letters than a short piece actually has room for. Scales with the model
-   *  either way — a bigger source gets proportionally bigger letters/holes, not a
-   *  fixed mm size. At 0.64 a single glyph is already over half the narrower
-   *  footprint dimension — the practical ceiling before letters start overlapping
+  /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.64,
+   *  doubled 2026-08-19 from 0.32 — was still too small to clearly see through the
+   *  through-holes, per-user decision; 0.32 itself was raised 2026-08-18 from 0.17;
+   *  changed 2026-08-19 from "narrower footprint dimension" to per-wall width so a
+   *  narrow side gets proportionately smaller letters instead of the same size as a
+   *  wide one — see bake_proxy.py's _cap_h_for_wall). For the default "vertical"
+   *  (climbing) orientation this is the WIDTH of the text column across the wall,
+   *  not how far up it reaches — glyphs are rotated 90° to read bottom-to-top.
+   *  Vertical reach is controlled separately by embossVerticalMarginFrac (the
+   *  "full height of the model" setting). Also clamped against the model's own
+   *  height (`dz * 0.8`, raised from 0.64 the same day) just so this column
+   *  width isn't clamped back down to something stingy on a tall, narrow wall —
+   *  not because it affects reach. Scales with the model either way — a bigger
+   *  source gets proportionally bigger letters/holes, not a fixed mm size. At
+   *  0.64 a single glyph is already over half a typical wall's width — the
+   *  practical ceiling before letters start overlapping
    *  is close; a further increase should probably come with a lower
    *  embossPillarCount instead. */
   embossPillarWidthFrac: number
@@ -153,6 +160,19 @@ export interface ProxyBakeConfig {
   /** Raycast grid cell size = pillar cap height / this divisor. Higher = finer grid
    *  (better at finding thin solid strips like window mullions, more raycasts). */
   embossWallCellDivisor: number
+  /** Fraction of the model's own height (dz) kept clear at the very top and
+   *  bottom of the vertical search band each pillar's climbing text is allowed
+   *  to reach into (default 0.01 = 1% per side, shrunk 2026-08-19 from a fixed
+   *  6% per "make the watermark full height of the model" — PROPORTIONAL to
+   *  each model's own dz, so it auto-scales for any model size rather than
+   *  needing per-size tuning). This sets the maximum possible vertical reach —
+   *  _locate_wall_text_at still only places the run where actual contiguous
+   *  solid material exists within that band, so a wall broken up by windows/
+   *  lattice can still fall short of full height on that one wall; that's a
+   *  real geometry constraint, not something this setting can override without
+   *  risking a hole cut through empty space. See bake_proxy.py's
+   *  _emboss_pillars (z0/z1). */
+  embossVerticalMarginFrac: number
   /** Text cap height as a % of the model's smaller horizontal footprint dimension.
    *  Used by the legacy "bands" style only; pillars derive their size from width-frac. */
   embossHeightPct: number

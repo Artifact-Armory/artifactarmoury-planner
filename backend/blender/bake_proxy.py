@@ -1101,6 +1101,45 @@ def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
     return best[:3] if best else None
 
 
+def _find_wall_segments(grid, read_n, cross_n, strip_cross_cells, min_coverage, min_run_cells):
+    """Every contiguous run (along the read/Z axis), fixed at the wall's
+    LATERAL CENTRE column, that clears `min_run_cells` — the watermark always
+    sits in the middle of each wall (2026-08-19, explicit user request: "only
+    the middle of each side"), never searching sideways for a longer run
+    elsewhere on the wall even if one exists. A gap at the centre (a window,
+    a post) still yields multiple segments — one below it, one above — so the
+    mark still reaches top-to-bottom through a centred obstruction; it just
+    never leaves the centre column to dodge one.
+
+    Returns a list of (run_len_cells, read_start_cell, cross_start_cell) — all
+    sharing the same centred cross_start_cell — longest segment first, or []
+    if nothing at the centre clears the floor anywhere."""
+    w = max(1, min(strip_cross_cells, cross_n))
+    cs = max(0, min(int(round((cross_n - w) / 2.0)), cross_n - w))
+    usable = []
+    for r in range(read_n):
+        row = grid[r]
+        cnt = sum(1 for c in range(cs, cs + w) if row[c])
+        usable.append(cnt >= w * min_coverage)
+    runs = []
+    run_start = None
+    r = 0
+    while r <= read_n:
+        if r < read_n and usable[r]:
+            if run_start is None:
+                run_start = r
+            r += 1
+        else:
+            if run_start is not None:
+                length = r - run_start
+                if length >= min_run_cells:
+                    runs.append((length, run_start, cs))
+                run_start = None
+            r += 1
+    runs.sort(key=lambda seg: seg[0], reverse=True)
+    return runs
+
+
 def _select_reach_mm(reach_mm, depth_mm, cap_h):
     """Depth-of-search clamp shared by _locate_wall_text (what counts as a
     'solid, in-reach' raycast hit) and _displace_wall_text (what vertices are
@@ -1261,6 +1300,73 @@ def _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1
         z_centre=z0 + (z_start + run_len / 2.0) * cell_read,
         run_mm=run_len * cell_read,
     )
+
+
+def _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
+                              cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
+    """VERTICAL-ONLY sibling of _locate_wall_text_at that returns EVERY usable
+    segment at the wall's LATERAL CENTRE (via _find_wall_segments) instead of
+    the single best run anywhere on the wall — see _find_wall_segments for why.
+    One trial at a fixed `cap_h`. Returns a list of dicts (orientation=
+    'vertical'/lateral_centre/z_centre/run_mm), possibly empty."""
+    import mathutils
+    up = mathutils.Vector((0.0, 0.0, 1.0))
+    cell = max(0.6, cap_h / max(1.0, cell_divisor))
+    period_read_mm = max(1e-3, cap_h * tile_aspect)
+    min_run_mm = max(cap_h * 1.15, period_read_mm * 0.6)
+
+    grid, read_n, cross_n, cell_read, cell_cross = _wall_solidity_grid(
+        bvh, wall_centre, normal, up, z0, z1, lateral, lateral_half, select_reach_mm, cell)
+
+    vert_w = max(1, int(math.ceil(cap_h * 0.96 / cell_cross)))
+    min_run_cells = max(1, int(math.ceil(min_run_mm / cell_read)))
+    segments = _find_wall_segments(grid, read_n, cross_n, vert_w, min_coverage, min_run_cells)
+
+    if os.environ.get("WM_DEBUG"):
+        print("WMDEBUG locate-segments vert_w=%d min_run_cells=%d segments=%r"
+              % (vert_w, min_run_cells, segments))
+
+    out = []
+    for run_len, z_start, lat_start in segments:
+        out.append(dict(
+            orientation="vertical",
+            lateral_centre=-lateral_half + (lat_start + vert_w / 2.0) * cell_cross,
+            z_centre=z0 + (z_start + run_len / 2.0) * cell_read,
+            run_mm=run_len * cell_read,
+        ))
+    return out
+
+
+def _locate_wall_text_segments(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
+                                cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
+    """Segmented sibling of _locate_wall_text: tries the same shrink sequence
+    (progressively smaller sizes, then one last-resort relaxed-coverage pass —
+    same "every wall gets SOME mark" guarantee) but returns ALL usable segments
+    at the wall's LATERAL CENTRE at whichever size first finds any, instead of
+    stopping at one placement anywhere on the wall. This is what makes the
+    watermark reach top-to-bottom without leaving the centre: a centred window
+    still gets a mark below it AND above it, together spanning close to the
+    wall's full extent, rather than the single best run giving up at the first
+    gap or drifting sideways to dodge it. VERTICAL orientation only — see
+    _locate_wall_segments_at. Returns a list of dicts, possibly empty (only
+    when the centre column truly has zero solid material anywhere)."""
+    for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32, 0.24, 0.18, 0.13, 0.1):
+        segs = _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half,
+                                         z0, z1, cap_h * shrink, tile_aspect, select_reach_mm,
+                                         min_coverage, cell_divisor)
+        if segs:
+            for s in segs:
+                s["cap_h"] = cap_h * shrink
+            return segs
+
+    relaxed_coverage = max(0.15, min_coverage * 0.5)
+    smallest = cap_h * 0.1
+    segs = _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half,
+                                     z0, z1, smallest, tile_aspect, select_reach_mm,
+                                     relaxed_coverage, cell_divisor)
+    for s in segs:
+        s["cap_h"] = smallest
+    return segs
 
 
 def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor,
@@ -1661,19 +1767,20 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         # Letter size: a fraction of EACH WALL'S OWN width (not the model's overall
         # footprint minimum) → a narrow side gets proportionately smaller letters,
         # a wide side gets bigger ones, computed per-wall below via
-        # _cap_h_for_wall(lateral_half). Clamped so several letters still fit up
-        # short pieces (the ceiling is kept aligned with embossPillarWidthFrac's
-        # default so bigger letters aren't clamped back down on shorter models).
-        # Doubled 2026-08-19 (0.32->0.64) per explicit user request — at this
-        # fraction a single glyph's cap height is more than half a typical wall's
-        # width, so pillars visually dominate most of each side. That's
-        # intentional here (holes need to read as clearly visible), but it's the
-        # practical ceiling before letters start overlapping each other or
-        # wrapping past a wall's actual edges — a further doubling would need
-        # embossPillarCount lowered too to keep them legible.
+        # _cap_h_for_wall(lateral_half). NOTE what this actually controls for the
+        # default "vertical" (climbing) orientation: each glyph is rotated 90° to
+        # read bottom-to-top, so cap_h becomes the WIDTH of the text column across
+        # the wall, not how far up the wall it reaches — that's governed by the
+        # z0/z1 search band below (the actual lever for "full height of the
+        # model") plus how much contiguous solid material _locate_wall_text_at
+        # finds inside it. The `dz * 0.8` clamp here just stops the column from
+        # being clamped back down to a stingy width on tall, narrow walls
+        # (ceiling raised 2026-08-19 from 0.64 alongside the z0/z1 change below,
+        # both from the same "full height" request) — it does not, by itself,
+        # change vertical reach.
         def _cap_h_for_wall(wall_lateral_half):
             wall_width = max(1e-4, wall_lateral_half * 2.0)
-            return max(diagp * 0.004, min(wall_width * width_frac, dz * 0.64))
+            return max(diagp * 0.004, min(wall_width * width_frac, dz * 0.8))
 
         # Upper bound for _measure_thickness_mm's exit-surface search. Bounded by the
         # model's own bbox diagonal — "through the model" can legitimately mean the
@@ -1681,8 +1788,24 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         # exit surface at all) from raycasting forever.
         max_probe_mm = max(diagp, 1.0)
 
-        z0 = minz + dz * 0.06
-        z1 = maxz - dz * 0.06
+        # Vertical search band the climbing text is allowed to reach into. A
+        # PERCENTAGE of this model's own dz (never a fixed mm value), so it
+        # automatically scales for any model size — a 20mm miniature and a 2m
+        # diorama piece both get a band covering the same fraction of their own
+        # height. Shrunk 2026-08-19 from 6%-per-side to embossVerticalMarginFrac
+        # (default 1%) per explicit "full height of the model" request — just
+        # enough clearance to keep the cutter off the literal top/bottom edge
+        # (thin material there may not have room for the hole cutter's entry/
+        # exit faces), not enough to visibly shrink the mark's reach. NOTE: this
+        # sets the MAXIMUM possible reach — _locate_wall_text_at still only
+        # places the run where it finds actual contiguous solid material within
+        # this band, so a wall broken up by windows/lattice may still fall short
+        # of the full band on that specific wall; that's a real geometry
+        # constraint, not something a margin setting can override without
+        # risking a hole cut through empty space.
+        v_margin = max(0.0, float(CFG.get("embossVerticalMarginFrac", 0.01)))
+        z0 = minz + dz * v_margin
+        z1 = maxz - dz * v_margin
 
         # Evenly-spaced azimuths. For the default 4 this is the cardinal
         # +Y/+X/-Y/-X order the old hardcoded table used (kept identical so
@@ -1723,6 +1846,9 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         applied = 0
         holes_attempted = 0
         holes_cut = 0
+        walls_covered = 0  # walls with >=1 successful mark — distinct from `applied`,
+        # which now counts individual holes and can exceed the wall count once a
+        # wall picks up more than one segment.
         placements = []
         cap_h_per_wall = []
         up = mathutils.Vector((0.0, 0.0, 1.0))
@@ -1738,6 +1864,58 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             select_reach_mm = _select_reach_mm(reach_mm, depth_mm, cap_h)
             wall_centre = mathutils.Vector((wx, wy, 0.0))
             label = "wall %d" % i
+
+            if through_holes and force_orientation == "vertical":
+                # Segmented placement, fixed to the wall's LATERAL CENTRE (never
+                # searches sideways for a better spot — explicit user request):
+                # every usable solid run in that centre column gets its own
+                # hole, not just the single best one. This is what lets the
+                # mark reach top-to-bottom through a centred obstruction (a run
+                # below a window AND a separate run above it) instead of
+                # stopping at the first gap. See _locate_wall_text_segments.
+                segs = _locate_wall_text_segments(bvh, wall_centre, normal, lateral, lateral_half,
+                                                   z0, z1, cap_h, tile_aspect, select_reach_mm,
+                                                   min_coverage, cell_divisor)
+                if not segs:
+                    warn("Watermark %s: no solid material found ANYWHERE on this wall "
+                         "(%.0fmm wide) even at minimum size — this side gets no mark"
+                         % (label, lateral_half * 2))
+                    placements.append("skipped")
+                    continue
+
+                wall_cut = 0
+                for seg_i, loc in enumerate(segs):
+                    anchor = wall_centre + lateral * loc["lateral_centre"] \
+                        + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
+                    seg_label = "%s seg%d/%d" % (label, seg_i + 1, len(segs))
+                    thickness_mm = _measure_thickness_mm(bvh, anchor, normal, loc["cap_h"], max_probe_mm)
+                    if thickness_mm is None:
+                        warn("Watermark %s: couldn't measure a local thickness (no far surface "
+                             "found within %.0fmm), skipping this segment" % (seg_label, max_probe_mm))
+                        placements.append("no-thickness (%s)" % seg_label)
+                        continue
+                    cutter = _build_hole_cutter(
+                        text, tile_aspect, up, lateral, normal, anchor,
+                        loc["cap_h"], loc["run_mm"], thickness_mm, hole_outside_mm,
+                        hole_safety_mm, seg_label)
+                    holes_attempted += 1
+                    # Cut THIS segment's hole right away (per-segment boolean) —
+                    # a solver failure on one segment must not sink marks that
+                    # already cut cleanly elsewhere (same reasoning as per-wall
+                    # booleans below, just one level finer).
+                    if _apply_wm_boolean(proxy, cutter, True, text,
+                                          "vertical-pillars-hole-%d-seg%d" % (i, seg_i)):
+                        applied += 1
+                        holes_cut += 1
+                        wall_cut += 1
+                        placements.append("vertical@%.1fmm thru=%.1fmm (%s)"
+                                           % (loc["cap_h"], thickness_mm, seg_label))
+                    else:
+                        placements.append("boolean-failed (%s)" % seg_label)
+                if wall_cut > 0:
+                    walls_covered += 1
+                continue
+
             loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
                                      z0, z1, cap_h, tile_aspect, select_reach_mm,
                                      min_coverage, cell_divisor, force_orientation)
@@ -1761,6 +1939,8 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                 read_axis, height_axis = up, lateral
 
             if through_holes:
+                # force_orientation == "auto" here (embossOrientation override) —
+                # the segmented path above only handles the vertical-only default.
                 thickness_mm = _measure_thickness_mm(bvh, anchor, normal, loc["cap_h"], max_probe_mm)
                 if thickness_mm is None:
                     warn("Watermark %s: couldn't measure a local thickness (no far surface found "
@@ -1772,15 +1952,10 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                     loc["cap_h"], loc["run_mm"], thickness_mm, hole_outside_mm,
                     hole_safety_mm, label)
                 holes_attempted += 1
-                # Cut THIS wall's hole right away (per-wall boolean) rather than
-                # collecting every wall's cutter and running one combined boolean at
-                # the end — a solver failure on one wall's geometry must not sink the
-                # marks that already cut cleanly into the other walls. Holes are
-                # always a material-removing DIFFERENCE regardless of embossEngrave
-                # (a "raised hole" isn't a coherent concept).
                 if _apply_wm_boolean(proxy, cutter, True, text, "vertical-pillars-hole-%d" % i):
                     applied += 1
                     holes_cut += 1
+                    walls_covered += 1
                     placements.append("%s@%.1fmm thru=%.1fmm" % (loc["orientation"], loc["cap_h"], thickness_mm))
                 else:
                     placements.append("boolean-failed")
@@ -1788,6 +1963,7 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                                       anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
                                       engrave, label):
                 applied += 1
+                walls_covered += 1
                 placements.append("%s@%.1fmm" % (loc["orientation"], loc["cap_h"]))
             else:
                 placements.append("failed")
@@ -1814,10 +1990,13 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         REPORT["embossPlacement"] = "vertical-pillars-%d" % count
         REPORT["embossOrientationCfg"] = orientation_cfg
         REPORT["embossWallPlacements"] = placements
-        if applied == 0:
+        REPORT["embossWallsCovered"] = walls_covered
+        REPORT["embossHolesTotal"] = applied  # individual holes; can exceed embossPillarCount
+        # now that a single wall can carry more than one segment
+        if walls_covered == 0:
             warn("Watermark applied to 0 of %d walls" % count)
-        elif applied < count:
-            warn("Watermark applied to only %d of %d walls" % (applied, count))
+        elif walls_covered < count:
+            warn("Watermark applied to only %d of %d walls" % (walls_covered, count))
     except Exception as e:
         warn("Emboss pillars failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
