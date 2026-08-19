@@ -8,6 +8,7 @@ import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
+import { Upload } from 'lucide-react'
 
 // Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
 // EditModel is statically imported by app.tsx (every page is), so a static import here
@@ -430,12 +431,17 @@ const EditModel: React.FC = () => {
               </div>
             )}
             <div>
-              <input
-                type="file"
-                accept="image/*"
-                disabled={busy}
-                onChange={(e) => onPickThumb(e.target.files?.[0] ?? null)}
-              />
+              <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                <Upload size={16} />
+                Choose image…
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={busy}
+                  onChange={(e) => onPickThumb(e.target.files?.[0] ?? null)}
+                />
+              </label>
               {thumbFile && <p className="text-xs text-muted-foreground mt-1">New image will be uploaded when you save.</p>}
             </div>
           </div>
@@ -479,12 +485,17 @@ const EditModel: React.FC = () => {
         </p>
 
         <form onSubmit={handleNewVersion} className="mt-4 space-y-3">
-          <input
-            type="file"
-            accept=".stl,.obj,.3mf"
-            disabled={versionBusy}
-            onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
-          />
+          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${versionBusy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={16} />
+            {versionFile ? versionFile.name : 'Choose file…'}
+            <input
+              type="file"
+              accept=".stl,.obj,.3mf"
+              className="hidden"
+              disabled={versionBusy}
+              onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
           <div>
             <label className="block text-sm mb-1">What changed? <span className="font-normal text-muted-foreground">(optional, shown to buyers)</span></label>
             <textarea

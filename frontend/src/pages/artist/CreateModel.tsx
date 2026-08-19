@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { ShieldCheck } from 'lucide-react'
+import { ShieldCheck, Upload } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
@@ -344,7 +344,11 @@ const CreateModel: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium mb-1">Model file (.stl, .obj or .3mf)</label>
-          <input type="file" accept=".stl,.obj,.3mf" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={16} />
+            Choose file…
+            <input type="file" accept=".stl,.obj,.3mf" className="hidden" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          </label>
           {stlFile && <p className="text-sm text-muted-foreground mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
           <p className="text-xs text-muted-foreground mt-1">
             OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
@@ -375,23 +379,32 @@ const CreateModel: React.FC = () => {
               ))}
             </ul>
           )}
-          <input
-            type="file"
-            accept=".stl,.obj,.3mf"
-            multiple
-            disabled={busy}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? [])
-              if (files.length) setPartFiles((list) => [...list, ...files])
-              e.target.value = '' // allow re-selecting the same file
-            }}
-          />
+          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={16} />
+            Add part file(s)…
+            <input
+              type="file"
+              accept=".stl,.obj,.3mf"
+              multiple
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? [])
+                if (files.length) setPartFiles((list) => [...list, ...files])
+                e.target.value = '' // allow re-selecting the same file
+              }}
+            />
+          </label>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Thumbnail <span className="text-red-500">*</span></label>
           <p className="text-xs text-muted-foreground mb-1">A preview image is required — it's what buyers see in the marketplace.</p>
-          <input type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={16} />
+            Choose image…
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          </label>
           {thumbFile && <p className="text-sm text-muted-foreground mt-1">{thumbFile.name}</p>}
         </div>
 
