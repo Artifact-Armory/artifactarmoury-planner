@@ -36,6 +36,8 @@
   "remeshStrategy": "decimate",
   "joinLooseParts": true,
   "poisonPillsEnabled": true,
+  "debrisIslandMinDiagFrac": 0.03,
+  "debrisIslandMinFaces": 30,
   "baseFaceZNormalThreshold": -0.5,
   "baseFaceHeightMm": 2.0,
   "targetMaxFileMb": 4,

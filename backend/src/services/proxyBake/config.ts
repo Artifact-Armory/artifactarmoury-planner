@@ -96,12 +96,15 @@ export interface ProxyBakeConfig {
    *  _measure_thickness_mm in bake_proxy.py) — instead of the shallow vertex-
    *  displacement relief the pillars style used before. A hole can't be shaded/lit
    *  away in a render or trivially patched over the way a shallow recess can, and it
-   *  reads as unmistakably damaged geometry to a would-be thief. Uses the same
-   *  boolean-with-safe-fallback path as the legacy "bands" style (_apply_wm_boolean) —
-   *  on a solver failure it falls back to joining the (unbooleaned) letters as loose
-   *  geometry rather than failing the bake, same "never die over the watermark"
-   *  guarantee as everywhere else in this file. Set false to fall back to the old
-   *  displacement relief. */
+   *  reads as unmistakably damaged geometry to a would-be thief. Cut per-wall via
+   *  _apply_wm_boolean (EXACT solver, retried with FAST on failure); if both solvers
+   *  fail for a given wall, that wall's mark is simply dropped rather than left as
+   *  un-subtracted geometry sitting on the surface (fixed 2026-08-19 — the old
+   *  fallback joined the loose cutter onto the proxy on failure, which looked like a
+   *  visible bulge/gouge instead of a hole). The bake itself still never fails over
+   *  a watermark problem, same "never die over the watermark" guarantee as
+   *  everywhere else in this file. Set false to fall back to the old displacement
+   *  relief. */
   embossThroughHoles: boolean
   /** How far (mm) the through-hole cutter pokes OUTSIDE the located surface before
    *  its solid volume begins, so the cut's entry edge is always clean even if the
@@ -188,6 +191,17 @@ export interface ProxyBakeConfig {
    *  looks damaged in the planner — the interior-face heuristic can punch holes in
    *  visible surfaces on some meshes. */
   poisonPillsEnabled: boolean
+  /** After the emboss boolean, any disconnected mesh island whose bounding-box
+   *  diagonal is smaller than this fraction of the whole proxy's diagonal is
+   *  treated as boolean-cut debris (a thin sliver severed by a watermark hole,
+   *  not real geometry) and deleted. Fixed 2026-08-19 after a production bake
+   *  left a free-floating shard next to a wall corner near a watermark cut —
+   *  present in the proxy, absent from the source. See remove_boolean_debris in
+   *  bake_proxy.py. */
+  debrisIslandMinDiagFrac: number
+  /** Face-count floor for the same debris check — an island under this many
+   *  faces is dropped regardless of its bounding-box size. */
+  debrisIslandMinFaces: number
   /** A base face points down when its normal Z is below this. */
   baseFaceZNormalThreshold: number
   /** A base face sits within this many mm of the minimum Z (the table). */

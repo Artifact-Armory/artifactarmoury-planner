@@ -553,12 +553,26 @@ def max_surface_displacement(src, proxy):
     return maxd
 
 
-def bake_pass(src, proxy, img, bake_type, samples, cage_extrusion, max_ray_distance, extra=None):
+def bake_pass(src, proxy, img, bake_type, samples, cage_extrusion, max_ray_distance,
+              extra=None, denoise=False):
     """Run one selected-to-active bake from src onto proxy's active image node.
     cage_extrusion/max_ray_distance are precomputed (see bake_maps) so every pass
-    reaches the source detail regardless of how far smoothing moved the surface."""
+    reaches the source detail regardless of how far smoothing moved the surface.
+
+    denoise=True runs Cycles' CPU OpenImageDenoise pass over the bake — AO/colour
+    passes at low sample counts show visible Monte-Carlo noise ("TV static") on
+    detailed/crevice-heavy geometry, and this cleans it up without needing more
+    samples (which would cost more bake time). NEVER set this for the normal-map
+    pass: it's a data pass (tangent-space vectors), not a colour image, and
+    denoising it would corrupt the encoded directions."""
     scene = bpy.context.scene
     scene.cycles.samples = max(1, int(samples))
+    scene.cycles.use_denoising = bool(denoise)
+    if denoise:
+        try:
+            scene.cycles.denoiser = "OPENIMAGEDENOISE"  # only CPU-available option here
+        except Exception:
+            pass
 
     ensure_material_with_image(proxy, img)
 
@@ -616,7 +630,7 @@ def bake_maps(src, proxy, diag):
 
     ao_img = new_image("proxy_ao", ao_res)
     ao_img.colorspace_settings.name = "Non-Color"
-    bake_pass(src, proxy, ao_img, "AO", ao_samples, cage, ray)
+    bake_pass(src, proxy, ao_img, "AO", ao_samples, cage, ray, denoise=True)
     save_png(ao_img, "ao.png")
 
     REPORT["textureResolutions"] = {"normal": normal_res, "ao": ao_res}
@@ -631,7 +645,7 @@ def bake_maps(src, proxy, diag):
         try:
             base_img = new_image("proxy_basecolor", base_res)
             bake_pass(src, proxy, base_img, "DIFFUSE", 16, cage, ray,
-                      extra=dict(pass_filter={"COLOR"}))
+                      extra=dict(pass_filter={"COLOR"}), denoise=True)
             save_png(base_img, "basecolor.png")
             REPORT["textureResolutions"]["baseColor"] = base_res
             REPORT["baseColorBaked"] = True
@@ -756,44 +770,51 @@ def _wm_material():
 
 def _apply_wm_boolean(proxy, wm, engrave, text, placement):
     """Boolean the finished watermark operand `wm` onto `proxy` (DIFFERENCE=engrave,
-    UNION=raised). Falls back to joining the text as loose geometry on solver failure
-    (weaker, but still in-mesh). Removes the operand on success. Sets REPORT fields."""
+    UNION=raised). Tries the EXACT solver, then retries once with FAST (less robust
+    on messy geometry but handles some cases EXACT chokes on, e.g. near-coplanar
+    faces in ornate/lattice-heavy models). If BOTH fail, the operand is discarded
+    WITHOUT joining it to the proxy: a failed cut must never leave un-subtracted
+    cutter geometry sitting on/through the surface — that reads as a visible
+    bulge/gouge, not a hole, which defeats the point of the mark. Returns True iff
+    a real cut was applied; the caller decides whether to count this wall/placement
+    as watermarked. Sets REPORT fields only on success (caller aggregates the
+    overall outcome across all placements)."""
     wm.data.materials.clear()
     wm.data.materials.append(_wm_material())
 
     deselect_all()
     proxy.select_set(True)
     set_active(proxy)
-    mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
-    mod.operation = "DIFFERENCE" if engrave else "UNION"
-    mod.object = wm
-    try:
-        mod.solver = "EXACT"
-    except Exception:
-        pass
 
-    try:
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-        REPORT["embossMethod"] = "boolean-" + ("difference" if engrave else "union")
-        if wm.name in bpy.data.objects:
-            bpy.data.objects.remove(wm, do_unlink=True)
-    except Exception as e:
-        warn("Emboss boolean failed, joining text as loose geometry: " + str(e))
+    for solver in ("EXACT", "FAST"):
+        mod = proxy.modifiers.new(name="wm_bool", type="BOOLEAN")
+        mod.operation = "DIFFERENCE" if engrave else "UNION"
+        mod.object = wm
         try:
-            proxy.modifiers.remove(mod)
+            mod.solver = solver
         except Exception:
             pass
-        deselect_all()
-        if wm.name in bpy.data.objects:
-            wm.select_set(True)
-            proxy.select_set(True)
-            set_active(proxy)  # active = join target
-            bpy.ops.object.join()  # consumes wm into proxy
-        REPORT["embossMethod"] = "join"
+        try:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            REPORT["embossMethod"] = "boolean-" + solver.lower() + "-" + ("difference" if engrave else "union")
+            if wm.name in bpy.data.objects:
+                bpy.data.objects.remove(wm, do_unlink=True)
+            REPORT["embossWatermark"] = text
+            REPORT["embossPlacement"] = placement
+            REPORT["embossApplied"] = True
+            return True
+        except Exception as e:
+            warn("Emboss boolean (%s solver, %s) failed: %s" % (solver, placement, str(e)))
+            try:
+                proxy.modifiers.remove(mod)
+            except Exception:
+                pass
 
-    REPORT["embossWatermark"] = text
-    REPORT["embossPlacement"] = placement
-    REPORT["embossApplied"] = True
+    warn("Emboss boolean failed on both solvers for %s — dropping this mark "
+         "rather than leaving a visible un-subtracted bulge" % placement)
+    if wm.name in bpy.data.objects:
+        bpy.data.objects.remove(wm, do_unlink=True)
+    return False
 
 
 _WM_TILE_CACHE = {}
@@ -1128,15 +1149,29 @@ def _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
     `tile_aspect` (the cached watermark tile's width/height, from
     _get_watermark_tile) is what lets _locate_wall_text_at judge "enough run to
     actually read" rather than just "enough run for one glyph row" — see there.
-    Returns a dict (orientation/lateral_centre/z_centre/run_mm/cap_h), or None
-    if nothing legible fits at any tried size."""
-    for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32):
+    Every wall should end up with SOME mark: after the normal shrink sequence,
+    a final last-resort pass tries the smallest size again with a relaxed
+    coverage floor — a smaller, less-ideal patch beats no mark at all on that
+    side. Returns a dict (orientation/lateral_centre/z_centre/run_mm/cap_h), or
+    None only if the wall truly has zero solid, in-reach material anywhere
+    (e.g. a fully open doorway spanning the whole side) — no size/coverage
+    combination can cut a hole through empty space."""
+    for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32, 0.24, 0.18, 0.13, 0.1):
         result = _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half,
                                        z0, z1, cap_h * shrink, tile_aspect, select_reach_mm,
                                        min_coverage, cell_divisor, force_orientation)
         if result is not None:
             result["cap_h"] = cap_h * shrink
             return result
+
+    relaxed_coverage = max(0.15, min_coverage * 0.5)
+    smallest = cap_h * 0.1
+    result = _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half,
+                                   z0, z1, smallest, tile_aspect, select_reach_mm,
+                                   relaxed_coverage, cell_divisor, force_orientation)
+    if result is not None:
+        result["cap_h"] = smallest
+        return result
     return None
 
 
@@ -1566,14 +1601,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
     Two placement mechanisms, controlled by embossThroughHoles:
       • THROUGH-HOLES (default, embossThroughHoles=true): real extruded letter
-        geometry, one boolean DIFFERENCE against the proxy per bake
-        (_build_hole_cutter + _apply_wm_boolean) sized to fully perforate the
-        local material at each located spot (_measure_thickness_mm) — an actual
-        hole a would-be thief has to notice and repair, not a shading trick a
-        render can hide. Uses the same boolean-with-safe-fallback path the
-        legacy "bands" style already relied on, so a solver failure still can't
-        fail the bake — it falls back to joining the cutters as loose
-        (unbooleaned) geometry instead.
+        geometry, one boolean DIFFERENCE per wall against the proxy
+        (_build_hole_cutter + _apply_wm_boolean, applied per-wall so one wall's
+        solver failure can't sink marks already cut cleanly on the others) sized
+        to fully perforate the local material at each located spot
+        (_measure_thickness_mm) — an actual hole a would-be thief has to notice
+        and repair, not a shading trick a render can hide. _apply_wm_boolean
+        retries with the FAST solver if EXACT fails; if both fail for a wall,
+        that wall's mark is dropped entirely rather than left as a visible
+        un-subtracted bulge — a failed cut must never look like anything other
+        than a clean hole or nothing at all.
       • RELIEF (embossThroughHoles=false): the original direct vertex-
         displacement approach (_displace_wall_text) — no boolean CSG cut at
         all, so it can't fail the way a boolean solver can on degenerate/sliver
@@ -1621,19 +1658,22 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         hy = dy / 2.0
         depth_mm = max(1e-4, diagp * depth_pct / 100.0)
 
-        # Letter size: a fraction of the narrower footprint → ribbons that scale with
-        # the model. Clamped so several letters still fit up short pieces (the ceiling
-        # is kept aligned with embossPillarWidthFrac's default so bigger letters
-        # aren't clamped back down on shorter models). Doubled 2026-08-19
-        # (0.32->0.64) per explicit user request — at this fraction a single glyph's
-        # cap height is now more than half the model's narrower footprint dimension,
-        # so on a roughly square piece the 4 default pillars will visually dominate
-        # most of each side. That's intentional here (holes need to read as clearly
-        # visible), but it's the practical ceiling before letters start overlapping
-        # each other or wrapping past a wall's actual edges — a further doubling
-        # would need embossPillarCount lowered too to keep them legible.
-        min_horiz = min(dx, dy)
-        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.64))
+        # Letter size: a fraction of EACH WALL'S OWN width (not the model's overall
+        # footprint minimum) → a narrow side gets proportionately smaller letters,
+        # a wide side gets bigger ones, computed per-wall below via
+        # _cap_h_for_wall(lateral_half). Clamped so several letters still fit up
+        # short pieces (the ceiling is kept aligned with embossPillarWidthFrac's
+        # default so bigger letters aren't clamped back down on shorter models).
+        # Doubled 2026-08-19 (0.32->0.64) per explicit user request — at this
+        # fraction a single glyph's cap height is more than half a typical wall's
+        # width, so pillars visually dominate most of each side. That's
+        # intentional here (holes need to read as clearly visible), but it's the
+        # practical ceiling before letters start overlapping each other or
+        # wrapping past a wall's actual edges — a further doubling would need
+        # embossPillarCount lowered too to keep them legible.
+        def _cap_h_for_wall(wall_lateral_half):
+            wall_width = max(1e-4, wall_lateral_half * 2.0)
+            return max(diagp * 0.004, min(wall_width * width_frac, dz * 0.64))
 
         # Upper bound for _measure_thickness_mm's exit-surface search. Bounded by the
         # model's own bbox diagonal — "through the model" can legitimately mean the
@@ -1681,10 +1721,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         bvh = _build_local_bvh(proxy)
 
         applied = 0
+        holes_attempted = 0
+        holes_cut = 0
         placements = []
-        cutters = []
+        cap_h_per_wall = []
         up = mathutils.Vector((0.0, 0.0, 1.0))
         for i, (normal, lateral, (wx, wy), reach_depth, lateral_half) in enumerate(walls):
+            # Sized to THIS wall's own width, not the model's overall footprint —
+            # see _cap_h_for_wall.
+            cap_h = _cap_h_for_wall(lateral_half)
+            cap_h_per_wall.append(round(cap_h, 3))
             reach_mm = max(1e-4, reach_depth * reach_frac)
             # Computed ONCE and used for both the search (_locate_wall_text) and
             # the actual selection (_displace_wall_text) — they must agree, see
@@ -1696,7 +1742,13 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                                      z0, z1, cap_h, tile_aspect, select_reach_mm,
                                      min_coverage, cell_divisor, force_orientation)
             if loc is None:
-                warn("Watermark %s: no usable solid patch found across %.0fmm of wall, skipping"
+                # _locate_wall_text already tried every size down to a last-resort
+                # relaxed-coverage attempt — this only fires if the wall truly has
+                # zero solid material anywhere (e.g. an open doorway spanning the
+                # whole side). Real walls with any frame/baseboard/mullion should
+                # always find something.
+                warn("Watermark %s: no solid material found ANYWHERE on this wall "
+                     "(%.0fmm wide) even at minimum size — this side gets no mark"
                      % (label, lateral_half * 2))
                 placements.append("skipped")
                 continue
@@ -1715,12 +1767,23 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                          "within %.0fmm), skipping" % (label, max_probe_mm))
                     placements.append("no-thickness")
                     continue
-                cutters.append(_build_hole_cutter(
+                cutter = _build_hole_cutter(
                     text, tile_aspect, read_axis, height_axis, normal, anchor,
                     loc["cap_h"], loc["run_mm"], thickness_mm, hole_outside_mm,
-                    hole_safety_mm, label))
-                applied += 1
-                placements.append("%s@%.1fmm thru=%.1fmm" % (loc["orientation"], loc["cap_h"], thickness_mm))
+                    hole_safety_mm, label)
+                holes_attempted += 1
+                # Cut THIS wall's hole right away (per-wall boolean) rather than
+                # collecting every wall's cutter and running one combined boolean at
+                # the end — a solver failure on one wall's geometry must not sink the
+                # marks that already cut cleanly into the other walls. Holes are
+                # always a material-removing DIFFERENCE regardless of embossEngrave
+                # (a "raised hole" isn't a coherent concept).
+                if _apply_wm_boolean(proxy, cutter, True, text, "vertical-pillars-hole-%d" % i):
+                    applied += 1
+                    holes_cut += 1
+                    placements.append("%s@%.1fmm thru=%.1fmm" % (loc["orientation"], loc["cap_h"], thickness_mm))
+                else:
+                    placements.append("boolean-failed")
             elif _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
                                       anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
                                       engrave, label):
@@ -1730,27 +1793,23 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                 placements.append("failed")
 
         if through_holes:
-            if cutters:
-                # One combined boolean for every wall's cutter, same pattern (and
-                # same safe join-fallback) the legacy "bands" style already used —
-                # holes are always a material-removing DIFFERENCE regardless of
-                # embossEngrave (a "raised hole" isn't a coherent concept).
-                deselect_all()
-                for o in cutters:
-                    o.select_set(True)
-                set_active(cutters[0])
-                bpy.ops.object.join()
-                wm = bpy.context.view_layer.objects.active
-                _apply_wm_boolean(proxy, wm, True, text, "vertical-pillars-holes-%d" % count)
-            else:
+            # Aggregate outcome across all per-wall booleans (each call above may
+            # have overwritten embossMethod/embossApplied with its own result).
+            if holes_attempted == 0:
                 REPORT["embossMethod"] = "holes-none-located"
-                REPORT["embossApplied"] = False
+            elif holes_cut == 0:
+                REPORT["embossMethod"] = "holes-all-failed"
+            else:
+                REPORT["embossMethod"] = "boolean-per-wall"
+            REPORT["embossApplied"] = holes_cut > 0
         else:
             REPORT["embossMethod"] = "displace"
             REPORT["embossApplied"] = applied > 0
 
         REPORT["embossPillarCount"] = count
-        REPORT["embossPillarCapHeightMm"] = round(cap_h, 3)
+        # One nominal size per wall now (proportionate to that wall's own width),
+        # not a single shared value — see _cap_h_for_wall.
+        REPORT["embossPillarCapHeightMmPerWall"] = cap_h_per_wall
         REPORT["embossWatermark"] = text
         REPORT["embossPlacement"] = "vertical-pillars-%d" % count
         REPORT["embossOrientationCfg"] = orientation_cfg
@@ -1844,7 +1903,8 @@ def _emboss_bands(proxy, text, engrave, height_pct, depth_pct, inset_pct):
         wm = bpy.context.view_layer.objects.active
         made = [wm]
 
-        _apply_wm_boolean(proxy, wm, engrave, text, "bottom-edge-4-sides")
+        cut_ok = _apply_wm_boolean(proxy, wm, engrave, text, "bottom-edge-4-sides")
+        REPORT["embossApplied"] = cut_ok
         made = []
     except Exception as e:
         warn("Emboss watermark failed (continuing without it): " + str(e))
@@ -1917,6 +1977,98 @@ def poison_pills(proxy):
     REPORT["boundaryEdgeCount"] = boundary
     if boundary <= 0:
         fail("Poison-pill assertion failed: proxy is still watertight (0 boundary edges)")
+
+
+def remove_boolean_debris(proxy, diag):
+    """Drop any small disconnected mesh island left on `proxy` — a boolean cut
+    (the watermark emboss, primarily) can sever a thin sliver of material into a
+    fragment that's no longer attached to the main shell, which reads as visible
+    debris floating near the surface even though the cut itself succeeded (a
+    real defect confirmed on a production bake: a corner of a wall next to a
+    watermark hole came away as a free-floating shard not present in the source).
+    Always keeps the single largest island; anything else under the size floor
+    is deleted. `proxy`'s object identity is preserved throughout — later
+    pipeline steps hold a direct reference to it — by repointing `proxy.data` at
+    the largest island's mesh instead of assuming `proxy` itself kept it.
+    Best-effort: any failure here just leaves the mesh as-is, same as every
+    other "never fail the bake over cleanup" step in this file."""
+    import mathutils
+    min_diag_frac = float(CFG.get("debrisIslandMinDiagFrac", 0.03))
+    min_faces = int(CFG.get("debrisIslandMinFaces", 30))
+    try:
+        before = set(bpy.data.objects.keys())
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.separate(type="LOOSE")
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        after = set(bpy.data.objects.keys())
+        new_names = after - before
+        pieces = [proxy] + [bpy.data.objects[n] for n in new_names if n in bpy.data.objects]
+        if len(pieces) <= 1:
+            return  # nothing was actually disconnected — the common, expected case
+
+        def piece_diag(o):
+            corners = [o.matrix_world @ mathutils.Vector(c) for c in o.bound_box]
+            xs = [c.x for c in corners]
+            ys = [c.y for c in corners]
+            zs = [c.z for c in corners]
+            return math.sqrt((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2
+                              + (max(zs) - min(zs)) ** 2)
+
+        pieces.sort(key=lambda o: len(o.data.polygons), reverse=True)
+        main = pieces[0]
+        threshold = diag * min_diag_frac
+        keep, debris = [], []
+        for o in pieces[1:]:
+            if piece_diag(o) < threshold or len(o.data.polygons) < min_faces:
+                debris.append(o)
+            else:
+                keep.append(o)  # not obviously debris — a human should look, not lose it silently
+
+        dropped_faces = sum(len(o.data.polygons) for o in debris)
+        for o in debris:
+            bpy.data.objects.remove(o, do_unlink=True)
+
+        # If the largest island ended up as a NEW object (not `proxy` itself),
+        # repoint `proxy` at its mesh data rather than joining into whatever
+        # (possibly debris-sized) data `proxy` happened to keep after separate.
+        if main is not proxy:
+            old_data = proxy.data
+            proxy.data = main.data
+            bpy.data.objects.remove(main, do_unlink=True)
+            if old_data.users == 0:
+                bpy.data.meshes.remove(old_data)
+
+        if keep:
+            deselect_all()
+            for o in keep:
+                o.select_set(True)
+            proxy.select_set(True)
+            set_active(proxy)
+            bpy.ops.object.join()
+
+        if debris:
+            REPORT["debrisIslandsRemoved"] = len(debris)
+            REPORT["debrisFacesRemoved"] = dropped_faces
+            warn("Removed %d small disconnected mesh island(s) (%d faces total) — "
+                 "likely boolean-cut debris, not real geometry" % (len(debris), dropped_faces))
+        if keep:
+            warn("Kept %d disconnected island(s) above the debris size floor — "
+                 "worth a manual look at this bake's report" % len(keep))
+    except Exception as e:
+        warn("Boolean-debris cleanup failed (continuing without it): " + str(e))
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except Exception:
+            pass
+    finally:
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
 
 
 def strip_metadata(proxy):
@@ -2057,6 +2209,9 @@ def main():
 
     with Stage("emboss"):
         emboss_watermark(proxy)
+
+    with Stage("debris_cleanup"):
+        remove_boolean_debris(proxy, diag)
 
     with Stage("poison_pills"):
         poison_pills(proxy)
