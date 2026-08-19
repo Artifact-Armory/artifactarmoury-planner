@@ -32,7 +32,7 @@ const PurchaseHistory: React.FC = () => {
     <div className="space-y-8">
       <section className="rounded-3xl bg-card p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-foreground">Purchase history</h1>
-        <p className="mt-2 text-sm text-muted-foreground">All of your digital orders and print requests in one place.</p>
+        <p className="mt-2 text-sm text-muted-foreground">All of your digital orders in one place.</p>
       </section>
 
       <section className="rounded-2xl border border-border bg-card shadow-xs">

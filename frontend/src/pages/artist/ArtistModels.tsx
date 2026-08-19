@@ -227,10 +227,12 @@ const ArtistModels: React.FC = () => {
         <div>
           <h1 className="text-xl font-semibold">My Models</h1>
           <p className="text-muted-foreground mt-1">Create and manage your listings. Drafts stay here until you publish them.</p>
-          <p className="text-muted-foreground text-sm mt-1">
-            Offer your model as a <span className="text-primary">print</span> for buyers without a 3D printer. They pay your set
-            price + the third-party print cost (+ a £1 site fee), and you earn exactly what you would on a normal sale of this model.
-          </p>
+          {FEATURES.printAndShip && (
+            <p className="text-muted-foreground text-sm mt-1">
+              Offer your model as a <span className="text-primary">print</span> for buyers without a 3D printer. They pay your set
+              price + the third-party print cost (+ a £1 site fee), and you earn exactly what you would on a normal sale of this model.
+            </p>
+          )}
         </div>
         <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground whitespace-nowrap">
           + New model

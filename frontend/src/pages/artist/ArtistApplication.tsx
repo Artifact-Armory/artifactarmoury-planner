@@ -9,8 +9,8 @@ const ArtistApplication: React.FC = () => {
         <h1 className="text-3xl font-semibold text-foreground">Become an {SITE_NAME} artist</h1>
         <p className="mt-3 text-sm text-muted-foreground">
           We&apos;re building a curated marketplace of terrain makers. Submit your portfolio and we&apos;ll send an invite code
-          if there&apos;s a good fit. Artists keep 80% of every sale and gain access to advanced analytics, customer
-          messaging, and on-demand print fulfillment.
+          if there&apos;s a good fit. Artists keep 80% of every sale and gain access to advanced analytics and customer
+          messaging.
         </p>
 
         <div className="mt-6 grid gap-6 sm:grid-cols-2">
@@ -29,8 +29,7 @@ const ArtistApplication: React.FC = () => {
             <ol className="mt-3 space-y-2 text-sm text-foreground">
               <li>1. Prepare a PDF portfolio or public gallery link</li>
               <li>2. Include links to social profiles or storefronts (if any)</li>
-              <li>3. Mention your printing validation process</li>
-              <li>4. Email everything to <span className="font-medium">artists@artifactarmoury.com</span></li>
+              <li>3. Email everything to <span className="font-medium">artists@artifactarmoury.com</span></li>
             </ol>
           </div>
         </div>

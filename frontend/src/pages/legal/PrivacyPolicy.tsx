@@ -15,7 +15,7 @@ const PrivacyPolicy: React.FC = () => {
       <LegalSection heading="2. What we collect">
         <ul className="ml-5 list-disc space-y-1">
           <li><strong>Account data</strong> — your email address, display name, password (stored hashed) and, for artists, payout details held by our payment processor.</li>
-          <li><strong>Order data</strong> — the models you buy, order references and, for print-and-ship orders, a delivery address.</li>
+          <li><strong>Order data</strong> — the models you buy and order references.</li>
           <li><strong>Usage data</strong> — pages viewed, searches and interactions, used to run and improve the marketplace and give artists aggregate analytics.</li>
           <li><strong>Content you upload</strong> — for artists, the model files, images and descriptions you list.</li>
         </ul>
