@@ -90,32 +90,26 @@ export interface ProxyBakeConfig {
    *  the previous behaviour of trying both orientations per wall and keeping whichever
    *  finds the longer legible run. Only read by the pillars style. */
   embossOrientation: 'vertical' | 'auto'
-  /** When true (default), the "pillars" style cuts real THROUGH-HOLES — actual 3D
-   *  letter geometry booleaned out of the proxy, deep enough to fully perforate the
-   *  local material (see embossHoleOutsideMm/embossHoleSafetyMm and
-   *  _measure_thickness_mm in bake_proxy.py) — instead of the shallow vertex-
-   *  displacement relief the pillars style used before. A hole can't be shaded/lit
-   *  away in a render or trivially patched over the way a shallow recess can, and it
-   *  reads as unmistakably damaged geometry to a would-be thief. Cut per-wall via
-   *  _apply_wm_boolean (EXACT solver, retried with FAST on failure); if both solvers
-   *  fail for a given wall, that wall's mark is simply dropped rather than left as
-   *  un-subtracted geometry sitting on the surface (fixed 2026-08-19 — the old
-   *  fallback joined the loose cutter onto the proxy on failure, which looked like a
-   *  visible bulge/gouge instead of a hole). The bake itself still never fails over
-   *  a watermark problem, same "never die over the watermark" guarantee as
-   *  everywhere else in this file. Set false to fall back to the old displacement
-   *  relief. */
+  /** When true (default), the "pillars" style cuts real THROUGH-HOLES — direct bmesh
+   *  FACE DELETION under the glyph shape (see _cut_wall_text_hole in bake_proxy.py),
+   *  not a boolean — instead of the shallow vertex-displacement relief the pillars
+   *  style used before. A hole can't be shaded/lit away in a render or trivially
+   *  patched over the way a shallow recess can, and it reads as unmistakably damaged
+   *  geometry to a would-be thief. No CSG solver anywhere in this path (switched off
+   *  booleans entirely 2026-08-19, after two separate production failures traced to
+   *  them here — see _apply_wm_boolean's and remove_boolean_debris's history): face
+   *  deletion can only ever remove existing topology from an already-located
+   *  selection, so it cannot leave an unresolved cutter fragment or sever a sliver
+   *  into a disconnected island the way a boolean could. The bake itself still never
+   *  fails over a watermark problem, same "never die over the watermark" guarantee as
+   *  everywhere else in this file. Set false to fall back to the displacement relief. */
   embossThroughHoles: boolean
-  /** How far (mm) the through-hole cutter pokes OUTSIDE the located surface before
-   *  its solid volume begins, so the cut's entry edge is always clean even if the
-   *  anchor point sits fractionally inside the true surface (decimate/smooth can shift
-   *  it a little). Only used when embossThroughHoles is true. */
-  embossHoleOutsideMm: number
-  /** Extra depth (mm) added on top of the raycast-measured local material thickness
-   *  before the through-hole cutter is built, so the cut reliably clears the far
-   *  surface (mesh noise, near-tangent hits) instead of leaving a paper-thin unresolved
-   *  sliver of material behind. Only used when embossThroughHoles is true. */
-  embossHoleSafetyMm: number
+  /** Greyscale threshold (0..1) on the cached watermark heightmap tile above which a
+   *  face is deleted to form the hole — the tile is near-binary (white glyph on black
+   *  background) so this mostly just needs to sit somewhere in the anti-aliased edge
+   *  between the two; 0.5 is the natural midpoint. Only used when embossThroughHoles
+   *  is true. */
+  embossHoleThreshold: number
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
   /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.64,
@@ -173,6 +167,17 @@ export interface ProxyBakeConfig {
    *  risking a hole cut through empty space. See bake_proxy.py's
    *  _emboss_pillars (z0/z1). */
   embossVerticalMarginFrac: number
+  /** Cap on how many separate segments (2026-08-19: fixed-centre, top-to-bottom
+   *  placement — see embossVerticalMarginFrac and bake_proxy.py's
+   *  _find_wall_segments) a single wall can accumulate, longest kept. Each
+   *  segment costs its own full boolean-cut cycle (_apply_wm_boolean) — a wall
+   *  with many small gaps could otherwise produce a long tail of tiny
+   *  segments, ballooning bake time and, per a 2026-08-19 production incident
+   *  (a bake crashed with "StructRNA of type Object has been removed" after
+   *  enough rapid create/apply/remove cycles on the same proxy object without
+   *  letting Blender's dependency graph catch up), real crash risk. Default 3
+   *  bounds worst-case per-wall cost regardless of how fragmented a wall is. */
+  embossMaxSegmentsPerWall: number
   /** Text cap height as a % of the model's smaller horizontal footprint dimension.
    *  Used by the legacy "bands" style only; pillars derive their size from width-frac. */
   embossHeightPct: number
@@ -211,13 +216,23 @@ export interface ProxyBakeConfig {
    *  looks damaged in the planner — the interior-face heuristic can punch holes in
    *  visible surfaces on some meshes. */
   poisonPillsEnabled: boolean
+  /** Run the debris-island cleanup pass after the emboss boolean (drops small
+   *  disconnected mesh fragments a watermark hole can sever off — see
+   *  remove_boolean_debris in bake_proxy.py). OFF by default (2026-08-19):
+   *  this object-lifecycle code (separate/classify/delete/repoint-data/rejoin)
+   *  had never run in production before the same day a bake crashed with
+   *  "StructRNA of type Object has been removed", and the debris it fixes is
+   *  a rare cosmetic defect — not worth the crash risk while unverified.
+   *  Enable per-model via proxy_bake_config once proven safe on a real
+   *  worker. */
+  debrisCleanupEnabled: boolean
   /** After the emboss boolean, any disconnected mesh island whose bounding-box
    *  diagonal is smaller than this fraction of the whole proxy's diagonal is
    *  treated as boolean-cut debris (a thin sliver severed by a watermark hole,
    *  not real geometry) and deleted. Fixed 2026-08-19 after a production bake
    *  left a free-floating shard next to a wall corner near a watermark cut —
    *  present in the proxy, absent from the source. See remove_boolean_debris in
-   *  bake_proxy.py. */
+   *  bake_proxy.py. Only takes effect when debrisCleanupEnabled is true. */
   debrisIslandMinDiagFrac: number
   /** Face-count floor for the same debris check — an island under this many
    *  faces is dropped regardless of its bounding-box size. */
@@ -288,8 +303,7 @@ export function loadDefaults(): ProxyBakeConfig {
     embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),
-    embossHoleOutsideMm: envNum('PROXY_BAKE_EMBOSS_HOLE_OUTSIDE_MM'),
-    embossHoleSafetyMm: envNum('PROXY_BAKE_EMBOSS_HOLE_SAFETY_MM'),
+    embossHoleThreshold: envNum('PROXY_BAKE_EMBOSS_HOLE_THRESHOLD'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),
