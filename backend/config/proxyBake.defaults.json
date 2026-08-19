@@ -18,7 +18,7 @@
   "embossHoleOutsideMm": 0.6,
   "embossHoleSafetyMm": 0.8,
   "embossPillarCount": 4,
-  "embossPillarWidthFrac": 0.32,
+  "embossPillarWidthFrac": 0.64,
   "embossPillarTwistDeg": 35,
   "embossPillarReachFrac": 1.0,
   "embossPillarMaxRepeats": 120,

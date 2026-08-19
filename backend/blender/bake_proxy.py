@@ -1038,9 +1038,21 @@ def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
     while a genuine gap (a window, a doorway, the notch between two wings of an
     L-shaped building) still fails every window that overlaps it, because it
     drags the average well below the threshold for its whole width.
+
+    Ties are broken by preferring the window closest to the wall's lateral
+    CENTRE. On a uniformly flat wall (the common case) nearly every cross-axis
+    window `cs` achieves the exact same max run length, and scanning `cs`
+    ascending while only replacing `best` on a STRICTLY longer run always kept
+    the very first (leftmost) one it found — the mark would land hard against
+    one edge of the wall instead of centred, even though a centred window was
+    equally valid the whole time. Real asymmetric geometry (an off-centre run
+    genuinely longer than any centred one, e.g. one side of the wall blocked by
+    a window) still wins on length as before; centring only breaks true ties.
+
     Returns (run_len_cells, read_start_cell, cross_start_cell) or None."""
     w = max(1, min(strip_cross_cells, cross_n))
-    best = None
+    centre_cs = (cross_n - w) / 2.0
+    best = None  # (length, run_start, cs, centre_dist) — centre_dist dropped before returning
     for cs in range(0, cross_n - w + 1):
         usable = []
         for r in range(read_n):
@@ -1050,6 +1062,7 @@ def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
                 if row[c]:
                     cnt += 1
             usable.append(cnt >= w * min_coverage)
+        centre_dist = abs(cs - centre_cs)
         run_start = None
         r = 0
         while r <= read_n:
@@ -1060,11 +1073,11 @@ def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
             else:
                 if run_start is not None:
                     length = r - run_start
-                    if best is None or length > best[0]:
-                        best = (length, run_start, cs)
+                    if best is None or length > best[0] or (length == best[0] and centre_dist < best[3]):
+                        best = (length, run_start, cs, centre_dist)
                     run_start = None
                 r += 1
-    return best
+    return best[:3] if best else None
 
 
 def _select_reach_mm(reach_mm, depth_mm, cap_h):
@@ -1611,9 +1624,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         # Letter size: a fraction of the narrower footprint → ribbons that scale with
         # the model. Clamped so several letters still fit up short pieces (the ceiling
         # is kept aligned with embossPillarWidthFrac's default so bigger letters
-        # aren't clamped back down on shorter models).
+        # aren't clamped back down on shorter models). Doubled 2026-08-19
+        # (0.32->0.64) per explicit user request — at this fraction a single glyph's
+        # cap height is now more than half the model's narrower footprint dimension,
+        # so on a roughly square piece the 4 default pillars will visually dominate
+        # most of each side. That's intentional here (holes need to read as clearly
+        # visible), but it's the practical ceiling before letters start overlapping
+        # each other or wrapping past a wall's actual edges — a further doubling
+        # would need embossPillarCount lowered too to keep them legible.
         min_horiz = min(dx, dy)
-        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.32))
+        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.64))
 
         # Upper bound for _measure_thickness_mm's exit-surface search. Bounded by the
         # model's own bbox diagonal — "through the model" can legitimately mean the

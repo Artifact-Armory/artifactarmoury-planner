@@ -116,11 +116,16 @@ export interface ProxyBakeConfig {
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
   /** Pillar letter cap height as a fraction of the narrower footprint dimension (default
-   *  0.32, raised 2026-08-18 from 0.17 — bigger/more prominent letters, per-user
-   *  decision). Also clamped against the model's own height (see bake_proxy.py's
-   *  _emboss_pillars, `dz * 0.32`) so it can't ask for taller letters than a short piece
-   *  actually has room for. Scales with the model either way — a bigger source gets
-   *  proportionally bigger letters/holes, not a fixed mm size. */
+   *  0.64, doubled 2026-08-19 from 0.32 — was still too small to clearly see through
+   *  the through-holes, per-user decision; 0.32 itself was raised 2026-08-18 from
+   *  0.17). Also clamped against the model's own height (see bake_proxy.py's
+   *  _emboss_pillars, `dz * 0.64`, kept aligned with this value) so it can't ask for
+   *  taller letters than a short piece actually has room for. Scales with the model
+   *  either way — a bigger source gets proportionally bigger letters/holes, not a
+   *  fixed mm size. At 0.64 a single glyph is already over half the narrower
+   *  footprint dimension — the practical ceiling before letters start overlapping
+   *  is close; a further increase should probably come with a lower
+   *  embossPillarCount instead. */
   embossPillarWidthFrac: number
   /** Total spiral twist (degrees) each pillar sweeps from base to top. Small = a gentle
    *  spiral; 0 = dead-straight vertical columns. */
