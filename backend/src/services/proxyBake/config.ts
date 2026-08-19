@@ -84,10 +84,43 @@ export interface ProxyBakeConfig {
    *  around the model, each climbing bottom→top with a slight spiral twist; "bands" is
    *  the legacy four upright bands hugging the bottom edge. */
   embossStyle: 'pillars' | 'bands'
+  /** Reading direction for the "pillars" style. "vertical" (default) forces every
+   *  placement to climb bottom→top (the classic spine-label look) even on a wall whose
+   *  only usable flat patch would otherwise read better horizontally. "auto" restores
+   *  the previous behaviour of trying both orientations per wall and keeping whichever
+   *  finds the longer legible run. Only read by the pillars style. */
+  embossOrientation: 'vertical' | 'auto'
+  /** When true (default), the "pillars" style cuts real THROUGH-HOLES — actual 3D
+   *  letter geometry booleaned out of the proxy, deep enough to fully perforate the
+   *  local material (see embossHoleOutsideMm/embossHoleSafetyMm and
+   *  _measure_thickness_mm in bake_proxy.py) — instead of the shallow vertex-
+   *  displacement relief the pillars style used before. A hole can't be shaded/lit
+   *  away in a render or trivially patched over the way a shallow recess can, and it
+   *  reads as unmistakably damaged geometry to a would-be thief. Uses the same
+   *  boolean-with-safe-fallback path as the legacy "bands" style (_apply_wm_boolean) —
+   *  on a solver failure it falls back to joining the (unbooleaned) letters as loose
+   *  geometry rather than failing the bake, same "never die over the watermark"
+   *  guarantee as everywhere else in this file. Set false to fall back to the old
+   *  displacement relief. */
+  embossThroughHoles: boolean
+  /** How far (mm) the through-hole cutter pokes OUTSIDE the located surface before
+   *  its solid volume begins, so the cut's entry edge is always clean even if the
+   *  anchor point sits fractionally inside the true surface (decimate/smooth can shift
+   *  it a little). Only used when embossThroughHoles is true. */
+  embossHoleOutsideMm: number
+  /** Extra depth (mm) added on top of the raycast-measured local material thickness
+   *  before the through-hole cutter is built, so the cut reliably clears the far
+   *  surface (mesh noise, near-tangent hits) instead of leaving a paper-thin unresolved
+   *  sliver of material behind. Only used when embossThroughHoles is true. */
+  embossHoleSafetyMm: number
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
-  /** Pillar letter cap height as a fraction of the narrower footprint dimension. Small
-   *  → slim ribbons that scale with the model without overwhelming the detail. */
+  /** Pillar letter cap height as a fraction of the narrower footprint dimension (default
+   *  0.32, raised 2026-08-18 from 0.17 — bigger/more prominent letters, per-user
+   *  decision). Also clamped against the model's own height (see bake_proxy.py's
+   *  _emboss_pillars, `dz * 0.32`) so it can't ask for taller letters than a short piece
+   *  actually has room for. Scales with the model either way — a bigger source gets
+   *  proportionally bigger letters/holes, not a fixed mm size. */
   embossPillarWidthFrac: number
   /** Total spiral twist (degrees) each pillar sweeps from base to top. Small = a gentle
    *  spiral; 0 = dead-straight vertical columns. */
@@ -209,6 +242,8 @@ export function loadDefaults(): ProxyBakeConfig {
     embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),
+    embossHoleOutsideMm: envNum('PROXY_BAKE_EMBOSS_HOLE_OUTSIDE_MM'),
+    embossHoleSafetyMm: envNum('PROXY_BAKE_EMBOSS_HOLE_SAFETY_MM'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),

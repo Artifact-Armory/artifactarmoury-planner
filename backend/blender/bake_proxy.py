@@ -697,20 +697,27 @@ def emboss_watermark(proxy):
     """Emboss the watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip
     carries the mark. Two styles (embossStyle):
 
-      • "pillars" (default): N thin vertical columns of text (embossPillarCount, default
-        4), evenly spaced around the model, each climbing bottom→top with a slight spiral
-        twist (embossPillarTwistDeg). Letter size is a small fraction of the footprint, so
-        the mark reads as four slim ribbons that scale with the model — visible on every
-        side and the full height without overwhelming it, leaving the high-value detail
-        between the ribbons intact.
-      • "bands": the older placement — four upright bands hugging the bottom edge.
+      • "pillars" (default): N text placements (embossPillarCount, default 4), evenly
+        spaced around the model, each climbing bottom→top (embossOrientation=
+        "vertical", the default) on a real raycast-located flat patch of each wall.
+        By default (embossThroughHoles=true) these are genuine THROUGH-HOLES — real
+        extruded letters booleaned out of the proxy, deep enough to fully perforate
+        the local material (see _emboss_pillars/_measure_thickness_mm) — rather than
+        a shallow shaded recess; set embossThroughHoles=false for the older, boolean-
+        free vertex-displacement relief instead. Letter size (embossPillarWidthFrac,
+        default 0.32 of the footprint) and, for holes, cut depth both scale with the
+        model rather than a fixed size.
+      • "bands": the older placement — four upright bands hugging the bottom edge,
+        always a boolean.
 
-    Both drive one boolean against the proxy: DIFFERENCE (engrave, carve the mark into
-    real geometry — can never float) or UNION (raised, letters stand proud). Engrave is
-    the default because a difference only removes material where the cutter meets real
-    mesh, so the mark always sticks to the surface and never floats over empty space. The
-    paid STL is never touched. Any error is a warning, never a job failure — a bake must
-    never die over the watermark."""
+    "bands", and "pillars" when embossThroughHoles=true, drive a boolean against the
+    proxy: DIFFERENCE (engrave/hole, carve the mark into real geometry — can never
+    float) or UNION (raised, letters stand proud — bands only; a "raised hole" isn't
+    coherent, so pillars' holes always use DIFFERENCE regardless of embossEngrave).
+    Engrave is the default for bands because a difference only removes material where
+    the cutter meets real mesh, so the mark always sticks to the surface and never
+    floats over empty space. The paid STL is never touched. Any error is a warning,
+    never a job failure — a bake must never die over the watermark."""
     if not bool(CFG.get("embossWatermarkEnabled", True)):
         REPORT["embossApplied"] = False
         warn("Emboss watermark DISABLED — a mesh-rip carries no mark.")
@@ -1082,9 +1089,15 @@ def _select_reach_mm(reach_mm, depth_mm, cap_h):
 
 
 def _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
-                       cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
+                       cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor,
+                       force_orientation="auto"):
     """Find where on this wall there's actually room for the watermark, trying
     the letter size down a few notches if the nominal one doesn't fit anywhere.
+
+    `force_orientation="vertical"` (the embossOrientation default) restricts the
+    search to the bottom→top climb only, even on a wall whose only usable patch
+    would otherwise read better horizontally — see _locate_wall_text_at.
+    "auto" restores trying both and keeping whichever finds the longer run.
 
     A facade's only flat band (a baseboard/eave trim — see _locate_wall_text_at)
     is very often THINNER than the "ideal" cap height derived from the model's
@@ -1107,7 +1120,7 @@ def _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
     for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32):
         result = _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half,
                                        z0, z1, cap_h * shrink, tile_aspect, select_reach_mm,
-                                       min_coverage, cell_divisor)
+                                       min_coverage, cell_divisor, force_orientation)
         if result is not None:
             result["cap_h"] = cap_h * shrink
             return result
@@ -1115,14 +1128,18 @@ def _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
 
 
 def _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
-                          cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
-    """One trial of _locate_wall_text at a fixed `cap_h`: try BOTH readable
-    orientations against the real geometry instead of assuming "climb straight
-    up the middle of the bbox edge" — a tall clear column (the pillar style's
-    original always-vertical look) AND a horizontal run along whatever flat
-    band exists. Whichever orientation finds the longer clear run wins — more
-    run length means more of "PREVIEW" actually resolves instead of a fragment
-    of one glyph or nothing at all.
+                          cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor,
+                          force_orientation="auto"):
+    """One trial of _locate_wall_text at a fixed `cap_h`. Normally (force_orientation=
+    "auto") tries BOTH readable orientations against the real geometry instead of
+    assuming "climb straight up the middle of the bbox edge" — a tall clear column
+    (the pillar style's original always-vertical look) AND a horizontal run along
+    whatever flat band exists — and whichever finds the longer clear run wins, since
+    more run length means more of "PREVIEW" actually resolves instead of a fragment
+    of one glyph or nothing at all. force_orientation="vertical" skips the horizontal
+    search entirely and only ever returns a vertical placement (or None) — the
+    through-hole pillars use this so every placement reads as a climbing column,
+    never a stray horizontal band on one wall and vertical columns on the rest.
 
     `select_reach_mm` (the SAME clamped depth _displace_wall_text will later
     select vertices within — see _select_reach_mm) bounds how deep a raycast
@@ -1163,14 +1180,20 @@ def _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1
     vert_mm = vert[0] * cell_read if vert else 0.0
 
     # Horizontal: transpose so lateral becomes the read axis and Z the cross axis.
-    grid_t = [[grid[r][c] for r in range(read_n)] for c in range(cross_n)]
-    horiz_w = max(1, int(math.ceil(cap_h * 0.96 / cell_read)))
-    horiz = _best_strip(grid_t, cross_n, read_n, horiz_w, min_coverage)
-    horiz_mm = horiz[0] * cell_cross if horiz else 0.0
+    # Skipped entirely when the caller forces vertical-only — every placement should
+    # read as a climbing column, not a stray horizontal band on whichever wall
+    # happened to have a wider-than-tall patch.
+    if force_orientation == "vertical":
+        horiz, horiz_mm = None, 0.0
+    else:
+        grid_t = [[grid[r][c] for r in range(read_n)] for c in range(cross_n)]
+        horiz_w = max(1, int(math.ceil(cap_h * 0.96 / cell_read)))
+        horiz = _best_strip(grid_t, cross_n, read_n, horiz_w, min_coverage)
+        horiz_mm = horiz[0] * cell_cross if horiz else 0.0
 
     if os.environ.get("WM_DEBUG"):
-        print("WMDEBUG locate vert_w=%d vert=%r vert_mm=%.2f  horiz_w=%d horiz=%r horiz_mm=%.2f"
-              % (vert_w, vert, vert_mm, horiz_w, horiz, horiz_mm))
+        print("WMDEBUG locate vert_w=%d vert=%r vert_mm=%.2f  horiz=%r horiz_mm=%.2f force=%s"
+              % (vert_w, vert, vert_mm, horiz, horiz_mm, force_orientation))
 
     if vert_mm < min_run_mm and horiz_mm < min_run_mm:
         return None
@@ -1419,25 +1442,143 @@ def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor
         set_active(proxy)
 
 
+def _measure_thickness_mm(bvh, anchor, normal, cap_h, max_probe_mm):
+    """From `anchor` (a point ON the model's outward surface, as located by
+    _locate_wall_text), raycast INWARD along `-normal` to find how far the solid
+    material actually extends before the ray exits again — the true local wall/
+    model thickness at this exact spot, measured against the real mesh instead of
+    assumed from a fixed percentage. This is what lets the through-hole cutter
+    (see _build_hole_cutter) reach exactly through whatever's really there: a thin
+    wall gets a thin, still fully-through cut; a solid chunk gets a correspondingly
+    deep one — the hole SCALES WITH THE MODEL rather than using one depth for
+    every shape.
+
+    Two raycasts: the first finds the near (outward) surface itself — should land
+    close to `anchor`, which is already on/near the surface, a small start offset
+    just covers `anchor` sitting fractionally off the true surface after decimate/
+    smooth. The second, fired from just past that hit, finds where the ray exits
+    the solid it just entered — the near wall's OWN back face if the model is a
+    hollow shell, or the model's opposite outer surface if solid all the way
+    through. Either is correct: "through the model" means through whatever
+    material is actually in the way, not an arbitrary fixed depth.
+
+    Returns thickness in mm, or None if no exit surface is found within
+    `max_probe_mm` (pathological/very thick geometry — caller skips this wall
+    rather than guessing a depth)."""
+    eps = 0.05
+    start = max(2.0, cap_h * 0.1)
+    origin = anchor + normal * start
+    hit1 = bvh.ray_cast(origin, -normal, start + max_probe_mm)
+    if not hit1 or hit1[0] is None:
+        return None
+    loc1, _n1, _i1, dist1 = hit1
+    remaining = start + max_probe_mm - dist1 - eps
+    if remaining <= 0:
+        return None
+    hit2 = bvh.ray_cast(loc1 - normal * eps, -normal, remaining)
+    if not hit2 or hit2[0] is None:
+        return None
+    loc2 = hit2[0]
+    thickness = (loc2 - loc1).length
+    return thickness if thickness > 1e-3 else None
+
+
+def _build_hole_cutter(text, tile_aspect, read_axis, height_axis, normal, anchor,
+                        cap_h, run_mm, thickness_mm, outside_mm, safety_mm, label):
+    """Build one wall's through-hole cutter: real extruded letter geometry (not a
+    heightmap-driven displacement) so a boolean DIFFERENCE against the proxy
+    actually removes material — a genuine perforation, not a shallow relief. Sized
+    and oriented from the same real, raycast-located wall patch _locate_wall_text
+    already found; depth comes from `thickness_mm` (see _measure_thickness_mm) plus
+    `safety_mm` so the cut reliably clears the far surface even on a slightly noisy
+    mesh, never leaving a paper-thin unresolved sliver of material behind, plus
+    `outside_mm` so it also starts cleanly outside the (possibly slightly-off)
+    located surface.
+
+    `read_axis`/`height_axis` come from the caller (forced to world-up/lateral for
+    the vertical-only placements this is built for). Because a font curve's
+    natural reading direction is its own local X and its extrude axis is local Z,
+    the returned object's rotation is built directly from these three world axes
+    as the COLUMNS of a 3x3 matrix rather than Euler angles — exact by
+    construction, no gimbal ambiguity — and it naturally rotates every glyph 90°
+    into the 'reads sideways, climbs upward' spine-label look the vertical pillars
+    have always had.
+
+    Returns the finished (already-a-mesh, already positioned) cutter Object, left
+    as a normal scene object for the caller to join with other walls' cutters
+    before a single boolean pass."""
+    import mathutils
+
+    period_read_mm = max(1e-3, cap_h * tile_aspect)
+    repeats = max(1, int(math.ceil(run_mm / period_read_mm)) + 1)
+    body = (text + "  ") * repeats
+
+    cur = bpy.data.curves.new(name="wm_hole_curve", type="FONT")
+    cur.body = body
+    cur.align_x = "CENTER"
+    cur.align_y = "CENTER"
+    cur.size = cap_h
+
+    total_depth = max(1e-3, outside_mm + thickness_mm + safety_mm)
+    extrude = total_depth / 2.0
+    cur.extrude = extrude
+
+    safe_label = "".join(c if c.isalnum() else "_" for c in label)
+    o = bpy.data.objects.new("wm_hole_" + safe_label, cur)
+    bpy.context.scene.collection.objects.link(o)
+    deselect_all()
+    o.select_set(True)
+    set_active(o)
+    bpy.ops.object.convert(target="MESH")
+    o = bpy.context.view_layer.objects.active
+
+    rot = mathutils.Matrix((
+        (read_axis.x, height_axis.x, normal.x),
+        (read_axis.y, height_axis.y, normal.y),
+        (read_axis.z, height_axis.z, normal.z),
+    ))
+    # Centred so the cutter's local +Z face sits `outside_mm` proud of the surface
+    # and its local -Z face reaches (thickness_mm + safety_mm) past it — see the
+    # docstring above.
+    centre = anchor + normal * (outside_mm - extrude)
+    o.matrix_world = mathutils.Matrix.Translation(centre) @ rot.to_4x4()
+    return o
+
+
 def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     """Emboss `text` at N wall positions (default 4), evenly spaced around the
-    model. Each wall's actual placement — vertical climb (the original look) or
-    a horizontal band, and exactly where along the wall — is chosen by
-    _locate_wall_text after raycast-sampling that wall for real flat, solid,
-    outward-facing material, rather than assumed from the model's bounding box.
+    model. Each wall's actual placement is chosen by _locate_wall_text after
+    raycast-sampling that wall for real flat, solid, outward-facing material,
+    rather than assumed from the model's bounding box.
 
-    Real geometry (a mesh-rip still carries it), via direct vertex displacement
-    driven by a cached text heightmap — no boolean CSG cut, so it can't fail the
-    way a boolean solver can on degenerate/sliver geometry left behind by weld/
-    decimate/smooth (see _displace_wall_text). Letter size is a small fraction
-    of the footprint so the mark reads as slim ribbons/bands — visible without
-    overwhelming the high-value detail around it.
+    Two placement mechanisms, controlled by embossThroughHoles:
+      • THROUGH-HOLES (default, embossThroughHoles=true): real extruded letter
+        geometry, one boolean DIFFERENCE against the proxy per bake
+        (_build_hole_cutter + _apply_wm_boolean) sized to fully perforate the
+        local material at each located spot (_measure_thickness_mm) — an actual
+        hole a would-be thief has to notice and repair, not a shading trick a
+        render can hide. Uses the same boolean-with-safe-fallback path the
+        legacy "bands" style already relied on, so a solver failure still can't
+        fail the bake — it falls back to joining the cutters as loose
+        (unbooleaned) geometry instead.
+      • RELIEF (embossThroughHoles=false): the original direct vertex-
+        displacement approach (_displace_wall_text) — no boolean CSG cut at
+        all, so it can't fail the way a boolean solver can on degenerate/sliver
+        geometry, but only a shallow shaded recess rather than a real opening.
 
-    NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — it doesn't
-    have a clean equivalent for an image-projected displacement without a much
-    more involved sheared/curved UV mapping. embossPillarMaxRepeats no longer
-    applies (REPEAT tiling fills whatever run was located without needing a
-    precomputed repeat count)."""
+    embossOrientation="vertical" (default) restricts every placement to a
+    bottom→top climb (the classic spine-label look, each glyph rotated 90° into
+    the climb — see _build_hole_cutter); "auto" lets each wall pick whichever of
+    vertical/horizontal finds the longer legible run, as before.
+
+    Both letter size (embossPillarWidthFrac, of the footprint) and, for holes,
+    cut depth (the raycast-measured local thickness) scale with the model
+    itself rather than using one fixed size for every shape.
+
+    NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — no clean
+    equivalent for either mechanism without a much more involved sheared/curved
+    mapping. embossPillarMaxRepeats no longer applies (both mechanisms tile to
+    fill whatever run was actually located, not a precomputed repeat count)."""
     import mathutils
     try:
         count = max(1, int(CFG.get("embossPillarCount", 4)))
@@ -1445,6 +1586,11 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
         min_coverage = min(1.0, max(0.05, float(CFG.get("embossWallMinCoverage", 0.65))))
         cell_divisor = max(1.0, float(CFG.get("embossWallCellDivisor", 6.0)))
+        orientation_cfg = str(CFG.get("embossOrientation", "vertical")).strip().lower()
+        force_orientation = "auto" if orientation_cfg == "auto" else "vertical"
+        through_holes = bool(CFG.get("embossThroughHoles", True))
+        hole_outside_mm = max(0.0, float(CFG.get("embossHoleOutsideMm", 0.6)))
+        hole_safety_mm = max(0.0, float(CFG.get("embossHoleSafetyMm", 0.8)))
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -1464,10 +1610,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
         # Letter size: a fraction of the narrower footprint → ribbons that scale with
         # the model. Clamped so several letters still fit up short pieces (the ceiling
-        # was raised alongside embossPillarWidthFrac's default so the bigger letters
+        # is kept aligned with embossPillarWidthFrac's default so bigger letters
         # aren't clamped back down on shorter models).
         min_horiz = min(dx, dy)
-        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.20))
+        cap_h = max(diagp * 0.004, min(min_horiz * width_frac, dz * 0.32))
+
+        # Upper bound for _measure_thickness_mm's exit-surface search. Bounded by the
+        # model's own bbox diagonal — "through the model" can legitimately mean the
+        # whole thing on a solid piece — just enough to stop a degenerate mesh (no
+        # exit surface at all) from raycasting forever.
+        max_probe_mm = max(diagp, 1.0)
 
         z0 = minz + dz * 0.06
         z1 = maxz - dz * 0.06
@@ -1510,6 +1662,8 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
         applied = 0
         placements = []
+        cutters = []
+        up = mathutils.Vector((0.0, 0.0, 1.0))
         for i, (normal, lateral, (wx, wy), reach_depth, lateral_half) in enumerate(walls):
             reach_mm = max(1e-4, reach_depth * reach_frac)
             # Computed ONCE and used for both the search (_locate_wall_text) and
@@ -1520,7 +1674,7 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             label = "wall %d" % i
             loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
                                      z0, z1, cap_h, tile_aspect, select_reach_mm,
-                                     min_coverage, cell_divisor)
+                                     min_coverage, cell_divisor, force_orientation)
             if loc is None:
                 warn("Watermark %s: no usable solid patch found across %.0fmm of wall, skipping"
                      % (label, lateral_half * 2))
@@ -1529,27 +1683,58 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
             anchor = wall_centre + lateral * loc["lateral_centre"] \
                 + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
-            up = mathutils.Vector((0.0, 0.0, 1.0))
             if loc["orientation"] == "horizontal":
                 read_axis, height_axis = lateral, up
             else:
                 read_axis, height_axis = up, lateral
 
-            if _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
-                                    anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
-                                    engrave, label):
+            if through_holes:
+                thickness_mm = _measure_thickness_mm(bvh, anchor, normal, loc["cap_h"], max_probe_mm)
+                if thickness_mm is None:
+                    warn("Watermark %s: couldn't measure a local thickness (no far surface found "
+                         "within %.0fmm), skipping" % (label, max_probe_mm))
+                    placements.append("no-thickness")
+                    continue
+                cutters.append(_build_hole_cutter(
+                    text, tile_aspect, read_axis, height_axis, normal, anchor,
+                    loc["cap_h"], loc["run_mm"], thickness_mm, hole_outside_mm,
+                    hole_safety_mm, label))
+                applied += 1
+                placements.append("%s@%.1fmm thru=%.1fmm" % (loc["orientation"], loc["cap_h"], thickness_mm))
+            elif _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
+                                      anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
+                                      engrave, label):
                 applied += 1
                 placements.append("%s@%.1fmm" % (loc["orientation"], loc["cap_h"]))
             else:
                 placements.append("failed")
 
+        if through_holes:
+            if cutters:
+                # One combined boolean for every wall's cutter, same pattern (and
+                # same safe join-fallback) the legacy "bands" style already used —
+                # holes are always a material-removing DIFFERENCE regardless of
+                # embossEngrave (a "raised hole" isn't a coherent concept).
+                deselect_all()
+                for o in cutters:
+                    o.select_set(True)
+                set_active(cutters[0])
+                bpy.ops.object.join()
+                wm = bpy.context.view_layer.objects.active
+                _apply_wm_boolean(proxy, wm, True, text, "vertical-pillars-holes-%d" % count)
+            else:
+                REPORT["embossMethod"] = "holes-none-located"
+                REPORT["embossApplied"] = False
+        else:
+            REPORT["embossMethod"] = "displace"
+            REPORT["embossApplied"] = applied > 0
+
         REPORT["embossPillarCount"] = count
         REPORT["embossPillarCapHeightMm"] = round(cap_h, 3)
-        REPORT["embossMethod"] = "displace"
         REPORT["embossWatermark"] = text
         REPORT["embossPlacement"] = "vertical-pillars-%d" % count
+        REPORT["embossOrientationCfg"] = orientation_cfg
         REPORT["embossWallPlacements"] = placements
-        REPORT["embossApplied"] = applied > 0
         if applied == 0:
             warn("Watermark applied to 0 of %d walls" % count)
         elif applied < count:
