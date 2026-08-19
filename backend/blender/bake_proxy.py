@@ -1974,8 +1974,13 @@ def setup_render_world():
 
 
 def render_views(src, proxy, diag, dims, centre):
-    """Render source vs proxy at the three planner camera distances. Best-effort:
-    a render failure is a warning, not a job failure."""
+    """Render source vs proxy at the three planner camera distances. QA aid only —
+    never shipped to buyers, so it's opt-in via validationRenderEnabled (default
+    off). Best-effort when it does run: a render failure is a warning, not a job
+    failure."""
+    if not CFG.get("validationRenderEnabled", False):
+        REPORT["validationRenders"] = 0
+        return
     import mathutils
     try:
         scene = setup_render_world()

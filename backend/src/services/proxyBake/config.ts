@@ -200,9 +200,16 @@ export interface ProxyBakeConfig {
   bakeTimeoutMinutes: number
   /** BaseColor atlas resolution (only baked when the source has usable materials). */
   baseColorRes: number
-  /** Square resolution of each validation render tile. */
+  /** Render the 6-image source-vs-proxy comparison PNG (QA aid only — never shown
+   *  to buyers). Off by default: it's pure Cycles render time added to every bake
+   *  for zero product benefit. Flip on per-model (via proxy_bake_config override)
+   *  when you actually want to eyeball a specific bake's quality. */
+  validationRenderEnabled: boolean
+  /** Square resolution of each validation render tile. Only used when
+   *  validationRenderEnabled is true. */
   validationRenderPx: number
-  /** Planner camera distances (metres) used for the three validation renders. */
+  /** Planner camera distances (metres) used for the three validation renders. Only
+   *  used when validationRenderEnabled is true. */
   plannerMinCameraDistanceM: number
   plannerTypicalCameraDistanceM: number
   plannerFullTableCameraDistanceM: number

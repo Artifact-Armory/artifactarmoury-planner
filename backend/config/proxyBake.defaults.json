@@ -42,6 +42,7 @@
   "sourceTriangleCap": 5000000,
   "bakeTimeoutMinutes": 20,
   "baseColorRes": 2048,
+  "validationRenderEnabled": false,
   "validationRenderPx": 512,
   "plannerMinCameraDistanceM": 0.3,
   "plannerTypicalCameraDistanceM": 2.0,

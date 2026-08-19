@@ -276,11 +276,13 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       )
     }
 
-    // 5. Comparison PNG (QA aid; best-effort).
+    // 5. Comparison PNG (QA aid; best-effort). Skipped unless the config opts in —
+    // Blender didn't produce render_source_*/render_proxy_* files in that case, so
+    // don't bother probing for them.
     const comparePng = path.join(outDir, 'compare.png')
-    const composed = await compositeComparison(outDir, comparePng, cfg.validationRenderPx).catch(
-      () => null,
-    )
+    const composed = cfg.validationRenderEnabled
+      ? await compositeComparison(outDir, comparePng, cfg.validationRenderPx).catch(() => null)
+      : null
 
     // 6. Publish to R2 under stable keys (overwrite on re-run — idempotent).
     const prefix = artefactPrefix(input)
