@@ -231,8 +231,16 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
     const srcBuf = await downloadObject(input.sourceKey)
     await fsp.writeFile(srcPath, srcBuf)
 
+    // embossSeed is per-JOB identity (model + part), not a tunable knob, so it's
+    // merged onto the serialized config rather than living in ProxyBakeConfig
+    // itself — bake_proxy.py's _emboss_punch_through hashes it to jitter the
+    // watermark's angle/position/phase deterministically per model (same model
+    // re-bakes identically; every other model differs), so a script tuned
+    // against one leaked model's exact hole geometry doesn't transfer to
+    // another (see bake_proxy.py's docstring for the full reasoning).
+    const embossSeed = `${input.modelId}:${input.partId ?? 'primary'}`
     const cfgPath = path.join(work, 'config.json')
-    await fsp.writeFile(cfgPath, JSON.stringify(cfg))
+    await fsp.writeFile(cfgPath, JSON.stringify({ ...cfg, embossSeed }))
 
     // 2. Blender bake with a hard timeout.
     const timeoutMs = Math.max(1, cfg.bakeTimeoutMinutes) * 60_000

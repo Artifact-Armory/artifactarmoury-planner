@@ -855,15 +855,18 @@ def _apply_wm_boolean(proxy, wm, engrave, text, placement):
 _WM_TILE_CACHE = {}
 
 
-def _watermark_tile_cache_path(text):
+def _watermark_tile_cache_path(text, trailing_spaces):
     """Disk path for the cached heightmap tile. Lives next to this script (not in
     the per-job OUT_DIR, which gets deleted after every job) so it survives across
     bake jobs on the same worker container. The text is always "PREVIEW" — the
     same tile is reusable across every model forever, so this render (a few
     hundred ms) happens at most once per worker-container lifetime, not once per
-    bake, which matters at upload-volume scale."""
+    bake, which matters at upload-volume scale. `trailing_spaces` is folded into
+    the cache key (see _get_watermark_tile) so styles that want a wider gap
+    between repeats don't collide with a differently-spaced tile some other
+    style already cached."""
     import hashlib
-    h = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    h = hashlib.sha1(("%s::%d" % (text, trailing_spaces)).encode("utf-8")).hexdigest()[:16]
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".wm_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -874,38 +877,49 @@ def _watermark_tile_cache_path(text):
         return out_path("wm_tile_%s.png" % h)
 
 
-def _get_watermark_tile(text):
+def _get_watermark_tile(text, trailing_spaces=2):
     """Return (png_path, unit_width, unit_height) for one vertically-tileable
-    repeat unit of `text + "  "`, rendered flat (font size=1.0) top-down, white
-    text on black. Cached in-process and on disk keyed by text."""
-    if text in _WM_TILE_CACHE:
-        return _WM_TILE_CACHE[text]
-    cache_path = _watermark_tile_cache_path(text)
+    repeat unit of `text + " "*trailing_spaces`, rendered flat (font size=1.0)
+    top-down, white text on black. Cached in-process and on disk keyed by
+    (text, trailing_spaces).
+
+    `trailing_spaces` (default 2, the original fixed gap) is how far apart
+    consecutive repeats land when the sampler's `u %= 1.0` wraps — a bigger
+    value means more BLANK background baked into the one repeat unit, so the
+    same modulo-wrap tiling shows the word less often per unit of surface
+    without touching letter size at all. Used by _emboss_punch_through
+    (embossPunchGapChars, default much larger than 2) to fix a repeating
+    pattern that tiled edge-to-edge into what read as solid noise/damage
+    rather than a legible "PREVIEW ... PREVIEW ... PREVIEW" band."""
+    cache_key = (text, trailing_spaces)
+    if cache_key in _WM_TILE_CACHE:
+        return _WM_TILE_CACHE[cache_key]
+    cache_path = _watermark_tile_cache_path(text, trailing_spaces)
     meta_path = cache_path + ".meta.json"
     if os.path.exists(cache_path) and os.path.exists(meta_path):
         try:
             with open(meta_path) as f:
                 meta = json.load(f)
             result = (cache_path, float(meta["w"]), float(meta["h"]))
-            _WM_TILE_CACHE[text] = result
+            _WM_TILE_CACHE[cache_key] = result
             return result
         except Exception:
             pass  # corrupt/partial cache entry — fall through and re-render
-    result = _render_watermark_tile(text, cache_path)
+    result = _render_watermark_tile(text, cache_path, trailing_spaces)
     try:
         with open(meta_path, "w") as f:
             json.dump({"w": result[1], "h": result[2]}, f)
     except Exception:
         pass
-    _WM_TILE_CACHE[text] = result
+    _WM_TILE_CACHE[cache_key] = result
     return result
 
 
-def _render_watermark_tile(text, out_png):
-    """Render one flat repeat-unit of `text + "  "` (font size=1.0, not tied to
-    any model) top-down onto a black background as white emissive text. Real-
-    world scale is applied later, per wall, via the Displace modifier's
-    projector transform — this image is dimensionless."""
+def _render_watermark_tile(text, out_png, trailing_spaces=2):
+    """Render one flat repeat-unit of `text + " "*trailing_spaces` (font
+    size=1.0, not tied to any model) top-down onto a black background as
+    white emissive text. Real-world scale is applied later, per wall, via the
+    Displace modifier's projector transform — this image is dimensionless."""
     made = []
     scene = bpy.context.scene
     saved_camera, saved_world = scene.camera, scene.world
@@ -920,7 +934,7 @@ def _render_watermark_tile(text, out_png):
         obj.hide_render = True
     try:
         cur = bpy.data.curves.new(name="wm_tile_curve", type="FONT")
-        cur.body = text + "  "
+        cur.body = text + (" " * max(0, int(trailing_spaces)))
         cur.align_x = "LEFT"
         cur.align_y = "BOTTOM_BASELINE"
         cur.size = 1.0
@@ -2056,6 +2070,16 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             warn("Post-emboss reselect failed (continuing): " + str(e))
 
 
+def _stable_seed_int(s):
+    """Deterministic integer seed from a string, for `random.Random(...)`.
+    Python's builtin `hash()` is salted per-process (PYTHONHASHSEED) — NOT
+    stable across Blender invocations — so a plain `hash(s)` would jitter
+    differently every re-bake of the SAME model, defeating the "idempotent
+    re-bake" half of the point. sha1 is stable everywhere, every time."""
+    import hashlib
+    return int(hashlib.sha1(s.encode("utf-8")).hexdigest()[:8], 16)
+
+
 _PUNCH_SIDE_ANGLES = {"front": 0.0, "right": -90.0, "back": 180.0, "left": 90.0}
 
 
@@ -2082,33 +2106,64 @@ def _emboss_punch_through(proxy, text):
     from any side, not just the one the mark was cut from.
 
     REWRITTEN 2026-08-21 (per-user: "too big... turn it into a repeating
-    pattern that crosses the models diagonally... small PREVIEW holes").
-    The original shape was ONE bold word climbing bottom-to-top dead centre
-    of the wall (cap_h = 35% of the model's own height — a single huge
-    letterform). Now it's a small, diagonal, TILED GRID of "PREVIEW" holes
-    covering the whole wall, like a stock-photo watermark:
-      • `embossPunchDiagonalDeg` (default 45°) rotates the read/height axes
+    pattern that crosses the models diagonally... small PREVIEW holes"), then
+    REVISED SAME DAY (per-user: a real bake screenshot showed the whole model
+    shredded — the first cut of this rewrite covered the ENTIRE wall in both
+    directions, which at a small letter size meant dozens of rows × many
+    columns of holes, reading as noise/damage rather than legible text; "far
+    too many watermarks... make them a lot smaller and less frequent"). The
+    ORIGINAL (pre-2026-08-21) shape was ONE bold word climbing bottom-to-top
+    dead centre of the wall (cap_h = 35% of the model's own height). Now it's
+    a small, diagonal, SPARSE band of "PREVIEW" holes crossing the wall
+    corner-to-corner — narrow (a couple of glyph rows, not the whole wall)
+    and loosely spaced (wide gaps between repeats), like a single watermark
+    stripe rather than a filled grid:
+      • `embossPunchDiagonalDeg` (default 45°, ± `embossPunchDiagonalJitterDeg`
+        random per model+side — see below) rotates the read/height axes
         within the wall's own plane (still an orthonormal basis built from
         `up`/`lateral`, so the maths downstream is unchanged) — the text
         reads diagonally instead of straight up.
-      • `embossPunchBoldnessFrac` now sizes ONE REPEAT TILE (small — default
-        0.06 of the model's height) rather than the whole climbing word.
-      • The cross-axis selection is widened from the old fixed
-        `cap_h * 0.48` (one glyph row) to `cross_half_mm` = half the wall's
-        own diagonal extent (via the new `_cut_wall_text_hole` param) — wide
-        enough that the SAME modulo-wrapped sampling that already repeats
-        "PREVIEW  " along the read axis (see _displace_wall_text/
-        _cut_wall_text_hole's `sample()`) also repeats it across the cross
-        axis, turning one column into a full grid. `read_half` is sized the
-        same way (half the diagonal) so the rotated selection box safely
-        covers the wall rectangle at any angle without needing per-angle
-        trig on the box edges. `read_phase_offset_mm` is dropped (0) — a
-        tiled, repeating pattern has no single "start of the word" to crop
-        to, unlike the old one-shot climbing word.
+      • `embossPunchBoldnessFrac` sizes ONE REPEAT TILE (small — default
+        0.045 of the model's height) rather than the whole climbing word.
+      • The cross-axis selection is `cross_half_mm` = `cap_h *
+        embossPunchBandRows` (default 1.2 → a band a bit over 2 glyph rows
+        wide) via the `_cut_wall_text_hole` param that decouples it from
+        `cap_h * 0.48` — narrow on purpose, NOT the wall's full extent (that
+        was the bug): wide enough that the modulo-wrapped sampling repeats
+        "PREVIEW" a couple of times across the band's own width, not enough
+        to tile the whole wall.
+      • `embossPunchGapChars` (default 12, vs the tile's normal 2 trailing
+        spaces — see `_get_watermark_tile`'s `trailing_spaces` param) bakes a
+        much wider blank gap into the SAME cached tile image, so the read
+        axis shows "PREVIEW" only a handful of times along the whole
+        diagonal instead of tiling edge-to-edge.
+      • `read_half` (run_mm) is still sized off half the wall's own diagonal
+        so the sparse band still visually crosses the whole wall
+        corner-to-corner, it's just mostly EMPTY space between occurrences
+        now rather than solid holes.
       • Small cap_h + a real source mesh (no more forced decimation, see
         make_proxy) means the density loop shared with _cut_wall_text_hole
         usually needs little or no extra subdivision — a non-decimated
         source is typically already dense enough near the target spacing.
+
+    Position/angle JITTER (per-user: "shift slightly so it's not always in
+    the same position... prevent someone from writing a script to fill it").
+    `embossSeed` (set by the TS worker to `"<modelId>:<partId-or-primary>"`,
+    see bake.ts) is hashed into a per-model, per-side `random.Random` — stable
+    across re-bakes of the SAME model/part (so `npm run test:proxybake`-style
+    comparisons stay reproducible) but different for every other model, which
+    is the actual anti-script property: a script tuned against one leaked
+    model's exact hole geometry (angle/offset/phase) won't line up with any
+    other model's. Three things get jittered, each within a config-bounded
+    range around the nominal value: the diagonal angle
+    (`embossPunchDiagonalJitterDeg`), the band's lateral offset from the
+    wall's centre (`embossPunchPositionJitterFrac`, a fraction of the wall's
+    own half-width), and the read-axis phase (where along the tile's repeat
+    cycle the pattern starts — always randomised a full period, no separate
+    config knob needed). Missing/empty `embossSeed` falls back to the literal
+    string "unseeded" — still deterministic (not wall-clock random), just the
+    same jitter on every model that omits it, which only matters for local
+    testing (bake.ts always sets a real one per job).
 
     Placement letter size still scales with the MODEL, never a fixed mm size
     (cap_h = max(diagp*0.004, span_mm*boldness_frac), same formula as before,
@@ -2132,6 +2187,7 @@ def _emboss_punch_through(proxy, text):
     uniform, geometry-agnostic mark; a per-skin density target would be the
     natural follow-up if that ever looks wrong on a real model."""
     import mathutils
+    import random
     try:
         sides_cfg = CFG.get("embossPunchSides", ["front", "right"])
         if isinstance(sides_cfg, str):
@@ -2140,10 +2196,15 @@ def _emboss_punch_through(proxy, text):
         if not sides:
             sides = ["front", "right"]
 
-        boldness_frac = min(1.0, max(0.01, float(CFG.get("embossPunchBoldnessFrac", 0.06))))
+        boldness_frac = min(1.0, max(0.01, float(CFG.get("embossPunchBoldnessFrac", 0.045))))
         v_margin = max(0.0, float(CFG.get("embossVerticalMarginFrac", 0.01)))
         reach_margin_frac = max(0.0, float(CFG.get("embossPunchReachMarginFrac", 0.1)))
         diagonal_deg = float(CFG.get("embossPunchDiagonalDeg", 45.0))
+        diagonal_jitter_deg = max(0.0, float(CFG.get("embossPunchDiagonalJitterDeg", 20.0)))
+        position_jitter_frac = min(1.0, max(0.0, float(CFG.get("embossPunchPositionJitterFrac", 0.3))))
+        band_rows = max(0.3, float(CFG.get("embossPunchBandRows", 1.2)))
+        gap_chars = max(0, int(CFG.get("embossPunchGapChars", 12)))
+        seed_str = str(CFG.get("embossSeed", "") or "unseeded")
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -2163,26 +2224,33 @@ def _emboss_punch_through(proxy, text):
         span_mm = max(1e-4, z1 - z0)
         cap_h = max(diagp * 0.004, span_mm * boldness_frac)
 
-        tile_path, tile_w, tile_h = _get_watermark_tile(text)
+        tile_path, tile_w, tile_h = _get_watermark_tile(text, trailing_spaces=gap_chars)
+        tile_aspect = max(1e-3, tile_w / max(tile_h, 1e-6))
         deselect_all()
         proxy.select_set(True)
         set_active(proxy)
 
         up = mathutils.Vector((0.0, 0.0, 1.0))
-        diag_rad = math.radians(diagonal_deg)
-        cos_d, sin_d = math.cos(diag_rad), math.sin(diag_rad)
         holes_attempted = 0
         holes_cut = 0
         placements = []
         for name in sides:
+            # Per model+side deterministic jitter — same model always jitters the
+            # same way (idempotent re-bakes), every other model jitters
+            # differently (the actual anti-script property; see docstring).
+            rng = random.Random(_stable_seed_int("%s::punch::%s" % (seed_str, name)))
+            diagonal_deg_eff = diagonal_deg + rng.uniform(-diagonal_jitter_deg, diagonal_jitter_deg)
+            diag_rad = math.radians(diagonal_deg_eff)
+            cos_d, sin_d = math.cos(diag_rad), math.sin(diag_rad)
+
             ang = _PUNCH_SIDE_ANGLES[name]
             rad = math.radians(ang)
             normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
             lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
-            # Rotate the (up, lateral) in-wall-plane basis by the diagonal angle —
-            # still orthonormal (a rotation of an orthonormal pair), so it drops
-            # straight into the same read_axis/height_axis contract every other
-            # placement uses. At 0° this reduces exactly to the old vertical
+            # Rotate the (up, lateral) in-wall-plane basis by the (jittered) diagonal
+            # angle — still orthonormal (a rotation of an orthonormal pair), so it
+            # drops straight into the same read_axis/height_axis contract every
+            # other placement uses. At 0° this reduces exactly to the old vertical
             # read_axis=up/height_axis=lateral case.
             read_axis = up * cos_d + lateral * sin_d
             height_axis = -up * sin_d + lateral * cos_d
@@ -2197,25 +2265,39 @@ def _emboss_punch_through(proxy, text):
             lateral_half = _box_support(hx, hy, lateral)
             wall_centre = mathutils.Vector((cx + normal.x * reach_depth,
                                              cy + normal.y * reach_depth, 0.0))
-            anchor = wall_centre + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0))
+            # Jitter the band's lateral offset from the wall's centre — a fraction
+            # of the wall's own half-width, so the band doesn't always cross dead
+            # centre either.
+            lateral_jitter_mm = rng.uniform(-1.0, 1.0) * lateral_half * position_jitter_frac
+            anchor = (wall_centre + lateral * lateral_jitter_mm
+                      + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0)))
             full_thru_mm = reach_depth * 2.0
             select_reach_mm = full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac)
 
             # Half the wall rectangle's own diagonal — sized so a box this big in
-            # BOTH the (rotated) read and cross axes safely covers the whole
-            # wall rectangle regardless of `diagonal_deg`, without per-angle trig
-            # on the rectangle's edges. The extra corner area outside the actual
-            # rectangle is harmless: _cut_wall_text_hole still only ever finds
-            # faces that are actually there.
+            # the (rotated) READ axis safely crosses the whole wall rectangle
+            # corner-to-corner regardless of `diagonal_deg_eff`, without per-angle
+            # trig on the rectangle's edges. The CROSS axis is deliberately much
+            # narrower (band_rows glyph-rows, not the wall's own extent — see the
+            # 2026-08-21 revision note in the docstring) so the pattern reads as
+            # one sparse diagonal stripe, not a filled grid.
             wall_half_diag = 0.5 * math.sqrt((lateral_half * 2.0) ** 2 + span_mm ** 2)
+            cross_half_mm = cap_h * band_rows
+
+            # Randomised read-axis phase — where along the tile's own repeat cycle
+            # the pattern starts, so two models sharing the same band geometry
+            # still don't line up glyph-for-glyph.
+            period_read_mm = max(1e-3, cap_h * tile_aspect)
+            phase_offset_mm = rng.uniform(0.0, period_read_mm)
 
             label = "punch %s" % name
             holes_attempted += 1
             if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
                                     cap_h, wall_half_diag * 2.0, select_reach_mm, label,
-                                    read_phase_offset_mm=0.0, cross_half_mm=wall_half_diag):
+                                    read_phase_offset_mm=phase_offset_mm, cross_half_mm=cross_half_mm):
                 holes_cut += 1
-                placements.append("%s: diagonal-grid@%.1fmm (through %.0fmm)" % (name, cap_h, full_thru_mm))
+                placements.append("%s: diagonal-band@%.1fmm angle=%.1f (through %.0fmm)"
+                                   % (name, cap_h, diagonal_deg_eff, full_thru_mm))
             else:
                 warn("Watermark punch %s: no material found along the punch axis "
                      "(%.0fmm wide, %.0fmm through) — this side gets no mark"
@@ -2230,6 +2312,7 @@ def _emboss_punch_through(proxy, text):
         REPORT["embossPunchSides"] = sides
         REPORT["embossPunchCapHeightMm"] = round(cap_h, 3)
         REPORT["embossPunchDiagonalDeg"] = diagonal_deg
+        REPORT["embossPunchSeed"] = seed_str
         REPORT["embossPunchPlacements"] = placements
         REPORT["embossHolesTotal"] = holes_cut
         if holes_cut == 0:

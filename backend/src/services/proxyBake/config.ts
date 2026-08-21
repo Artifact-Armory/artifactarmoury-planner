@@ -123,17 +123,52 @@ export interface ProxyBakeConfig {
    *  = model height * this fraction, same idea as embossHoleBoldnessFrac but a
    *  separate knob so tuning one style never silently retunes the other. Letter size
    *  always scales with the model, never a fixed mm size. Since 2026-08-21 this sizes
-   *  ONE REPEAT TILE of a diagonal, repeating grid pattern (see embossPunchDiagonalDeg
-   *  and bake_proxy.py's _emboss_punch_through) rather than one bold word climbing
-   *  the whole wall — default dropped from 0.35 (a single huge letterform) to 0.06
-   *  (small, per-user "too big... small PREVIEW holes"). */
+   *  ONE REPEAT TILE of a small, sparse diagonal BAND (see embossPunchBandRows/
+   *  embossPunchGapChars/embossPunchDiagonalDeg and bake_proxy.py's
+   *  _emboss_punch_through) rather than one bold word climbing the whole wall —
+   *  default dropped from 0.35 (a single huge letterform) to 0.045 (small, per-user
+   *  "too big... small PREVIEW holes"). */
   embossPunchBoldnessFrac: number
   /** Rotation (degrees) of the punch-through text's read/height axes within each
    *  wall's own plane, measured from vertical ("up"). 0 = the original straight
    *  bottom-to-top climb; the default 45 reads diagonally, crossing the wall corner-
-   *  to-corner (per-user "repeating pattern that crosses the models diagonally").
-   *  Only used by embossStyle="punch"; see bake_proxy.py's _emboss_punch_through. */
+   *  to-corner (per-user "repeating pattern that crosses the models diagonally"). This
+   *  is the NOMINAL angle — the actual per-model angle is this ± a random offset up to
+   *  embossPunchDiagonalJitterDeg (see there). Only used by embossStyle="punch"; see
+   *  bake_proxy.py's _emboss_punch_through. */
   embossPunchDiagonalDeg: number
+  /** How much the per-model/per-side JITTER (see embossSeed in bake_proxy.py) may
+   *  rotate the punch-through band away from embossPunchDiagonalDeg, in degrees
+   *  either direction. Default 20 (i.e. the real angle lands somewhere in
+   *  [25°, 65°] for the 45° default) — per-user request that the watermark's
+   *  position "shift slightly so it's not always in the same position" to resist a
+   *  script written against one specific leaked model's hole geometry. 0 disables
+   *  angle jitter (always exactly embossPunchDiagonalDeg). */
+  embossPunchDiagonalJitterDeg: number
+  /** How far the per-model/per-side JITTER may shift the punch-through band's
+   *  lateral centre away from the wall's own midline, as a fraction (0..1) of that
+   *  wall's own half-width. Default 0.3. Same anti-script motivation as
+   *  embossPunchDiagonalJitterDeg — the band isn't always dead-centre either. 0
+   *  disables position jitter. */
+  embossPunchPositionJitterFrac: number
+  /** Cross-axis (band) width of the punch-through pattern, in units of its own
+   *  cap_h — total band width = 2 * cap_h * this value. Default 1.2 (~2.4 glyph
+   *  rows) — a narrow stripe, NOT the wall's full extent. Raised (2026-08-21) from
+   *  an earlier "cover the whole wall" attempt that read as a fully perforated,
+   *  shredded-looking mesh in a real bake rather than a legible small pattern —
+   *  per-user "far too many watermarks... make them a lot smaller and less
+   *  frequent". */
+  embossPunchBandRows: number
+  /** Trailing spaces baked into the punch-through watermark's cached tile image
+   *  (see bake_proxy.py's `_get_watermark_tile`'s `trailing_spaces` param), in
+   *  place of the tile's normal fixed 2. A bigger value bakes more blank
+   *  background into one repeat unit, so the SAME modulo-wrap tiling shows
+   *  "PREVIEW" far less often per unit of surface — this is what turns a
+   *  solid-tiled band into a sparse, spaced-out one (letter SIZE is unaffected;
+   *  only the gap between occurrences grows). Default 12 (a fixed gap 6x the
+   *  original 2). Only affects "punch"; the "pillars" style keeps the original
+   *  2-space tile. */
+  embossPunchGapChars: number
   /** Extra safety margin added on top of the exact distance to the OPPOSITE wall when
    *  sizing the punch-through cut's vertex-selection depth — as a fraction of that
    *  full-through distance (floored at 2mm absolute). Without this, a punch sized to
