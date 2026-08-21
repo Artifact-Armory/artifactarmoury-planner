@@ -11,24 +11,27 @@ import fs from 'fs'
 import path from 'path'
 
 export interface ProxyBakeConfig {
-  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh) AND the
-   *  detail-removal smoothing pass. Default **false** (2026-08-21, per-user
-   *  decision — "don't decimate the model's triangles at all... perfect looking
-   *  models with small PREVIEW holes"): the proxy then keeps the source's EXACT
-   *  triangle count and full surface detail (see make_proxy's
-   *  decimation_enabled branch, which — same as "source already within
-   *  budget" always did — still runs UV + AO/normal bake + poison pills +
-   *  the emboss watermark, just skips the DECIMATE/voxel-remesh step
-   *  entirely regardless of source size). triangleBudget/triangleRetainRatio/
-   *  triangleBudgetCeiling below are simply unused while this is false — kept
-   *  in the schema so a specific over-sized model can still opt back into
-   *  decimation via proxy_bake_config if a real bake ever times out.
-   *  Geometry-based anti-theft (decimated + smoothed proxy = unprintable
-   *  blob) is traded away when this is false; protection then relies on the
-   *  emboss watermark holes (embossStyle) and the download-time AES header
-   *  watermark on the paid STL instead. See also proxySmoothIterations,
-   *  which should normally be 0 alongside this for a genuinely undegraded
-   *  preview. */
+  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh). Default
+   *  **true** (restored 2026-08-21): a real bake with this off caused visible
+   *  planner slowdown, because this GLB is the SAME file the planner renders —
+   *  removing decimation put the source's full, undecimated triangle count
+   *  straight into the browser, exactly the FPS problem this pipeline was
+   *  originally built to prevent (see the 2026-08 "Planner FPS drop" note in
+   *  CLAUDE.md). triangleRetainRatio was raised alongside re-enabling this (0.22
+   *  → 0.6) so the trade favours fidelity more than the original tuning did —
+   *  most typical uploads (under triangleBudget, the floor) still get ZERO
+   *  decimation and their exact source geometry either way; only genuinely dense
+   *  sources (a few hundred thousand+ triangles) actually get scaled down, now
+   *  to ~60% rather than ~22%. Smoothing (proxySmoothIterations) stays 0/off
+   *  regardless — decimation alone (triangle-count reduction) is a different,
+   *  much less visually-lossy operation than the old LaplacianSmooth blur, and
+   *  isn't reintroduced here. Set false to skip decimation entirely (full
+   *  source detail, no triangle-count cap) if planner performance on dense
+   *  models is an acceptable trade for a specific use case — see make_proxy's
+   *  decimation_enabled branch. Geometry-based anti-theft is inherently weaker
+   *  whichever way this is set without the old smoothing; protection leans on
+   *  the emboss watermark holes (embossStyle) and the download-time AES header
+   *  watermark on the paid STL either way. */
   proxyDecimationEnabled: boolean
   /** FLOOR on the decimated proxy's triangle count — the minimum target regardless
    *  of source complexity. Sources at/under this skip decimation entirely (unchanged
@@ -40,23 +43,27 @@ export interface ProxyBakeConfig {
    *  90k-tri tile kept 100%), so scaling by source size fixes the inversion. */
   triangleBudget: number
   /** Fraction of SOURCE triangles the adaptive budget targets for sources above the
-   *  triangleBudget floor (default 0.22 = keep ~22%, raised 2026-08-18 from 0.09 —
-   *  models were too aggressively decimated). Only takes effect once
-   *  src_tris * triangleRetainRatio exceeds triangleBudget — typical/simple sources
-   *  are unaffected and keep decimating to the flat floor as before. See
-   *  bake_proxy.py's compute_adaptive_budget docstring for why the ceiling was NOT
-   *  scaled up proportionally with this. */
+   *  triangleBudget floor (default 0.6 = keep ~60%, raised 2026-08-21 from 0.22 —
+   *  per-user preference for fidelity over aggressive reduction, balanced against a
+   *  real bake proving fully-off decimation made the planner visibly slow on a dense
+   *  model). Only takes effect once src_tris * triangleRetainRatio exceeds
+   *  triangleBudget — typical/simple sources are unaffected and skip decimation
+   *  entirely (full source detail) as before. See bake_proxy.py's
+   *  compute_adaptive_budget docstring for why the ceiling was NOT scaled up
+   *  proportionally with this. */
   triangleRetainRatio: number
   /** Hard cap on the adaptive proxy triangle target, regardless of how large
    *  triangleRetainRatio * sourceTriangles gets. Protects the 20-min bake timeout
    *  and — since the worker is a single-threaded serial queue (proxyBakeWorker.ts)
    *  — protects every OTHER queued upload's wait time too, not just this one's.
-   *  Default 300000, chosen deliberately BELOW what triangleRetainRatio=0.22 would
-   *  imply for the densest known real source (~2.5M tris → ~490k) — that ratio has
-   *  only been proven safe up to this ceiling; a prior 30%-retain/no-ceiling attempt
-   *  on that same source did not complete in a reasonable time. Raise only after a
-   *  real worker-side bake confirms a higher number stays comfortably under the
-   *  timeout. */
+   *  Left at 300000 when triangleRetainRatio was raised 0.22→0.6 (2026-08-21):
+   *  worst-case OUTPUT triangle count for the densest known real source (~2.5M
+   *  tris) is unchanged — still ceiling-bound at exactly this value either way
+   *  (2.5M * 0.6 = 1.5M ≫ ceiling) — so the higher ratio only gives MORE detail to
+   *  sources that weren't already ceiling-bound (roughly under ~500k tris at the
+   *  new ratio), without reintroducing the timeout risk a raised ceiling would.
+   *  Raise the ceiling itself only after a real worker-side bake confirms a higher
+   *  number stays comfortably under the timeout. */
   triangleBudgetCeiling: number
   /** Merge-by-distance threshold (mm) run on the imported source BEFORE decimate/
    *  smooth. STL has no shared-vertex topology — every triangle owns its own verts —
@@ -124,10 +131,12 @@ export interface ProxyBakeConfig {
    *  separate knob so tuning one style never silently retunes the other. Letter size
    *  always scales with the model, never a fixed mm size. Since 2026-08-21 this sizes
    *  ONE REPEAT TILE of a small, sparse diagonal BAND (see embossPunchBandRows/
-   *  embossPunchGapChars/embossPunchDiagonalDeg and bake_proxy.py's
+   *  embossPunchGapFrac/embossPunchDiagonalDeg and bake_proxy.py's
    *  _emboss_punch_through) rather than one bold word climbing the whole wall —
-   *  default dropped from 0.35 (a single huge letterform) to 0.045 (small, per-user
-   *  "too big... small PREVIEW holes"). */
+   *  default dropped from 0.35 (a single huge letterform) to 0.06 (small, per-user
+   *  "too big... small PREVIEW holes"; 0.06 confirmed legible in a real local
+   *  Blender render at this size, 0.045 was noticeably blurrier — see bake_proxy.py's
+   *  emboss docstring for the local-testing method). */
   embossPunchBoldnessFrac: number
   /** Rotation (degrees) of the punch-through text's read/height axes within each
    *  wall's own plane, measured from vertical ("up"). 0 = the original straight
@@ -159,16 +168,27 @@ export interface ProxyBakeConfig {
    *  per-user "far too many watermarks... make them a lot smaller and less
    *  frequent". */
   embossPunchBandRows: number
-  /** Trailing spaces baked into the punch-through watermark's cached tile image
-   *  (see bake_proxy.py's `_get_watermark_tile`'s `trailing_spaces` param), in
-   *  place of the tile's normal fixed 2. A bigger value bakes more blank
-   *  background into one repeat unit, so the SAME modulo-wrap tiling shows
-   *  "PREVIEW" far less often per unit of surface — this is what turns a
+  /** Real blank gap baked into the punch-through watermark's cached tile image
+   *  (see bake_proxy.py's `_get_watermark_tile`'s `gap_frac` param), as a
+   *  fraction of the word's own ink width — 1.5 (the default) means the gap is
+   *  1.5x as wide as "PREVIEW" itself, so the word occupies the left 40% of
+   *  each repeat period and the rest is blank. This is what turns a
    *  solid-tiled band into a sparse, spaced-out one (letter SIZE is unaffected;
-   *  only the gap between occurrences grows). Default 12 (a fixed gap 6x the
-   *  original 2). Only affects "punch"; the "pillars" style keeps the original
-   *  2-space tile. */
-  embossPunchGapChars: number
+   *  only the gap between occurrences grows). 0 = edge-to-edge tiling, no gap.
+   *  Only affects "punch"; the "pillars" style keeps its original gapless tile
+   *  (gap_frac=0, the default when unspecified).
+   *
+   *  FIXED 2026-08-21: this used to be `embossPunchGapChars`, trying to get the
+   *  gap via literal trailing SPACE characters appended to the rendered string.
+   *  That never worked — confirmed via a local Blender test, Blender's
+   *  text-to-mesh conversion (and even the un-converted text object's own
+   *  `Object.dimensions`) measures only a string's INK extent; trailing spaces
+   *  contribute zero width regardless of count. Every caller of this tile
+   *  (including the pre-existing "pillars" style's fixed 2-space gap) had
+   *  therefore always tiled edge-to-edge with NO real gap since this feature's
+   *  original implementation. Now the gap is real rendered blank pixels in the
+   *  tile image itself (see _render_watermark_tile), which actually works. */
+  embossPunchGapFrac: number
   /** Extra safety margin added on top of the exact distance to the OPPOSITE wall when
    *  sizing the punch-through cut's vertex-selection depth — as a fraction of that
    *  full-through distance (floored at 2mm absolute). Without this, a punch sized to

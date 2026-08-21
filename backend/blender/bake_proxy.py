@@ -855,18 +855,18 @@ def _apply_wm_boolean(proxy, wm, engrave, text, placement):
 _WM_TILE_CACHE = {}
 
 
-def _watermark_tile_cache_path(text, trailing_spaces):
+def _watermark_tile_cache_path(text, gap_frac):
     """Disk path for the cached heightmap tile. Lives next to this script (not in
     the per-job OUT_DIR, which gets deleted after every job) so it survives across
     bake jobs on the same worker container. The text is always "PREVIEW" — the
     same tile is reusable across every model forever, so this render (a few
     hundred ms) happens at most once per worker-container lifetime, not once per
-    bake, which matters at upload-volume scale. `trailing_spaces` is folded into
+    bake, which matters at upload-volume scale. `gap_frac` is folded into
     the cache key (see _get_watermark_tile) so styles that want a wider gap
     between repeats don't collide with a differently-spaced tile some other
     style already cached."""
     import hashlib
-    h = hashlib.sha1(("%s::%d" % (text, trailing_spaces)).encode("utf-8")).hexdigest()[:16]
+    h = hashlib.sha1(("%s::%.4f" % (text, gap_frac)).encode("utf-8")).hexdigest()[:16]
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".wm_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -877,24 +877,43 @@ def _watermark_tile_cache_path(text, trailing_spaces):
         return out_path("wm_tile_%s.png" % h)
 
 
-def _get_watermark_tile(text, trailing_spaces=2):
+def _get_watermark_tile(text, gap_frac=0.0):
     """Return (png_path, unit_width, unit_height) for one vertically-tileable
-    repeat unit of `text + " "*trailing_spaces`, rendered flat (font size=1.0)
+    repeat unit of `text` PLUS a real blank gap, rendered flat (font size=1.0)
     top-down, white text on black. Cached in-process and on disk keyed by
-    (text, trailing_spaces).
+    (text, gap_frac).
 
-    `trailing_spaces` (default 2, the original fixed gap) is how far apart
-    consecutive repeats land when the sampler's `u %= 1.0` wraps — a bigger
-    value means more BLANK background baked into the one repeat unit, so the
-    same modulo-wrap tiling shows the word less often per unit of surface
-    without touching letter size at all. Used by _emboss_punch_through
-    (embossPunchGapChars, default much larger than 2) to fix a repeating
-    pattern that tiled edge-to-edge into what read as solid noise/damage
-    rather than a legible "PREVIEW ... PREVIEW ... PREVIEW" band."""
-    cache_key = (text, trailing_spaces)
+    `gap_frac` (default 0, the original behaviour) is how much extra BLANK
+    background — as a fraction of the word's own ink width — gets baked into
+    the one repeat unit, so the same modulo-wrap tiling (`u %= 1.0` in
+    _cut_wall_text_hole/_displace_wall_text's `sample()`) shows the word less
+    often per unit of surface without touching letter size at all. gap_frac=1
+    means the blank gap is as wide as the word itself (word takes the left
+    half of the period, right half is empty); 0 means edge-to-edge tiling
+    with no gap.
+
+    NOTE (2026-08-21): earlier versions of this function tried to get the gap
+    by appending literal trailing SPACE characters to the rendered string
+    (`text + "  "`) instead. That never worked, for any caller, since this
+    function's inception — confirmed via a local Blender test:
+    `bpy`'s text-to-mesh conversion (and even `Object.dimensions` on the
+    un-converted text object) measures only the INK extent of a string;
+    trailing space characters contribute zero width to both, so
+    `"PREVIEW"`, `"PREVIEW  "`, and `"PREVIEW            "` all measured an
+    IDENTICAL bounding box. Every style using this tile (pillars' fixed
+    "2-space" gap, and this session's punch rewrite) has therefore always
+    tiled the word edge-to-edge with NO real gap regardless of the space
+    count requested — this is why widening embossPunchGapChars had no visual
+    effect when tested locally. Fixed by baking the gap in as real rendered
+    pixels (extending the camera frame past the ink) instead of relying on
+    whitespace characters at all — see _render_watermark_tile. Pillars keeps
+    calling this with the default gap_frac=0.0, so its long-standing (if
+    accidentally gapless) visual appearance is UNCHANGED by this fix; only
+    punch (which explicitly passes a non-zero gap_frac) gets a real gap now."""
+    cache_key = (text, gap_frac)
     if cache_key in _WM_TILE_CACHE:
         return _WM_TILE_CACHE[cache_key]
-    cache_path = _watermark_tile_cache_path(text, trailing_spaces)
+    cache_path = _watermark_tile_cache_path(text, gap_frac)
     meta_path = cache_path + ".meta.json"
     if os.path.exists(cache_path) and os.path.exists(meta_path):
         try:
@@ -905,7 +924,7 @@ def _get_watermark_tile(text, trailing_spaces=2):
             return result
         except Exception:
             pass  # corrupt/partial cache entry — fall through and re-render
-    result = _render_watermark_tile(text, cache_path, trailing_spaces)
+    result = _render_watermark_tile(text, cache_path, gap_frac)
     try:
         with open(meta_path, "w") as f:
             json.dump({"w": result[1], "h": result[2]}, f)
@@ -915,11 +934,15 @@ def _get_watermark_tile(text, trailing_spaces=2):
     return result
 
 
-def _render_watermark_tile(text, out_png, trailing_spaces=2):
-    """Render one flat repeat-unit of `text + " "*trailing_spaces` (font
-    size=1.0, not tied to any model) top-down onto a black background as
-    white emissive text. Real-world scale is applied later, per wall, via the
-    Displace modifier's projector transform — this image is dimensionless."""
+def _render_watermark_tile(text, out_png, gap_frac=0.0):
+    """Render one flat repeat-unit of `text` (font size=1.0, not tied to any
+    model) top-down onto a black background as white emissive text, framed to
+    include `gap_frac` extra blank width AFTER the word's own ink (real
+    rendered pixels — see _get_watermark_tile's docstring for why trailing
+    space characters don't work for this). The returned unit_width covers
+    ink+gap; the ink itself sits left-aligned (cur.align_x="LEFT") in the
+    left `1/(1+gap_frac)` portion of that width, so `sample()`'s `u %= 1.0`
+    wrap shows one word then real blank space before the next repeat."""
     made = []
     scene = bpy.context.scene
     saved_camera, saved_world = scene.camera, scene.world
@@ -934,7 +957,7 @@ def _render_watermark_tile(text, out_png, trailing_spaces=2):
         obj.hide_render = True
     try:
         cur = bpy.data.curves.new(name="wm_tile_curve", type="FONT")
-        cur.body = text + (" " * max(0, int(trailing_spaces)))
+        cur.body = text
         cur.align_x = "LEFT"
         cur.align_y = "BOTTOM_BASELINE"
         cur.size = 1.0
@@ -953,8 +976,10 @@ def _render_watermark_tile(text, out_png, trailing_spaces=2):
         ys = [v.co.y for v in me.vertices]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
-        w = max(1e-4, max_x - min_x)
+        ink_w = max(1e-4, max_x - min_x)
         h = max(1e-4, max_y - min_y)
+        gap_frac = max(0.0, float(gap_frac))
+        w = ink_w * (1.0 + gap_frac)  # full repeat period: ink + real blank gap
 
         mat = bpy.data.materials.new("wm_tile_mat")
         mat.use_nodes = True
@@ -974,7 +999,11 @@ def _render_watermark_tile(text, out_png, trailing_spaces=2):
         scene.render.film_transparent = False
         scene.render.image_settings.file_format = "PNG"
         scene.render.image_settings.color_mode = "RGB"
-        px_w = 256
+        # Resolution scales with the period so the glyph itself keeps roughly
+        # constant pixel density regardless of how much blank gap is added
+        # (a fixed 256px stretched over a much wider period would soften the
+        # letterforms). Capped so a large gap_frac can't blow up render cost.
+        px_w = min(1024, max(256, int(round(256 * (1.0 + gap_frac)))))
         px_h = max(32, int(round(px_w * (h / w))))
         scene.render.resolution_x = px_w
         scene.render.resolution_y = px_h
@@ -996,7 +1025,10 @@ def _render_watermark_tile(text, out_png, trailing_spaces=2):
         scene.collection.objects.link(cam)
         made.append(cam)
         scene.camera = cam
-        cx = (min_x + max_x) / 2.0
+        # Centre the camera on the FULL period (ink + gap), not just the ink —
+        # the ink is left-aligned within it (cur.align_x="LEFT", min_x≈0), so
+        # this leaves real blank space in the right portion of the frame.
+        cx = min_x + w / 2.0
         cy = (min_y + max_y) / 2.0
         cam.location = (cx, cy, 10.0)
         cam.rotation_euler = (0.0, 0.0, 0.0)  # looks straight down -Z at the flat text
@@ -2132,11 +2164,15 @@ def _emboss_punch_through(proxy, text):
         was the bug): wide enough that the modulo-wrapped sampling repeats
         "PREVIEW" a couple of times across the band's own width, not enough
         to tile the whole wall.
-      • `embossPunchGapChars` (default 12, vs the tile's normal 2 trailing
-        spaces — see `_get_watermark_tile`'s `trailing_spaces` param) bakes a
-        much wider blank gap into the SAME cached tile image, so the read
-        axis shows "PREVIEW" only a handful of times along the whole
-        diagonal instead of tiling edge-to-edge.
+      • `embossPunchGapFrac` (default 1.5 — a real blank gap 1.5x the word's
+        own ink width, baked into the rendered tile image itself; see
+        `_get_watermark_tile`'s `gap_frac` param) makes the read axis show
+        "PREVIEW" only a handful of times along the whole diagonal instead of
+        tiling edge-to-edge. (Fixed 2026-08-21: an earlier attempt at this via
+        literal trailing SPACE characters in the rendered string never
+        actually worked — Blender's text-to-mesh conversion discards
+        trailing-whitespace advance entirely — see _get_watermark_tile's
+        docstring for the local-Blender-test proof.)
       • `read_half` (run_mm) is still sized off half the wall's own diagonal
         so the sparse band still visually crosses the whole wall
         corner-to-corner, it's just mostly EMPTY space between occurrences
@@ -2203,7 +2239,7 @@ def _emboss_punch_through(proxy, text):
         diagonal_jitter_deg = max(0.0, float(CFG.get("embossPunchDiagonalJitterDeg", 20.0)))
         position_jitter_frac = min(1.0, max(0.0, float(CFG.get("embossPunchPositionJitterFrac", 0.3))))
         band_rows = max(0.3, float(CFG.get("embossPunchBandRows", 1.2)))
-        gap_chars = max(0, int(CFG.get("embossPunchGapChars", 12)))
+        gap_frac = max(0.0, float(CFG.get("embossPunchGapFrac", 1.5)))
         seed_str = str(CFG.get("embossSeed", "") or "unseeded")
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
@@ -2224,7 +2260,7 @@ def _emboss_punch_through(proxy, text):
         span_mm = max(1e-4, z1 - z0)
         cap_h = max(diagp * 0.004, span_mm * boldness_frac)
 
-        tile_path, tile_w, tile_h = _get_watermark_tile(text, trailing_spaces=gap_chars)
+        tile_path, tile_w, tile_h = _get_watermark_tile(text, gap_frac=gap_frac)
         tile_aspect = max(1e-3, tile_w / max(tile_h, 1e-6))
         deselect_all()
         proxy.select_set(True)
@@ -2274,15 +2310,45 @@ def _emboss_punch_through(proxy, text):
             full_thru_mm = reach_depth * 2.0
             select_reach_mm = full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac)
 
-            # Half the wall rectangle's own diagonal — sized so a box this big in
-            # the (rotated) READ axis safely crosses the whole wall rectangle
-            # corner-to-corner regardless of `diagonal_deg_eff`, without per-angle
-            # trig on the rectangle's edges. The CROSS axis is deliberately much
-            # narrower (band_rows glyph-rows, not the wall's own extent — see the
-            # 2026-08-21 revision note in the docstring) so the pattern reads as
-            # one sparse diagonal stripe, not a filled grid.
-            wall_half_diag = 0.5 * math.sqrt((lateral_half * 2.0) ** 2 + span_mm ** 2)
             cross_half_mm = cap_h * band_rows
+
+            # CONTAINMENT (fixed 2026-08-21 after a local Blender test surfaced a
+            # real bug, not just a size/frequency tuning issue): `select_reach_mm`
+            # reaches the model's FULL depth along `normal` — by design, that's
+            # what makes this a THROUGH punch. Combined with a rotated band, that
+            # full-depth reach means if the band's footprint (read_half/cross_half,
+            # ± jitter) gets anywhere near THIS wall's own edges, the same
+            # full-depth selection starts grazing whatever sits just past that
+            # edge — an ADJACENT perpendicular wall, a corner, the base slab —
+            # and deletes/subdivides THAT too. On a real bake this read as
+            # scattered, unrelated damage far from the intended mark, and locally
+            # (a synthetic 60-triangle test box) it produced 443 disconnected
+            # debris islands and blew the proxy up to 135k+ triangles from ONE
+            # small diagonal cut. Fix: size read_half so the FULL rotated
+            # rectangle (read_half/cross_half at this exact angle), plus the
+            # worst-case lateral jitter already applied to `anchor`, is
+            # GUARANTEED to stay within `edge_margin_frac` of this wall's own
+            # half-extents — never reaching its edges regardless of angle or
+            # jitter. Standard axis-aligned-bounding-box-of-a-rotated-rectangle
+            # maths: a rectangle with half-extents (read_half, cross_half) rotated
+            # by the read axis's own angle projects to axis-aligned half-extents
+            # of `read_half*|cos| + cross_half*|sin|` (up axis) and
+            # `read_half*|sin| + cross_half*|cos|` (lateral axis); solved for the
+            # largest read_half that keeps both under budget.
+            edge_margin_frac = 0.75
+            safe_half_span = max(1e-3, (span_mm / 2.0) * edge_margin_frac)
+            safe_half_lateral = max(1e-3, lateral_half * edge_margin_frac - abs(lateral_jitter_mm))
+            cos_a, sin_a = abs(cos_d), abs(sin_d)
+            read_half_caps = [cap_h]  # floor: never shrink below a single glyph
+            if cos_a > 1e-6:
+                read_half_caps.append((safe_half_span - cross_half_mm * sin_a) / cos_a)
+            if sin_a > 1e-6:
+                read_half_caps.append((safe_half_lateral - cross_half_mm * cos_a) / sin_a)
+            read_half_contained = max(cap_h * 0.5, min(read_half_caps))
+            # _cut_wall_text_hole derives its OWN read_half from run_mm as
+            # `run_mm/2 + 6% of run_mm` — back-solve run_mm so its actual read_half
+            # lands at (not past) the contained value above.
+            run_mm = max(cap_h, read_half_contained / 1.06 * 2.0)
 
             # Randomised read-axis phase — where along the tile's own repeat cycle
             # the pattern starts, so two models sharing the same band geometry
@@ -2293,7 +2359,7 @@ def _emboss_punch_through(proxy, text):
             label = "punch %s" % name
             holes_attempted += 1
             if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
-                                    cap_h, wall_half_diag * 2.0, select_reach_mm, label,
+                                    cap_h, run_mm, select_reach_mm, label,
                                     read_phase_offset_mm=phase_offset_mm, cross_half_mm=cross_half_mm):
                 holes_cut += 1
                 placements.append("%s: diagonal-band@%.1fmm angle=%.1f (through %.0fmm)"
