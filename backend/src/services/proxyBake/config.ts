@@ -296,8 +296,59 @@ export interface ProxyBakeConfig {
    *  pick up genuine structural material behind a typical reveal depth without
    *  reaching all the way to an opposite wall. */
   embossHoleReachFrac: number
-  /** Number of vertical pillars spaced evenly around the model (default 4). */
+  /** Number of vertical pillars spaced evenly around the model (default 4).
+   *  Briefly raised to 8 the same session (2026-08-21) chasing "repeat across
+   *  the model so scalpers can't just chop a bit off", then reverted: on a
+   *  real rectangular building, the 4 extra azimuths (evenly spaced past 4
+   *  land at the CORNERS, not mid-wall) found zero solid material every
+   *  single time — a diagonal direction on a box doesn't correspond to any
+   *  real flat wall, so every extra search attempt was wasted compute for no
+   *  additional placement. embossLateralSegments (splitting each EXISTING
+   *  wall's own width instead — see there) is what actually delivers
+   *  redundancy on this shape. Raise this past 4 only for genuinely
+   *  non-rectangular models (e.g. a round tower) where non-cardinal azimuths
+   *  DO correspond to real wall surface. */
   embossPillarCount: number
+  /** Splits each wall's vertical search band (z0..z1) into this many equal
+   *  height bands (default 3) and runs an INDEPENDENT _locate_wall_text
+   *  search+cut in EACH one, instead of one search over the whole wall height.
+   *  Per-user: "the watermark needs to repeat across the model so scalpers
+   *  can't just chop a bit off and resell the model" — a single placement per
+   *  wall (however solidly it's located) is still one identifiable region a
+   *  scalper could crop away; independent per-band placements mean no single
+   *  horizontal slice of the model removes every mark, only the ones that
+   *  happen to fall within that slice — ON A MODEL THAT ACTUALLY HAS SOLID
+   *  MATERIAL AT MULTIPLE HEIGHTS. Honest limitation, confirmed on a real dense
+   *  test model this session: this can only place a mark where real material
+   *  exists — a model whose walls are entirely open lattice/window above a
+   *  solid base will have every non-base band skip cleanly every time,
+   *  because there's genuinely nothing to cut a legible hole into up there.
+   *  On that class of model, embossLateralSegments (splitting each wall's own
+   *  WIDTH instead of its height — see there) is the lever that actually
+   *  delivers redundancy, since it multiplies placements along material
+   *  already confirmed solid rather than searching new directions that may
+   *  not correspond to any real surface. A band with no usable material just
+   *  skips, same as any other "nothing here" case — this only ever adds marks
+   *  where real material allows it, never trades one placement for a worse
+   *  one. 1 disables banding (the original one-search-per-wall behaviour). */
+  embossVerticalBands: number
+  /** Splits each wall's own WIDTH into this many equal lateral columns (default
+   *  3) and runs an INDEPENDENT _locate_wall_text search+cut in EACH one, at
+   *  the SAME letter size (cap_h stays sized off the whole wall, not the
+   *  narrower column — see _cap_h_for_wall). Added alongside embossVerticalBands
+   *  for the same "repeat across the model" request, after a real bake showed
+   *  raising embossPillarCount past 4 (spreading placements to non-cardinal
+   *  azimuths) wasted every extra attempt on a rectangular building — a
+   *  diagonal direction doesn't correspond to any real flat wall, so nothing
+   *  was ever found there. Splitting an EXISTING wall's width instead
+   *  multiplies placements on the SAME solid band that already carried that
+   *  wall's one mark (confirmed working: several independent columns along a
+   *  building's solid base strip), which is what actually delivers "removing
+   *  the mark means removing the whole band, not one small chunk of it". A
+   *  column with no usable material just skips, same as any other "nothing
+   *  here" case. 1 disables segmentation (one search across the whole wall
+   *  width, the original behaviour). */
+  embossLateralSegments: number
   /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.15,
    *  dropped 2026-08-21 from 0.64 — see bake_proxy.py's _cap_h_for_wall). 0.64 was
    *  tuned back when this style always did one dead-centre, no-search, full-height

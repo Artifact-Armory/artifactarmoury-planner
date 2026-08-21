@@ -1928,6 +1928,25 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
 
         bvh = _build_local_bvh(proxy)
 
+        # Height bands: split z0..z1 into `bands` equal sub-ranges and run an
+        # INDEPENDENT search+cut in EACH one, rather than one search over the
+        # whole wall height. Per-user: "the watermark needs to repeat across
+        # the model so scalpers can't just chop a bit off and resell the
+        # model" — one mark per wall (however solidly it's placed) is still a
+        # SINGLE region a scalper could identify and remove; a run confined to
+        # one contiguous band (see the "vertical" fix's own honest caveat —
+        # this model's longest run is consistently near the base) is provably
+        # removable with one crop. Splitting the search space so every band
+        # gets its OWN independent placement means no single horizontal slice
+        # of the model can remove every mark — only the marks that happen to
+        # fall in that slice's band(s). A band with no usable material (e.g.
+        # entirely open lattice) just skips cleanly, same as any other
+        # "nothing here" case — this only ever ADDS marks, never trades one
+        # placement for a worse one.
+        bands = max(1, int(CFG.get("embossVerticalBands", 3)))
+        band_h = max(1e-4, (z1 - z0) / bands)
+        lateral_segments = max(1, int(CFG.get("embossLateralSegments", 3)))
+
         applied = 0
         holes_attempted = 0
         holes_cut = 0
@@ -1948,54 +1967,84 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             # _select_reach_mm's docstring for the bug this fixes.
             select_reach_mm = _select_reach_mm(reach_mm, depth_mm, cap_h)
             wall_centre = mathutils.Vector((wx, wy, 0.0))
-            label = "wall %d" % i
+            wall_covered_any = False
 
-            loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
-                                     z0, z1, cap_h, tile_aspect, select_reach_mm,
-                                     min_coverage, cell_divisor, force_orientation)
-            if loc is None:
-                # _locate_wall_text already tried every size down to a last-resort
-                # relaxed-coverage attempt — this only fires if the wall truly has
-                # zero solid material anywhere (e.g. an open doorway spanning the
-                # whole side). Real walls with any frame/baseboard/mullion should
-                # always find something.
-                warn("Watermark %s: no solid material found ANYWHERE on this wall "
-                     "(%.0fmm wide) even at minimum size — this side gets no mark"
-                     % (label, lateral_half * 2))
-                placements.append("skipped")
-                continue
+            # LATERAL segments: split this wall's own width into `lateral_segments`
+            # equal columns and search+cut EACH independently, at the SAME letter
+            # size (cap_h stays sized off the whole wall's width, not the narrower
+            # segment — see _cap_h_for_wall). Complements embossVerticalBands: a
+            # real bake on a rectangular building found spreading MORE placements
+            # to non-cardinal azimuths (embossPillarCount > 4) wasted every extra
+            # attempt, because a diagonal direction on a box doesn't correspond to
+            # any real flat wall — nothing was ever found there. Splitting an
+            # EXISTING wall's own width instead multiplies real placements on
+            # material that's actually confirmed to exist (the same solid base
+            # strip that already carried the wall's one mark, now searched as
+            # several independent columns along it) — per-user "the watermark
+            # needs to repeat across the model so scalpers can't just chop a bit
+            # off": several independent marks spread along a wall's own solid
+            # band mean removing all of them means removing that whole band, not
+            # one small chunk of it.
+            seg_half = max(1e-4, lateral_half / lateral_segments)
 
-            anchor = wall_centre + lateral * loc["lateral_centre"] \
-                + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
-            if loc["orientation"] == "horizontal":
-                read_axis, height_axis = lateral, up
-            else:
-                read_axis, height_axis = up, lateral
+            for s in range(lateral_segments):
+                seg_offset = -lateral_half + seg_half * (2 * s + 1)
+                seg_centre = wall_centre + lateral * seg_offset
 
-            if through_holes:
-                # force_orientation="vertical" (the default) restricts
-                # _locate_wall_text above to the vertical reading direction only,
-                # so loc["orientation"] is always "vertical" here in that case —
-                # a real climbing mark, not confined to a horizontal strip near
-                # the base that a single planar cut could remove. "auto" tries
-                # both and may still pick horizontal if it finds a longer run.
-                holes_attempted += 1
-                if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
-                                        loc["cap_h"], loc["run_mm"], select_reach_mm, label):
-                    applied += 1
-                    holes_cut += 1
-                    walls_covered += 1
-                    placements.append("%s@%.1fmm hole" % (loc["orientation"], loc["cap_h"]))
-                else:
-                    placements.append("hole-failed")
-            elif _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
-                                      anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
-                                      engrave, label):
-                applied += 1
+                for b in range(bands):
+                    band_z0 = z0 + band_h * b
+                    band_z1 = z0 + band_h * (b + 1)
+                    label = "wall %d seg %d band %d" % (i, s, b)
+
+                    loc = _locate_wall_text(bvh, seg_centre, normal, lateral, seg_half,
+                                             band_z0, band_z1, cap_h, tile_aspect, select_reach_mm,
+                                             min_coverage, cell_divisor, force_orientation)
+                    if loc is None:
+                        # _locate_wall_text already tried every size down to a last-resort
+                        # relaxed-coverage attempt — this only fires if THIS SEGMENT/BAND
+                        # truly has zero solid material anywhere (e.g. a window spanning
+                        # the whole patch). Other segments/bands on the same wall are
+                        # searched independently and often still find something.
+                        warn("Watermark %s: no solid material found in this segment "
+                             "(%.0fmm wide, z %.0f-%.0f) — skipping" % (label, seg_half * 2, band_z0, band_z1))
+                        placements.append("skipped")
+                        continue
+
+                    anchor = seg_centre + lateral * loc["lateral_centre"] \
+                        + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
+                    if loc["orientation"] == "horizontal":
+                        read_axis, height_axis = lateral, up
+                    else:
+                        read_axis, height_axis = up, lateral
+
+                    if through_holes:
+                        # force_orientation="vertical" (the default) restricts
+                        # _locate_wall_text above to the vertical reading direction only,
+                        # so loc["orientation"] is always "vertical" here in that case —
+                        # a real climbing mark, not confined to a horizontal strip near
+                        # the base that a single planar cut could remove. "auto" tries
+                        # both and may still pick horizontal if it finds a longer run.
+                        holes_attempted += 1
+                        if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
+                                                loc["cap_h"], loc["run_mm"], select_reach_mm, label):
+                            applied += 1
+                            holes_cut += 1
+                            wall_covered_any = True
+                            placements.append("%s@%.1fmm hole" % (loc["orientation"], loc["cap_h"]))
+                        else:
+                            placements.append("hole-failed")
+                        continue
+                    if _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis,
+                                            anchor, loc["run_mm"], loc["cap_h"], depth_mm, select_reach_mm,
+                                            engrave, label):
+                        applied += 1
+                        wall_covered_any = True
+                        placements.append("%s@%.1fmm" % (loc["orientation"], loc["cap_h"]))
+                    else:
+                        placements.append("failed")
+
+            if wall_covered_any:
                 walls_covered += 1
-                placements.append("%s@%.1fmm" % (loc["orientation"], loc["cap_h"]))
-            else:
-                placements.append("failed")
 
         if through_holes:
             # Aggregate outcome across all per-wall/per-segment hole cuts.
@@ -2011,16 +2060,19 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             REPORT["embossApplied"] = applied > 0
 
         REPORT["embossPillarCount"] = count
+        REPORT["embossVerticalBands"] = bands
+        REPORT["embossLateralSegments"] = lateral_segments
         # One nominal size per wall now (proportionate to that wall's own width),
         # not a single shared value — see _cap_h_for_wall.
         REPORT["embossPillarCapHeightMmPerWall"] = cap_h_per_wall
         REPORT["embossWatermark"] = text
-        REPORT["embossPlacement"] = "vertical-pillars-%d" % count
+        REPORT["embossPlacement"] = "vertical-pillars-%d-x-%d-bands-x-%d-segs" % (count, bands, lateral_segments)
         REPORT["embossOrientationCfg"] = orientation_cfg
         REPORT["embossWallPlacements"] = placements
         REPORT["embossWallsCovered"] = walls_covered
-        REPORT["embossHolesTotal"] = applied  # individual holes; can exceed embossPillarCount
-        # now that a single wall can carry more than one segment
+        REPORT["embossHolesTotal"] = applied  # individual holes; can exceed embossPillarCount *
+        # embossVerticalBands * embossLateralSegments now that each wall is
+        # independently searched per band/segment
         if walls_covered == 0:
             warn("Watermark applied to 0 of %d walls" % count)
         elif walls_covered < count:

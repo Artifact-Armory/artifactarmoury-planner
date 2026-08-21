@@ -29,6 +29,8 @@
   "embossHoleBoldnessFrac": 0.35,
   "embossHoleReachFrac": 2.5,
   "embossPillarCount": 4,
+  "embossLateralSegments": 3,
+  "embossVerticalBands": 3,
   "embossPillarWidthFrac": 0.15,
   "embossPillarTwistDeg": 35,
   "embossPillarReachFrac": 1.0,
