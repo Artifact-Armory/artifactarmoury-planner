@@ -348,10 +348,23 @@ def make_proxy(src, src_tris):
         bpy.ops.object.modifier_apply(modifier=m.name)
 
     strategy = str(CFG.get("remeshStrategy", "decimate"))
+    decimation_enabled = bool(CFG.get("proxyDecimationEnabled", False))
 
+    # proxyDecimationEnabled=false (the default since 2026-08-21, per-user
+    # decision to keep the preview "perfect looking" rather than reduced) skips
+    # triangle reduction ENTIRELY regardless of source size — the proxy keeps
+    # the source's exact triangle count, same as the pre-existing "source
+    # already within budget" path below. Geometry-based anti-theft (decimate +
+    # LaplacianSmooth) is then off; protection relies on the emboss watermark
+    # holes (_emboss_punch_through) and the download-time AES header watermark
+    # instead. Still gets UV + AO + poison pills — the preview/purchase split
+    # must hold universally either way.
+    if not decimation_enabled:
+        strategy = "none"
+        REPORT["proxyStrategyDetail"] = "decimation disabled (proxyDecimationEnabled=false)"
     # Sources already at/under budget skip decimation but STILL get UV + AO + poison
     # pills — the split between preview and purchase file must hold universally.
-    if src_tris <= budget:
+    elif src_tris <= budget:
         strategy = "none"
         REPORT["proxyStrategyDetail"] = "source already within budget"
     else:
@@ -1513,7 +1526,8 @@ def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor
 
 
 def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
-                         cap_h, run_mm, select_reach_mm, label, read_phase_offset_mm=0.0):
+                         cap_h, run_mm, select_reach_mm, label, read_phase_offset_mm=0.0,
+                         cross_half_mm=None):
     """Cut one placement's worth of watermark text as a REAL through-hole —
     direct bmesh FACE DELETION under the glyph shape, sampled from the same
     cached heightmap tile _displace_wall_text uses, instead of a boolean CSG
@@ -1561,9 +1575,20 @@ def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor
     word. Selection geometry (read_half, lateral_reach) is unaffected — only
     which part of the cached tile gets sampled shifts.
 
+    `cross_half_mm` decouples the CROSS-axis (height_axis) selection extent
+    from `cap_h`. Left as None it defaults to `cap_h * 0.48` — a single
+    glyph-row-tall band, the original behaviour (one column/band of text).
+    Passing an explicit value (e.g. half the wall's own extent) widens the
+    selection far past one glyph row so the SAME modulo-wrapped `v` sampling
+    that already repeats the tile along the read axis also repeats it across
+    the cross axis — turning one column of text into a full tiled GRID of
+    repeats covering the whole passed-in area. This is what lets the
+    diagonal punch-through pattern (_emboss_punch_through) cover a whole wall
+    with small repeating holes instead of one bold climbing word.
+
     Returns True iff at least one face was actually deleted (i.e. the glyph
     shape landed on real geometry, not just on the background of the tile)."""
-    lateral_reach = max(cap_h * 0.48, 1e-3)
+    lateral_reach = max(1e-3, cap_h * 0.48 if cross_half_mm is None else cross_half_mm)
     read_half = max(1e-3, run_mm / 2.0 + max(1e-3, run_mm * 0.06))
     if os.environ.get("WM_DEBUG"):
         print("WMDEBUG hole %s anchor=%r normal=%r read_axis=%r height_axis=%r "
@@ -2056,17 +2081,44 @@ def _emboss_punch_through(proxy, text):
     than a mark on one wall — a leaked/ripped file reads as visibly punctured
     from any side, not just the one the mark was cut from.
 
-    Placement is the same "climb bottom→top, full height of the model" shape
-    the pillars style's direct full-height cut uses (cap_h sized as a
-    fraction of the model's own height, embossPunchBoldnessFrac) — letter
-    size scales with the model, never a fixed mm size. The only real
-    difference from that pillar branch is `select_reach_mm`: pillars caps it
-    to a shallow multiple of the recess depth (embossHoleReachFrac) so the
-    cut stays a dent in one wall; here it's sized to the model's FULL extent
-    along the punch axis (2x the wall's own centre-offset, i.e. the distance
-    to the OPPOSITE wall, plus a safety margin) so the same face-deletion
-    mechanism keeps removing faces all the way through instead of stopping
-    partway.
+    REWRITTEN 2026-08-21 (per-user: "too big... turn it into a repeating
+    pattern that crosses the models diagonally... small PREVIEW holes").
+    The original shape was ONE bold word climbing bottom-to-top dead centre
+    of the wall (cap_h = 35% of the model's own height — a single huge
+    letterform). Now it's a small, diagonal, TILED GRID of "PREVIEW" holes
+    covering the whole wall, like a stock-photo watermark:
+      • `embossPunchDiagonalDeg` (default 45°) rotates the read/height axes
+        within the wall's own plane (still an orthonormal basis built from
+        `up`/`lateral`, so the maths downstream is unchanged) — the text
+        reads diagonally instead of straight up.
+      • `embossPunchBoldnessFrac` now sizes ONE REPEAT TILE (small — default
+        0.06 of the model's height) rather than the whole climbing word.
+      • The cross-axis selection is widened from the old fixed
+        `cap_h * 0.48` (one glyph row) to `cross_half_mm` = half the wall's
+        own diagonal extent (via the new `_cut_wall_text_hole` param) — wide
+        enough that the SAME modulo-wrapped sampling that already repeats
+        "PREVIEW  " along the read axis (see _displace_wall_text/
+        _cut_wall_text_hole's `sample()`) also repeats it across the cross
+        axis, turning one column into a full grid. `read_half` is sized the
+        same way (half the diagonal) so the rotated selection box safely
+        covers the wall rectangle at any angle without needing per-angle
+        trig on the box edges. `read_phase_offset_mm` is dropped (0) — a
+        tiled, repeating pattern has no single "start of the word" to crop
+        to, unlike the old one-shot climbing word.
+      • Small cap_h + a real source mesh (no more forced decimation, see
+        make_proxy) means the density loop shared with _cut_wall_text_hole
+        usually needs little or no extra subdivision — a non-decimated
+        source is typically already dense enough near the target spacing.
+
+    Placement letter size still scales with the MODEL, never a fixed mm size
+    (cap_h = max(diagp*0.004, span_mm*boldness_frac), same formula as before,
+    just a smaller default boldness). The only real difference from the
+    pillars style is `select_reach_mm`: pillars caps it to a shallow multiple
+    of the recess depth (embossHoleReachFrac) so the cut stays a dent in one
+    wall; here it's sized to the model's FULL extent along the punch axis (2x
+    the wall's own centre-offset, i.e. the distance to the OPPOSITE wall,
+    plus a safety margin) so the same face-deletion mechanism keeps removing
+    faces all the way through instead of stopping partway.
 
     Known trade-off (documented rather than engineered around, to keep this
     style as simple as the "just punch a hole" request that motivated it):
@@ -2088,9 +2140,10 @@ def _emboss_punch_through(proxy, text):
         if not sides:
             sides = ["front", "right"]
 
-        boldness_frac = min(1.0, max(0.05, float(CFG.get("embossPunchBoldnessFrac", 0.35))))
+        boldness_frac = min(1.0, max(0.01, float(CFG.get("embossPunchBoldnessFrac", 0.06))))
         v_margin = max(0.0, float(CFG.get("embossVerticalMarginFrac", 0.01)))
         reach_margin_frac = max(0.0, float(CFG.get("embossPunchReachMarginFrac", 0.1)))
+        diagonal_deg = float(CFG.get("embossPunchDiagonalDeg", 45.0))
 
         diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
         corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
@@ -2116,6 +2169,8 @@ def _emboss_punch_through(proxy, text):
         set_active(proxy)
 
         up = mathutils.Vector((0.0, 0.0, 1.0))
+        diag_rad = math.radians(diagonal_deg)
+        cos_d, sin_d = math.cos(diag_rad), math.sin(diag_rad)
         holes_attempted = 0
         holes_cut = 0
         placements = []
@@ -2124,6 +2179,13 @@ def _emboss_punch_through(proxy, text):
             rad = math.radians(ang)
             normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
             lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
+            # Rotate the (up, lateral) in-wall-plane basis by the diagonal angle —
+            # still orthonormal (a rotation of an orthonormal pair), so it drops
+            # straight into the same read_axis/height_axis contract every other
+            # placement uses. At 0° this reduces exactly to the old vertical
+            # read_axis=up/height_axis=lateral case.
+            read_axis = up * cos_d + lateral * sin_d
+            height_axis = -up * sin_d + lateral * cos_d
             # reach_depth = this wall's own centre-offset from the model's centre
             # (half the box's extent along `normal`) — 2x that is the distance
             # STRAIGHT THROUGH to the opposite wall, i.e. the model's full depth
@@ -2139,13 +2201,21 @@ def _emboss_punch_through(proxy, text):
             full_thru_mm = reach_depth * 2.0
             select_reach_mm = full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac)
 
+            # Half the wall rectangle's own diagonal — sized so a box this big in
+            # BOTH the (rotated) read and cross axes safely covers the whole
+            # wall rectangle regardless of `diagonal_deg`, without per-angle trig
+            # on the rectangle's edges. The extra corner area outside the actual
+            # rectangle is harmless: _cut_wall_text_hole still only ever finds
+            # faces that are actually there.
+            wall_half_diag = 0.5 * math.sqrt((lateral_half * 2.0) ** 2 + span_mm ** 2)
+
             label = "punch %s" % name
             holes_attempted += 1
-            if _cut_wall_text_hole(proxy, tile_path, up, lateral, normal, anchor,
-                                    cap_h, span_mm, select_reach_mm, label,
-                                    read_phase_offset_mm=span_mm / 2.0):
+            if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
+                                    cap_h, wall_half_diag * 2.0, select_reach_mm, label,
+                                    read_phase_offset_mm=0.0, cross_half_mm=wall_half_diag):
                 holes_cut += 1
-                placements.append("%s: through@%.1fmm (span %.0fmm)" % (name, cap_h, full_thru_mm))
+                placements.append("%s: diagonal-grid@%.1fmm (through %.0fmm)" % (name, cap_h, full_thru_mm))
             else:
                 warn("Watermark punch %s: no material found along the punch axis "
                      "(%.0fmm wide, %.0fmm through) — this side gets no mark"
@@ -2156,9 +2226,10 @@ def _emboss_punch_through(proxy, text):
                                    else ("holes-all-failed" if holes_attempted > 0 else "holes-none-located"))
         REPORT["embossApplied"] = holes_cut > 0
         REPORT["embossWatermark"] = text
-        REPORT["embossPlacement"] = "punch-through-%s" % "-".join(sides)
+        REPORT["embossPlacement"] = "punch-through-diagonal-%s" % "-".join(sides)
         REPORT["embossPunchSides"] = sides
         REPORT["embossPunchCapHeightMm"] = round(cap_h, 3)
+        REPORT["embossPunchDiagonalDeg"] = diagonal_deg
         REPORT["embossPunchPlacements"] = placements
         REPORT["embossHolesTotal"] = holes_cut
         if holes_cut == 0:

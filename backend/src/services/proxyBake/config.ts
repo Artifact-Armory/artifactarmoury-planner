@@ -11,6 +11,25 @@ import fs from 'fs'
 import path from 'path'
 
 export interface ProxyBakeConfig {
+  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh) AND the
+   *  detail-removal smoothing pass. Default **false** (2026-08-21, per-user
+   *  decision — "don't decimate the model's triangles at all... perfect looking
+   *  models with small PREVIEW holes"): the proxy then keeps the source's EXACT
+   *  triangle count and full surface detail (see make_proxy's
+   *  decimation_enabled branch, which — same as "source already within
+   *  budget" always did — still runs UV + AO/normal bake + poison pills +
+   *  the emboss watermark, just skips the DECIMATE/voxel-remesh step
+   *  entirely regardless of source size). triangleBudget/triangleRetainRatio/
+   *  triangleBudgetCeiling below are simply unused while this is false — kept
+   *  in the schema so a specific over-sized model can still opt back into
+   *  decimation via proxy_bake_config if a real bake ever times out.
+   *  Geometry-based anti-theft (decimated + smoothed proxy = unprintable
+   *  blob) is traded away when this is false; protection then relies on the
+   *  emboss watermark holes (embossStyle) and the download-time AES header
+   *  watermark on the paid STL instead. See also proxySmoothIterations,
+   *  which should normally be 0 alongside this for a genuinely undegraded
+   *  preview. */
+  proxyDecimationEnabled: boolean
   /** FLOOR on the decimated proxy's triangle count — the minimum target regardless
    *  of source complexity. Sources at/under this skip decimation entirely (unchanged
    *  from before adaptive budgeting). For anything above it, the actual target is
@@ -51,8 +70,10 @@ export interface ProxyBakeConfig {
   weldMergeDistanceMm: number
   /** Smoothing passes applied to the proxy to REMOVE printable surface relief
    *  (the anti-theft core). The detail is re-added as a normal map, which printers
-   *  ignore — so the geometry a thief rips is a smooth blob. 0 disables smoothing
-   *  (the old, broken behaviour where the proxy kept all its detail). */
+   *  ignore — so the geometry a thief rips is a smooth blob. 0 disables smoothing —
+   *  default since 2026-08-21 (alongside proxyDecimationEnabled=false) so the
+   *  preview keeps its full, undegraded detail rather than a melted/rounded
+   *  silhouette; anti-theft then leans on the emboss watermark holes instead. */
   proxySmoothIterations: number
   /** Per-iteration smoothing factor (0..1) for the LEGACY plain Smooth modifier
    *  (only used when proxySmoothVolumePreserve is false). Higher = flatter. */
@@ -98,11 +119,21 @@ export interface ProxyBakeConfig {
    *  punches exactly those two faces straight through the model, per the original
    *  request — add "back"/"left" for more sides. */
   embossPunchSides: Array<'front' | 'right' | 'back' | 'left'>
-  /** Punch-through letter boldness as a fraction of the model's OWN height (dz) —
-   *  cap_h = model height * this fraction, same idea as embossHoleBoldnessFrac but a
+  /** Punch-through letter size, as a fraction of the model's OWN height (dz) — cap_h
+   *  = model height * this fraction, same idea as embossHoleBoldnessFrac but a
    *  separate knob so tuning one style never silently retunes the other. Letter size
-   *  always scales with the model, never a fixed mm size. */
+   *  always scales with the model, never a fixed mm size. Since 2026-08-21 this sizes
+   *  ONE REPEAT TILE of a diagonal, repeating grid pattern (see embossPunchDiagonalDeg
+   *  and bake_proxy.py's _emboss_punch_through) rather than one bold word climbing
+   *  the whole wall — default dropped from 0.35 (a single huge letterform) to 0.06
+   *  (small, per-user "too big... small PREVIEW holes"). */
   embossPunchBoldnessFrac: number
+  /** Rotation (degrees) of the punch-through text's read/height axes within each
+   *  wall's own plane, measured from vertical ("up"). 0 = the original straight
+   *  bottom-to-top climb; the default 45 reads diagonally, crossing the wall corner-
+   *  to-corner (per-user "repeating pattern that crosses the models diagonally").
+   *  Only used by embossStyle="punch"; see bake_proxy.py's _emboss_punch_through. */
+  embossPunchDiagonalDeg: number
   /** Extra safety margin added on top of the exact distance to the OPPOSITE wall when
    *  sizing the punch-through cut's vertex-selection depth — as a fraction of that
    *  full-through distance (floored at 2mm absolute). Without this, a punch sized to
