@@ -80,10 +80,36 @@ export interface ProxyBakeConfig {
   /** The text embossed into the proxy (e.g. "PREVIEW"). Repeats up the pillar with
    *  a two-space separator, so a single word tiles legibly without its own. */
   embossWatermarkText: string
-  /** Placement style: "pillars" (default) embosses N thin vertical text columns spaced
-   *  around the model, each climbing bottom→top with a slight spiral twist; "bands" is
-   *  the legacy four upright bands hugging the bottom edge. */
-  embossStyle: 'pillars' | 'bands'
+  /** Placement style. "punch" (default): cuts a genuine THROUGH-HOLE spanning the
+   *  model's ENTIRE depth on each side in embossPunchSides (front/right by default) —
+   *  a die-punch straight through the whole volume, exiting whatever is on the far
+   *  side. Deliberately skips the raycast wall-solidity search the other styles use
+   *  to find "the best flat patch" — a full-depth cut doesn't need one, since face
+   *  deletion just removes whatever is actually in the glyph's path regardless of
+   *  surface type, so it's uniform across every model. See bake_proxy.py's
+   *  _emboss_punch_through. "pillars": N thin vertical text columns spaced around the
+   *  model, each climbing bottom→top on a real raycast-located flat patch of each
+   *  wall (shallow recess/hole, not through-depth). "bands" is the legacy four
+   *  upright bands hugging the bottom edge, always a boolean. */
+  embossStyle: 'punch' | 'pillars' | 'bands'
+  /** Which sides get a punch-through cut (style "punch" only). Each entry is one of
+   *  "front"/"right"/"back"/"left" (same cardinal wall convention as the pillars
+   *  style: front = +Y, right = +X, back = -Y, left = -X). Default ["front","right"]
+   *  punches exactly those two faces straight through the model, per the original
+   *  request — add "back"/"left" for more sides. */
+  embossPunchSides: Array<'front' | 'right' | 'back' | 'left'>
+  /** Punch-through letter boldness as a fraction of the model's OWN height (dz) —
+   *  cap_h = model height * this fraction, same idea as embossHoleBoldnessFrac but a
+   *  separate knob so tuning one style never silently retunes the other. Letter size
+   *  always scales with the model, never a fixed mm size. */
+  embossPunchBoldnessFrac: number
+  /** Extra safety margin added on top of the exact distance to the OPPOSITE wall when
+   *  sizing the punch-through cut's vertex-selection depth — as a fraction of that
+   *  full-through distance (floored at 2mm absolute). Without this, a punch sized to
+   *  land EXACTLY on the far wall's plane can miss it by a hair due to float/geometry
+   *  noise and leave the far skin uncut (a dent, not a through-hole); the margin
+   *  guarantees the far skin is included. */
+  embossPunchReachMarginFrac: number
   /** Reading direction for the "pillars" style. "vertical" (default) forces every
    *  placement to climb bottom→top (the classic spine-label look) even on a wall whose
    *  only usable flat patch would otherwise read better horizontally. "auto" restores
@@ -110,6 +136,31 @@ export interface ProxyBakeConfig {
    *  between the two; 0.5 is the natural midpoint. Only used when embossThroughHoles
    *  is true. */
   embossHoleThreshold: number
+  /** Letter boldness for the default vertical through-hole cut, as a fraction of the
+   *  wall's OWN height (embossOrientation="vertical" only) — cap_h = panel height *
+   *  this fraction. Solving instead for "exactly one 'PREVIEW  ' period fits the
+   *  panel height" (span / tile_aspect) was tried first and produced letters only
+   *  ~15% of the panel height on real models (a word is ~6.6 cap-heights tall), which
+   *  read as small even though it was technically full-height (confirmed live —
+   *  "too small, only covers a very small portion of the model"). Sizing for boldness
+   *  instead means the word may not fully fit — read_phase_offset_mm in
+   *  _cut_wall_text_hole crops it from its natural start (the bottom of the panel)
+   *  rather than an arbitrary centred slice, so a short run reads "PREV…" climbing
+   *  from the base instead of a random fragment. Only used when embossThroughHoles
+   *  is true and embossOrientation is "vertical" (the defaults). */
+  embossHoleBoldnessFrac: number
+  /** Depth reach multiplier for the default vertical through-hole cut only —
+   *  select_reach_mm = min(wall's own physical reach, max(depth_mm*4, cap_h_full *
+   *  this)). The shared _select_reach_mm default (cap_h*0.6, tuned for a shallow
+   *  emboss recess) left the bold full-height cut confined to whatever thin
+   *  trim/baseboard sat within that shallow band, since a real window's frame/
+   *  lattice sits recessed well behind the nominal wall plane and was never close
+   *  enough to the plane to be considered — no amount of increasing cap_h_full
+   *  alone fixed this (confirmed live: the mark stayed a small blob at the panel's
+   *  base instead of climbing through the window bay). 2.5x reaches far enough to
+   *  pick up genuine structural material behind a typical reveal depth without
+   *  reaching all the way to an opposite wall. */
+  embossHoleReachFrac: number
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
   /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.64,
@@ -167,17 +218,6 @@ export interface ProxyBakeConfig {
    *  risking a hole cut through empty space. See bake_proxy.py's
    *  _emboss_pillars (z0/z1). */
   embossVerticalMarginFrac: number
-  /** Cap on how many separate segments (2026-08-19: fixed-centre, top-to-bottom
-   *  placement — see embossVerticalMarginFrac and bake_proxy.py's
-   *  _find_wall_segments) a single wall can accumulate, longest kept. Each
-   *  segment costs its own full boolean-cut cycle (_apply_wm_boolean) — a wall
-   *  with many small gaps could otherwise produce a long tail of tiny
-   *  segments, ballooning bake time and, per a 2026-08-19 production incident
-   *  (a bake crashed with "StructRNA of type Object has been removed" after
-   *  enough rapid create/apply/remove cycles on the same proxy object without
-   *  letting Blender's dependency graph catch up), real crash risk. Default 3
-   *  bounds worst-case per-wall cost regardless of how fragmented a wall is. */
-  embossMaxSegmentsPerWall: number
   /** Text cap height as a % of the model's smaller horizontal footprint dimension.
    *  Used by the legacy "bands" style only; pillars derive their size from width-frac. */
   embossHeightPct: number
@@ -304,6 +344,8 @@ export function loadDefaults(): ProxyBakeConfig {
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),
     embossHoleThreshold: envNum('PROXY_BAKE_EMBOSS_HOLE_THRESHOLD'),
+    embossHoleBoldnessFrac: envNum('PROXY_BAKE_EMBOSS_HOLE_BOLDNESS_FRAC'),
+    embossHoleReachFrac: envNum('PROXY_BAKE_EMBOSS_HOLE_REACH_FRAC'),
     normalMapRes: envNum('PROXY_BAKE_NORMAL_RES'),
     aoMapRes: envNum('PROXY_BAKE_AO_RES'),
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),

@@ -709,11 +709,22 @@ def wire_material(proxy, normal_img, ao_img, base_img):
 
 def emboss_watermark(proxy):
     """Emboss the watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip
-    carries the mark. Two styles (embossStyle):
+    carries the mark. Three styles (embossStyle):
 
-      • "pillars" (default): N text placements (embossPillarCount, default 4), evenly
-        spaced around the model, each climbing bottom→top (embossOrientation=
-        "vertical", the default) on a real raycast-located flat patch of each wall.
+      • "punch" (default): the mark is cut as a genuine THROUGH-HOLE that spans the
+        model's ENTIRE depth on each chosen side (embossPunchSides, default
+        ["front","right"]) — literally a die-punch straight through the whole
+        volume, exiting whatever is on the opposite side, not a shallow recess into
+        one wall. Deliberately skips the raycast wall-solidity search the other
+        styles use to find "the best flat patch": a full-depth cut doesn't need one,
+        since face deletion just removes whatever is actually in the glyph's path —
+        front skin, interior structure, back skin, whatever surface type it happens
+        to be — so it's uniform across every model regardless of geometry
+        complexity (windows/lattice/organic surfaces all behave the same). See
+        _emboss_punch_through.
+      • "pillars": N text placements (embossPillarCount, default 4), evenly spaced
+        around the model, each climbing bottom→top (embossOrientation="vertical",
+        the default) on a real raycast-located flat patch of each wall.
         By default (embossThroughHoles=true) these are genuine THROUGH-HOLES — direct
         bmesh face deletion under the glyph shape, no boolean involved (see
         _emboss_pillars/_cut_wall_text_hole) — rather than a shallow shaded recess;
@@ -725,9 +736,9 @@ def emboss_watermark(proxy):
 
     Only "bands" still drives a boolean against the proxy (DIFFERENCE for engrave,
     carving the mark into real geometry so it can never float, or UNION for raised
-    letters standing proud). "pillars" never booleans: embossThroughHoles=true cuts
-    a real hole via face deletion, embossThroughHoles=false displaces vertices — see
-    each mechanism's own docstring for why booleans were dropped from this path
+    letters standing proud). "punch" and "pillars" never boolean: both go through
+    _cut_wall_text_hole's bmesh FACE DELETION under the glyph shape — see each
+    mechanism's own docstring for why booleans were dropped from this path
     specifically (two distinct production failures traced to them here). The paid
     STL is never touched. Any error is a warning, never a job failure — a bake must
     never die over the watermark."""
@@ -744,13 +755,15 @@ def emboss_watermark(proxy):
     engrave = bool(CFG.get("embossEngrave", True))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
     inset_pct = float(CFG.get("embossInsetPct", 2.0))
-    style = str(CFG.get("embossStyle", "pillars")).strip().lower()
+    style = str(CFG.get("embossStyle", "punch")).strip().lower()
 
     if style == "bands":
         _emboss_bands(proxy, text, engrave, float(CFG.get("embossHeightPct", 9.0)),
                       depth_pct, inset_pct)
-    else:
+    elif style == "pillars":
         _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct)
+    else:
+        _emboss_punch_through(proxy, text)
 
 
 def _wm_material():
@@ -1110,45 +1123,6 @@ def _best_strip(grid, read_n, cross_n, strip_cross_cells, min_coverage):
     return best[:3] if best else None
 
 
-def _find_wall_segments(grid, read_n, cross_n, strip_cross_cells, min_coverage, min_run_cells):
-    """Every contiguous run (along the read/Z axis), fixed at the wall's
-    LATERAL CENTRE column, that clears `min_run_cells` — the watermark always
-    sits in the middle of each wall (2026-08-19, explicit user request: "only
-    the middle of each side"), never searching sideways for a longer run
-    elsewhere on the wall even if one exists. A gap at the centre (a window,
-    a post) still yields multiple segments — one below it, one above — so the
-    mark still reaches top-to-bottom through a centred obstruction; it just
-    never leaves the centre column to dodge one.
-
-    Returns a list of (run_len_cells, read_start_cell, cross_start_cell) — all
-    sharing the same centred cross_start_cell — longest segment first, or []
-    if nothing at the centre clears the floor anywhere."""
-    w = max(1, min(strip_cross_cells, cross_n))
-    cs = max(0, min(int(round((cross_n - w) / 2.0)), cross_n - w))
-    usable = []
-    for r in range(read_n):
-        row = grid[r]
-        cnt = sum(1 for c in range(cs, cs + w) if row[c])
-        usable.append(cnt >= w * min_coverage)
-    runs = []
-    run_start = None
-    r = 0
-    while r <= read_n:
-        if r < read_n and usable[r]:
-            if run_start is None:
-                run_start = r
-            r += 1
-        else:
-            if run_start is not None:
-                length = r - run_start
-                if length >= min_run_cells:
-                    runs.append((length, run_start, cs))
-                run_start = None
-            r += 1
-    runs.sort(key=lambda seg: seg[0], reverse=True)
-    return runs
-
-
 def _select_reach_mm(reach_mm, depth_mm, cap_h):
     """Depth-of-search clamp shared by _locate_wall_text (what counts as a
     'solid, in-reach' raycast hit) and _displace_wall_text (what vertices are
@@ -1309,80 +1283,6 @@ def _locate_wall_text_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1
         z_centre=z0 + (z_start + run_len / 2.0) * cell_read,
         run_mm=run_len * cell_read,
     )
-
-
-def _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
-                              cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
-    """VERTICAL-ONLY sibling of _locate_wall_text_at that returns EVERY usable
-    segment at the wall's LATERAL CENTRE (via _find_wall_segments) instead of
-    the single best run anywhere on the wall — see _find_wall_segments for why.
-    One trial at a fixed `cap_h`. Returns a list of dicts (orientation=
-    'vertical'/lateral_centre/z_centre/run_mm), possibly empty."""
-    import mathutils
-    up = mathutils.Vector((0.0, 0.0, 1.0))
-    cell = max(0.6, cap_h / max(1.0, cell_divisor))
-    period_read_mm = max(1e-3, cap_h * tile_aspect)
-    min_run_mm = max(cap_h * 1.15, period_read_mm * 0.6)
-
-    grid, read_n, cross_n, cell_read, cell_cross = _wall_solidity_grid(
-        bvh, wall_centre, normal, up, z0, z1, lateral, lateral_half, select_reach_mm, cell)
-
-    vert_w = max(1, int(math.ceil(cap_h * 0.96 / cell_cross)))
-    min_run_cells = max(1, int(math.ceil(min_run_mm / cell_read)))
-    segments = _find_wall_segments(grid, read_n, cross_n, vert_w, min_coverage, min_run_cells)
-
-    if os.environ.get("WM_DEBUG"):
-        print("WMDEBUG locate-segments vert_w=%d min_run_cells=%d segments=%r"
-              % (vert_w, min_run_cells, segments))
-
-    out = []
-    for run_len, z_start, lat_start in segments:
-        out.append(dict(
-            orientation="vertical",
-            lateral_centre=-lateral_half + (lat_start + vert_w / 2.0) * cell_cross,
-            z_centre=z0 + (z_start + run_len / 2.0) * cell_read,
-            run_mm=run_len * cell_read,
-        ))
-    return out
-
-
-def _locate_wall_text_segments(bvh, wall_centre, normal, lateral, lateral_half, z0, z1,
-                                cap_h, tile_aspect, select_reach_mm, min_coverage, cell_divisor):
-    """Segmented sibling of _locate_wall_text: tries the same shrink sequence
-    (progressively smaller sizes, then one last-resort relaxed-coverage pass —
-    same "every wall gets SOME mark" guarantee) but returns ALL usable segments
-    at the wall's LATERAL CENTRE at whichever size first finds any, instead of
-    stopping at one placement anywhere on the wall. This is what makes the
-    watermark reach top-to-bottom without leaving the centre: a centred window
-    still gets a mark below it AND above it, together spanning close to the
-    wall's full extent, rather than the single best run giving up at the first
-    gap or drifting sideways to dodge it. VERTICAL orientation only — see
-    _locate_wall_segments_at. Capped to embossMaxSegmentsPerWall (default 3,
-    longest segments kept) — a busy wall with many small gaps could otherwise
-    produce a long tail of tiny segments, each costing a full boolean-cut cycle
-    (see _apply_wm_boolean); this bounds worst-case bake time per wall.
-    Returns a list of dicts, possibly empty (only when the centre column truly
-    has zero solid material anywhere)."""
-    max_segments = max(1, int(CFG.get("embossMaxSegmentsPerWall", 3)))
-    for shrink in (1.0, 0.85, 0.7, 0.55, 0.42, 0.32, 0.24, 0.18, 0.13, 0.1):
-        segs = _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half,
-                                         z0, z1, cap_h * shrink, tile_aspect, select_reach_mm,
-                                         min_coverage, cell_divisor)
-        if segs:
-            segs = segs[:max_segments]  # already longest-first (_find_wall_segments)
-            for s in segs:
-                s["cap_h"] = cap_h * shrink
-            return segs
-
-    relaxed_coverage = max(0.15, min_coverage * 0.5)
-    smallest = cap_h * 0.1
-    segs = _locate_wall_segments_at(bvh, wall_centre, normal, lateral, lateral_half,
-                                     z0, z1, smallest, tile_aspect, select_reach_mm,
-                                     relaxed_coverage, cell_divisor)
-    segs = segs[:max_segments]
-    for s in segs:
-        s["cap_h"] = smallest
-    return segs
 
 
 def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor,
@@ -1613,7 +1513,7 @@ def _displace_wall_text(proxy, tile_path, normal, read_axis, height_axis, anchor
 
 
 def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
-                         cap_h, run_mm, select_reach_mm, label):
+                         cap_h, run_mm, select_reach_mm, label, read_phase_offset_mm=0.0):
     """Cut one placement's worth of watermark text as a REAL through-hole —
     direct bmesh FACE DELETION under the glyph shape, sampled from the same
     cached heightmap tile _displace_wall_text uses, instead of a boolean CSG
@@ -1649,6 +1549,17 @@ def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor
     re-subdividing every round isn't either) — resolving legible letterforms
     needs the same vertex/face density regardless of whether the result is a
     continuous displacement or a binary delete.
+
+    `read_phase_offset_mm` shifts WHERE in the tile's reading axis `anchor`
+    itself samples (u=0 normally lands exactly on `anchor`, i.e. the middle
+    of the selection box). Passing +run_mm/2 (so anchor, sitting at the box's
+    CENTRE, instead samples the START of "PREVIEW  ") is what lets a run
+    shorter than one full period show the word cropped from its natural
+    reading start rather than an arbitrary centred slice of the texture —
+    used when `cap_h` is sized for boldness rather than for "exactly one
+    period fits the run", so the run legitimately might not show the whole
+    word. Selection geometry (read_half, lateral_reach) is unaffected — only
+    which part of the cached tile gets sampled shifts.
 
     Returns True iff at least one face was actually deleted (i.e. the glyph
     shape landed on real geometry, not just on the background of the tile)."""
@@ -1768,7 +1679,7 @@ def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor
             if not (-select_reach_mm <= d_normal <= max(2.0, select_reach_mm * 0.3)
                     and abs(d_height) <= lateral_reach and abs(d_read) <= read_half):
                 continue
-            u = d_read / period_read_mm
+            u = (d_read + read_phase_offset_mm) / period_read_mm
             v = d_height / cap_h + 0.5
             if sample(u, v) > hole_threshold:
                 f.select = True
@@ -1792,44 +1703,55 @@ def _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor
 
 def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     """Emboss `text` at N wall positions (default 4), evenly spaced around the
-    model. Each wall's actual placement is chosen by _locate_wall_text after
-    raycast-sampling that wall for real flat, solid, outward-facing material,
-    rather than assumed from the model's bounding box.
+    model.
 
-    Two placement mechanisms, controlled by embossThroughHoles:
-      • THROUGH-HOLES (default, embossThroughHoles=true): a real perforation —
-        direct bmesh FACE DELETION under the glyph shape (_cut_wall_text_hole),
-        sized to the same located patch _locate_wall_text already found. No
-        boolean CSG cut anywhere in this path: deleting faces can only ever
-        remove existing topology from an already-bounded selection, never
-        intersect new geometry that could leave an unresolved sliver or sever
-        a fragment into a disconnected island — the two distinct ways a
-        boolean-based hole failed on this exact pipeline before landing here
-        (the original emboss "strand poking out" bug, and a production crash
-        from a per-segment through-hole boolean severing debris — see
-        remove_boolean_debris). An actual hole a would-be thief has to notice
-        and repair, not a shading trick a render can hide — and unlike a
-        boolean, it genuinely cannot fail to cut once a solid patch has been
-        located; if it can't, that means densification found no real geometry
-        there at all, which _cut_wall_text_hole reports plainly rather than
-        leaving a bulge or a botched partial cut.
-      • RELIEF (embossThroughHoles=false): the original direct vertex-
-        displacement approach (_displace_wall_text) — a shallow shaded recess
-        rather than a real opening, kept as the non-destructive alternative.
+    Placement differs by branch:
+      • DEFAULT (embossThroughHoles=true, embossOrientation="vertical"): ONE
+        direct full-height cut per wall, centred on the wall's LATERAL MIDDLE
+        (never searched sideways — explicit user request), sized so one full
+        reading of the word spans the ENTIRE z0..z1 band top-to-bottom
+        (cap_h = span / tile_aspect — see the call site). No search, no
+        shrink-to-fit: earlier versions ran the same raycast-located,
+        coverage-gated search every other branch still uses and shrank the
+        text whenever the full word didn't fit a contiguous ~65%-solid run —
+        on real architectural models (windows, lattice, tiled roofs) that was
+        nearly always, so the mark routinely ended up a fraction of a
+        millimetre tall, unnoticeable at any normal viewing distance
+        (confirmed live in production — "too small, only covers a very small
+        portion of the model"). A real THROUGH-HOLE doesn't need that guard:
+        direct bmesh FACE DELETION under the glyph shape (_cut_wall_text_hole)
+        just has no face to delete wherever the wall already has an opening,
+        so the cut shows through existing structure instead of failing to
+        place — the word reads as a perforation stencil laid over whatever
+        the wall actually has, not a search result. A wall whose exact centre
+        is genuinely empty top to bottom (a doorway spanning the whole panel)
+        still skips cleanly.
+      • OTHER combinations (embossOrientation="auto", or embossThroughHoles=
+        false): placement still comes from _locate_wall_text, which raycast-
+        samples the wall for a real flat, solid, outward-facing patch and
+        shrinks the text to fit a legible run — needed for RELIEF (the vertex-
+        displacement style, _displace_wall_text, where a low-density/gappy
+        selection genuinely can't resolve a legible recess) and preserved for
+        "auto" orientation's wider search. Holes cut this way still go through
+        _cut_wall_text_hole (no boolean either), just at the searched size/
+        location instead of the direct full-height one above.
 
-    embossOrientation="vertical" (default) restricts every placement to a
-    bottom→top climb (the classic spine-label look, each glyph rotated 90° into
-    the climb); "auto" lets each wall pick whichever of vertical/horizontal
-    finds the longer legible run, as before.
-
-    Letter size (embossPillarWidthFrac, of the footprint) scales with the
-    model itself rather than using one fixed size for every shape. Holes no
-    longer need a depth/thickness parameter at all — see _cut_wall_text_hole.
+    No boolean CSG cut anywhere in the through-holes path: deleting faces can
+    only ever remove existing topology from an already-bounded selection,
+    never intersect new geometry that could leave an unresolved sliver or
+    sever a fragment into a disconnected island — the two distinct ways a
+    boolean-based hole failed on this exact pipeline before landing here (the
+    original emboss "strand poking out" bug, and a production crash from a
+    per-segment through-hole boolean severing debris — see
+    remove_boolean_debris). Letter size scales with the model itself in every
+    branch — the wall's own width for the search-based branches
+    (embossPillarWidthFrac, via _cap_h_for_wall), the wall's own height for
+    the default direct full-height cut.
 
     NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — no clean
-    equivalent for either mechanism without a much more involved sheared/curved
-    mapping. embossPillarMaxRepeats no longer applies (both mechanisms tile to
-    fill whatever run was actually located, not a precomputed repeat count)."""
+    equivalent without a much more involved sheared/curved mapping.
+    embossPillarMaxRepeats no longer applies (text tiles to fill whatever
+    span it's given, not a precomputed repeat count)."""
     import mathutils
     try:
         count = max(1, int(CFG.get("embossPillarCount", 4)))
@@ -1953,43 +1875,73 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             label = "wall %d" % i
 
             if through_holes and force_orientation == "vertical":
-                # Segmented placement, fixed to the wall's LATERAL CENTRE (never
-                # searches sideways for a better spot — explicit user request):
-                # every usable solid run in that centre column gets its own
-                # hole, not just the single best one. This is what lets the
-                # mark reach top-to-bottom through a centred obstruction (a run
-                # below a window AND a separate run above it) instead of
-                # stopping at the first gap. See _locate_wall_text_segments.
-                segs = _locate_wall_text_segments(bvh, wall_centre, normal, lateral, lateral_half,
-                                                   z0, z1, cap_h, tile_aspect, select_reach_mm,
-                                                   min_coverage, cell_divisor)
-                if not segs:
-                    warn("Watermark %s: no solid material found ANYWHERE on this wall "
-                         "(%.0fmm wide) even at minimum size — this side gets no mark"
-                         % (label, lateral_half * 2))
-                    placements.append("skipped")
-                    continue
-
-                wall_cut = 0
-                for seg_i, loc in enumerate(segs):
-                    anchor = wall_centre + lateral * loc["lateral_centre"] \
-                        + mathutils.Vector((0.0, 0.0, loc["z_centre"]))
-                    seg_label = "%s seg%d/%d" % (label, seg_i + 1, len(segs))
-                    holes_attempted += 1
-                    # Cut THIS segment's hole right away — a failure on one
-                    # segment (only possible now if densification finds no real
-                    # geometry there, not a solver failure) must not sink marks
-                    # that already cut cleanly elsewhere.
-                    if _cut_wall_text_hole(proxy, tile_path, up, lateral, normal, anchor,
-                                            loc["cap_h"], loc["run_mm"], select_reach_mm, seg_label):
-                        applied += 1
-                        holes_cut += 1
-                        wall_cut += 1
-                        placements.append("vertical@%.1fmm hole (%s)" % (loc["cap_h"], seg_label))
-                    else:
-                        placements.append("hole-failed (%s)" % seg_label)
-                if wall_cut > 0:
+                # ONE direct cut of the word, spanning the ENTIRE z0..z1 band
+                # top-to-bottom, fixed to the wall's LATERAL CENTRE (never
+                # searches sideways — explicit user request) — not a search
+                # for a "clean enough" patch to shrink into. This REPLACES an
+                # earlier version that ran the coverage-gated segment search
+                # (_locate_wall_text_segments) and shrank the text — sometimes
+                # to a fraction of a millimetre — whenever the full word
+                # didn't fit a contiguous ~65%-solid run: on real architectural
+                # models that was nearly always, so the mark routinely ended
+                # up unnoticeable (confirmed live — "too small, only covers a
+                # very small portion of the model"). Face DELETION doesn't
+                # need that guard: a window opening under part of a letter
+                # just has no face to delete there, so the cut shows through
+                # existing openings instead of failing to place — the word
+                # reads as a perforation stencil laid over whatever the wall
+                # actually has, not a search result.
+                #
+                # cap_h is sized for BOLDNESS (embossHoleBoldnessFrac, default
+                # 0.35, of the panel's own height) rather than "shrink until
+                # one full 'PREVIEW  ' period exactly fits the span" — solving
+                # for an exact fit (span / tile_aspect) was tried first and
+                # still produced letters only ~15-20% of the panel height on
+                # real models with a modest wall height relative to width
+                # (a single word is ~6.6 cap-heights tall), which read as
+                # small even though it was technically "full height". Sizing
+                # for boldness instead means the run legitimately might not
+                # show the whole word — read_phase_offset_mm anchors the crop
+                # to the START of "PREVIEW" at the panel's bottom edge (see
+                # _cut_wall_text_hole) so a short run shows "PREV..." climbing
+                # from the base rather than an arbitrary centred slice. A wall
+                # whose exact centre has literally nothing there at all (a
+                # doorway spanning the full panel) still skips cleanly — see
+                # _cut_wall_text_hole's own "no nearby geometry" / "no face
+                # under a glyph stroke" returns.
+                span_mm = max(1e-4, z1 - z0)
+                boldness_frac = min(1.0, max(0.05, float(CFG.get("embossHoleBoldnessFrac", 0.35))))
+                cap_h_full = max(1e-4, span_mm * boldness_frac)
+                anchor = wall_centre + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0))
+                # _select_reach_mm's default multiplier (cap_h*0.6, tuned for a
+                # shallow emboss recess) is nowhere near deep enough here: a
+                # real window's frame/lattice sits recessed well behind the
+                # nominal wall plane, so at the small default reach nothing in
+                # the window bay is ever close enough to the plane to even be
+                # considered for deletion — the cut can ONLY land on whatever
+                # thin trim/baseboard happens to sit within that shallow band,
+                # no matter how large cap_h_full is (confirmed: increasing
+                # boldness alone left the mark confined to a sliver at the
+                # panel's base, not climbing through the window bay at all).
+                # embossHoleReachFrac (default 2.5x cap_h_full, still capped by
+                # the wall's own physical half-depth via reach_mm) reaches far
+                # enough to pick up genuine structural material — window
+                # mullions, frame posts — behind a typical reveal depth.
+                reach_frac_hole = max(0.6, float(CFG.get("embossHoleReachFrac", 2.5)))
+                select_reach_mm_full = min(reach_mm, max(depth_mm * 4.0, cap_h_full * reach_frac_hole))
+                holes_attempted += 1
+                if _cut_wall_text_hole(proxy, tile_path, up, lateral, normal, anchor,
+                                        cap_h_full, span_mm, select_reach_mm_full, label,
+                                        read_phase_offset_mm=span_mm / 2.0):
+                    applied += 1
+                    holes_cut += 1
                     walls_covered += 1
+                    placements.append("vertical@%.1fmm hole (full-height)" % cap_h_full)
+                else:
+                    warn("Watermark %s: no solid material found in the middle panel "
+                         "(%.0fmm wide, %.0fmm tall) — this side gets no mark"
+                         % (label, lateral_half * 2, span_mm))
+                    placements.append("skipped")
                 continue
 
             loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
@@ -2071,6 +2023,152 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         # this stage: a bare failure here would propagate past every "never
         # die" guard in this function and kill the whole bake, same class of
         # bug as the one that actually crashed (see _apply_wm_boolean).
+        try:
+            deselect_all()
+            proxy.select_set(True)
+            set_active(proxy)
+        except Exception as e:
+            warn("Post-emboss reselect failed (continuing): " + str(e))
+
+
+_PUNCH_SIDE_ANGLES = {"front": 0.0, "right": -90.0, "back": 180.0, "left": 90.0}
+
+
+def _emboss_punch_through(proxy, text):
+    """Cut `text` as a real THROUGH-HOLE spanning the model's ENTIRE depth on each
+    side in embossPunchSides (default ["front","right"]) — a die-punch straight
+    through the whole volume, not a shallow recess into one wall's surface.
+
+    Why this exists alongside "pillars": the raycast wall-solidity search
+    (_locate_wall_text) that "pillars" uses exists to find a real flat, solid,
+    outward-facing patch to avoid cutting through empty space (a window, a
+    doorway) — necessary when the cut only reaches a short way into the wall,
+    because landing on the wrong material there produces a shallow gouge in
+    thin air or a fragment of the mark. None of that matters once the cut
+    reaches the ENTIRE depth of the model: wherever the glyph shape falls,
+    _cut_wall_text_hole's face deletion just removes whatever is actually
+    there along that whole path — front skin, interior structure, the far
+    skin, a window mullion, dense terrain, an open lattice — and skips
+    cleanly wherever there's truly nothing to delete. So this style never
+    searches for "the best geometry" the way pillars does; it doesn't need
+    to, because deletion is naturally uniform across every surface type. This
+    is also what makes the mark genuinely a HOLE all the way through rather
+    than a mark on one wall — a leaked/ripped file reads as visibly punctured
+    from any side, not just the one the mark was cut from.
+
+    Placement is the same "climb bottom→top, full height of the model" shape
+    the pillars style's direct full-height cut uses (cap_h sized as a
+    fraction of the model's own height, embossPunchBoldnessFrac) — letter
+    size scales with the model, never a fixed mm size. The only real
+    difference from that pillar branch is `select_reach_mm`: pillars caps it
+    to a shallow multiple of the recess depth (embossHoleReachFrac) so the
+    cut stays a dent in one wall; here it's sized to the model's FULL extent
+    along the punch axis (2x the wall's own centre-offset, i.e. the distance
+    to the OPPOSITE wall, plus a safety margin) so the same face-deletion
+    mechanism keeps removing faces all the way through instead of stopping
+    partway.
+
+    Known trade-off (documented rather than engineered around, to keep this
+    style as simple as the "just punch a hole" request that motivated it):
+    the local-subdivision density loop shared with _cut_wall_text_hole targets
+    a total vertex count across the WHOLE selected depth, near skin + far skin
+    + anything between, not each skin independently — so on a model whose near
+    and far walls have very different existing vertex density, one side of the
+    punch can end up crisper than the other. Both sides still get faces
+    removed either way (the hole is real all the way through); only fine
+    legibility on the harder-to-reach side can vary. Good enough for a
+    uniform, geometry-agnostic mark; a per-skin density target would be the
+    natural follow-up if that ever looks wrong on a real model."""
+    import mathutils
+    try:
+        sides_cfg = CFG.get("embossPunchSides", ["front", "right"])
+        if isinstance(sides_cfg, str):
+            sides_cfg = [s.strip() for s in sides_cfg.split(",") if s.strip()]
+        sides = [s.strip().lower() for s in sides_cfg if str(s).strip().lower() in _PUNCH_SIDE_ANGLES]
+        if not sides:
+            sides = ["front", "right"]
+
+        boldness_frac = min(1.0, max(0.05, float(CFG.get("embossPunchBoldnessFrac", 0.35))))
+        v_margin = max(0.0, float(CFG.get("embossVerticalMarginFrac", 0.01)))
+        reach_margin_frac = max(0.0, float(CFG.get("embossPunchReachMarginFrac", 0.1)))
+
+        diagp, _dimsp, (minz, maxz) = bbox_diagonal(proxy)
+        corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        dx = max(1e-4, max_x - min_x)
+        dy = max(1e-4, max_y - min_y)
+        dz = max(1e-4, maxz - minz)
+        hx, hy = dx / 2.0, dy / 2.0
+
+        z0 = minz + dz * v_margin
+        z1 = maxz - dz * v_margin
+        span_mm = max(1e-4, z1 - z0)
+        cap_h = max(diagp * 0.004, span_mm * boldness_frac)
+
+        tile_path, tile_w, tile_h = _get_watermark_tile(text)
+        deselect_all()
+        proxy.select_set(True)
+        set_active(proxy)
+
+        up = mathutils.Vector((0.0, 0.0, 1.0))
+        holes_attempted = 0
+        holes_cut = 0
+        placements = []
+        for name in sides:
+            ang = _PUNCH_SIDE_ANGLES[name]
+            rad = math.radians(ang)
+            normal = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
+            lateral = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
+            # reach_depth = this wall's own centre-offset from the model's centre
+            # (half the box's extent along `normal`) — 2x that is the distance
+            # STRAIGHT THROUGH to the opposite wall, i.e. the model's full depth
+            # along this axis. This is the one number that turns the shared
+            # _cut_wall_text_hole helper from "shallow dent" into "through hole":
+            # everything else about the call is identical to the pillars style's
+            # direct full-height cut.
+            reach_depth = _box_support(hx, hy, normal)
+            lateral_half = _box_support(hx, hy, lateral)
+            wall_centre = mathutils.Vector((cx + normal.x * reach_depth,
+                                             cy + normal.y * reach_depth, 0.0))
+            anchor = wall_centre + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0))
+            full_thru_mm = reach_depth * 2.0
+            select_reach_mm = full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac)
+
+            label = "punch %s" % name
+            holes_attempted += 1
+            if _cut_wall_text_hole(proxy, tile_path, up, lateral, normal, anchor,
+                                    cap_h, span_mm, select_reach_mm, label,
+                                    read_phase_offset_mm=span_mm / 2.0):
+                holes_cut += 1
+                placements.append("%s: through@%.1fmm (span %.0fmm)" % (name, cap_h, full_thru_mm))
+            else:
+                warn("Watermark punch %s: no material found along the punch axis "
+                     "(%.0fmm wide, %.0fmm through) — this side gets no mark"
+                     % (name, lateral_half * 2, full_thru_mm))
+                placements.append("%s: skipped" % name)
+
+        REPORT["embossMethod"] = ("punch-through-hole" if holes_cut > 0
+                                   else ("holes-all-failed" if holes_attempted > 0 else "holes-none-located"))
+        REPORT["embossApplied"] = holes_cut > 0
+        REPORT["embossWatermark"] = text
+        REPORT["embossPlacement"] = "punch-through-%s" % "-".join(sides)
+        REPORT["embossPunchSides"] = sides
+        REPORT["embossPunchCapHeightMm"] = round(cap_h, 3)
+        REPORT["embossPunchPlacements"] = placements
+        REPORT["embossHolesTotal"] = holes_cut
+        if holes_cut == 0:
+            warn("Watermark punch-through applied to 0 of %d side(s)" % holes_attempted)
+        elif holes_cut < holes_attempted:
+            warn("Watermark punch-through applied to only %d of %d side(s)" % (holes_cut, holes_attempted))
+    except Exception as e:
+        warn("Emboss punch-through failed (continuing without it): " + str(e))
+        REPORT["embossApplied"] = False
+    finally:
         try:
             deselect_all()
             proxy.select_set(True)
