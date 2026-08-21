@@ -133,10 +133,15 @@ export interface ProxyBakeConfig {
    *  ONE REPEAT TILE of a small, sparse diagonal BAND (see embossPunchBandRows/
    *  embossPunchGapFrac/embossPunchDiagonalDeg and bake_proxy.py's
    *  _emboss_punch_through) rather than one bold word climbing the whole wall —
-   *  default dropped from 0.35 (a single huge letterform) to 0.06 (small, per-user
-   *  "too big... small PREVIEW holes"; 0.06 confirmed legible in a real local
-   *  Blender render at this size, 0.045 was noticeably blurrier — see bake_proxy.py's
-   *  emboss docstring for the local-testing method). */
+   *  default dropped from 0.35 (a single huge letterform) to 0.1. Tuned in three
+   *  steps against real Blender renders (see bake_proxy.py's emboss docstring for
+   *  the local-testing method): 0.045 was blurry/illegible even bug-free; 0.06
+   *  read as legible text on a synthetic test mesh but was confirmed via a real
+   *  downloaded PRODUCTION proxy (a genuinely dense, organically-detailed model,
+   *  not a flat test box) to be too small to notice at a glance on a short wall —
+   *  boldness scales off THAT WALL'S OWN height, which can be much shorter than
+   *  a model's overall size; 0.1 was the smallest value that read as clearly
+   *  present without approaching the original "damage-looking" territory. */
   embossPunchBoldnessFrac: number
   /** Rotation (degrees) of the punch-through text's read/height axes within each
    *  wall's own plane, measured from vertical ("up"). 0 = the original straight

@@ -15,7 +15,7 @@
   "embossWatermarkText": "PREVIEW",
   "embossStyle": "punch",
   "embossPunchSides": ["front", "right"],
-  "embossPunchBoldnessFrac": 0.06,
+  "embossPunchBoldnessFrac": 0.1,
   "embossPunchDiagonalDeg": 45,
   "embossPunchDiagonalJitterDeg": 20,
   "embossPunchPositionJitterFrac": 0.3,
