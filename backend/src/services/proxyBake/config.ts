@@ -12,26 +12,35 @@ import path from 'path'
 
 export interface ProxyBakeConfig {
   /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh). Default
-   *  **true** (restored 2026-08-21): a real bake with this off caused visible
-   *  planner slowdown, because this GLB is the SAME file the planner renders —
-   *  removing decimation put the source's full, undecimated triangle count
-   *  straight into the browser, exactly the FPS problem this pipeline was
-   *  originally built to prevent (see the 2026-08 "Planner FPS drop" note in
-   *  CLAUDE.md). triangleRetainRatio was raised alongside re-enabling this (0.22
-   *  → 0.6) so the trade favours fidelity more than the original tuning did —
-   *  most typical uploads (under triangleBudget, the floor) still get ZERO
-   *  decimation and their exact source geometry either way; only genuinely dense
-   *  sources (a few hundred thousand+ triangles) actually get scaled down, now
-   *  to ~60% rather than ~22%. Smoothing (proxySmoothIterations) stays 0/off
-   *  regardless — decimation alone (triangle-count reduction) is a different,
-   *  much less visually-lossy operation than the old LaplacianSmooth blur, and
-   *  isn't reintroduced here. Set false to skip decimation entirely (full
-   *  source detail, no triangle-count cap) if planner performance on dense
-   *  models is an acceptable trade for a specific use case — see make_proxy's
-   *  decimation_enabled branch. Geometry-based anti-theft is inherently weaker
-   *  whichever way this is set without the old smoothing; protection leans on
-   *  the emboss watermark holes (embossStyle) and the download-time AES header
-   *  watermark on the paid STL either way. */
+   *  **false** (2026-08-21, final — after a brief detour to `true` the same day).
+   *  Sequence: turning this off entirely caused visible planner slowdown (this GLB
+   *  IS the file the planner renders, so undecimated = the source's full triangle
+   *  count straight into the browser — the FPS problem this pipeline was built to
+   *  prevent). Turning it back on (retain 0.6, ceiling 300000) to fix that was
+   *  **proven actively DESTRUCTIVE, not just lossy**, on a real dense multi-shell
+   *  architectural model (a "Japan houses"-style building, 2.6M source triangles):
+   *  a local Blender test comparing renders at IDENTICAL camera angles found
+   *  Blender's DECIMATE(COLLAPSE) tearing visible holes through vases, lattice
+   *  panels and railings — at EVERY tested reduction ratio (11% retain via the
+   *  300k ceiling: severe; 34% retain via a 900k ceiling: still visibly damaged,
+   *  just less). VOXEL remesh (the pipeline's existing fallback strategy) was
+   *  tested too and was worse in a different way — it obliterates fine lattice/
+   *  ornament detail entirely rather than corrupting it. Only fully-undecimated
+   *  (this field false) reproduced the pristine source with no artefacts. This
+   *  asset class (dense, many separate-but-touching thin shells — lattice bars,
+   *  balusters, ornaments) is apparently NOT safe to decimate with the operators
+   *  available here at any meaningfully lossy ratio; a proper fix would need a
+   *  smarter/topology-aware simplifier or a separate planner-only LOD asset
+   *  decoupled from this preview proxy — neither exists yet. Until then, per
+   *  explicit user priority ("doesn't destroy the model" over planner speed),
+   *  this stays false and dense models simply keep their full triangle count in
+   *  the planner. triangleBudget/triangleRetainRatio/triangleBudgetCeiling below
+   *  are unused while this is false — kept in the schema for a future fix or a
+   *  per-model override on a source PROVEN safe to decimate. Smoothing
+   *  (proxySmoothIterations) stays 0/off regardless. Geometry-based anti-theft is
+   *  inherently weaker without decimation/smoothing; protection leans on the
+   *  emboss watermark (embossStyle) and the download-time AES header watermark
+   *  on the paid STL instead. */
   proxyDecimationEnabled: boolean
   /** FLOOR on the decimated proxy's triangle count — the minimum target regardless
    *  of source complexity. Sources at/under this skip decimation entirely (unchanged
@@ -108,17 +117,25 @@ export interface ProxyBakeConfig {
   /** The text embossed into the proxy (e.g. "PREVIEW"). Repeats up the pillar with
    *  a two-space separator, so a single word tiles legibly without its own. */
   embossWatermarkText: string
-  /** Placement style. "punch" (default): cuts a genuine THROUGH-HOLE spanning the
-   *  model's ENTIRE depth on each side in embossPunchSides (front/right by default) —
-   *  a die-punch straight through the whole volume, exiting whatever is on the far
-   *  side. Deliberately skips the raycast wall-solidity search the other styles use
-   *  to find "the best flat patch" — a full-depth cut doesn't need one, since face
-   *  deletion just removes whatever is actually in the glyph's path regardless of
-   *  surface type, so it's uniform across every model. See bake_proxy.py's
-   *  _emboss_punch_through. "pillars": N thin vertical text columns spaced around the
-   *  model, each climbing bottom→top on a real raycast-located flat patch of each
-   *  wall (shallow recess/hole, not through-depth). "bands" is the legacy four
-   *  upright bands hugging the bottom edge, always a boolean. */
+  /** Placement style. "pillars" (default since 2026-08-21): N text placements
+   *  (embossPillarCount) found via a real raycast wall-solidity search
+   *  (_locate_wall_text) that only cuts where a genuinely flat, solid,
+   *  outward-facing patch actually exists — this is what makes it SAFE on
+   *  detailed models. "punch" (the default up to 2026-08-21): cuts a THROUGH-HOLE
+   *  with NO solidity search at all — deliberately skips it, on the theory that
+   *  face deletion is "uniform" regardless of what it hits. That theory held on a
+   *  simple hollow test box but FAILED on a real richly-detailed architectural
+   *  model: a local Blender test (multiple real bakes, camera-matched before/after
+   *  renders) showed punch repeatedly landing on thin/fragile members — railings,
+   *  posts, a decorative lantern sitting behind the wall — and tearing them into
+   *  jagged, damage-looking geometry, however the reach/boldness knobs were tuned.
+   *  Switching to "pillars" with embossOrientation="auto" (see there) — which DOES
+   *  search for real solid material before cutting — fixed this immediately on the
+   *  same model: clean, legible text, zero visible damage elsewhere. "punch" is
+   *  kept in the schema (still safe on simple flat-walled models, e.g. the
+   *  synthetic box this pipeline was first validated against) but is no longer the
+   *  default. "bands" is the legacy four upright bands hugging the bottom edge,
+   *  always a boolean. */
   embossStyle: 'punch' | 'pillars' | 'bands'
   /** Which sides get a punch-through cut (style "punch" only). Each entry is one of
    *  "front"/"right"/"back"/"left" (same cardinal wall convention as the pillars
@@ -201,11 +218,33 @@ export interface ProxyBakeConfig {
    *  noise and leave the far skin uncut (a dent, not a through-hole); the margin
    *  guarantees the far skin is included. */
   embossPunchReachMarginFrac: number
-  /** Reading direction for the "pillars" style. "vertical" (default) forces every
-   *  placement to climb bottom→top (the classic spine-label look) even on a wall whose
-   *  only usable flat patch would otherwise read better horizontally. "auto" restores
-   *  the previous behaviour of trying both orientations per wall and keeping whichever
-   *  finds the longer legible run. Only read by the pillars style. */
+  /** Hard cap on the punch-through cut's vertex-selection depth, as a multiple of
+   *  cap_h (the letter size), regardless of how far the exact-through-the-opposite-
+   *  wall distance would otherwise reach. Default 8 — deep enough to clear typical
+   *  wall thickness (a genuine through-hole in the outer skin) but shallow enough
+   *  to leave a model's INTERIOR alone. Added 2026-08-21 after a local Blender test
+   *  on a real, richly-detailed architectural model (not the simple hollow box this
+   *  style was originally validated on) showed the punch reaching the model's full
+   *  depth and tearing through a decorative interior prop (a lantern/finial) sitting
+   *  well behind the outer wall, not just the wall itself — per-user "work on this
+   *  until you can see a clear watermark that doesn't destroy the model". Only binds
+   *  on models whose full through-distance exceeds this cap; a thin-walled model (or
+   *  the original synthetic test box) is unaffected — the cut still reaches genuinely
+   *  through in that case. Raise if a specific thick-walled model's mark isn't
+   *  reaching daylight on the far side; lower if it's still catching interior detail. */
+  embossPunchMaxReachFrac: number
+  /** Reading direction for the "pillars" style. "auto" (default since 2026-08-21):
+   *  tries BOTH orientations per wall via the raycast wall-solidity search
+   *  (_locate_wall_text) and keeps whichever finds the longer legible run on REAL
+   *  material — this is what makes pillars safe on detailed models (see
+   *  embossStyle's doc): it naturally avoids windows, thin lattice, and other gaps
+   *  instead of blindly cutting through them. "vertical" forces every placement to
+   *  climb bottom→top through the wall's exact centre with NO search at all (a
+   *  direct full-height cut, same "no solidity check" idea as the "punch" style) —
+   *  this was the default until a local test showed it tearing through thin
+   *  railings/posts just like punch did, for the same underlying reason. Kept for
+   *  a simple flat-walled model where the classic spine-label look is wanted and
+   *  the no-search risk is low. */
   embossOrientation: 'vertical' | 'auto'
   /** When true (default), the "pillars" style cuts real THROUGH-HOLES — direct bmesh
    *  FACE DELETION under the glyph shape (see _cut_wall_text_hole in bake_proxy.py),
@@ -254,24 +293,20 @@ export interface ProxyBakeConfig {
   embossHoleReachFrac: number
   /** Number of vertical pillars spaced evenly around the model (default 4). */
   embossPillarCount: number
-  /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.64,
-   *  doubled 2026-08-19 from 0.32 — was still too small to clearly see through the
-   *  through-holes, per-user decision; 0.32 itself was raised 2026-08-18 from 0.17;
-   *  changed 2026-08-19 from "narrower footprint dimension" to per-wall width so a
-   *  narrow side gets proportionately smaller letters instead of the same size as a
-   *  wide one — see bake_proxy.py's _cap_h_for_wall). For the default "vertical"
-   *  (climbing) orientation this is the WIDTH of the text column across the wall,
-   *  not how far up it reaches — glyphs are rotated 90° to read bottom-to-top.
-   *  Vertical reach is controlled separately by embossVerticalMarginFrac (the
-   *  "full height of the model" setting). Also clamped against the model's own
-   *  height (`dz * 0.8`, raised from 0.64 the same day) just so this column
-   *  width isn't clamped back down to something stingy on a tall, narrow wall —
-   *  not because it affects reach. Scales with the model either way — a bigger
-   *  source gets proportionally bigger letters/holes, not a fixed mm size. At
-   *  0.64 a single glyph is already over half a typical wall's width — the
-   *  practical ceiling before letters start overlapping
-   *  is close; a further increase should probably come with a lower
-   *  embossPillarCount instead. */
+  /** Pillar letter cap height as a fraction of EACH WALL'S OWN width (default 0.15,
+   *  dropped 2026-08-21 from 0.64 — see bake_proxy.py's _cap_h_for_wall). 0.64 was
+   *  tuned back when this style always did one dead-centre, no-search, full-height
+   *  cut per wall (the same failure mode "punch" was later found to have — see
+   *  embossStyle's doc); at that size, with the current default embossOrientation
+   *  "auto" ACTUALLY searching for real material, 0.64 produced oversized text on
+   *  the one legible patch the search found. 0.15 was confirmed via a local test
+   *  (real Blender bake, real complex model) to read as clean, legible "PREVIEW"
+   *  text without visually dominating the wall — the search-and-shrink logic in
+   *  _locate_wall_text still adapts this down further on any wall whose only
+   *  usable patch is smaller than 0.15 would need. Also clamped against the
+   *  model's own height (`dz * 0.8`) so this width isn't stingy on a tall, narrow
+   *  wall. Scales with the model either way — a bigger source gets proportionally
+   *  bigger letters/holes, not a fixed mm size. */
   embossPillarWidthFrac: number
   /** Total spiral twist (degrees) each pillar sweeps from base to top. Small = a gentle
    *  spiral; 0 = dead-straight vertical columns. */

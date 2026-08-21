@@ -768,15 +768,15 @@ def emboss_watermark(proxy):
     engrave = bool(CFG.get("embossEngrave", True))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
     inset_pct = float(CFG.get("embossInsetPct", 2.0))
-    style = str(CFG.get("embossStyle", "punch")).strip().lower()
+    style = str(CFG.get("embossStyle", "pillars")).strip().lower()
 
     if style == "bands":
         _emboss_bands(proxy, text, engrave, float(CFG.get("embossHeightPct", 9.0)),
                       depth_pct, inset_pct)
-    elif style == "pillars":
-        _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct)
-    else:
+    elif style == "punch":
         _emboss_punch_through(proxy, text)
+    else:
+        _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct)
 
 
 def _wm_material():
@@ -1777,35 +1777,32 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     model.
 
     Placement differs by branch:
-      • DEFAULT (embossThroughHoles=true, embossOrientation="vertical"): ONE
-        direct full-height cut per wall, centred on the wall's LATERAL MIDDLE
-        (never searched sideways — explicit user request), sized so one full
-        reading of the word spans the ENTIRE z0..z1 band top-to-bottom
-        (cap_h = span / tile_aspect — see the call site). No search, no
-        shrink-to-fit: earlier versions ran the same raycast-located,
-        coverage-gated search every other branch still uses and shrank the
-        text whenever the full word didn't fit a contiguous ~65%-solid run —
-        on real architectural models (windows, lattice, tiled roofs) that was
-        nearly always, so the mark routinely ended up a fraction of a
-        millimetre tall, unnoticeable at any normal viewing distance
-        (confirmed live in production — "too small, only covers a very small
-        portion of the model"). A real THROUGH-HOLE doesn't need that guard:
-        direct bmesh FACE DELETION under the glyph shape (_cut_wall_text_hole)
-        just has no face to delete wherever the wall already has an opening,
-        so the cut shows through existing structure instead of failing to
-        place — the word reads as a perforation stencil laid over whatever
-        the wall actually has, not a search result. A wall whose exact centre
-        is genuinely empty top to bottom (a doorway spanning the whole panel)
-        still skips cleanly.
-      • OTHER combinations (embossOrientation="auto", or embossThroughHoles=
-        false): placement still comes from _locate_wall_text, which raycast-
-        samples the wall for a real flat, solid, outward-facing patch and
-        shrinks the text to fit a legible run — needed for RELIEF (the vertex-
-        displacement style, _displace_wall_text, where a low-density/gappy
-        selection genuinely can't resolve a legible recess) and preserved for
-        "auto" orientation's wider search. Holes cut this way still go through
-        _cut_wall_text_hole (no boolean either), just at the searched size/
-        location instead of the direct full-height one above.
+      • DEFAULT since 2026-08-21 (embossOrientation="auto"): placement comes from
+        _locate_wall_text, which raycast-samples the wall for a real flat, solid,
+        outward-facing patch (trying both vertical and horizontal reading
+        directions, keeping whichever finds the longer legible run) and shrinks
+        the text to fit. This is what makes pillars SAFE on richly-detailed
+        models — it naturally steers around windows, thin lattice, and other
+        gaps instead of cutting blindly through them. Confirmed via a local
+        Blender test on a real dense architectural model: clean, legible
+        "PREVIEW" text with zero damage elsewhere, after the OLD default (below)
+        was found tearing through thin railings/posts on the exact same model.
+      • embossOrientation="vertical" (the default until 2026-08-21, still
+        available): ONE direct full-height cut per wall, centred on the wall's
+        LATERAL MIDDLE, with NO search at all — sized so one full reading of the
+        word spans the ENTIRE z0..z1 band top-to-bottom (cap_h = span /
+        tile_aspect). This was built specifically because the search-based
+        branch's shrink-to-fit routinely produced fragment-sized text on busy
+        real architecture (confirmed live in production — "too small, only
+        covers a very small portion of the model"), and a real THROUGH-HOLE
+        doesn't strictly NEED a search to "work" (face deletion just has no face
+        to delete over an opening, so it skips cleanly there). It DOES need one
+        to avoid landing on thin/fragile members, though — a second, separate
+        local test on the same real model found this branch tearing through
+        railings and support posts the same way the (also search-less) "punch"
+        style did, for the identical underlying reason. Kept for models where a
+        classic full-height spine-label look is wanted and the risk is
+        acceptable (e.g. a simple flat-walled model).
 
     No boolean CSG cut anywhere in the through-holes path: deleting faces can
     only ever remove existing topology from an already-bounded selection,
@@ -1826,11 +1823,11 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     import mathutils
     try:
         count = max(1, int(CFG.get("embossPillarCount", 4)))
-        width_frac = float(CFG.get("embossPillarWidthFrac", 0.1))
+        width_frac = float(CFG.get("embossPillarWidthFrac", 0.15))
         reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
         min_coverage = min(1.0, max(0.05, float(CFG.get("embossWallMinCoverage", 0.65))))
         cell_divisor = max(1.0, float(CFG.get("embossWallCellDivisor", 6.0)))
-        orientation_cfg = str(CFG.get("embossOrientation", "vertical")).strip().lower()
+        orientation_cfg = str(CFG.get("embossOrientation", "auto")).strip().lower()
         force_orientation = "auto" if orientation_cfg == "auto" else "vertical"
         through_holes = bool(CFG.get("embossThroughHoles", True))
 
@@ -2117,26 +2114,37 @@ _PUNCH_OPPOSITE_SIDE = {"front": "back", "back": "front", "right": "left", "left
 
 
 def _emboss_punch_through(proxy, text):
-    """Cut `text` as a real THROUGH-HOLE spanning the model's ENTIRE depth on each
-    side in embossPunchSides (default ["front","right"]) — a die-punch straight
-    through the whole volume, not a shallow recess into one wall's surface.
+    """Cut `text` as a real THROUGH-HOLE into each side in embossPunchSides
+    (default ["front","right"]) — a die-punch through the outer skin, not a
+    shallow surface recess.
 
     Why this exists alongside "pillars": the raycast wall-solidity search
     (_locate_wall_text) that "pillars" uses exists to find a real flat, solid,
     outward-facing patch to avoid cutting through empty space (a window, a
     doorway) — necessary when the cut only reaches a short way into the wall,
     because landing on the wrong material there produces a shallow gouge in
-    thin air or a fragment of the mark. None of that matters once the cut
-    reaches the ENTIRE depth of the model: wherever the glyph shape falls,
-    _cut_wall_text_hole's face deletion just removes whatever is actually
-    there along that whole path — front skin, interior structure, the far
-    skin, a window mullion, dense terrain, an open lattice — and skips
-    cleanly wherever there's truly nothing to delete. So this style never
-    searches for "the best geometry" the way pillars does; it doesn't need
-    to, because deletion is naturally uniform across every surface type. This
-    is also what makes the mark genuinely a HOLE all the way through rather
-    than a mark on one wall — a leaked/ripped file reads as visibly punctured
-    from any side, not just the one the mark was cut from.
+    thin air or a fragment of the mark. That matters less once the cut reaches
+    well PAST the outer wall's own thickness (see embossPunchMaxReachFrac
+    below): wherever the glyph shape falls, _cut_wall_text_hole's face
+    deletion just removes whatever is actually there along that reach — front
+    skin, a bit of interior structure, a window mullion, dense terrain, an
+    open lattice — and skips cleanly wherever there's truly nothing to
+    delete. So this style never searches for "the best geometry" the way
+    pillars does; it doesn't need to, because deletion is naturally uniform
+    across every surface type it actually reaches.
+
+    DEPTH BOUNDED, NOT model-spanning (fixed 2026-08-21 — see
+    embossPunchMaxReachFrac's own comment at the call site for the full
+    story): earlier versions of this style reached the model's literal FULL
+    depth to the opposite wall, "exiting whatever is on the far side" — fine
+    on a simple hollow test box (empty interior), but on a real, richly
+    detailed architectural model a local Blender test showed this tearing
+    through interior PROPS (a decorative lantern/finial) sitting well behind
+    the outer wall, not just cutting the wall itself. The reach is now capped
+    to a modest multiple of the letter size (embossPunchMaxReachFrac), deep
+    enough to clear typical wall thickness but shallow enough to leave
+    interior set-dressing alone. On a thin-walled model (or the original
+    synthetic test box) the cap never binds and behaviour is unchanged.
 
     REWRITTEN 2026-08-21 (per-user: "too big... turn it into a repeating
     pattern that crosses the models diagonally... small PREVIEW holes"), then
@@ -2204,13 +2212,13 @@ def _emboss_punch_through(proxy, text):
 
     Placement letter size still scales with the MODEL, never a fixed mm size
     (cap_h = max(diagp*0.004, span_mm*boldness_frac), same formula as before,
-    just a smaller default boldness). The only real difference from the
-    pillars style is `select_reach_mm`: pillars caps it to a shallow multiple
-    of the recess depth (embossHoleReachFrac) so the cut stays a dent in one
-    wall; here it's sized to the model's FULL extent along the punch axis (2x
-    the wall's own centre-offset, i.e. the distance to the OPPOSITE wall,
-    plus a safety margin) so the same face-deletion mechanism keeps removing
-    faces all the way through instead of stopping partway.
+    just a smaller default boldness). `select_reach_mm` here is deliberately
+    much MORE generous than pillars' embossHoleReachFrac (pillars stays a
+    shallow dent in one wall on purpose) — sized toward the distance to the
+    OPPOSITE wall so the cut can genuinely punch all the way through a
+    thin-walled model — but capped at embossPunchMaxReachFrac × cap_h so it
+    can't reach arbitrarily deep into a THICK or busy model's interior. Same
+    face-deletion mechanism either way; only how far it's allowed to search.
 
     OPPOSITE-SIDE FALLBACK (2026-08-21, per-user: "if no material is found it
     is done on the opposite side"): a configured side can legitimately find
@@ -2329,7 +2337,26 @@ def _emboss_punch_through(proxy, text):
             anchor = (wall_centre + lateral * lateral_jitter_mm
                       + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0)))
             full_thru_mm = reach_depth * 2.0
-            select_reach_mm = full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac)
+            # DEPTH CAP (fixed 2026-08-21 after a local test on a real, richly-
+            # detailed architectural model — not the earlier synthetic box —
+            # showed the punch reaching all the way across the model's full
+            # interior and tearing through a decorative prop (a lantern/finial
+            # sitting well behind the outer wall) rather than staying a clean
+            # hole in the outer skin. Reaching the model's FULL depth was fine
+            # on a simple hollow box (nothing behind the near wall but empty
+            # air and the far wall), but on a real model the interior is often
+            # NOT empty — furniture, statuary, structural framing — and the
+            # punch's face-deletion doesn't distinguish "the far wall" from
+            # "a delicate prop halfway there". Bounding the reach to a modest
+            # multiple of the letter size itself (embossPunchMaxReachFrac,
+            # default 8x cap_h) keeps it a genuine THROUGH-hole in the outer
+            # wall/roof skin — reaching well past typical wall thickness —
+            # without reaching deep enough to hit interior set-dressing. Only
+            # engages on deep models; a thin wall (full_thru_mm already under
+            # the cap) is completely unaffected, so the simple-box case this
+            # style was originally validated on is unchanged.
+            max_reach_mm = cap_h * max(1.0, float(CFG.get("embossPunchMaxReachFrac", 8.0)))
+            select_reach_mm = min(full_thru_mm + max(2.0, full_thru_mm * reach_margin_frac), max_reach_mm)
 
             cross_half_mm = cap_h * band_rows
 
