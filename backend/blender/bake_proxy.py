@@ -2113,6 +2113,7 @@ def _stable_seed_int(s):
 
 
 _PUNCH_SIDE_ANGLES = {"front": 0.0, "right": -90.0, "back": 180.0, "left": 90.0}
+_PUNCH_OPPOSITE_SIDE = {"front": "back", "back": "front", "right": "left", "left": "right"}
 
 
 def _emboss_punch_through(proxy, text):
@@ -2211,6 +2212,20 @@ def _emboss_punch_through(proxy, text):
     plus a safety margin) so the same face-deletion mechanism keeps removing
     faces all the way through instead of stopping partway.
 
+    OPPOSITE-SIDE FALLBACK (2026-08-21, per-user: "if no material is found it
+    is done on the opposite side"): a configured side can legitimately find
+    zero material under the glyph stroke — a real window/doorway/open lattice
+    spanning exactly where the (randomly angled+positioned) band landed, not a
+    bug — and previously just left that model with fewer marks than
+    configured. Now, whenever a side's cut fails, it's retried ONCE on that
+    side's geometric OPPOSITE (front<->back, right<->left) with that side's
+    OWN seed/jitter (not a repeat of the failed attempt), via a small
+    (name, fallback_for) work queue rather than the plain `for name in sides`
+    loop this used to be. Skipped when the opposite is already configured (it
+    gets its own primary attempt regardless — a separate fallback would only
+    ever duplicate or re-fail identically) or already attempted (no infinite
+    ping-pong if BOTH a side and its opposite come up empty).
+
     Known trade-off (documented rather than engineered around, to keep this
     style as simple as the "just punch a hole" request that motivated it):
     the local-subdivision density loop shared with _cut_wall_text_hole targets
@@ -2270,7 +2285,13 @@ def _emboss_punch_through(proxy, text):
         holes_attempted = 0
         holes_cut = 0
         placements = []
-        for name in sides:
+
+        def try_side(name, fallback_for=None):
+            """Attempt one side's cut; returns True iff a real hole was cut.
+            `fallback_for` is only used for the log label when this call is a
+            fallback attempt on the OPPOSITE side of one that found no
+            material (see the queue loop below)."""
+            nonlocal holes_attempted, holes_cut
             # Per model+side deterministic jitter — same model always jitters the
             # same way (idempotent re-bakes), every other model jitters
             # differently (the actual anti-script property; see docstring).
@@ -2356,35 +2377,63 @@ def _emboss_punch_through(proxy, text):
             period_read_mm = max(1e-3, cap_h * tile_aspect)
             phase_offset_mm = rng.uniform(0.0, period_read_mm)
 
-            label = "punch %s" % name
+            label = ("punch %s (fallback for %s)" % (name, fallback_for)) if fallback_for else ("punch %s" % name)
             holes_attempted += 1
             if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
                                     cap_h, run_mm, select_reach_mm, label,
                                     read_phase_offset_mm=phase_offset_mm, cross_half_mm=cross_half_mm):
                 holes_cut += 1
-                placements.append("%s: diagonal-band@%.1fmm angle=%.1f (through %.0fmm)"
-                                   % (name, cap_h, diagonal_deg_eff, full_thru_mm))
+                placements.append("%s: diagonal-band@%.1fmm angle=%.1f (through %.0fmm)%s"
+                                   % (name, cap_h, diagonal_deg_eff, full_thru_mm,
+                                      " [fallback for %s]" % fallback_for if fallback_for else ""))
+                return True
             else:
                 warn("Watermark punch %s: no material found along the punch axis "
                      "(%.0fmm wide, %.0fmm through) — this side gets no mark"
                      % (name, lateral_half * 2, full_thru_mm))
-                placements.append("%s: skipped" % name)
+                placements.append("%s: skipped%s" % (name, " [fallback for %s]" % fallback_for if fallback_for else ""))
+                return False
+
+        # Try every configured side; whenever one finds no material, retry once
+        # on its geometric OPPOSITE (front<->back, right<->left) rather than
+        # just leaving that model with fewer marks than intended — per-user
+        # request ("if no material is found it is done on the opposite side").
+        # `attempted` guards against a redundant double-attempt when the
+        # opposite side is already queued (it'll run — or already ran — as its
+        # own primary attempt either way, so a separate fallback would either
+        # duplicate it or repeat an identical failure — same seed, same wall).
+        attempted = set()
+        queue = [(name, None) for name in sides]  # (side_name, fallback_for_or_None)
+        while queue:
+            name, fallback_for = queue.pop(0)
+            if name in attempted:
+                continue
+            attempted.add(name)
+            ok = try_side(name, fallback_for=fallback_for)
+            if not ok:
+                opp = _PUNCH_OPPOSITE_SIDE.get(name)
+                if opp and opp not in attempted and opp not in [q[0] for q in queue]:
+                    queue.append((opp, name))
 
         REPORT["embossMethod"] = ("punch-through-hole" if holes_cut > 0
                                    else ("holes-all-failed" if holes_attempted > 0 else "holes-none-located"))
         REPORT["embossApplied"] = holes_cut > 0
         REPORT["embossWatermark"] = text
-        REPORT["embossPlacement"] = "punch-through-diagonal-%s" % "-".join(sides)
+        # `attempted` includes any opposite-side fallbacks, not just the
+        # configured `sides` — reflects what was ACTUALLY tried on this bake.
+        REPORT["embossPlacement"] = "punch-through-diagonal-%s" % "-".join(sorted(attempted))
         REPORT["embossPunchSides"] = sides
+        REPORT["embossPunchSidesAttempted"] = sorted(attempted)
         REPORT["embossPunchCapHeightMm"] = round(cap_h, 3)
         REPORT["embossPunchDiagonalDeg"] = diagonal_deg
         REPORT["embossPunchSeed"] = seed_str
         REPORT["embossPunchPlacements"] = placements
         REPORT["embossHolesTotal"] = holes_cut
         if holes_cut == 0:
-            warn("Watermark punch-through applied to 0 of %d side(s)" % holes_attempted)
+            warn("Watermark punch-through applied to 0 of %d side(s) (incl. opposite-side fallbacks)" % holes_attempted)
         elif holes_cut < holes_attempted:
-            warn("Watermark punch-through applied to only %d of %d side(s)" % (holes_cut, holes_attempted))
+            warn("Watermark punch-through applied to only %d of %d side(s) (incl. opposite-side fallbacks)"
+                 % (holes_cut, holes_attempted))
     except Exception as e:
         warn("Emboss punch-through failed (continuing without it): " + str(e))
         REPORT["embossApplied"] = False
