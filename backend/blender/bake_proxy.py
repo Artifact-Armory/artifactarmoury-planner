@@ -1776,33 +1776,43 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     """Emboss `text` at N wall positions (default 4), evenly spaced around the
     model.
 
-    Placement differs by branch:
-      • DEFAULT since 2026-08-21 (embossOrientation="auto"): placement comes from
-        _locate_wall_text, which raycast-samples the wall for a real flat, solid,
-        outward-facing patch (trying both vertical and horizontal reading
-        directions, keeping whichever finds the longer legible run) and shrinks
-        the text to fit. This is what makes pillars SAFE on richly-detailed
-        models — it naturally steers around windows, thin lattice, and other
-        gaps instead of cutting blindly through them. Confirmed via a local
-        Blender test on a real dense architectural model: clean, legible
-        "PREVIEW" text with zero damage elsewhere, after the OLD default (below)
-        was found tearing through thin railings/posts on the exact same model.
-      • embossOrientation="vertical" (the default until 2026-08-21, still
-        available): ONE direct full-height cut per wall, centred on the wall's
-        LATERAL MIDDLE, with NO search at all — sized so one full reading of the
-        word spans the ENTIRE z0..z1 band top-to-bottom (cap_h = span /
-        tile_aspect). This was built specifically because the search-based
-        branch's shrink-to-fit routinely produced fragment-sized text on busy
-        real architecture (confirmed live in production — "too small, only
-        covers a very small portion of the model"), and a real THROUGH-HOLE
-        doesn't strictly NEED a search to "work" (face deletion just has no face
-        to delete over an opening, so it skips cleanly there). It DOES need one
-        to avoid landing on thin/fragile members, though — a second, separate
-        local test on the same real model found this branch tearing through
-        railings and support posts the same way the (also search-less) "punch"
-        style did, for the identical underlying reason. Kept for models where a
-        classic full-height spine-label look is wanted and the risk is
-        acceptable (e.g. a simple flat-walled model).
+    Placement ALWAYS comes from _locate_wall_text now (fixed 2026-08-21 — see
+    below for the two things that changed the same day and why): a raycast
+    search across the wall for a real flat, solid, outward-facing patch, which
+    shrinks the text to fit whatever run it actually finds. This is what makes
+    pillars SAFE on richly-detailed models — it naturally steers around
+    windows, thin lattice, and other gaps instead of cutting blindly through
+    them. `embossOrientation` controls which reading direction(s) the search
+    is allowed to use:
+      • "vertical" (the default): search ONLY the vertical (bottom→top)
+        direction. Per-user request ("the watermark can't just sit around the
+        bottom, too easy to chop it off and have a full model") — a mark
+        confined to a low horizontal strip near the base can be removed with
+        ONE planar cut; a mark that climbs a real vertical run of solid wall
+        can't be isolated that cheaply. Still governed by the search, not a
+        blind full-height cut — see the history below for why that distinction
+        matters.
+      • "auto": tries BOTH vertical and horizontal, keeping whichever finds the
+        longer legible run — may end up horizontal (e.g. hugging a baseboard)
+        if that happens to offer more contiguous solid material than any
+        vertical column does on a given wall.
+
+    History of this function's placement logic, for context (two distinct
+    fixes, same day, easy to conflate): (1) an EARLIER version of the
+    "vertical" mode did ONE direct full-height cut per wall with NO search at
+    all — built because the search's shrink-to-fit routinely produced
+    fragment-sized text on busy real architecture ("too small, only covers a
+    very small portion of the model"). That fixed the size problem but
+    reintroduced the exact hazard the search exists to avoid: a local Blender
+    test on a real dense model found it tearing through thin railings and
+    support posts, the same way the (also search-less) "punch" style did, for
+    the identical reason — no check for what it's about to delete. Removed
+    entirely; every through-hole placement now goes through the search.
+    (2) `embossPillarWidthFrac` was dropped 0.64→0.15 the same day (see its own
+    config doc) so the search starts from a modest, appropriately-sized target
+    instead of the old oversized one — keeping the shrink-to-fit path from
+    needing to work as hard, and so its output is far less likely to reduce
+    to an illegible fragment now than it was when 0.64 was tuned.
 
     No boolean CSG cut anywhere in the through-holes path: deleting faces can
     only ever remove existing topology from an already-bounded selection,
@@ -1811,10 +1821,8 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
     boolean-based hole failed on this exact pipeline before landing here (the
     original emboss "strand poking out" bug, and a production crash from a
     per-segment through-hole boolean severing debris — see
-    remove_boolean_debris). Letter size scales with the model itself in every
-    branch — the wall's own width for the search-based branches
-    (embossPillarWidthFrac, via _cap_h_for_wall), the wall's own height for
-    the default direct full-height cut.
+    remove_boolean_debris). Letter size scales with the model itself — the
+    wall's own width, via embossPillarWidthFrac/_cap_h_for_wall.
 
     NOTE: the old spiral twist (embossPillarTwistDeg) is dropped — no clean
     equivalent without a much more involved sheared/curved mapping.
@@ -1827,7 +1835,7 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
         reach_frac = max(0.05, float(CFG.get("embossPillarReachFrac", 1.0)))
         min_coverage = min(1.0, max(0.05, float(CFG.get("embossWallMinCoverage", 0.65))))
         cell_divisor = max(1.0, float(CFG.get("embossWallCellDivisor", 6.0)))
-        orientation_cfg = str(CFG.get("embossOrientation", "auto")).strip().lower()
+        orientation_cfg = str(CFG.get("embossOrientation", "vertical")).strip().lower()
         force_orientation = "auto" if orientation_cfg == "auto" else "vertical"
         through_holes = bool(CFG.get("embossThroughHoles", True))
 
@@ -1942,76 +1950,6 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
             wall_centre = mathutils.Vector((wx, wy, 0.0))
             label = "wall %d" % i
 
-            if through_holes and force_orientation == "vertical":
-                # ONE direct cut of the word, spanning the ENTIRE z0..z1 band
-                # top-to-bottom, fixed to the wall's LATERAL CENTRE (never
-                # searches sideways — explicit user request) — not a search
-                # for a "clean enough" patch to shrink into. This REPLACES an
-                # earlier version that ran the coverage-gated segment search
-                # (_locate_wall_text_segments) and shrank the text — sometimes
-                # to a fraction of a millimetre — whenever the full word
-                # didn't fit a contiguous ~65%-solid run: on real architectural
-                # models that was nearly always, so the mark routinely ended
-                # up unnoticeable (confirmed live — "too small, only covers a
-                # very small portion of the model"). Face DELETION doesn't
-                # need that guard: a window opening under part of a letter
-                # just has no face to delete there, so the cut shows through
-                # existing openings instead of failing to place — the word
-                # reads as a perforation stencil laid over whatever the wall
-                # actually has, not a search result.
-                #
-                # cap_h is sized for BOLDNESS (embossHoleBoldnessFrac, default
-                # 0.35, of the panel's own height) rather than "shrink until
-                # one full 'PREVIEW  ' period exactly fits the span" — solving
-                # for an exact fit (span / tile_aspect) was tried first and
-                # still produced letters only ~15-20% of the panel height on
-                # real models with a modest wall height relative to width
-                # (a single word is ~6.6 cap-heights tall), which read as
-                # small even though it was technically "full height". Sizing
-                # for boldness instead means the run legitimately might not
-                # show the whole word — read_phase_offset_mm anchors the crop
-                # to the START of "PREVIEW" at the panel's bottom edge (see
-                # _cut_wall_text_hole) so a short run shows "PREV..." climbing
-                # from the base rather than an arbitrary centred slice. A wall
-                # whose exact centre has literally nothing there at all (a
-                # doorway spanning the full panel) still skips cleanly — see
-                # _cut_wall_text_hole's own "no nearby geometry" / "no face
-                # under a glyph stroke" returns.
-                span_mm = max(1e-4, z1 - z0)
-                boldness_frac = min(1.0, max(0.05, float(CFG.get("embossHoleBoldnessFrac", 0.35))))
-                cap_h_full = max(1e-4, span_mm * boldness_frac)
-                anchor = wall_centre + mathutils.Vector((0.0, 0.0, (z0 + z1) / 2.0))
-                # _select_reach_mm's default multiplier (cap_h*0.6, tuned for a
-                # shallow emboss recess) is nowhere near deep enough here: a
-                # real window's frame/lattice sits recessed well behind the
-                # nominal wall plane, so at the small default reach nothing in
-                # the window bay is ever close enough to the plane to even be
-                # considered for deletion — the cut can ONLY land on whatever
-                # thin trim/baseboard happens to sit within that shallow band,
-                # no matter how large cap_h_full is (confirmed: increasing
-                # boldness alone left the mark confined to a sliver at the
-                # panel's base, not climbing through the window bay at all).
-                # embossHoleReachFrac (default 2.5x cap_h_full, still capped by
-                # the wall's own physical half-depth via reach_mm) reaches far
-                # enough to pick up genuine structural material — window
-                # mullions, frame posts — behind a typical reveal depth.
-                reach_frac_hole = max(0.6, float(CFG.get("embossHoleReachFrac", 2.5)))
-                select_reach_mm_full = min(reach_mm, max(depth_mm * 4.0, cap_h_full * reach_frac_hole))
-                holes_attempted += 1
-                if _cut_wall_text_hole(proxy, tile_path, up, lateral, normal, anchor,
-                                        cap_h_full, span_mm, select_reach_mm_full, label,
-                                        read_phase_offset_mm=span_mm / 2.0):
-                    applied += 1
-                    holes_cut += 1
-                    walls_covered += 1
-                    placements.append("vertical@%.1fmm hole (full-height)" % cap_h_full)
-                else:
-                    warn("Watermark %s: no solid material found in the middle panel "
-                         "(%.0fmm wide, %.0fmm tall) — this side gets no mark"
-                         % (label, lateral_half * 2, span_mm))
-                    placements.append("skipped")
-                continue
-
             loc = _locate_wall_text(bvh, wall_centre, normal, lateral, lateral_half,
                                      z0, z1, cap_h, tile_aspect, select_reach_mm,
                                      min_coverage, cell_divisor, force_orientation)
@@ -2035,8 +1973,12 @@ def _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct):
                 read_axis, height_axis = up, lateral
 
             if through_holes:
-                # force_orientation == "auto" here (embossOrientation override) —
-                # the segmented path above only handles the vertical-only default.
+                # force_orientation="vertical" (the default) restricts
+                # _locate_wall_text above to the vertical reading direction only,
+                # so loc["orientation"] is always "vertical" here in that case —
+                # a real climbing mark, not confined to a horizontal strip near
+                # the base that a single planar cut could remove. "auto" tries
+                # both and may still pick horizontal if it finds a longer run.
                 holes_attempted += 1
                 if _cut_wall_text_hole(proxy, tile_path, read_axis, height_axis, normal, anchor,
                                         loc["cap_h"], loc["run_mm"], select_reach_mm, label):

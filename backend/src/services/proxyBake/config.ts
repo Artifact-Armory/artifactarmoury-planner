@@ -129,9 +129,11 @@ export interface ProxyBakeConfig {
    *  renders) showed punch repeatedly landing on thin/fragile members — railings,
    *  posts, a decorative lantern sitting behind the wall — and tearing them into
    *  jagged, damage-looking geometry, however the reach/boldness knobs were tuned.
-   *  Switching to "pillars" with embossOrientation="auto" (see there) — which DOES
-   *  search for real solid material before cutting — fixed this immediately on the
-   *  same model: clean, legible text, zero visible damage elsewhere. "punch" is
+   *  Switching to "pillars" — which always searches for real solid material before
+   *  cutting (embossOrientation controls which reading direction the search may
+   *  use, see there; either way it's real material, never blind) — fixed this
+   *  immediately on the same model: clean, legible text, zero visible damage
+   *  elsewhere. "punch" is
    *  kept in the schema (still safe on simple flat-walled models, e.g. the
    *  synthetic box this pipeline was first validated against) but is no longer the
    *  default. "bands" is the legacy four upright bands hugging the bottom edge,
@@ -233,18 +235,21 @@ export interface ProxyBakeConfig {
    *  through in that case. Raise if a specific thick-walled model's mark isn't
    *  reaching daylight on the far side; lower if it's still catching interior detail. */
   embossPunchMaxReachFrac: number
-  /** Reading direction for the "pillars" style. "auto" (default since 2026-08-21):
-   *  tries BOTH orientations per wall via the raycast wall-solidity search
-   *  (_locate_wall_text) and keeps whichever finds the longer legible run on REAL
-   *  material — this is what makes pillars safe on detailed models (see
-   *  embossStyle's doc): it naturally avoids windows, thin lattice, and other gaps
-   *  instead of blindly cutting through them. "vertical" forces every placement to
-   *  climb bottom→top through the wall's exact centre with NO search at all (a
-   *  direct full-height cut, same "no solidity check" idea as the "punch" style) —
-   *  this was the default until a local test showed it tearing through thin
-   *  railings/posts just like punch did, for the same underlying reason. Kept for
-   *  a simple flat-walled model where the classic spine-label look is wanted and
-   *  the no-search risk is low. */
+  /** Reading direction for the "pillars" style's raycast wall-solidity search
+   *  (_locate_wall_text) — placement ALWAYS goes through that search now (fixed
+   *  2026-08-21; an earlier no-search "vertical" mode was found tearing through
+   *  thin railings/posts, the same failure the search exists to prevent — see
+   *  bake_proxy.py's _emboss_pillars docstring for the full history). This field
+   *  only controls which reading direction(s) the search may use:
+   *  "vertical" (default, changed from "auto" 2026-08-21): search ONLY the
+   *  vertical bottom→top direction. Per-user request — a mark confined to a
+   *  horizontal strip near the base can be removed with a single planar cut; a
+   *  mark climbing a real vertical run of wall can't be isolated that cheaply.
+   *  "auto": tries both vertical and horizontal, keeping whichever finds the
+   *  longer legible run — may end up horizontal (e.g. hugging a baseboard) if
+   *  that offers more contiguous solid material on a given wall. Both modes are
+   *  equally SAFE (both go through the real solidity search); this is purely
+   *  about resisting a trivial single-cut removal, not about damage. */
   embossOrientation: 'vertical' | 'auto'
   /** When true (default), the "pillars" style cuts real THROUGH-HOLES — direct bmesh
    *  FACE DELETION under the glyph shape (see _cut_wall_text_hole in bake_proxy.py),
@@ -297,9 +302,9 @@ export interface ProxyBakeConfig {
    *  dropped 2026-08-21 from 0.64 — see bake_proxy.py's _cap_h_for_wall). 0.64 was
    *  tuned back when this style always did one dead-centre, no-search, full-height
    *  cut per wall (the same failure mode "punch" was later found to have — see
-   *  embossStyle's doc); at that size, with the current default embossOrientation
-   *  "auto" ACTUALLY searching for real material, 0.64 produced oversized text on
-   *  the one legible patch the search found. 0.15 was confirmed via a local test
+   *  embossStyle's doc); now that placement always goes through the real
+   *  solidity search (_locate_wall_text), 0.64 produced oversized text on
+   *  whatever legible patch the search found. 0.15 was confirmed via a local test
    *  (real Blender bake, real complex model) to read as clean, legible "PREVIEW"
    *  text without visually dominating the wall — the search-and-shrink logic in
    *  _locate_wall_text still adapts this down further on any wall whose only

@@ -23,7 +23,7 @@
   "embossPunchGapFrac": 1.5,
   "embossPunchReachMarginFrac": 0.1,
   "embossPunchMaxReachFrac": 8,
-  "embossOrientation": "auto",
+  "embossOrientation": "vertical",
   "embossThroughHoles": true,
   "embossHoleThreshold": 0.5,
   "embossHoleBoldnessFrac": 0.35,
