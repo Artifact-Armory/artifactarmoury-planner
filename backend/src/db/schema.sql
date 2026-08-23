@@ -150,6 +150,10 @@ CREATE TABLE models (
     -- single-STL model; extra parts live in model_parts, this row is part 1).
     part_count INTEGER NOT NULL DEFAULT 1,
 
+    -- Name of the component that owns the primary STL, when the listing groups
+    -- its files into several named models (migration 038). NULL = ungrouped.
+    primary_group_name VARCHAR(255),
+
     -- Default tilt (pitch about X, degrees) applied to this model when first placed
     -- in the planner. STL has no canonical "up" — terrain tends Z-up, character
     -- sculpts Y-up — so an artist can bake in the orientation that stands the model
@@ -238,6 +242,11 @@ CREATE TABLE model_parts (
     processing_status VARCHAR(20) DEFAULT 'processing',
     processing_error TEXT,
     display_order INTEGER DEFAULT 0,
+    -- Component ("included model") this part belongs to, e.g. a "Small Village"
+    -- listing whose parts group into a Village Tower / Tavern / Well. Group 0 is
+    -- the component that owns the model's own primary STL (migration 038).
+    group_index INTEGER NOT NULL DEFAULT 0,
+    group_name VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

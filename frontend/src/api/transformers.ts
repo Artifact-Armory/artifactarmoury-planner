@@ -161,7 +161,10 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     depth: p.depth ?? undefined,
     height: p.height ?? undefined,
     processingStatus: p.processing_status ?? p.processingStatus ?? undefined,
+    groupIndex: Number(p.group_index ?? p.groupIndex ?? 0),
+    groupName: p.group_name ?? p.groupName ?? null,
   })),
+  primaryGroupName: model.primary_group_name ?? model.primaryGroupName ?? null,
   featuredInTables:
     (model.featuredInTables ?? model.featured_in_tables) != null
       ? Number(model.featuredInTables ?? model.featured_in_tables)

@@ -60,6 +60,12 @@ const VALID_LICENSES = ['personal', 'commercial'];
 // Printer authoring targets (migration 032).
 const VALID_PRINTER_TYPES = ['fdm', 'resin', 'both'];
 
+// A listing may bundle several named components ("Small Village" = tower +
+// tavern + well), each of several files. Caps are generous but bounded: every
+// extra file is a separate background conversion + preview bake.
+const MAX_EXTRA_PARTS = 60;
+const MAX_COMPONENTS = 20;
+
 // The type facet a model must be tagged with, per model class. A model's headline
 // classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).
 const TYPE_FACET_BY_CLASS: Record<string, string> = {
@@ -273,7 +279,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -321,10 +327,17 @@ router.post('/from-upload',
 
     // Optional extra STL parts (multi-part "set" models). Each must be its own
     // raw/ upload; they're processed alongside the primary in the background.
-    const extraParts: Array<{ rawKey: string; filename?: string; name?: string }> = [];
+    // A part may also declare the COMPONENT it belongs to (groupIndex/groupName),
+    // which is how a "Small Village" listing keeps its Village Tower's three
+    // files together and separate from the Tavern's two (migration 038).
+    const extraParts: Array<{
+      rawKey: string; filename?: string; name?: string; groupIndex: number; groupName: string | null;
+    }> = [];
     if (parts != null) {
       if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
-      if (parts.length > 20) throw new ValidationError('A set can have at most 20 extra parts');
+      if (parts.length > MAX_EXTRA_PARTS) {
+        throw new ValidationError(`A listing can have at most ${MAX_EXTRA_PARTS} extra files`);
+      }
       for (const p of parts) {
         if (!p?.rawKey || typeof p.rawKey !== 'string' || !p.rawKey.startsWith('raw/')) {
           throw new ValidationError('Each part needs an uploaded raw/ object');
@@ -332,6 +345,13 @@ router.post('/from-upload',
         if (!meshFormatFromName(p.filename || p.rawKey)) {
           throw new ValidationError('Each part must be an STL, OBJ or 3MF file');
         }
+        const groupIndex = p.groupIndex == null ? 0 : Number(p.groupIndex);
+        if (!Number.isInteger(groupIndex) || groupIndex < 0 || groupIndex > MAX_COMPONENTS) {
+          throw new ValidationError('Invalid part group');
+        }
+        const groupName = typeof p.groupName === 'string' && p.groupName.trim()
+          ? p.groupName.trim().slice(0, 255)
+          : null;
         const partBytes = await objectSize(p.rawKey);
         if (partBytes == null) {
           throw new ValidationError('A part file was not found in storage — retry the upload');
@@ -342,10 +362,15 @@ router.post('/from-upload',
             `A part file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB per file — please reduce it and upload again.`,
           );
         }
-        extraParts.push({ rawKey: p.rawKey, filename: p.filename, name: p.name });
+        extraParts.push({ rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName });
       }
     }
     const partCount = 1 + extraParts.length;
+    // Name of the component owning the primary file (NULL when the listing isn't
+    // split into named models).
+    const primaryGroup = typeof primaryGroupName === 'string' && primaryGroupName.trim()
+      ? primaryGroupName.trim().slice(0, 255)
+      : null;
 
     // Validate taxonomy tags up-front (read-only) so a bad payload never creates a
     // half-tagged draft; they're written after the model row exists.
@@ -386,22 +411,27 @@ router.post('/from-upload',
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, 'draft', 'processing')
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup]
     );
     const model = result.rows[0];
     // Seed price history (backs the anti-inflation guard on sales).
     recordPrice('model', model.id, price);
 
-    // Insert a row per extra part (processed in the background job).
+    // Insert a row per extra part (processed in the background job). Default part
+    // names count within their own component — group 0 continues from the primary
+    // (which is that component's part 1), later components start at part 1.
+    const seenInGroup = new Map<number, number>();
     for (let i = 0; i < extraParts.length; i++) {
       const p = extraParts[i];
+      const nth = (seenInGroup.get(p.groupIndex) ?? (p.groupIndex === 0 ? 1 : 0)) + 1;
+      seenInGroup.set(p.groupIndex, nth);
       await db.query(
-        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, processing_status)
-         VALUES ($1, $2, $3, $4, 'processing')`,
-        [model.id, p.name || `Part ${i + 2}`, p.rawKey, i + 1]
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, processing_status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'processing')`,
+        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName]
       );
     }
 
@@ -634,7 +664,8 @@ router.get('/sets',
   asyncHandler(async (_req, res) => {
     const models = (await db.query(
       `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.artist_id,
-              m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg
+              m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg,
+              m.primary_group_name
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
        ORDER BY m.created_at DESC`
@@ -642,10 +673,10 @@ router.get('/sets',
 
     const sets = await Promise.all(models.map(async (m: any) => {
       const extra = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height
+        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name
          FROM model_parts
          WHERE model_id = $1 AND processing_status = 'ready'
-         ORDER BY display_order ASC`,
+         ORDER BY group_index ASC, display_order ASC`,
         [m.id]
       )).rows;
       // NB: never expose the raw glb_file_path (public CDN key). The planner fetches
@@ -653,8 +684,16 @@ router.get('/sets',
       // id IS the model id; extras are model_parts ids). `is_primary` tells the
       // frontend which signed route to use.
       const parts = [
-        { id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path, width: m.width, depth: m.depth, height: m.height },
-        ...extra.map((p: any) => ({ id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path, width: p.width, depth: p.depth, height: p.height })),
+        {
+          id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
+          width: m.width, depth: m.depth, height: m.height,
+          group_index: 0, group_name: m.primary_group_name ?? null,
+        },
+        ...extra.map((p: any) => ({
+          id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path,
+          width: p.width, depth: p.depth, height: p.height,
+          group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
+        })),
       ].filter((p) => p.has_glb);
       return {
         id: m.id,
@@ -663,6 +702,7 @@ router.get('/sets',
         thumbnail_path: m.thumbnail_path,
         artist_id: m.artist_id,
         default_pitch_deg: m.default_pitch_deg,
+        primary_group_name: m.primary_group_name ?? null,
         parts,
       };
     }));
@@ -810,8 +850,9 @@ router.get('/:id',
     let parts: any[] = [];
     if ((model.part_count ?? 1) > 1) {
       parts = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height, processing_status, display_order
-         FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+        `SELECT id, name, glb_file_path, width, depth, height, processing_status, display_order,
+                group_index, group_name
+         FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;
     }
@@ -849,6 +890,7 @@ router.get('/:id',
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
       processing_status: p.processing_status, display_order: p.display_order,
+      group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
       has_glb: !!p.glb_file_path,
     }));
 
@@ -1525,7 +1567,7 @@ router.get('/:id/download',
 
     const model = (await db.query(
       `SELECT id, artist_id, name, stl_file_path, source_format, source_file_path,
-              fulfillment_type, processing_status, part_count, status
+              fulfillment_type, processing_status, part_count, status, primary_group_name
        FROM models WHERE id = $1`,
       [id]
     )).rows[0];
@@ -1564,24 +1606,53 @@ router.get('/:id/download',
     // the artist's original file.
     type Entry = { name: string; key: string; format: MeshFormat };
     const entries: Entry[] = [];
+    // Artists are free to name two parts (or two components) the same thing, so
+    // de-duplicate entry paths — a ZIP with repeated names hides files on extract.
+    const usedNames = new Set<string>();
+    const uniqueName = (name: string) => {
+      if (!usedNames.has(name)) { usedNames.add(name); return name; }
+      const dot = name.lastIndexOf('.');
+      const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+      let n = 2;
+      while (usedNames.has(`${stem}-${n}${ext}`)) n++;
+      const out = `${stem}-${n}${ext}`;
+      usedNames.add(out);
+      return out;
+    };
     const addDeliverable = (label: string, stlKey: string, srcFormat?: string, srcKey?: string | null) => {
-      entries.push({ name: `${label}.stl`, key: stlKey, format: 'stl' });
+      entries.push({ name: uniqueName(`${label}.stl`), key: stlKey, format: 'stl' });
       if (srcFormat && srcFormat !== 'stl' && srcKey) {
-        entries.push({ name: `${label}.${srcFormat}`, key: srcKey, format: srcFormat as MeshFormat });
+        entries.push({ name: uniqueName(`${label}.${srcFormat}`), key: srcKey, format: srcFormat as MeshFormat });
       }
     };
 
     if ((model.part_count ?? 1) > 1) {
       // Multi-part "set": every part's STL (+ original) as one watermarked ZIP.
       const parts = (await db.query(
-        `SELECT name, stl_file_path, source_format, source_file_path
-         FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+        `SELECT name, stl_file_path, source_format, source_file_path, group_index, group_name
+         FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;
-      addDeliverable(`${safeName}-part-1`, model.stl_file_path, model.source_format, model.source_file_path);
+      // When the listing is split into named components ("Small Village" → Village
+      // Tower / Tavern / Well), give each component its own folder in the ZIP so a
+      // buyer can tell which files belong together. Ungrouped sets stay flat.
+      const slug = (v: string) => String(v).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
+      const grouped =
+        !!model.primary_group_name ||
+        parts.some((p: any) => (p.group_index ?? 0) !== 0 || p.group_name);
+      const folderFor = (groupIndex: number, groupName: string | null) =>
+        grouped ? `${slug(groupName || `model-${groupIndex + 1}`)}/` : '';
+
+      addDeliverable(
+        `${folderFor(0, model.primary_group_name)}${safeName}-part-1`,
+        model.stl_file_path, model.source_format, model.source_file_path,
+      );
       parts.forEach((p: any, i: number) => {
-        const label = String(p.name || `part-${i + 2}`).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
-        addDeliverable(label, p.stl_file_path, p.source_format, p.source_file_path);
+        const label = slug(p.name || `part-${i + 2}`);
+        addDeliverable(
+          `${folderFor(p.group_index ?? 0, p.group_name)}${label}`,
+          p.stl_file_path, p.source_format, p.source_file_path,
+        );
       });
       await streamWatermarkedZip(entries, payload, safeName, res);
     } else {

@@ -167,6 +167,30 @@ bundle group UI). Distinct from a **bundle** (which groups *independently-listed
   Placing a part → `addPlacedModelToShopCart` adds the **parent model** once (buy-once). Only
   the **primary** part carries the price so the "Your build" total counts a set once (extras £0).
 
+## Grouped listings — several named models in one product (built 2026-08-23, migration 038)
+An artist selling a **"Small Village"** (a Village Tower of 3 parts, a Tavern of 2, a Well of 1)
+lists it **once, at one price**. On top of 009's flat part list, every file now belongs to a
+named **component** ("included model"):
+- **Schema (038 + schema.sql):** `model_parts.group_index` (0 = the component that owns the
+  model's own primary STL; 1..N added after it) + `model_parts.group_name`, and
+  `models.primary_group_name` (name of component 0; **NULL = ungrouped**, i.e. a plain single
+  model or a flat 009-style set — old rows keep working untouched).
+- **Upload UI (`CreateModel.tsx`):** the old "Model file" + "Extra parts" inputs are replaced by a
+  **component list** — each block has a name ("Village Tower") and takes **multiple part files**,
+  with an **"Add another model"** button below. First file of the first block = the primary. Names
+  are required as soon as there's more than one component. One progress bar spans **all** files
+  ("Uploading… 40% · tower-roof.stl — file 4 of 11").
+- **API:** `POST /from-upload` takes `primaryGroupName` plus `groupIndex`/`groupName` per part.
+  Caps: `MAX_EXTRA_PARTS` 60 (was 20), `MAX_COMPONENTS` 20. Default part names count **within**
+  their component. `GET /:id` and `GET /sets` return `group_index`/`group_name` +
+  `primary_group_name`.
+- **Download ZIP** nests each component in its **own folder** (`village-tower/roof.stl`) when the
+  listing is grouped; ungrouped sets stay flat. Entry names are de-duplicated, since two
+  components may legitimately reuse a part name.
+- **Product page** shows `GROUP · N models` with a per-component breakdown (plain sets keep the
+  old `SET · N parts` list). **Planner** labels a part by its component ("Village Tower — Roof")
+  instead of the listing name; parts still sit flat under one SET tile (nested palette = follow-up).
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,

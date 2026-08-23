@@ -21,6 +21,29 @@ import ReportModelModal from '../components/reports/ReportModelModal'
 import { FEATURES } from '../config/features'
 import { SITE_NAME } from '../config/brand'
 
+/**
+ * Group a multi-file listing's parts into its components ("included models").
+ * A listing sold as a group — a "Small Village" of a tower, a tavern and a well —
+ * tags each file with the component it belongs to; component 0 owns the model's
+ * primary file. An ungrouped set comes back as a single unnamed component.
+ */
+function partComponents(model: TerrainModel): Array<{ index: number; name: string | null; parts: Array<{ id: string; name: string }> }> {
+  const groups = new Map<number, { index: number; name: string | null; parts: Array<{ id: string; name: string }> }>()
+  groups.set(0, {
+    index: 0,
+    name: model.primaryGroupName ?? null,
+    parts: [{ id: 'primary', name: 'Part 1' }],
+  })
+  ;(model.parts ?? []).forEach((p, i) => {
+    const gi = p.groupIndex ?? 0
+    let g = groups.get(gi)
+    if (!g) { g = { index: gi, name: p.groupName ?? null, parts: [] }; groups.set(gi, g) }
+    if (!g.name && p.groupName) g.name = p.groupName
+    g.parts.push({ id: p.id, name: p.name || `Part ${g.parts.length + 1}` })
+  })
+  return [...groups.values()].sort((a, b) => a.index - b.index)
+}
+
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
   if (!models.length) return null
@@ -258,32 +281,61 @@ const ModelDetails: React.FC = () => {
             )}
           </div>
 
-          {model.partCount && model.partCount > 1 && (
-            <section className="rounded-2xl bg-card p-6 shadow-xs">
-              <div className="flex items-center gap-2">
-                <span className="rounded-sm bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
-                  SET · {model.partCount} parts
-                </span>
-                <h2 className="text-lg font-semibold text-foreground">Multi-part model</h2>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                This piece comes as {model.partCount} STL files — buy once and download them all as a
-                ZIP. Each part can be placed separately in the planner.
-              </p>
-              {model.parts && model.parts.length > 0 && (
-                <ul className="mt-4 divide-y">
-                  {[{ id: 'primary', name: 'Part 1', thumbnailUrl: model.thumbnailUrl }, ...model.parts].map((p, i) => (
-                    <li key={p.id} className="flex items-center gap-3 py-2">
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-muted">
-                        {p.thumbnailUrl && <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
-                      </div>
-                      <span className="text-sm text-foreground">{p.name || `Part ${i + 1}`}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+          {model.partCount && model.partCount > 1 && (() => {
+            const components = partComponents(model)
+            // A "group" listing sells several named models as one product; a plain
+            // set is one piece that prints in several parts.
+            const isGroup = components.length > 1
+            return (
+              <section className="rounded-2xl bg-card p-6 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-sm bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
+                    {isGroup ? `GROUP · ${components.length} models` : `SET · ${model.partCount} parts`}
+                  </span>
+                  <h2 className="text-lg font-semibold text-foreground">
+                    {isGroup ? "What's included" : 'Multi-part model'}
+                  </h2>
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {isGroup
+                    ? `${components.length} models across ${model.partCount} STL files — buy once and download them all as a ZIP. Every piece can be placed separately in the planner.`
+                    : `This piece comes as ${model.partCount} STL files — buy once and download them all as a ZIP. Each part can be placed separately in the planner.`}
+                </p>
+                {isGroup ? (
+                  <ul className="mt-4 space-y-3">
+                    {components.map((c) => (
+                      <li key={c.index} className="rounded-sm border border-border/70 p-3">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium text-foreground">
+                            {c.name || `Model ${c.index + 1}`}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {c.parts.length} part{c.parts.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {c.parts.map((p) => p.name).join(' · ')}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul className="mt-4 divide-y">
+                    {components[0].parts.map((p, i) => (
+                      <li key={p.id} className="flex items-center gap-3 py-2">
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-muted">
+                          {i === 0 && model.thumbnailUrl && (
+                            <img src={model.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                          )}
+                        </div>
+                        <span className="text-sm text-foreground">{p.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )
+          })()}
 
           <section className="rounded-2xl bg-card p-6 shadow-xs">
             <h2 className="text-lg font-semibold text-foreground">Description</h2>

@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { ShieldCheck, Upload } from 'lucide-react'
+import { Plus, ShieldCheck, Upload } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
@@ -42,6 +42,24 @@ type Phase = 'form' | 'uploading' | 'processing' | 'done' | 'error'
 // so a huge mesh crashes the server — reject it here before wasting an upload.
 const MAX_MODEL_FILE_MB = 150
 const MAX_MODEL_FILE_BYTES = MAX_MODEL_FILE_MB * 1024 * 1024
+
+// Caps mirrored from the backend (routes/models.ts).
+const MAX_EXTRA_FILES = 60
+const MAX_COMPONENTS = 20
+
+const MESH_FILE_RE = /\.(stl|obj|3mf)$/i
+const baseName = (filename: string) => filename.replace(MESH_FILE_RE, '')
+
+/**
+ * A "component" — one named model inside the listing. A plain single-piece
+ * upload is one component with one file; a multi-part piece is one component
+ * with several; a collection ("Small Village") is several named components, each
+ * with its own parts. It's still ONE listing, one price, one purchase.
+ */
+type Component = { key: string; name: string; files: File[] }
+
+let componentKeySeq = 0
+const newComponent = (): Component => ({ key: `c${componentKeySeq++}`, name: '', files: [] })
 
 const CreateModel: React.FC = () => {
   const navigate = useNavigate()
@@ -106,25 +124,56 @@ const CreateModel: React.FC = () => {
   const [basePrice, setBasePrice] = React.useState('')
   const [license, setLicense] = React.useState<'personal' | 'commercial'>('personal')
   const [printerType, setPrinterType] = React.useState<'' | 'fdm' | 'resin' | 'both'>('')
-  const [stlFile, setStlFile] = React.useState<File | null>(null)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
-  // Extra STL parts for a multi-part "set" model (the main file above is part 1).
-  const [partFiles, setPartFiles] = React.useState<File[]>([])
+  // The listing's files, grouped into named models (see Component above). The very
+  // first file of the first component is the primary — the model row's own STL.
+  const [components, setComponents] = React.useState<Component[]>([newComponent()])
 
   const [phase, setPhase] = React.useState<Phase>('form')
   const [progress, setProgress] = React.useState(0)
+  const [uploadLabel, setUploadLabel] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
   const busy = phase === 'uploading' || phase === 'processing'
+
+  const totalFiles = components.reduce((n, c) => n + c.files.length, 0)
+  const componentLabel = (i: number) =>
+    components[i]?.name.trim() || (i === 0 ? 'your first model' : `model ${i + 1}`)
+
+  const patchComponent = (i: number, patch: Partial<Component>) =>
+    setComponents((list) => list.map((c, idx) => (idx === i ? { ...c, ...patch } : c)))
+  const addFiles = (i: number, files: File[]) =>
+    setComponents((list) => list.map((c, idx) => (idx === i ? { ...c, files: [...c.files, ...files] } : c)))
+  const removeFile = (i: number, fileIndex: number) =>
+    setComponents((list) =>
+      list.map((c, idx) => (idx === i ? { ...c, files: c.files.filter((_, f) => f !== fileIndex) } : c)))
+  const addComponent = () => setComponents((list) => [...list, newComponent()])
+  const removeComponent = (i: number) => setComponents((list) => list.filter((_, idx) => idx !== i))
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
 
-    if (!stlFile) { setError('Choose a model file to upload'); return }
-    if (!/\.(stl|obj|3mf)$/i.test(stlFile.name)) { setError('The model file must be an .stl, .obj or .3mf'); return }
-    if (partFiles.some((f) => !/\.(stl|obj|3mf)$/i.test(f.name))) { setError('Every part must be an .stl, .obj or .3mf file'); return }
-    const oversized = [stlFile, ...partFiles].find((f) => f.size > MAX_MODEL_FILE_BYTES)
+    const primaryFile = components[0]?.files[0] ?? null
+    const allFiles = components.flatMap((c) => c.files)
+    const grouped = components.length > 1
+
+    if (!primaryFile) { setError('Choose at least one model file to upload'); return }
+    const emptyIdx = components.findIndex((c) => c.files.length === 0)
+    if (emptyIdx >= 0) { setError(`Add at least one file to ${componentLabel(emptyIdx)}`); return }
+    if (grouped && components.some((c) => !c.name.trim())) {
+      setError('Give every included model a name (e.g. “Village Tower”) so buyers know what each one is')
+      return
+    }
+    if (allFiles.some((f) => !MESH_FILE_RE.test(f.name))) {
+      setError('Every model file must be an .stl, .obj or .3mf')
+      return
+    }
+    if (allFiles.length - 1 > MAX_EXTRA_FILES) {
+      setError(`A listing can have at most ${MAX_EXTRA_FILES + 1} files — split it into two listings or a bundle`)
+      return
+    }
+    const oversized = allFiles.find((f) => f.size > MAX_MODEL_FILE_BYTES)
     if (oversized) {
       setError(
         `"${oversized.name}" is ${(oversized.size / (1024 * 1024)).toFixed(0)}MB — the maximum is ${MAX_MODEL_FILE_MB}MB per file. ` +
@@ -147,24 +196,52 @@ const CreateModel: React.FC = () => {
       setPhase('uploading')
       setProgress(0)
 
-      // 1. Raw STL straight to R2 (quarantine prefix), with progress.
-      const { key: rawKey } = await uploadsApi.uploadDirect(stlFile, 'raw', setProgress)
+      // Every file (all components + the thumbnail) contributes to one bar, so a
+      // 12-file village doesn't look stuck at 100% after the first upload.
+      const totalUploads = allFiles.length + 1
+      let uploadsDone = 0
+      const bump = (pct: number) =>
+        setProgress(Math.round(((uploadsDone + pct / 100) / totalUploads) * 100))
+      const startFile = (label: string) =>
+        setUploadLabel(`${label} — file ${uploadsDone + 1} of ${totalUploads}`)
 
-      // 2. Extra parts (multi-part set) — each straight to R2.
-      const parts: Array<{ rawKey: string; filename: string; name: string }> = []
-      for (let i = 0; i < partFiles.length; i++) {
-        const f = partFiles[i]
-        const p = await uploadsApi.uploadDirect(f, 'raw')
-        parts.push({ rawKey: p.key, filename: f.name, name: f.name.replace(/\.(stl|obj|3mf)$/i, '') })
+      // 1. The primary file (first file of the first model) straight to R2
+      //    (quarantine prefix), with progress.
+      startFile(primaryFile.name)
+      const { key: rawKey } = await uploadsApi.uploadDirect(primaryFile, 'raw', bump)
+      uploadsDone++
+
+      // 2. Every other file, tagged with the component ("included model") it
+      //    belongs to so the backend can group them.
+      const parts: Array<{
+        rawKey: string; filename: string; name: string; groupIndex: number; groupName?: string
+      }> = []
+      for (let ci = 0; ci < components.length; ci++) {
+        const comp = components[ci]
+        for (let fi = ci === 0 ? 1 : 0; fi < comp.files.length; fi++) {
+          const f = comp.files[fi]
+          startFile(f.name)
+          const p = await uploadsApi.uploadDirect(f, 'raw', bump)
+          uploadsDone++
+          parts.push({
+            rawKey: p.key,
+            filename: f.name,
+            name: baseName(f.name),
+            groupIndex: ci,
+            groupName: comp.name.trim() || undefined,
+          })
+        }
       }
 
       // 3. Thumbnail (required), also direct to R2.
-      const thumbnailKey = (await uploadsApi.uploadDirect(thumbFile, 'thumbnails')).key
+      startFile(thumbFile.name)
+      const thumbnailKey = (await uploadsApi.uploadDirect(thumbFile, 'thumbnails', bump)).key
+      uploadsDone++
 
       // 4. Create the model row; the API processes it (+ all parts) in the background.
       const created = await modelsApi.createFromUpload({
         rawKey,
-        filename: stlFile.name,
+        filename: primaryFile.name,
         name: name.trim(),
         description: description.trim() || undefined,
         // Vehicles / characters store their class as the legacy category; terrain
@@ -175,6 +252,9 @@ const CreateModel: React.FC = () => {
         printerType: printerType || undefined,
         thumbnailKey,
         parts: parts.length ? parts : undefined,
+        // Names the primary file's component — only meaningful once the listing is
+        // split into several named models.
+        primaryGroupName: grouped ? components[0].name.trim() || undefined : undefined,
         // The print-process term is derived from the Printer type select above
         // rather than asked again in the tag picker.
         terms: submittedTerms.length ? submittedTerms : undefined,
@@ -221,7 +301,10 @@ const CreateModel: React.FC = () => {
   return (
     <div className="px-4 py-10 max-w-2xl mx-auto">
       <h1 className="text-xl font-semibold">Create Model</h1>
-      <p className="text-muted-foreground mt-1">Upload an STL and details. We’ll generate the 3D preview and print estimate for you.</p>
+      <p className="text-muted-foreground mt-1">
+        Upload your files and details — one model, a multi-part piece, or a whole group like a
+        “Small Village” sold as one product. We’ll generate the 3D previews and print estimate for you.
+      </p>
 
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
         <div>
@@ -342,59 +425,121 @@ const CreateModel: React.FC = () => {
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Model file (.stl, .obj or .3mf)</label>
-          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-            <Upload size={16} />
-            Choose file…
-            <input type="file" accept=".stl,.obj,.3mf" className="hidden" onChange={(e) => setStlFile(e.target.files?.[0] ?? null)} disabled={busy} />
+        <div className="rounded-lg border border-border p-3">
+          <label className="block text-sm font-medium mb-1">
+            Model files <span className="text-red-500">*</span>
           </label>
-          {stlFile && <p className="text-sm text-muted-foreground mt-1">{stlFile.name} · {(stlFile.size / 1_048_576).toFixed(1)} MB</p>}
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mb-3">
+            Add every file a buyer gets for this listing. If one piece prints as several parts
+            (separate floors, a roof), add them all under the same model. Selling a group as one
+            product — a “Small Village”? Hit <strong>Add another model</strong> for each building
+            and name it (“Village Tower”). It stays one listing at one price: buyers download
+            everything as a ZIP and can place each piece separately in the planner.
+          </p>
+
+          <div className="space-y-3">
+            {components.map((comp, ci) => (
+              <div key={comp.key} className="rounded-sm border border-border/70 bg-muted/20 p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {ci === 0 ? 'Model 1 (main)' : `Model ${ci + 1}`}
+                  </span>
+                  {ci > 0 && (
+                    <button
+                      type="button"
+                      className="ml-auto text-xs text-red-600 disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => removeComponent(ci)}
+                    >
+                      remove model
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  className="mt-2 w-full border rounded-sm px-3 py-2 text-sm"
+                  placeholder={
+                    components.length > 1
+                      ? 'Name this model — e.g. “Village Tower”'
+                      : 'Name (optional — only needed if you add more models below)'
+                  }
+                  value={comp.name}
+                  onChange={(e) => patchComponent(ci, { name: e.target.value })}
+                  disabled={busy}
+                />
+
+                {comp.files.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {comp.files.map((f, fi) => (
+                      <li key={`${f.name}-${fi}`} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate">
+                          {f.name}
+                          <span className="text-muted-foreground"> · {(f.size / 1_048_576).toFixed(1)} MB</span>
+                          {ci === 0 && fi === 0 && (
+                            <span className="ml-2 rounded-sm bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                              primary
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-red-600 text-xs disabled:opacity-50"
+                          onClick={() => removeFile(ci, fi)}
+                          disabled={busy}
+                        >
+                          remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <label className={`mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                  <Upload size={16} />
+                  {comp.files.length ? 'Add another part file…' : 'Choose file(s)…'}
+                  <input
+                    type="file"
+                    accept=".stl,.obj,.3mf"
+                    multiple
+                    className="hidden"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? [])
+                      if (files.length) addFiles(ci, files)
+                      e.target.value = '' // allow re-selecting the same file
+                    }}
+                  />
+                </label>
+
+                {comp.files.length > 1 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {comp.files.length} parts — buyers get them all and place each one separately.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={addComponent}
+            disabled={busy || components.length >= MAX_COMPONENTS}
+            className="mt-3 inline-flex items-center gap-2 rounded-sm border border-dashed border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            <Plus size={16} />
+            Add another model
+          </button>
+
+          {totalFiles > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {components.length} model{components.length === 1 ? '' : 's'} · {totalFiles} file
+              {totalFiles === 1 ? '' : 's'} · sold as one product for one price.
+            </p>
+          )}
+          <p className="mt-1 text-xs text-muted-foreground">
             OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
             Max {MAX_MODEL_FILE_MB}MB per file; decimate very high-poly models before uploading.
           </p>
-        </div>
-
-        <div className="rounded-sm border border-dashed p-3">
-          <label className="block text-sm font-medium mb-1">Extra parts (optional — makes this a “set”)</label>
-          <p className="text-xs text-muted-foreground mb-2">
-            Add more STL/OBJ/3MF files if this piece comes in several parts (e.g. separate floors).
-            Buyers pay once, download all parts as a ZIP, and can place each part in the planner.
-          </p>
-          {partFiles.length > 0 && (
-            <ul className="mb-2 space-y-1">
-              {partFiles.map((f, i) => (
-                <li key={i} className="flex items-center justify-between text-sm">
-                  <span className="truncate">Part {i + 2}: {f.name}</span>
-                  <button
-                    type="button"
-                    className="text-red-600 text-xs ml-2 disabled:opacity-50"
-                    onClick={() => setPartFiles((list) => list.filter((_, idx) => idx !== i))}
-                    disabled={busy}
-                  >
-                    remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-            <Upload size={16} />
-            Add part file(s)…
-            <input
-              type="file"
-              accept=".stl,.obj,.3mf"
-              multiple
-              className="hidden"
-              disabled={busy}
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? [])
-                if (files.length) setPartFiles((list) => [...list, ...files])
-                e.target.value = '' // allow re-selecting the same file
-              }}
-            />
-          </label>
         </div>
 
         <div>
@@ -413,7 +558,9 @@ const CreateModel: React.FC = () => {
             <div className="h-2 rounded-sm bg-muted overflow-hidden">
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(4, progress)}%` }} />
             </div>
-            <p className="text-sm text-muted-foreground mt-1">Uploading… {progress}%</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Uploading… {progress}%{uploadLabel ? ` · ${uploadLabel}` : ''}
+            </p>
           </div>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}

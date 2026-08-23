@@ -160,7 +160,16 @@ export interface TerrainModel {
     depth?: number
     height?: number
     processingStatus?: string
+    /** Component ("included model") this part belongs to — 0 is the primary's. */
+    groupIndex?: number
+    groupName?: string | null
   }>
+  /**
+   * Name of the component that owns the primary file, when the listing groups its
+   * files into several named models (a "Small Village" of tower + tavern + well).
+   * Undefined/null = an ungrouped model or flat multi-part set.
+   */
+  primaryGroupName?: string | null
   // Default planner tilt (pitch about X, degrees) baked in by the artist so the
   // model stands upright when placed. 0 = no tilt.
   defaultPitchDeg?: number

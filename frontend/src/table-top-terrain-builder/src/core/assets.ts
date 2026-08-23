@@ -304,9 +304,12 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
         const dM = part.depth != null ? part.depth / 1000 : 0.15
         const hM = part.height != null ? part.height / 1000 : 0.15
         const aabb = { x: wM, z: dM, y: hM }
+        // A listing sold as a group ("Small Village") names each component, so a
+        // part reads "Village Tower — Roof" rather than "Small Village — Roof".
+        const componentName = part.groupName || (part.isPrimary ? s.primaryGroupName : null)
         partAssets.push({
           id: assetId,
-          name: `${s.name} — ${part.name}`,
+          name: `${componentName || s.name} — ${part.name}`,
           tags: [],
           aabb,
           footprint: deriveFootprint(aabb, DEFAULT_GRID_SIZE),

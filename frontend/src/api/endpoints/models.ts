@@ -39,8 +39,24 @@ export const modelsApi = {
     /** Printer authoring target: 'fdm' | 'resin' | 'both'. */
     printerType?: 'fdm' | 'resin' | 'both'
     thumbnailKey?: string
-    /** Extra STL parts for a multi-part "set" model (primary is the main rawKey). */
-    parts?: Array<{ rawKey: string; filename?: string; name?: string }>
+    /**
+     * Name of the component the primary file belongs to, when the listing groups
+     * its files into several named models (e.g. "Small Village" → "Village Tower").
+     * Omit for an ungrouped model/set.
+     */
+    primaryGroupName?: string
+    /**
+     * Extra STL parts for a multi-part "set" model (primary is the main rawKey).
+     * `groupIndex`/`groupName` place a part inside a named component — group 0 is
+     * the primary file's component, 1..N are the ones added after it.
+     */
+    parts?: Array<{
+      rawKey: string
+      filename?: string
+      name?: string
+      groupIndex?: number
+      groupName?: string
+    }>
     /** Taxonomy tags as `facetSlug:termPath` tokens. */
     terms?: string[]
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
@@ -72,7 +88,12 @@ export const modelsApi = {
     thumbnailPath: string | null
     artistId: string
     defaultPitchDeg: number
-    parts: Array<{ id: string; name: string; isPrimary: boolean; hasGlb: boolean; width: number | null; depth: number | null; height: number | null }>
+    primaryGroupName: string | null
+    parts: Array<{
+      id: string; name: string; isPrimary: boolean; hasGlb: boolean
+      width: number | null; depth: number | null; height: number | null
+      groupIndex: number; groupName: string | null
+    }>
   }>> => {
     const response = await apiClient.get(`${BASE_URL}/sets`)
     return (response.data?.sets ?? []).map((s: any) => ({
@@ -82,11 +103,14 @@ export const modelsApi = {
       thumbnailPath: s.thumbnail_path ?? null,
       artistId: s.artist_id,
       defaultPitchDeg: Number(s.default_pitch_deg ?? 0),
+      primaryGroupName: s.primary_group_name ?? null,
       parts: (s.parts ?? []).map((p: any) => ({
         id: p.id,
         name: p.name,
         isPrimary: Boolean(p.is_primary),
         hasGlb: Boolean(p.has_glb),
+        groupIndex: Number(p.group_index ?? 0),
+        groupName: p.group_name ?? null,
         width: p.width != null ? Number(p.width) : null,
         depth: p.depth != null ? Number(p.depth) : null,
         height: p.height != null ? Number(p.height) : null,
