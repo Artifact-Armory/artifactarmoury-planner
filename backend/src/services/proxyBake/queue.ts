@@ -20,8 +20,22 @@ export function isBakeWorkerEnabled(): boolean {
   return process.env.PROXY_BAKE_ENABLED === 'true'
 }
 
-/** A running job whose lock is older than this is assumed crashed and reclaimable. */
-const STALE_LOCK_MS = Number(process.env.PROXY_BAKE_STALE_LOCK_MS ?? 45 * 60_000)
+/** A running job whose lock is older than this is assumed crashed and reclaimable.
+ *
+ *  Short (3 min) because the worker HEARTBEATS its lock while baking (see
+ *  `heartbeatJob`), so a lock only goes stale when the worker is genuinely gone.
+ *  Before the heartbeat existed this had to exceed the longest legitimate bake
+ *  and sat at 45 minutes — which is exactly what a crashed worker cost us in
+ *  production on 2026-08-23: one part of a 4-part upload was claimed by a worker
+ *  that died mid-bake without recording an error, so the row stayed 'running'
+ *  and unreclaimable for 2700s while the other three parts finished in 95s
+ *  total. The model can't go 'ready' until every part is done, so the whole
+ *  upload took 46 minutes to do a minute and a half of work. */
+const STALE_LOCK_MS = Number(process.env.PROXY_BAKE_STALE_LOCK_MS ?? 3 * 60_000)
+
+/** How often a worker refreshes its lock while a bake runs. Must be comfortably
+ *  under STALE_LOCK_MS so a live job is never reclaimed mid-bake. */
+export const HEARTBEAT_INTERVAL_MS = Number(process.env.PROXY_BAKE_HEARTBEAT_MS ?? 30_000)
 
 export interface EnqueueInput {
   modelId: string
@@ -101,6 +115,46 @@ export async function claimNextJob(workerId: string): Promise<BakeJobRow | null>
   } finally {
     client.release()
   }
+}
+
+/**
+ * Refresh this worker's lock on a job it is actively baking, so the row is not
+ * mistaken for a crashed worker's. Scoped to `locked_by` and `status='running'`
+ * so a job that has already been reclaimed (or finished) is never re-locked.
+ *
+ * Returns false when the update matched nothing, which means this worker no
+ * longer owns the job — worth logging, since it means two workers briefly
+ * duplicated a bake.
+ */
+export async function heartbeatJob(jobId: string, workerId: string): Promise<boolean> {
+  const res = await db.query(
+    `UPDATE proxy_bake_jobs SET locked_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND locked_by = $2 AND status = 'running'`,
+    [jobId, workerId],
+  )
+  return (res.rowCount ?? 0) > 0
+}
+
+/**
+ * Hand a claimed job straight back to the queue because THIS worker is shutting
+ * down, not because the bake failed. Used on SIGTERM so a deploy/restart never
+ * orphans an in-flight bake: without it the row sits 'running' until the stale
+ * window expires, which is how a 4-part upload once took 46 minutes to do 95
+ * seconds of work.
+ *
+ * `attempts` is decremented because the attempt was abandoned by us, not spent
+ * on a real failure — otherwise a few unlucky redeploys could burn through
+ * max_attempts and fail the model for no reason.
+ */
+export async function releaseJob(job: BakeJobRow, workerId: string): Promise<boolean> {
+  const res = await db.query(
+    `UPDATE proxy_bake_jobs
+        SET status = 'queued', locked_at = NULL, locked_by = NULL,
+            attempts = GREATEST(attempts - 1, 0), updated_at = NOW()
+      WHERE id = $1 AND locked_by = $2 AND status = 'running'`,
+    [job.id, workerId],
+  )
+  return (res.rowCount ?? 0) > 0
 }
 
 /**
