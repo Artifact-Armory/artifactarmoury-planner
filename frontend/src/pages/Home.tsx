@@ -5,6 +5,7 @@ import { Compass, RefreshCcw, ShieldCheck } from 'lucide-react'
 import Spinner from '../components/ui/Spinner'
 import ModelGrid from '../components/models/ModelGrid'
 import SaleCarousel from '../components/models/SaleCarousel'
+import Logo from '../components/common/Logo'
 import { browseApi } from '../api/endpoints/browse'
 import { SITE_NAME, SITE_TAGLINE } from '../config/brand'
 
@@ -63,7 +64,13 @@ const Home: React.FC = () => {
         />
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
         <div className="max-w-3xl">
-          <p className="text-sm uppercase tracking-widest text-sky-300">{SITE_NAME}</p>
+          {/* The hero's overlay gradient is lightest at the top, so the lockup gets
+              its own shadow to stay legible over whatever frame the video is on. */}
+          <Logo
+            variant="lockup"
+            title={SITE_NAME}
+            className="h-16 w-auto text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:h-20"
+          />
           <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Premium terrain, built for the table.</h1>
           <p className="mt-4 text-white/80">
             {SITE_TAGLINE} Browse artist-made 3D models, arrange your battlefield in the table builder, and buy

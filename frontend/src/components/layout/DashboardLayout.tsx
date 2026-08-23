@@ -129,8 +129,7 @@ const DashboardLayout: React.FC = () => {
         {/* Sidebar Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <Link to="/" className="flex items-center text-foreground">
-            <Logo className="h-8 w-8 text-primary" />
-            <span className="ml-2 font-bold text-lg">{SITE_NAME}</span>
+            <Logo variant="horizontal" title={SITE_NAME} className="h-8 w-auto" />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}

@@ -1,5 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import { useParams } from 'react-router-dom'
+import Logo from '../../components/common/Logo'
+import { SITE_NAME } from '../../config/brand'
 
 // Lazy — also loaded statically-elsewhere would defeat code-splitting for
 // pages/Planner.tsx's own dynamic import of the same module (Rollup can only
@@ -23,8 +25,9 @@ const EditTable: React.FC = () => {
         <div style={{ minHeight: '640px', height: 'calc(100vh - 280px)' }}>
           <Suspense
             fallback={
-              <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">
-                Loading planner…
+              <div className="h-full w-full flex flex-col items-center justify-center gap-4 text-sm">
+                <Logo variant="lockup" title={SITE_NAME} className="h-16 w-auto text-white/90" />
+                <span className="text-white/50">Loading planner…</span>
               </div>
             }
           >

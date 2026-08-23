@@ -663,6 +663,13 @@
   width: min(360px, 80vw);
   text-align: center;
 }
+.tb-loading-logo {
+  display: block;
+  width: auto;
+  height: 84px;
+  margin: 0 auto 22px;
+  color: var(--tb-text);
+}
 .tb-loading-title {
   font-size: 15px;
   font-weight: 600;

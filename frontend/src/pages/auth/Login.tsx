@@ -7,6 +7,8 @@ import { useAuthStore } from '../../store/authStore'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import { Card, CardContent } from '../../components/shadcn/card'
+import Logo from '../../components/common/Logo'
+import { SITE_NAME } from '../../config/brand'
 
 type FormValues = { email: string; password: string }
 
@@ -61,6 +63,7 @@ const Login: React.FC = () => {
   if (challengeToken) {
     return (
       <div className="max-w-md mx-auto px-4 py-10">
+        <Logo variant="lockup" title={SITE_NAME} className="mx-auto mb-8 h-20 w-auto text-foreground" />
         <Card>
           <CardContent>
             <h1 className="text-2xl font-semibold text-foreground">Two-step verification</h1>
@@ -101,6 +104,7 @@ const Login: React.FC = () => {
   // ── First step: email + password ──────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto px-4 py-10">
+      <Logo variant="lockup" title={SITE_NAME} className="mx-auto mb-8 h-20 w-auto text-foreground" />
       <Card>
         <CardContent>
           <h1 className="text-2xl font-semibold text-foreground">Sign in</h1>

@@ -27,6 +27,7 @@ import { HelpOverlay } from './HelpOverlay'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
+import Logo from '@/components/common/Logo'
 import FacetRail from '@/components/taxonomy/FacetRail'
 import { facetAppliesTo, MODEL_CLASSES, MODEL_CLASS_SLUG } from '@/api/endpoints/taxonomy'
 import { SlidersHorizontal } from 'lucide-react'
@@ -665,6 +666,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       {!sceneReady && (
         <div className="tb-loading" role="status" aria-live="polite">
           <div className="tb-loading-card">
+            <Logo variant="lockup" title="Artifact Armoury" className="tb-loading-logo" />
             <div className="tb-loading-title">Preparing your table…</div>
             <div className="tb-loading-track">
               <div className="tb-loading-bar" style={{ width: `${Math.max(6, loadPct)}%` }} />

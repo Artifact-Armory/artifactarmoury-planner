@@ -106,10 +106,7 @@ const Header: React.FC = () => {
           {/* Logo */}
           <div className="shrink-0">
             <Link to="/" className="flex items-center text-foreground">
-              <Logo className="h-8 w-8 text-primary" />
-              <span className="ml-2 text-xl font-bold tracking-tight">
-                {SITE_NAME}
-              </span>
+              <Logo variant="horizontal" title={SITE_NAME} className="h-9 w-auto" />
             </Link>
           </div>
 

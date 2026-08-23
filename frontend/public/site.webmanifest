@@ -1,0 +1,14 @@
+{
+  "name": "Artifact Armoury",
+  "short_name": "Armoury",
+  "description": "A marketplace and 3D planner for tabletop terrain. Buy printable STL terrain from independent artists and lay out your table before you print.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

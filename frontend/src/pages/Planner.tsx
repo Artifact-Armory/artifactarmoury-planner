@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useIsDesktop } from '../hooks/useIsDesktop'
+import Logo from '../components/common/Logo'
+import { SITE_NAME } from '../config/brand'
 
 // The 3D Table Planner (Three.js, InstancedMesh-based) is desktop-only by
 // design — grid-snap placement and camera controls assume mouse + trackpad
@@ -63,9 +65,12 @@ function PlannerUnavailable() {
 }
 
 function PlannerLoading() {
+  // Matches the planner's own `.tb-loading` gate that takes over once the chunk
+  // has parsed, so opening the planner doesn't flash a white screen first.
   return (
-    <div className="h-full w-full flex items-center justify-center bg-background text-muted-foreground text-sm">
-      Loading planner…
+    <div className="h-full w-full flex flex-col items-center justify-center gap-5 bg-[#0a0f16]">
+      <Logo variant="lockup" title={SITE_NAME} className="h-[84px] w-auto text-[#e8edf5]" />
+      <p className="text-sm text-[#e8edf5]/60">Loading planner…</p>
     </div>
   )
 }
