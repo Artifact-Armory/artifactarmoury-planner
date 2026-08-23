@@ -760,21 +760,23 @@ def emboss_watermark(proxy):
         warn("Emboss watermark DISABLED — a mesh-rip carries no mark.")
         return
 
+    style = str(CFG.get("embossStyle", "pillars")).strip().lower()
     text = str(CFG.get("embossWatermarkText", "PREVIEW")).strip()
-    if not text:
+    if not text and style != "logo":  # "logo" cuts a shape, not a string
         REPORT["embossApplied"] = False
         return
 
     engrave = bool(CFG.get("embossEngrave", True))
     depth_pct = float(CFG.get("embossDepthPct", 1.5))
     inset_pct = float(CFG.get("embossInsetPct", 2.0))
-    style = str(CFG.get("embossStyle", "pillars")).strip().lower()
 
     if style == "bands":
         _emboss_bands(proxy, text, engrave, float(CFG.get("embossHeightPct", 9.0)),
                       depth_pct, inset_pct)
     elif style == "punch":
         _emboss_punch_through(proxy, text)
+    elif style == "logo":
+        _emboss_logo_grid(proxy)
     else:
         _emboss_pillars(proxy, text, engrave, depth_pct, inset_pct)
 
@@ -2105,6 +2107,819 @@ def _stable_seed_int(s):
 
 _PUNCH_SIDE_ANGLES = {"front": 0.0, "right": -90.0, "back": 180.0, "left": 90.0}
 _PUNCH_OPPOSITE_SIDE = {"front": "back", "back": "front", "right": "left", "left": "right"}
+
+
+_LOGO_POLY_CACHE = {}
+
+
+def _script_dir():
+    """Directory holding this script, for loading sibling data files. Blender's
+    `-P` defines `__file__`, but the local iteration harnesses this pipeline is
+    routinely driven by `exec()` the source into a bare namespace where it is
+    missing — so fall back to argv, then cwd, rather than raising."""
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        for a in sys.argv:
+            if a.lower().endswith("bake_proxy.py"):
+                return os.path.dirname(os.path.abspath(a))
+        return os.getcwd()
+
+
+def _logo_shape():
+    """The watermark cut shape as a LIST OF CLOSED RINGS — unit HEIGHT overall,
+    centred on (0,0), y-up. Resolved in priority order:
+
+      1. `embossLogoPolygon` from config — either one ring ([[x,y],...]) or
+         several ([[[x,y],...],...]), any scale/orientation, renormalised here.
+      2. `blender/logo_shape.json` — the real Artifact Armoury monogram (the
+         chevron "A" plus its compass star), traced from the brand PNG by
+         `scripts/trace_logo.py`. This is what ships.
+      3. The built-in shield traced from frontend/public/favicon.svg, as a
+         fallback so a missing/corrupt data file degrades to a working mark
+         rather than failing the bake.
+
+    MULTIPLE RINGS are supported because the real mark is two disjoint pieces,
+    and the inside test (`_point_in_rings`) is even-odd across all of them.
+    What is NOT supported is a ring nested inside another ring: the material
+    between them would be bounded entirely by removed faces and drop out as a
+    floating island. `trace_logo.py` refuses to emit that, and the monogram
+    avoids it naturally — the chevron's counter opens at the bottom, so it
+    stays connected to the wall, and the star is a separate solid piece inside
+    that counter. Cached per resolved source."""
+    poly_cfg = CFG.get("embossLogoPolygon")
+    key = json.dumps(poly_cfg) if poly_cfg else "__file_or_shield__"
+    if key in _LOGO_POLY_CACHE:
+        return _LOGO_POLY_CACHE[key]
+    rings = None
+    if poly_cfg:
+        first = poly_cfg[0] if poly_cfg else None
+        many = isinstance(first, (list, tuple)) and first and isinstance(first[0], (list, tuple))
+        raw = poly_cfg if many else [poly_cfg]
+        rings = [[(float(p[0]), float(p[1])) for p in ring] for ring in raw]
+        if any(len(r) < 3 for r in rings):
+            raise RuntimeError("embossLogoPolygon rings need at least 3 points each")
+    else:
+        shape_path = os.path.join(_script_dir(), "logo_shape.json")
+        try:
+            with open(shape_path) as f:
+                data = json.load(f)
+            rings = [[(float(p[0]), float(p[1])) for p in ring] for ring in data["rings"]]
+            if not rings or any(len(r) < 3 for r in rings):
+                raise RuntimeError("logo_shape.json has no usable rings")
+        except Exception as e:
+            warn("Logo shape file unusable (%s) — falling back to the built-in shield" % e)
+            rings = None
+    if rings is None:
+        # favicon.svg shield path (32x32 viewBox, SVG y-down):
+        #   M16 4.5 L24.5 8 V15 c0 6.8 -4.6 11.9 -8.5 13.9 C11.6 26.9 7 21.8 7 15 V8 Z
+        def bez(p0, p1, p2, p3, n=6):
+            out = []
+            for k in range(1, n + 1):
+                t = k / float(n)
+                mt = 1.0 - t
+                out.append((
+                    mt * mt * mt * p0[0] + 3 * mt * mt * t * p1[0] + 3 * mt * t * t * p2[0] + t * t * t * p3[0],
+                    mt * mt * mt * p0[1] + 3 * mt * mt * t * p1[1] + 3 * mt * t * t * p2[1] + t * t * t * p3[1],
+                ))
+            return out
+        pts = [(16.0, 4.5), (24.5, 8.0), (24.5, 15.0)]
+        pts += bez((24.5, 15.0), (24.5, 21.8), (19.9, 26.9), (16.0, 28.9))
+        pts += bez((16.0, 28.9), (11.6, 26.9), (7.0, 21.8), (7.0, 15.0))
+        pts += [(7.0, 8.0)]
+        # SVG is y-down; negate here so every source reaching the shared
+        # normalise below is already y-up.
+        rings = [[(x, -y) for (x, y) in pts]]
+    xs = [p[0] for r in rings for p in r]
+    ys = [p[1] for r in rings for p in r]
+    h = max(1e-6, max(ys) - min(ys))
+    mx = (max(xs) + min(xs)) / 2.0
+    my = (max(ys) + min(ys)) / 2.0
+    result = [[((x - mx) / h, (y - my) / h) for (x, y) in ring] for ring in rings]
+    _LOGO_POLY_CACHE[key] = result
+    return result
+
+
+def _point_in_rings(u, v, rings):
+    """Even-odd point-in-shape test across every ring, in the shape's own 2D
+    plane. Even-odd (rather than "inside any ring") so a shape whose rings
+    overlap still behaves sanely; for the disjoint rings the real mark uses it
+    reduces to "inside one of them". Cheap at ~14 edges total."""
+    inside = False
+    for ring in rings:
+        j = len(ring) - 1
+        for i in range(len(ring)):
+            ui, vi = ring[i]
+            uj, vj = ring[j]
+            if (vi > v) != (vj > v) and u < (uj - ui) * (v - vi) / (vj - vi) + ui:
+                inside = not inside
+            j = i
+    return inside
+
+
+def _emboss_logo_grid(proxy):
+    """embossStyle="logo": cut the Artifact Armoury logo (see _logo_shape) as
+    real through-holes in a UNIFORM, STAGGERED GRID across each configured side
+    of the model — the "professional and intentional" repeating brand mark the
+    user asked for (2026-08-22), replacing text glyphs entirely.
+
+    Why a new cutting MECHANISM and not just a logo-shaped tile through
+    _cut_wall_text_hole: that path deletes whole faces whose CENTRE falls under
+    the mask, so hole edges are jagged at whatever the local triangle
+    granularity happens to be — which is exactly what kept reading as "damage"
+    rather than an intentional mark across every text iteration. Here each hole
+    is cut by slicing the local geometry with bmesh.ops.bisect_plane along
+    EVERY edge of the logo outline first (each plane contains the outline edge
+    and the wall normal, so the cut extrudes straight through the skin), and
+    only THEN deleting the faces strictly inside the outline. The boundary of
+    the hole therefore follows the logo outline EXACTLY — clean die-cut edges,
+    independent of mesh density, with no subdivision loop needed at all (bisect
+    splits big triangles by construction). No boolean solver anywhere in the
+    path (two prior production failures — see _apply_wm_boolean /
+    remove_boolean_debris) and no view-dependent operator (knife_project needs
+    a VIEW_3D region that headless Blender doesn't have).
+
+    Placement: per side, logo height = clamp(model height × embossLogoHeightFrac,
+    embossLogoMinHeightMm..embossLogoMaxHeightMm); centres on a rectangular grid
+    (step = logo size × embossLogoSpacingX/YFrac) with alternate rows offset by
+    embossLogoStaggerFrac for the classic diaper/brick pattern; an
+    embossLogoEdgeMarginFrac border keeps every hole fully ON the wall face,
+    never bleeding over an edge/corner (and never hugging a trimmable base
+    edge). The grid PHASE in both axes is jittered a full period from
+    embossSeed (per model+side, stable across re-bakes of the same model — same
+    property as punch) so the pattern is uniform WITHIN a model but lands
+    differently on every model: a script tuned to fill one leaked model's holes
+    doesn't line up with any other's.
+
+    Depth is anchored PER CELL, not at the bounding-box plane: the first local
+    test on the Japanese-house diorama showed why — its walls sit inset tens of
+    mm behind the box (base rock and props define the box), so bbox-window cuts
+    missed the building and instead smeared stretched marks across the base
+    skirt and ground. Each cell now walks its faces outermost-first and
+    accumulates wall-aligned area (embossLogoAlignMinDot) until
+    embossLogoAnchorAreaFrac of the logo's own area has been seen — that depth
+    is the local wall surface. Thin railings/posts in front carry too little
+    area to fool the anchor. The cut then reaches embossLogoMaxReachFrac ×
+    logo-height INWARD of that anchor (through the skin, not into interior
+    set-dressing) and embossLogoOutwardSlackFrac × logo-height outward (through
+    stone-relief bumps, but not through a railing standing well in front).
+    Cells whose window holds less wall-aligned area than embossLogoMinCoverage
+    × logo-area are skipped entirely — no marks on open lattice, bare ground,
+    or roof slopes seen edge-on, where a partial mark reads as damage (the same
+    lesson embossWallMinCoverage encodes for pillars).
+
+    WHERE it will and won't cut, and why (all settled against real bakes of
+    the Cikkirock guard tower and a Japanese-architecture house/roof set,
+    each compared to a watermark-off control render of the same model so the
+    artefacts were provably the cuts, not the source mesh):
+      • Only cells whose surface is close to square-on to the grid direction
+        (embossLogoCellAlignMin) are stamped. Measured: every cell on a real
+        flat wall — rough stone, timber panelling — came back >= 0.98, while
+        the cells that cut badly (a side grid grazing a tiled roof slope) sat
+        in a tail from 0.76.
+      • Only faces facing ACROSS the cut axis are removed
+        (embossLogoFaceFacingMin) — see its own note below.
+      • "top" is NOT in the default sides: top-down stamping read as ragged
+        notches on a tiled roof and punched shield holes into a diorama's
+        ground plane. It stays available for genuinely flat-topped pieces.
+      • Surface RELIEF and normal COHERENCE gates were both built, measured
+        and REMOVED — neither separated good from bad (details at their old
+        site in the cell loop).
+    A cell that fails any gate, or finds no material at all (a window, open
+    lattice, the gap beside a gable), is simply skipped: the mark lands where
+    it can sit cleanly, and the model keeps its own silhouette everywhere
+    else.
+
+    Ordering note: this runs AFTER make_proxy's decimation stage, so any
+    decimation ratio (including the planned 60%) cannot erode the mark — the
+    holes are cut into the final preview topology. Verified by re-decimating a
+    marked proxy by a further 60% (309k -> 164k triangles) and re-rendering:
+    the shields stay crisp. Errors warn, never fail the bake (same contract as
+    every other emboss style)."""
+    import mathutils
+    import random
+    try:
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except Exception:
+            pass
+
+        sides_cfg = CFG.get("embossLogoSides", ["front", "right", "back", "left"])
+        if isinstance(sides_cfg, str):
+            sides_cfg = [s.strip() for s in sides_cfg.split(",") if s.strip()]
+        valid_sides = set(_PUNCH_SIDE_ANGLES) | {"top"}
+        sides = [s.strip().lower() for s in sides_cfg if str(s).strip().lower() in valid_sides]
+        if not sides:
+            sides = ["front", "right", "back", "left"]
+
+        height_frac = float(CFG.get("embossLogoHeightFrac", 0.14))
+        min_mm = float(CFG.get("embossLogoMinHeightMm", 5.0))
+        max_mm = float(CFG.get("embossLogoMaxHeightMm", 22.0))
+        spacing_x = max(1.05, float(CFG.get("embossLogoSpacingXFrac", 2.6)))
+        spacing_y = max(1.05, float(CFG.get("embossLogoSpacingYFrac", 2.0)))
+        stagger = min(1.0, max(0.0, float(CFG.get("embossLogoStaggerFrac", 0.5))))
+        edge_margin = min(0.4, max(0.0, float(CFG.get("embossLogoEdgeMarginFrac", 0.08))))
+        reach_frac = max(0.25, float(CFG.get("embossLogoMaxReachFrac", 2.0)))
+        max_per_side = max(1, int(CFG.get("embossLogoMaxPerSide", 60)))
+        # Safety gates, all per grid cell (see the cell loop): minimum wall-like
+        # material coverage (fraction of the logo's own area) before a cell may
+        # cut; how much outward-facing area anchors the cell's cut depth; how
+        # aligned a face's normal must be with the side to count as "wall-like";
+        # and how far OUTWARD of the anchored depth the cut may still reach
+        # (fraction of logo height — covers stone-relief bumps without slicing
+        # a railing standing well in front of the wall).
+        min_coverage = max(0.0, float(CFG.get("embossLogoMinCoverage", 0.5)))
+        anchor_frac = max(0.05, float(CFG.get("embossLogoAnchorAreaFrac", 0.25)))
+        align_min = min(0.99, max(0.0, float(CFG.get("embossLogoAlignMinDot", 0.5))))
+        outward_slack_frac = max(0.0, float(CFG.get("embossLogoOutwardSlackFrac", 0.6)))
+        # 0.95 is measured, not guessed: across the test models every cell on a
+        # genuinely flat wall (rough stone, timber panels) came back >= 0.98,
+        # while the cells that cut badly — side grids grazing a tiled roof
+        # slope — sat in a low tail from 0.76. Cutting at 0.95 loses nothing on
+        # walls and drops that tail.
+        cell_align_min = min(0.99, max(0.0, float(CFG.get("embossLogoCellAlignMin", 0.95))))
+        band_frac = max(0.05, float(CFG.get("embossLogoSurfaceBandFrac", 0.35)))
+        face_facing_min = min(0.95, max(0.0, float(CFG.get("embossLogoFaceFacingMin", 0.35))))
+        seed_str = str(CFG.get("embossSeed", "") or "unseeded")
+
+        _diagp, _dims, (minz, maxz) = bbox_diagonal(proxy)
+        corners = [proxy.matrix_world @ mathutils.Vector(c) for c in proxy.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        hx = max(1e-4, (max_x - min_x) / 2.0)
+        hy = max(1e-4, (max_y - min_y) / 2.0)
+        span_mm = max(1e-4, maxz - minz)
+
+        cap = min(max(span_mm * height_frac, min_mm), max_mm)
+        cap = min(cap, span_mm * 0.8)  # never taller than the model itself
+
+        rings = [[(u * cap, v * cap) for (u, v) in ring] for ring in _logo_shape()]
+        all_pts = [p for ring in rings for p in ring]
+        w = max(p[0] for p in all_pts) - min(p[0] for p in all_pts)
+        # Ink area summed over rings — the coverage gate is "is there enough
+        # material to carry the mark", so it wants the area actually removed,
+        # not the area of the bounding outline.
+        poly_area = 0.0
+        for ring in rings:
+            acc = 0.0
+            for i in range(len(ring)):
+                x1p, y1p = ring[i]
+                x2p, y2p = ring[(i + 1) % len(ring)]
+                acc += x1p * y2p - x2p * y1p
+            poly_area += abs(acc) / 2.0
+        # Every ring edge costs one bisect per grid cell, so this is the knob
+        # that sets cut cost: the traced monogram is 14 edges total.
+        edges = []
+        for ring in rings:
+            for i in range(len(ring)):
+                edges.append((ring[i], ring[(i + 1) % len(ring)]))
+
+        bm = bmesh.new()
+        bm.from_mesh(proxy.data)
+        bm.faces.ensure_lookup_table()
+        area_cache = {}  # BMFace -> area, shared across sides (faces don't resize)
+
+        # ONE full-mesh pass: axis-aligned bounds per face, plain floats. Every
+        # side's slab/box tests below are derived from these analytically
+        # (_project_box) instead of re-scanning 300k+ faces with mathutils
+        # Vector maths per side — the first local test spent most of its 7+
+        # minutes in exactly those scans.
+        inf = float("inf")
+        fboxes = []
+        for f in bm.faces:
+            x0 = y0 = z0 = inf
+            x1 = y1 = z1 = -inf
+            for vtx in f.verts:
+                co = vtx.co
+                if co.x < x0: x0 = co.x
+                if co.x > x1: x1 = co.x
+                if co.y < y0: y0 = co.y
+                if co.y > y1: y1 = co.y
+                if co.z < z0: z0 = co.z
+                if co.z > z1: z1 = co.z
+            fboxes.append((f, x0, x1, y0, y1, z0, z1))
+
+        def _project_box(box, ax, off):
+            """Interval of (p·ax − off) over an axis-aligned box (x0,x1,y0,y1,z0,z1)."""
+            lo = hi = -off
+            for comp, b0, b1 in ((ax.x, box[1], box[2]), (ax.y, box[3], box[4]),
+                                 (ax.z, box[5], box[6])):
+                if comp >= 0.0:
+                    lo += comp * b0
+                    hi += comp * b1
+                else:
+                    lo += comp * b1
+                    hi += comp * b0
+            return lo, hi
+
+        up3 = mathutils.Vector((0.0, 0.0, 1.0))
+        out_slack = 2.0
+        holes_cut = 0
+        instances_total = 0
+        placements = []
+
+        for name in sides:
+            rng = random.Random(_stable_seed_int("%s::logo::%s" % (seed_str, name)))
+            if name == "top":
+                normal3 = mathutils.Vector((0.0, 0.0, 1.0))
+                uaxis = mathutils.Vector((1.0, 0.0, 0.0))
+                vaxis = mathutils.Vector((0.0, 1.0, 0.0))
+                anchor = mathutils.Vector((cx, cy, maxz))
+                u_half, v_half = hx, hy
+                thru = span_mm
+            else:
+                ang = _PUNCH_SIDE_ANGLES[name]
+                rad = math.radians(ang)
+                normal3 = mathutils.Vector((-math.sin(rad), math.cos(rad), 0.0))
+                uaxis = mathutils.Vector((math.cos(rad), math.sin(rad), 0.0))
+                vaxis = up3
+                reach_depth = _box_support(hx, hy, normal3)
+                anchor = mathutils.Vector((cx + normal3.x * reach_depth,
+                                           cy + normal3.y * reach_depth,
+                                           (minz + maxz) / 2.0))
+                u_half = _box_support(hx, hy, uaxis)
+                v_half = span_mm / 2.0
+                thru = reach_depth * 2.0
+
+            reach = cap * reach_frac
+
+            # Usable ranges for logo CENTRES: full logo inside the wall face,
+            # inside the edge margin. A wall too small for even one logo at
+            # margin still gets a single centred one if the logo physically
+            # fits at all; otherwise the side is skipped (tiny model).
+            u_lo = -(u_half * (1.0 - edge_margin)) + w / 2.0
+            u_hi = +(u_half * (1.0 - edge_margin)) - w / 2.0
+            v_lo = -(v_half * (1.0 - edge_margin)) + cap / 2.0
+            v_hi = +(v_half * (1.0 - edge_margin)) - cap / 2.0
+            if u_lo > u_hi:
+                if u_half * 2.0 >= w:
+                    u_lo = u_hi = 0.0
+                else:
+                    placements.append("%s: skipped (wall narrower than logo)" % name)
+                    continue
+            if v_lo > v_hi:
+                if v_half * 2.0 >= cap:
+                    v_lo = v_hi = 0.0
+                else:
+                    placements.append("%s: skipped (wall shorter than logo)" % name)
+                    continue
+
+            step_u = w * spacing_x
+            step_v = cap * spacing_y
+            phase_u = rng.uniform(0.0, step_u)
+            phase_v = rng.uniform(0.0, step_v)
+
+            v_centres = []
+            if v_hi == v_lo:
+                v_centres = [v_lo]
+            else:
+                vv = v_lo + (phase_v % step_v)
+                while vv <= v_hi + 1e-9:
+                    v_centres.append(vv)
+                    vv += step_v
+                if not v_centres:
+                    v_centres = [(v_lo + v_hi) / 2.0]
+
+            centres = []
+            for ri, vc in enumerate(v_centres):
+                if u_hi == u_lo:
+                    centres.append((u_lo, vc))
+                    continue
+                row_phase = (phase_u + (step_u * stagger if ri % 2 else 0.0)) % step_u
+                uu = u_lo + row_phase
+                row = []
+                while uu <= u_hi + 1e-9:
+                    row.append((uu, vc))
+                    uu += step_u
+                if not row:
+                    row = [((u_lo + u_hi) / 2.0, vc)]
+                centres.extend(row)
+            if len(centres) > max_per_side:
+                stride = max(1, int(math.ceil(len(centres) / float(max_per_side))))
+                centres = centres[::stride][:max_per_side]
+
+            # This side's candidates from the precomputed face boxes — pure
+            # float interval projection, no per-vertex work. Candidates keep
+            # faces at ANY depth (not just near the bounding-box plane): on a
+            # real diorama-style model (the Japanese-house test set) the actual
+            # walls sit INSET tens of mm behind the bounding box — the base
+            # rock/props define the box — so a fixed bbox-plane cut window
+            # missed the building entirely. Each grid cell below instead
+            # anchors its own cut depth at the LOCAL outermost wall-like
+            # surface. Candidates are binned along u so each cell scans only
+            # its own strip of the model, not every face.
+            off_n = anchor.dot(normal3)
+            off_u = anchor.dot(uaxis)
+            off_v = anchor.dot(vaxis)
+            nbins = max(1, int(math.ceil((2.0 * u_half) / max(step_u, 1e-3))) + 1)
+            bin_w = max(1e-3, (2.0 * u_half) / nbins)
+            bins = [[] for _ in range(nbins)]
+
+            def bin_entry(c):
+                b0 = int((c[1] + u_half) / bin_w)
+                b1 = int((c[2] + u_half) / bin_w)
+                for bi in range(max(0, b0), min(nbins - 1, b1) + 1):
+                    bins[bi].append(c)
+
+            for entry in fboxes:
+                if not entry[0].is_valid:
+                    continue
+                dn0, dn1 = _project_box(entry, normal3, off_n)
+                if dn0 > out_slack or dn1 < -(thru + out_slack):
+                    continue
+                du0, du1 = _project_box(entry, uaxis, off_u)
+                dv0, dv1 = _project_box(entry, vaxis, off_v)
+                bin_entry((entry[0], du0, du1, dv0, dv1, dn0, dn1))
+
+            # Every bmesh operator call pays O(whole mesh) overhead (operator
+            # flag layers span all elements), so cutting in-place cost ~1.5s per
+            # grid cell on a 310k-face proxy in local timing runs — minutes per
+            # model. Instead each cell's small region is EXTRACTED into its own
+            # micro-bmesh (a few hundred..thousand faces), all ~16 bisects and
+            # the inside-delete run there at O(region) cost, and the results are
+            # merged back with ONE batched delete per side. Boundary verts are
+            # remembered (vmap/rmap) and reused on merge, so the region stitches
+            # back into the surrounding mesh with identical connectivity — no
+            # duplicate-vert shading seams. UV loops / material / smooth flags
+            # are carried through both directions (in production this runs AFTER
+            # unwrap+bake; losing UVs would scramble the baked textures).
+            rx = w / 2.0 + cap * 0.15
+            rz = cap / 2.0 + cap * 0.15
+            pad = cap * 0.03 + 1e-3
+            side_holes = 0
+            uv_names = [lay.name for lay in bm.loops.layers.uv.values()]
+            cell_area = (2.0 * rx) * (2.0 * rz)
+            for (uc, vc) in centres:
+                instances_total += 1
+                b0 = int((uc - rx + u_half) / bin_w)
+                b1 = int((uc + rx + u_half) / bin_w)
+                cell = []
+                seen = set()
+                for bi in range(max(0, b0), min(nbins - 1, b1) + 1):
+                    for c in bins[bi]:
+                        f = c[0]
+                        if (f not in seen and f.is_valid
+                                and c[1] <= uc + rx and c[2] >= uc - rx
+                                and c[3] <= vc + rz and c[4] >= vc - rz):
+                            seen.add(f)
+                            cell.append(c)
+                if not cell:
+                    continue
+
+                # DEPTH ANCHOR: walk the cell's faces outermost-first and let
+                # wall-aligned AREA accumulate; the depth where a substantial
+                # fraction of the logo's own area has been seen is the local
+                # wall surface. Thin stuff standing in front (a railing, a
+                # post) carries too little area to trigger, so the anchor
+                # lands on the real wall behind it — and a cell that never
+                # accumulates enough (open lattice, bare ground, a roof slope
+                # seen edge-on) is skipped outright.
+                cell.sort(key=lambda c: -c[6])
+                acc = 0.0
+                dn_surf = None
+                for c in cell:
+                    f = c[0]
+                    if f.normal.dot(normal3) < align_min:
+                        continue
+                    a = area_cache.get(f)
+                    if a is None:
+                        a = f.calc_area()
+                        area_cache[f] = a
+                    acc += min(a, cell_area)
+                    if acc >= poly_area * anchor_frac:
+                        dn_surf = c[6]
+                        break
+                if dn_surf is None:
+                    continue
+                # Gathering window in the SIDE's frame. Deliberately wider than
+                # the cut window: on an oblique surface the cell's material
+                # drifts along the side axis across the cell's own footprint,
+                # so a window sized exactly to the cut would clip the far edge
+                # of the patch out of the extracted region.
+                win_lo = dn_surf - reach - cap * 0.75
+                win_hi = dn_surf + cap * (outward_slack_frac + 0.75)
+                band = cap * band_frac
+
+                # COVERAGE + SURFACE ORIENTATION. Besides gating, this pass
+                # measures the cell's area-weighted mean normal, which becomes
+                # the cell's own CUT AXIS (see below) — the stamp follows the
+                # local surface instead of the global side axis.
+                # Deep PERPENDICULAR slabs (the ground plane, a floor) are
+                # excluded from the cut entirely: they span the whole depth
+                # window, so a bottom-row shield prism otherwise slices an
+                # elongated hole straight through the ground (seen on the
+                # Japanese-house base). Small oblique facets (stone-relief
+                # bumps) stay cuttable — the exclusion needs BOTH near-zero
+                # alignment and a long run along the cut axis.
+                cov = 0.0
+                mx = my = mz = 0.0
+                rfaces = []
+                for c in cell:
+                    if c[6] < win_lo or c[5] > win_hi:
+                        continue
+                    f = c[0]
+                    nd = f.normal.dot(normal3)
+                    if abs(nd) < 0.3 and (c[6] - c[5]) > cap * 0.6:
+                        continue  # ground/floor slab crossing the window
+                    rfaces.append(f)
+                    # Coverage / orientation / relief are measured on the SKIN
+                    # BAND around the anchored surface only — not the whole cut
+                    # window. The window is ~3.5x the mark deep by design (it
+                    # has to reach through the wall), so letting anything in it
+                    # contribute mixed the far skin and interior structure into
+                    # the surface statistics: measured that way even the
+                    # known-good stone tower showed relief up to 1.0, which is
+                    # a property of the wall's THICKNESS, not its surface.
+                    if abs(c[6] - dn_surf) > band and abs(c[5] - dn_surf) > band:
+                        continue
+                    if nd >= align_min:
+                        a = area_cache.get(f)
+                        if a is None:
+                            a = f.calc_area()
+                            area_cache[f] = a
+                        a = min(a, cell_area)
+                        cov += a
+                        n = f.normal
+                        mx += a * n.x
+                        my += a * n.y
+                        mz += a * n.z
+                if cov < poly_area * min_coverage or not rfaces:
+                    continue
+                mlen = math.sqrt(mx * mx + my * my + mz * mz)
+                if mlen < 1e-9:
+                    continue
+                tilt = (mx * normal3.x + my * normal3.y + mz * normal3.z) / mlen
+                # COHERENCE = |Σ area·n| / Σ area: 1.0 for a perfectly flat
+                # patch, falling as the patch's own normals disagree — rejects
+                # patches too wrinkled for ANY single stamp direction to sit
+                # cleanly on.
+                # Surface RELIEF and normal COHERENCE were both tried here as
+                # extra gates and both REMOVED after measuring them (see
+                # WM_LOGO_DEBUG) on a known-good surface (rough stone tower
+                # walls) against a known-bad one (the tiled pagoda roof under
+                # a top-down grid): neither separates the two. The tile roof
+                # measured tilt 0.85-0.99, coherence 0.92-0.97 and LOWER
+                # relief (0.055) than the tower it was supposed to be
+                # distinguished from (0.10-0.13) — i.e. by every surface-
+                # quality metric the roof looked BETTER, while cutting far
+                # worse. Keeping them only suppressed valid marks (one roof
+                # side dropped from 16 cuts to 1 at coherence 0.9). The real
+                # discriminator turned out to be the grid DIRECTION, not the
+                # surface: top-down stamping onto tiled roofs and diorama
+                # ground planes is what looked wrong, so "top" is simply off
+                # by default (embossLogoSides) and the walls — which cut
+                # cleanly on every model tested — carry the mark.
+                if os.environ.get("WM_LOGO_DEBUG"):
+                    print("LOGOCELL %s tilt=%.3f coh=%.3f covr=%.2f"
+                          % (name, tilt, mlen / cov, cov / poly_area))
+                if tilt < cell_align_min:
+                    continue
+
+                # CUT AXIS = the cell's own measured surface normal, NOT the
+                # global side axis. This is what makes the mark sit true on
+                # anything that isn't a perfectly square-on wall. Measured
+                # cells on the tiled pagoda roof (WM_LOGO_DEBUG) came back
+                # tilt 0.85-0.99 / coherence 0.92-0.97 — i.e. locally FLAT,
+                # just SLOPED — so no threshold on those numbers could have
+                # separated the ragged roof cuts from clean wall cuts: the
+                # roof wasn't wrinkled, it was oblique to the cut. Projecting
+                # a stamp down a global axis onto an oblique surface stretches
+                # the outline and drags the prism through the surface relief
+                # at a shallow angle, which is exactly what read as chewed
+                # notches. Stamping along the LOCAL normal instead keeps the
+                # shield true-shape and drives the prism straight into the
+                # material. On a square-on wall cut_dir ≈ normal3 and this
+                # reduces to the previous behaviour exactly (verified: the
+                # stone-tower result is unchanged).
+                cut_dir = mathutils.Vector((mx / mlen, my / mlen, mz / mlen))
+                centre3 = (anchor + uaxis * uc + vaxis * vc + normal3 * dn_surf)
+                u3 = uaxis - cut_dir * uaxis.dot(cut_dir)
+                if u3.length < 1e-6:
+                    u3 = vaxis - cut_dir * vaxis.dot(cut_dir)
+                u3.normalize()
+                v3 = u3.cross(cut_dir)  # ordered so v3 ≈ vaxis on a flat wall
+                v3.normalize()
+                # Cut window, now measured from centre3 along cut_dir (the
+                # win_lo/win_hi above are in the side's frame and belong to the
+                # gathering pass only).
+                cut_lo = -reach
+                cut_hi = cap * outward_slack_frac
+
+                micro = bmesh.new()
+                pairs = [(bm.loops.layers.uv.get(n), micro.loops.layers.uv.new(n))
+                         for n in uv_names]
+                vmap = {}
+                for f in rfaces:
+                    mvs = []
+                    for vtx in f.verts:
+                        mv = vmap.get(vtx)
+                        if mv is None:
+                            mv = micro.verts.new(vtx.co)
+                            vmap[vtx] = mv
+                        mvs.append(mv)
+                    try:
+                        mf = micro.faces.new(mvs)
+                    except ValueError:
+                        continue  # degenerate/duplicate — leave it out of the cut
+                    mf.material_index = f.material_index
+                    mf.smooth = f.smooth
+                    for lsrc, ldst in zip(f.loops, mf.loops):
+                        for slay, dlay in pairs:
+                            ldst[dlay].uv = lsrc[slay].uv
+                rmap = dict((mv, v) for v, mv in vmap.items())
+
+                box_cache = {}
+
+                def uv_box(mf):
+                    """(u,v) bounds in the CELL's own local stamp basis."""
+                    b = box_cache.get(mf)
+                    if b is None:
+                        b0 = b2 = inf
+                        b1 = b3 = -inf
+                        for vtx in mf.verts:
+                            rel = vtx.co - centre3
+                            du = rel.dot(u3)
+                            dv = rel.dot(v3)
+                            if du < b0: b0 = du
+                            if du > b1: b1 = du
+                            if dv < b2: b2 = dv
+                            if dv > b3: b3 = dv
+                        b = (b0, b1, b2, b3)
+                        box_cache[mf] = b
+                    return b
+
+                for p1, p2 in edges:
+                    ex, ey = p2[0] - p1[0], p2[1] - p1[1]
+                    elen = math.hypot(ex, ey)
+                    if elen < 1e-9:
+                        continue
+                    edir3 = u3 * (ex / elen) + v3 * (ey / elen)
+                    plane_no = edir3.cross(cut_dir)
+                    if plane_no.length < 1e-9:
+                        continue
+                    plane_no.normalize()
+                    plane_co = centre3 + u3 * p1[0] + v3 * p1[1]
+                    # Bisect only faces near THIS outline segment — the plane is
+                    # infinite within the geometry it's handed, so feeding it the
+                    # whole region made every plane slice a full line of dense
+                    # faces across the region (~3x triangle growth in the first
+                    # local test). Segment-local geometry keeps splits (and cost)
+                    # proportional to the outline itself.
+                    e_u0 = min(p1[0], p2[0]) - pad
+                    e_u1 = max(p1[0], p2[0]) + pad
+                    e_v0 = min(p1[1], p2[1]) - pad
+                    e_v1 = max(p1[1], p2[1]) + pad
+                    seg_faces = []
+                    for mf in micro.faces:
+                        b = uv_box(mf)
+                        if b[0] <= e_u1 and b[1] >= e_u0 and b[2] <= e_v1 and b[3] >= e_v0:
+                            seg_faces.append(mf)
+                    if not seg_faces:
+                        continue
+                    seg_edges = set()
+                    seg_verts = set()
+                    for mf in seg_faces:
+                        seg_edges.update(mf.edges)
+                        seg_verts.update(mf.verts)
+                    bmesh.ops.bisect_plane(
+                        micro, geom=seg_faces + list(seg_edges) + list(seg_verts),
+                        dist=1e-4, plane_co=plane_co, plane_no=plane_no,
+                        use_snap_center=False, clear_outer=False, clear_inner=False)
+
+                inside = []
+                for mf in micro.faces:
+                    rel = mf.calc_center_median() - centre3
+                    dn = rel.dot(cut_dir)
+                    if not (cut_lo <= dn <= cut_hi):
+                        continue
+                    # Only remove surfaces the punch actually crosses. A face
+                    # roughly PARALLEL to the cut axis is being sliced
+                    # lengthwise, not punched through — that is what carved
+                    # long smeared shields into the diorama base's near-
+                    # horizontal apron and into interior floors, where a
+                    # horizontal cut runs along the surface for its whole
+                    # reach. Skins facing either way across the axis (|dot|
+                    # high) are still removed, so a genuine through-hole is
+                    # unaffected: front skin out, far skin out, daylight
+                    # through.
+                    if abs(mf.normal.dot(cut_dir)) < face_facing_min:
+                        continue
+                    if _point_in_rings(rel.dot(u3), rel.dot(v3), rings):
+                        inside.append(mf)
+                if not inside:
+                    micro.free()  # nothing to cut here — main mesh stays untouched
+                    continue
+                bmesh.ops.delete(micro, geom=inside, context="FACES")
+
+                # Triangulate what the bisects left behind. Slicing a triangle
+                # repeatedly produces N-GONS, and Blender's tangent computation
+                # only handles tris and quads — a single n-gon anywhere makes
+                # the glTF exporter skip TANGENT for the whole primitive, which
+                # shows up as normal-map seams on every surface of the model,
+                # not just near the mark. Caught by the pipeline's own E2E
+                # test ("primitive has TANGENT"), which passed with the
+                # watermark off and failed with it on. Cheap here: the micro
+                # holds only this cell's few hundred faces.
+                ngons = [f for f in micro.faces if len(f.verts) > 4]
+                if ngons:
+                    bmesh.ops.triangulate(micro, faces=ngons)
+
+                # Merge back IMMEDIATELY, not batched at side end: a single big
+                # face (a flat plank/panel) can span SEVERAL grid cells, and a
+                # deferred merge hands each of those cells an uncut copy of it —
+                # on the first tower test the overlapping merged copies plugged
+                # each other's holes. One FACES_ONLY delete per cut instance is
+                # ~0.1s of O(mesh) op overhead — the expensive part (the ~16
+                # bisects) stays in the micro. FACES_ONLY keeps every vert alive
+                # so rmap stays valid; wire/loose orphans are swept once at the
+                # end of the whole pass.
+                bmesh.ops.delete(bm, geom=[f for f in rfaces if f.is_valid],
+                                 context="FACES_ONLY")
+                main_layers = [bm.loops.layers.uv.get(n) for n in uv_names]
+                micro_layers = [micro.loops.layers.uv.get(n) for n in uv_names]
+                for mf in micro.faces:
+                    vs = []
+                    for mv in mf.verts:
+                        v = rmap.get(mv)
+                        if v is None or not v.is_valid:
+                            v = bm.verts.new(mv.co)
+                            rmap[mv] = v
+                        vs.append(v)
+                    try:
+                        nf = bm.faces.new(vs)
+                    except ValueError:
+                        continue
+                    nf.material_index = mf.material_index
+                    nf.smooth = mf.smooth
+                    for ldst, lsrc in zip(nf.loops, mf.loops):
+                        for dlay, slay in zip(main_layers, micro_layers):
+                            ldst[dlay].uv = lsrc[slay].uv
+                    # The replacement pieces must be visible to LATER grid cells
+                    # (this side's cand) and later sides (fboxes) — that's what
+                    # keeps multi-cell-spanning faces correct.
+                    x0 = y0 = z0 = inf
+                    x1 = y1 = z1 = -inf
+                    for vtx in nf.verts:
+                        co = vtx.co
+                        if co.x < x0: x0 = co.x
+                        if co.x > x1: x1 = co.x
+                        if co.y < y0: y0 = co.y
+                        if co.y > y1: y1 = co.y
+                        if co.z < z0: z0 = co.z
+                        if co.z > z1: z1 = co.z
+                    entry = (nf, x0, x1, y0, y1, z0, z1)
+                    fboxes.append(entry)
+                    ndn0, ndn1 = _project_box(entry, normal3, off_n)
+                    ndu0, ndu1 = _project_box(entry, uaxis, off_u)
+                    ndv0, ndv1 = _project_box(entry, vaxis, off_v)
+                    bin_entry((nf, ndu0, ndu1, ndv0, ndv1, ndn0, ndn1))
+                micro.free()
+                holes_cut += 1
+                side_holes += 1
+
+            placements.append("%s: %d/%d holes cut (cap=%.1fmm grid=%.0fx%.0fmm)"
+                              % (name, side_holes, len(centres), cap, step_u, step_v))
+
+        # Sweep wire edges / loose verts left by FACES_ONLY deletes (two O(mesh)
+        # ops total for the whole model, not per cut).
+        wire = [e for e in bm.edges if not e.link_faces]
+        if wire:
+            bmesh.ops.delete(bm, geom=wire, context="EDGES")
+        loose = [v for v in bm.verts if not v.link_faces]
+        if loose:
+            bmesh.ops.delete(bm, geom=loose, context="VERTS")
+
+        bm.normal_update()
+        bm.to_mesh(proxy.data)
+        bm.free()
+        proxy.data.update()
+
+        REPORT["embossMethod"] = "logo-grid-bisect" if holes_cut > 0 else "logo-grid-none-cut"
+        REPORT["embossApplied"] = holes_cut > 0
+        REPORT["embossWatermark"] = "logo"
+        REPORT["embossPlacement"] = "logo-grid-%s" % "-".join(sides)
+        REPORT["embossLogoSides"] = sides
+        REPORT["embossLogoCapMm"] = round(cap, 3)
+        REPORT["embossLogoSeed"] = seed_str
+        REPORT["embossLogoPlacements"] = placements
+        REPORT["embossHolesTotal"] = holes_cut
+        REPORT["embossLogoInstancesAttempted"] = instances_total
+        if holes_cut == 0:
+            warn("Logo watermark cut 0 of %d attempted grid cells" % instances_total)
+    except Exception as e:
+        warn("Emboss logo grid failed (continuing without it): " + str(e))
+        REPORT["embossApplied"] = False
+    finally:
+        try:
+            deselect_all()
+            proxy.select_set(True)
+            set_active(proxy)
+        except Exception as e:
+            warn("Post-emboss reselect failed (continuing): " + str(e))
 
 
 def _emboss_punch_through(proxy, text):

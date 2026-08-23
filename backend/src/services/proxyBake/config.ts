@@ -137,8 +137,120 @@ export interface ProxyBakeConfig {
    *  kept in the schema (still safe on simple flat-walled models, e.g. the
    *  synthetic box this pipeline was first validated against) but is no longer the
    *  default. "bands" is the legacy four upright bands hugging the bottom edge,
-   *  always a boolean. */
-  embossStyle: 'punch' | 'pillars' | 'bands'
+   *  always a boolean.
+   *  "logo" (default since 2026-08-22): cuts the Artifact Armoury monogram as
+   *  clean through-holes in a uniform staggered grid across each side — see the
+   *  embossLogo* keys below and bake_proxy.py's _emboss_logo_grid. Unlike every
+   *  text style it slices the hole boundary EXACTLY along the logo outline
+   *  (bmesh bisect_plane per outline edge, then delete-inside), so the edges are
+   *  die-cut clean instead of jagged face-deletion — the "professional and
+   *  intentional" look, not damage. */
+  embossStyle: 'logo' | 'punch' | 'pillars' | 'bands'
+  /** Which sides get the logo grid (style "logo"). "front"/"right"/"back"/"left"
+   *  use the same cardinal wall convention as punch/pillars; "top" grids the
+   *  model's top-down footprint.
+   *  Default is the four WALLS only — "top" is opt-in, for genuinely flat-topped
+   *  pieces (terrain tiles, floors). It was tried as a default and dropped: on a
+   *  tiled pagoda roof the top-down stamps read as ragged notches rather than
+   *  marks, and on a diorama-based house they punched shield holes into the
+   *  ground plane. Both were verified against a watermark-off control render of
+   *  the same model, so they were the cuts, not the source mesh. Walls cut
+   *  cleanly on every model tested. */
+  embossLogoSides: Array<'front' | 'right' | 'back' | 'left' | 'top'>
+  /** Logo height = clamp(model height × this, embossLogoMinHeightMm..MaxHeightMm),
+   *  and never more than 80% of the model's own height. 0.18 rather than the
+   *  0.14 the solid shield used: the real monogram is a thin-stroked outline,
+   *  so at the same overall height its strokes are far finer and read faintly
+   *  on rough stone — verified by baking both. */
+  embossLogoHeightFrac: number
+  /** NOTE on proxyDecimationEnabled, re-enabled 2026-08-23 after being off since
+   *  2026-08-21: the earlier decision came from a render comparison read as
+   *  "decimation tears holes through vases/lattice/railings". Re-measured
+   *  properly on the same source (2.63M -> 300k tris, 11% retain, closest-point
+   *  deviation over 218k sampled points): median 0.009mm, p99 0.053mm, max
+   *  0.53mm on a 344mm-diagonal model — below one resin layer for 99% of the
+   *  surface, and nothing torn (a severed railing would deviate by millimetres).
+   *  The surface "damage" in those renders is the artist's sculpted weathering,
+   *  present identically in the undecimated mesh. What likely made decimation
+   *  destructive before was the volume-preserving Laplacian smooth running on
+   *  unwelded shells; smoothing is now 0 and the weld pass runs first. */
+  /** Lower clamp on the logo's cut height, in mm — keeps the mark visible on
+   *  short/squat models. */
+  embossLogoMinHeightMm: number
+  /** Upper clamp on the logo's cut height, in mm — keeps the mark tasteful on
+   *  very tall models. */
+  embossLogoMaxHeightMm: number
+  /** Horizontal grid step, in units of the logo's own WIDTH (2.6 → one logo then
+   *  1.6 logo-widths of blank wall before the next). */
+  embossLogoSpacingXFrac: number
+  /** Vertical grid step, in units of the logo's own HEIGHT. */
+  embossLogoSpacingYFrac: number
+  /** Alternate rows shift horizontally by this fraction of the horizontal step —
+   *  0.5 gives the classic staggered diaper/brick pattern, 0 a square grid. */
+  embossLogoStaggerFrac: number
+  /** Border (fraction of each wall's half-extents) kept clear of logo holes, so a
+   *  hole never bleeds over a corner/edge — and never hugs a trimmable edge. */
+  embossLogoEdgeMarginFrac: number
+  /** Depth cap: each hole reaches at most logo-height × this INWARD of the
+   *  cell's locally-anchored wall surface — clears the outer skin for a genuine
+   *  see-through hole without gutting interior detail. Same idea as
+   *  embossPunchMaxReachFrac, but measured from the per-cell surface anchor,
+   *  not the bounding box. */
+  embossLogoMaxReachFrac: number
+  /** Per-cell safety gate: minimum wall-like material coverage inside the cut
+   *  window, as a fraction of the logo's own area, before the cell may cut —
+   *  keeps the mark off open lattice/sparse members where it would read as
+   *  floating fragments (same idea as embossWallMinCoverage for pillars). */
+  embossLogoMinCoverage: number
+  /** How much outward-facing area (fraction of the logo's area) must accumulate,
+   *  walking the cell's faces outermost-first, before that depth is taken as the
+   *  cell's wall surface — thin railings/posts in front carry too little area to
+   *  fool it. */
+  embossLogoAnchorAreaFrac: number
+  /** Minimum dot(face normal, side normal) for a face to count as "wall-like"
+   *  in the anchor/coverage gates — skips cells whose local surface is ground,
+   *  a roof slope seen edge-on, or other oblique geometry that would smear the
+   *  projected logo. */
+  embossLogoAlignMinDot: number
+  /** How far OUTWARD of the anchored surface the cut still reaches, as a
+   *  fraction of logo height — covers stone-relief bumps without slicing a
+   *  railing standing well in front of the wall. */
+  embossLogoOutwardSlackFrac: number
+  /** Per-cell gate on how square-on the cell's surface is to the grid direction
+   *  (area-weighted mean normal · side normal). Below this the cell is skipped
+   *  rather than stamped at a steep angle, where the grid's own spacing gets
+   *  badly foreshortened. Each accepted cell is then cut along its OWN measured
+   *  normal, not the side axis, so moderately angled surfaces still take a
+   *  true-shape mark. */
+  embossLogoCellAlignMin: number
+  /** Minimum |face normal · cut axis| for a face inside the outline to be
+   *  removed. Faces roughly PARALLEL to the cut axis are being sliced
+   *  lengthwise rather than punched through — that is what carved long smeared
+   *  shields into a diorama base's near-horizontal apron when a horizontal cut
+   *  ran along it for its whole reach. Skins facing either way across the axis
+   *  are still removed, so genuine through-holes are unaffected. */
+  embossLogoFaceFacingMin: number
+  /** Half-thickness of the skin band (fraction of logo height) around each
+   *  cell's anchored surface used to measure coverage and orientation. The cut
+   *  window itself is several times deeper (it has to reach through the wall);
+   *  measuring over that whole depth mixed the far skin and interior structure
+   *  into the surface statistics. */
+  embossLogoSurfaceBandFrac: number
+  /** Hard cap on grid cells per side (evenly thinned when exceeded) so a huge
+   *  terrain board doesn't get hundreds of cuts. */
+  embossLogoMaxPerSide: number
+  /** Optional override of the cut shape: either one closed outline
+   *  ([[x,y],...]) or several ([[[x,y],...],...]), any scale, y-up,
+   *  renormalised to unit height. Unset = `blender/logo_shape.json`, the real
+   *  Artifact Armoury monogram (chevron "A" + compass star) traced from the
+   *  brand PNG by `scripts/trace_logo.py`; if that file is missing or corrupt
+   *  the bake falls back to a built-in shield rather than failing.
+   *  Rings may be disjoint but must NOT nest: this is a CUTOUT, so material
+   *  enclosed by a ring inside a ring would drop out as a floating island.
+   *  `trace_logo.py` refuses to emit a nested shape. Each ring edge costs one
+   *  mesh bisect per hole, so keep the outline simple — the shipped monogram
+   *  is 14 vertices total. */
+  embossLogoPolygon?: Array<[number, number]> | Array<Array<[number, number]>>
   /** Which sides get a punch-through cut (style "punch" only). Each entry is one of
    *  "front"/"right"/"back"/"left" (same cardinal wall convention as the pillars
    *  style: front = +Y, right = +X, back = -Y, left = -X). Default ["front","right"]
