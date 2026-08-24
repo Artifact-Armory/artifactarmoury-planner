@@ -174,7 +174,10 @@ CREATE TABLE models (
     mesh_report JSONB,
 
     -- Duplicate prevention
-    file_hash VARCHAR(64) UNIQUE, -- SHA-256 of original STL bytes
+    -- SHA-256 of the canonical STL bytes. NOT unique: an artist may list the same
+    -- piece more than once (on its own and inside a set) — dedup rejects a match
+    -- against ANOTHER artist only (migration 039).
+    file_hash VARCHAR(64),
 
     -- Moderation
     flagged_reason TEXT,

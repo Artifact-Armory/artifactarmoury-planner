@@ -22,12 +22,16 @@ import { paintFitsTable, isBlank as paintIsBlank } from '@core/paintmap'
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
+// `touch` marks a press made with a finger. A finger has no second button and no
+// wheel, so on touch a drag that would box-select on desktop pans the camera
+// instead — tap still places/selects, via the same movement threshold.
 type LeftDrag =
   | { kind: 'none' }
-  | { kind: 'maybePlace'; x: number; y: number }
-  | { kind: 'maybe'; mode: 'piece' | 'box'; x: number; y: number; pieceId?: string; ground: THREE.Vector3 | null; additive: boolean }
+  | { kind: 'maybePlace'; x: number; y: number; touch: boolean }
+  | { kind: 'maybe'; mode: 'piece' | 'box'; x: number; y: number; pieceId?: string; ground: THREE.Vector3 | null; additive: boolean; touch: boolean }
   | { kind: 'move'; startGround: THREE.Vector3; ids: string[]; orig: Map<string, { x: number; z: number }> }
   | { kind: 'box'; x: number; y: number; base: Set<string> }
+  | { kind: 'pan'; x: number; y: number }
 
 export function ThreeStage() {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -55,6 +59,8 @@ export function ThreeStage() {
     lastPointer: { clientX: number; clientY: number } | null
     sculpting: boolean             // true while dragging a terrain brush
     strokeChanged: boolean         // any change during the current sculpt/paint stroke
+    touchIds: Set<number>          // fingers currently down (2+ = camera gesture)
+    gestureLatch: boolean          // a 2-finger gesture happened; ignore the trailing tap
   } | null>(null)
 
   useEffect(() => {
@@ -202,6 +208,7 @@ export function ThreeStage() {
       renderer, scene, camera, cam, inst, ghost, tableGroup, gridGroup, cellHi,
       raycaster, ground, requestRender, ghostRot: 0, drag: { kind: 'none' }, hovered: null,
       levelOverride: null, lastAutoLevel: 0, lastPointer: null, sculpting: false, strokeChanged: false,
+      touchIds: new Set(), gestureLatch: false,
     }
 
     // expose camera controls to the store (UI buttons / fitView)
@@ -220,6 +227,11 @@ export function ThreeStage() {
         cam.frameBox(box.isEmpty() ? tableBox() : box)
       },
       home: () => cam.home(tableBox()),
+    })
+    // Engine actions the on-screen touch controls need (no keyboard on a tablet).
+    useAppStore.getState().setStageApi({
+      rotate: (dir) => rotateActive(dir),
+      nudgeLevel: (delta) => nudgeLevel(delta),
     })
 
     buildTable()
@@ -496,9 +508,37 @@ export function ThreeStage() {
       lastGround = groundPoint(e)
     }
 
+    // Abandon whatever left-button/finger drag is in flight (a second finger just
+    // landed, so the camera owns the gesture now).
+    function cancelDrag() {
+      const eng = engine.current!
+      if (eng.drag.kind === 'move') inst.clearLive()
+      if (eng.drag.kind === 'box') setBoxRect(null)
+      eng.drag = { kind: 'none' }
+      // A second finger also ends a terrain stroke — pointerup is swallowed while
+      // the gesture latch is set, so close the undo step here or the brush would
+      // stay "down" and keep sculpting after the pinch.
+      if (eng.sculpting) {
+        eng.sculpting = false
+        if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
+      }
+      requestRender()
+    }
+
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return // right/middle handled by BuilderCamera
       const eng = engine.current!
+      const touch = e.pointerType === 'touch'
+      if (touch) {
+        eng.touchIds.add(e.pointerId)
+        // Two fingers = camera gesture (pinch/twist/pitch). Drop any drag the first
+        // finger started and let BuilderCamera have it.
+        if (eng.touchIds.size >= 2) {
+          eng.gestureLatch = true
+          cancelDrag()
+          return
+        }
+      }
       // View-only (a shopper inspecting an artist's table): tapping a placed model
       // selects it so its info + buy tile can show, but never moves/places it.
       // The camera still orbits on the right/middle mouse buttons.
@@ -521,7 +561,7 @@ export function ThreeStage() {
       }
 
       if (s.selectedAssetId) {
-        eng.drag = { kind: 'maybePlace', x: e.clientX, y: e.clientY }
+        eng.drag = { kind: 'maybePlace', x: e.clientX, y: e.clientY, touch }
         return
       }
       const pieceId = pickPiece(e)
@@ -536,16 +576,25 @@ export function ThreeStage() {
           useAppStore.getState().setSelectedInstances([pieceId])
         }
         inst.setSelection(new Set(useAppStore.getState().selectedInstanceIds))
-        eng.drag = { kind: 'maybe', mode: 'piece', x: e.clientX, y: e.clientY, pieceId, ground: gp, additive }
+        eng.drag = { kind: 'maybe', mode: 'piece', x: e.clientX, y: e.clientY, pieceId, ground: gp, additive, touch }
       } else {
-        eng.drag = { kind: 'maybe', mode: 'box', x: e.clientX, y: e.clientY, ground: gp, additive: e.shiftKey }
+        eng.drag = { kind: 'maybe', mode: 'box', x: e.clientX, y: e.clientY, ground: gp, additive: e.shiftKey, touch }
       }
       requestRender()
     }
 
     function onPointerMoveLeft(e: PointerEvent) {
       const eng = engine.current!
+      // Two fingers down: the camera is driving, nothing here should react.
+      if (eng.touchIds.size >= 2) return
       const overCanvas = e.target === renderer.domElement
+
+      // One finger dragging empty table pans the view (touch has no middle button).
+      if (eng.drag.kind === 'pan') {
+        cam.panByScreenDelta(e.clientX - eng.drag.x, e.clientY - eng.drag.y)
+        eng.drag = { kind: 'pan', x: e.clientX, y: e.clientY }
+        return
+      }
 
       // View-only (inspecting an artist's table): no ghost, no placement square, no
       // grab cursor — just a plain pointer over models to hint they're clickable.
@@ -568,6 +617,14 @@ export function ThreeStage() {
       }
 
       const d = eng.drag
+      // Placing on a tablet: a tap stamps the piece, but dragging pans instead of
+      // doing nothing (on desktop this stays a no-op until the button is released).
+      if (d.kind === 'maybePlace' && d.touch) {
+        if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > DRAG_THRESHOLD) {
+          eng.drag = { kind: 'pan', x: e.clientX, y: e.clientY }
+        }
+        return
+      }
       if (d.kind === 'maybe') {
         const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y)
         if (moved > DRAG_THRESHOLD) {
@@ -580,8 +637,13 @@ export function ThreeStage() {
             }
             eng.drag = { kind: 'move', startGround: d.ground, ids, orig }
           } else if (d.mode === 'box') {
-            const base = d.additive ? new Set(useAppStore.getState().selectedInstanceIds) : new Set<string>()
-            eng.drag = { kind: 'box', x: d.x, y: d.y, base }
+            // Finger on empty table -> pan. Mouse on empty table -> box-select.
+            if (d.touch) {
+              eng.drag = { kind: 'pan', x: e.clientX, y: e.clientY }
+            } else {
+              const base = d.additive ? new Set(useAppStore.getState().selectedInstanceIds) : new Set<string>()
+              eng.drag = { kind: 'box', x: d.x, y: d.y, base }
+            }
           }
         }
       }
@@ -637,6 +699,15 @@ export function ThreeStage() {
     function onPointerUpLeft(e: PointerEvent) {
       if (e.button !== 0) return
       const eng = engine.current!
+      if (e.pointerType === 'touch') {
+        eng.touchIds.delete(e.pointerId)
+        // Lifting fingers after a pinch/twist must not register as a tap. The latch
+        // clears only once the last finger is up.
+        if (eng.gestureLatch) {
+          if (eng.touchIds.size === 0) { eng.gestureLatch = false; eng.drag = { kind: 'none' } }
+          return
+        }
+      }
       if (eng.sculpting) {
         eng.sculpting = false
         // Record the whole stroke as one undoable step (terrain + paint are in the
@@ -647,6 +718,7 @@ export function ThreeStage() {
       const d = eng.drag
       eng.drag = { kind: 'none' }
 
+      if (d.kind === 'pan') return
       if (d.kind === 'maybePlace') {
         const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y)
         if (moved <= DRAG_THRESHOLD) placeGhost(e)
@@ -686,6 +758,16 @@ export function ThreeStage() {
         requestRender()
         return
       }
+    }
+
+    // The OS can take a touch away mid-gesture (iOS edge swipe, app switcher).
+    // Treat it as a hard reset so nothing is left half-dragged.
+    function onPointerCancel(e: PointerEvent) {
+      const eng = engine.current!
+      if (e.pointerType !== 'touch') return
+      eng.touchIds.delete(e.pointerId)
+      if (eng.touchIds.size === 0) eng.gestureLatch = false
+      cancelDrag()
     }
 
     function placeGhost(e: { clientX: number; clientY: number }) {
@@ -729,6 +811,28 @@ export function ThreeStage() {
     function refreshGhost() {
       const eng = engine.current!
       if (eng.lastPointer && store().selectedAssetId) updateGhost(eng.lastPointer)
+    }
+
+    // Rotate whatever the R key would rotate: the ghost while placing, otherwise
+    // the selection. Shared by the key handler and the touch controls.
+    function rotateActive(dir: 1 | -1) {
+      const eng = engine.current!
+      if (store().selectedAssetId) {
+        eng.ghostRot = normDeg(eng.ghostRot + rotationStep() * dir)
+        refreshGhost()
+        requestRender()
+      } else {
+        rotateSelection(dir)
+      }
+    }
+
+    // Raise/lower the level the ghost places at, overriding the auto-surface.
+    function nudgeLevel(delta: 1 | -1) {
+      const eng = engine.current!
+      if (!store().selectedAssetId) return
+      const cur = eng.levelOverride != null ? eng.levelOverride : eng.lastAutoLevel
+      eng.levelOverride = Math.max(0, cur + delta)
+      refreshGhost()
     }
 
     function rotateSelection(dir: 1 | -1) {
@@ -796,20 +900,12 @@ export function ThreeStage() {
       // PageUp/PageDown: manually raise/lower the placement level (override auto-surface).
       if ((e.key === 'PageUp' || e.key === 'PageDown') && s.selectedAssetId) {
         e.preventDefault()
-        const cur = eng.levelOverride != null ? eng.levelOverride : eng.lastAutoLevel
-        eng.levelOverride = e.key === 'PageUp' ? cur + 1 : Math.max(0, cur - 1)
-        refreshGhost()
+        nudgeLevel(e.key === 'PageUp' ? 1 : -1)
         return
       }
 
       if (k === 'r') {
-        if (s.selectedAssetId) {
-          eng.ghostRot = normDeg(eng.ghostRot + rotationStep() * (e.shiftKey ? -1 : 1))
-          refreshGhost()
-          requestRender()
-        } else {
-          rotateSelection(e.shiftKey ? -1 : 1)
-        }
+        rotateActive(e.shiftKey ? -1 : 1)
         return
       }
 
@@ -920,6 +1016,7 @@ export function ThreeStage() {
     window.addEventListener('pointermove', trackGround)
     window.addEventListener('pointermove', onPointerMoveLeft)
     window.addEventListener('pointerup', onPointerUpLeft)
+    window.addEventListener('pointercancel', onPointerCancel)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
 
@@ -931,6 +1028,7 @@ export function ThreeStage() {
       window.removeEventListener('pointermove', trackGround)
       window.removeEventListener('pointermove', onPointerMoveLeft)
       window.removeEventListener('pointerup', onPointerUpLeft)
+      window.removeEventListener('pointercancel', onPointerCancel)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       useAppStore.getState().setCameraApi(null)

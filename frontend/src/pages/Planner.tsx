@@ -4,12 +4,12 @@ import { useIsDesktop } from '../hooks/useIsDesktop'
 import Logo from '../components/common/Logo'
 import { SITE_NAME } from '../config/brand'
 
-// The 3D Table Planner (Three.js, InstancedMesh-based) is desktop-only by
-// design — grid-snap placement and camera controls assume mouse + trackpad
-// input. Named constant (not a magic number): matches the site's own `lg`
-// Tailwind breakpoint, and is the narrowest width the planner's toolbars/
-// palette were laid out for. Adjust here if that changes.
-const PLANNER_MIN_WIDTH = 1024
+// The 3D Table Planner supports touch (pinch/twist to fly the camera, on-screen
+// buttons for the keyboard-only actions) and stows its side panels into drawers
+// on a narrow viewport, so tablets are in. What it still can't do is a phone: the
+// palette tiles and the table itself need real room. This is the narrowest width
+// the compact layout was built for — roughly a small tablet in portrait.
+const PLANNER_MIN_WIDTH = 640
 
 // Lazy so the Three.js/planner chunk is only ever requested once the desktop
 // check below has passed — mobile visitors never fetch it.
@@ -51,8 +51,8 @@ function PlannerUnavailable() {
     <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center bg-background">
       <h2 className="text-2xl font-semibold mb-2">The Table Planner needs a bigger screen</h2>
       <p className="text-muted-foreground max-w-md mb-6">
-        It's built for desktop — grid placement and camera controls need a mouse and a bit of
-        room. Open this page on a laptop or desktop to design your table.
+        Laying out a table needs room for the board and the model palette. It works on a tablet
+        or larger — try turning your device landscape, or open this page on a laptop or desktop.
       </p>
       <Link
         to="/browse"

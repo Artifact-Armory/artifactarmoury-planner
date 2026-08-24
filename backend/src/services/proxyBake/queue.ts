@@ -12,6 +12,7 @@
 
 import { db } from '../../db'
 import logger from '../../utils/logger'
+import { createNotification } from '../notifications'
 import type { ProxyBakeConfigOverrides } from './config'
 import type { BakeResult } from './bake'
 
@@ -222,6 +223,27 @@ export async function failJob(job: BakeJobRow, error: string): Promise<void> {
       WHERE id = $1`,
     [job.model_id, msg],
   )
+  // Tell the artist. They left the upload form long before the bake ran, so a
+  // failure recorded only in processing_error is invisible to them — the model
+  // just never gets a preview. (The upload-time rejections do the same, from
+  // markModelFailed in routes/models.ts.)
+  try {
+    const row = (await db.query(
+      'SELECT artist_id, name FROM models WHERE id = $1', [job.model_id],
+    )).rows[0]
+    if (row?.artist_id) {
+      await createNotification({
+        userId: row.artist_id,
+        type: 'model.upload_failed',
+        title: `Preview failed: ${row.name || 'your model'}`,
+        body: `We couldn't generate the 3D preview for this model. ${msg}`,
+        link: '/artist/models',
+        modelId: job.model_id,
+      })
+    }
+  } catch (err) {
+    logger.error('Bake-failure notification failed', { error: err, modelId: job.model_id })
+  }
   logger.error('Bake job failed permanently', { jobId: job.id, modelId: job.model_id, error: msg })
 }
 

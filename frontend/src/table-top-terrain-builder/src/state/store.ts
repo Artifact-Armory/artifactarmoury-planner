@@ -60,6 +60,18 @@ export interface CameraApi {
   home: () => void
 }
 
+/**
+ * Engine actions that live inside ThreeStage (ghost rotation, the manual
+ * placement level) but have no keyboard on a tablet, so the touch control
+ * cluster in the UI can drive them. Mirrors the R / PageUp / PageDown keys.
+ */
+export interface StageApi {
+  /** Rotate the ghost if placing, else the current selection. dir: 1 = cw. */
+  rotate: (dir: 1 | -1) => void
+  /** Raise (+1) / lower (-1) the placement level, overriding auto-surface. */
+  nudgeLevel: (delta: 1 | -1) => void
+}
+
 export type Unit = 'm'|'cm'|'ft'|'in'
 export type Table = { width: number; height: number; unitDisplay: Unit; gridSize: number }
 
@@ -165,6 +177,7 @@ interface AppState {
   // Camera modes
   cameraMode: 'perspective' | 'top-down' | 'isometric'
   cameraApi: CameraApi | null
+  stageApi: StageApi | null
 
   // View-only mode: a shopper opened a published table. Camera works, but all
   // placement/selection/editing is disabled (only the owning artist edits, via
@@ -186,6 +199,7 @@ interface AppState {
   setSelectedInstances: (ids: string[]) => void
   setCameraMode: (mode: 'perspective' | 'top-down' | 'isometric') => void
   setCameraApi: (api: CameraApi | null) => void
+  setStageApi: (api: StageApi | null) => void
   setReadOnly: (v: boolean) => void
   setSnapBaseline: (b: SnapBaseline) => void
   toggleSnapBaseline: () => void
@@ -340,6 +354,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   cameraMode: 'perspective',
   cameraApi: null,
+  stageApi: null,
 
   readOnly: false,
 
@@ -372,6 +387,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ selectedInstanceIds: ids, selectedInstanceId: ids.length ? ids[ids.length - 1] : null }),
   setCameraMode: (mode) => set({ cameraMode: mode }),
   setCameraApi: (api) => set({ cameraApi: api }),
+  setStageApi: (api) => set({ stageApi: api }),
   setReadOnly: (v) => set({ readOnly: v }),
   setSnapBaseline: (b) => set({ snapBaseline: b }),
   toggleSnapBaseline: () => set(s => ({ snapBaseline: s.snapBaseline === 'snap' ? 'free' : 'snap' })),

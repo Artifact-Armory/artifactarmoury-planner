@@ -540,6 +540,10 @@ const CreateModel: React.FC = () => {
             OBJ and 3MF are converted to a print-ready STL — buyers download your original file and the STL.
             Max {MAX_MODEL_FILE_MB}MB per file; decimate very high-poly models before uploading.
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Reusing your own files is fine — list a piece on its own <em>and</em> inside a set. Only a
+            file matching <strong>another artist’s</strong> model is rejected.
+          </p>
         </div>
 
         <div>

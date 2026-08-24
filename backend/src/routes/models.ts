@@ -39,7 +39,7 @@ import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_OR
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
 import { isBakeWorkerEnabled, enqueueBakeJob } from '../services/proxyBake/queue';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
-import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate } from '../services/notifications';
+import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate, createNotification } from '../services/notifications';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
@@ -135,7 +135,10 @@ router.post('/',
       // Fingerprint: compute SHA-256 and reject exact duplicates
       const rawBuffer = await fsReadFile(modelFile.path);
       const fileHash = computeFileHash(rawBuffer);
-      const dupCheck = await db.query('SELECT id, name FROM models WHERE file_hash = $1', [fileHash]);
+      const dupCheck = await db.query(
+        'SELECT id, name FROM models WHERE file_hash = $1 AND artist_id <> $2',
+        [fileHash, (req as any).userId],
+      );
       if (dupCheck.rows.length > 0) {
         await deleteUploadedFile(modelFile.path);
         if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
@@ -144,7 +147,9 @@ router.post('/',
 
       // Geometry fingerprint — reject re-uploads even when re-exported to beat the hash.
       const fingerprint = await computeGeometryFingerprint(modelFile.path);
-      const geoDup = await findGeometryDuplicate(fingerprint, '00000000-0000-0000-0000-000000000000');
+      const geoDup = (await findGeometryDuplicate(
+        fingerprint, '00000000-0000-0000-0000-000000000000', (req as any).userId,
+      )).foreign;
       if (geoDup) {
         await deleteUploadedFile(modelFile.path);
         if (thumbnailFile) await deleteUploadedFile(thumbnailFile.path);
@@ -1680,6 +1685,22 @@ router.get('/:id/download',
 // restarts mid-job the row is left in 'processing'; a future reaper/retry can
 // pick those up. For higher volume, move this to a real job queue.
 
+/**
+ * Wording for a "this file is already on the site" rejection.
+ *
+ * Only ever called for a clash with ANOTHER artist — the uploader's own models are
+ * exempt from dedup (migration 039), so there is no "you already uploaded this"
+ * rejection to word. The clashing listing is deliberately NOT named: dedup scans
+ * every artist's catalogue, so naming it would hand a stranger the name of someone
+ * else's model, and it reads as gibberish to whoever is uploading.
+ */
+function duplicateMessage(kind: 'file' | 'geometry', partLabel?: string): string {
+  const subject = partLabel ? `The file "${partLabel}"` : 'This file';
+  return kind === 'file'
+    ? `${subject} is already on the marketplace under another artist's listing. If you believe this is your own work, contact support.`
+    : `${subject} is nearly identical to a model already on the marketplace (same shape, even if re-exported or rescaled). If you believe this is your own work, contact support.`;
+}
+
 async function processUploadedModel(modelId: string, rawKey: string, filename?: string): Promise<void> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-model-'));
   const format: MeshFormat = meshFormatFromName(filename || rawKey) ?? 'stl';
@@ -1693,24 +1714,39 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     const stlBuffer = convertToStl(rawBuffer, format);
     await fsp.writeFile(stlTmp, stlBuffer);
 
-    // 2. Reject exact-duplicate uploads (by canonical-STL hash), excluding this row.
+    // 2. Reject exact-duplicate uploads (by canonical-STL hash) — but only against
+    //    ANOTHER artist. The uploader's own models are exempt: selling a piece
+    //    individually *and* inside a set means uploading the same file twice,
+    //    which is legitimate (migration 039).
+    const uploaderId: string | null =
+      (await db.query('SELECT artist_id FROM models WHERE id = $1', [modelId])).rows[0]?.artist_id ?? null;
+    // Matches against the artist's OWN catalogue — allowed, but collected so they
+    // can be told once at the end (an accidental double upload looks identical).
+    const selfMatches: string[] = [];
+
     const fileHash = computeFileHash(stlBuffer);
-    const dup = await db.query('SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2', [fileHash, modelId]);
-    if (dup.rows.length > 0) {
-      await markModelFailed(modelId, `This model file has already been uploaded (matches "${dup.rows[0].name}")`);
+    const dup = await db.query(
+      'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
+      [fileHash, modelId],
+    );
+    const foreignHashDup = dup.rows.find((r: any) => r.artist_id !== uploaderId);
+    if (foreignHashDup) {
+      await markModelFailed(modelId, duplicateMessage('file'));
       await safeDeleteObject(rawKey);
       return;
     }
+    if (dup.rows.length > 0) selfMatches.push(dup.rows[0].name);
 
     // 3. Geometry fingerprint — catches re-uploads even if the file was
     //    re-exported/rotated/rescaled/converted to dodge the exact-hash check above.
     const fingerprint = await computeGeometryFingerprint(stlTmp);
-    const geoDup = await findGeometryDuplicate(fingerprint, modelId);
-    if (geoDup) {
-      await markModelFailed(modelId, `This model appears to be a copy of an existing model ("${geoDup.name}")`);
+    const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
+    if (geoDup.foreign) {
+      await markModelFailed(modelId, duplicateMessage('geometry'));
       await safeDeleteObject(rawKey);
       return;
     }
+    if (geoDup.own && !selfMatches.includes(geoDup.own.name)) selfMatches.push(geoDup.own.name);
 
     // 4. Analyse geometry + generate the GLB preview (from the canonical STL).
     //    Preview generation has two modes: when the bake worker is enabled the GLB
@@ -1803,7 +1839,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     //    inline (pure-Node) or enqueues a bake per part; only the inline path can
     //    mark the model ready here — the bake path is rolled up by the worker.
     if (hasParts) {
-      await processModelParts(modelId);
+      await processModelParts(modelId, uploaderId, selfMatches);
       if (!bakeEnabled) {
         await db.query(
           `UPDATE models SET processing_status = 'ready', processing_error = NULL, updated_at = NOW()
@@ -1821,7 +1857,23 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
     }
 
-    logger.info('Model processed successfully', { modelId, hasParts, bakeEnabled });
+    // Allowed self-duplicates: tell the artist once, neutrally. Listing a piece on
+    // its own AND in a set is exactly what this permits, but an accidental double
+    // upload now looks identical from here — this is the only signal they'd get.
+    if (selfMatches.length > 0 && uploaderId) {
+      const names = selfMatches.slice(0, 3).map((n) => `"${n}"`).join(', ');
+      const more = selfMatches.length > 3 ? ` and ${selfMatches.length - 3} more` : '';
+      await createNotification({
+        userId: uploaderId,
+        type: 'model.duplicate_allowed',
+        title: 'Uploaded — you already list this file',
+        body: `This upload reuses a file you already sell as ${names}${more}. That's allowed (a piece can be sold on its own and inside a set) — no action needed unless you uploaded it by mistake.`,
+        link: '/artist/models',
+        modelId,
+      });
+    }
+
+    logger.info('Model processed successfully', { modelId, hasParts, bakeEnabled, selfMatches: selfMatches.length });
   } catch (error) {
     logger.error('Model processing failed', { error, modelId });
     await markModelFailed(modelId, (error as Error)?.message?.slice(0, 500) || 'Processing failed');
@@ -1856,18 +1908,26 @@ async function processModelVersionUpdate(
 
     // Exact-hash dedup against OTHER models (a version identical to someone else's
     // model is still theft). Self is excluded, so re-uploading a tweak is fine.
+    // As above: only a clash with ANOTHER artist blocks. Replacing a model's file
+    // with one the artist already uses elsewhere is their business.
+    const ownerId: string | null =
+      (await db.query('SELECT artist_id FROM models WHERE id = $1', [modelId])).rows[0]?.artist_id ?? null;
+
     const fileHash = computeFileHash(stlBuffer);
-    const dup = await db.query('SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2', [fileHash, modelId]);
+    const dup = await db.query(
+      'SELECT id, name FROM models WHERE file_hash = $1 AND id <> $2 AND artist_id <> $3',
+      [fileHash, modelId, ownerId],
+    );
     if (dup.rows.length > 0) {
-      await failVersionUpdate(modelId, `That file matches an existing model ("${dup.rows[0].name}") — not applied`);
+      await failVersionUpdate(modelId, 'That file matches a model already on the marketplace — not applied');
       await safeDeleteObject(rawKey);
       return;
     }
 
     const fingerprint = await computeGeometryFingerprint(stlTmp);
-    const geoDup = await findGeometryDuplicate(fingerprint, modelId);
-    if (geoDup) {
-      await failVersionUpdate(modelId, `That file looks like a copy of another model ("${geoDup.name}") — not applied`);
+    const geoDup = await findGeometryDuplicate(fingerprint, modelId, ownerId);
+    if (geoDup.foreign) {
+      await failVersionUpdate(modelId, 'That file looks like a copy of a model already on the marketplace — not applied');
       await safeDeleteObject(rawKey);
       return;
     }
@@ -1985,7 +2045,11 @@ async function failVersionUpdate(modelId: string, reason: string): Promise<void>
  * preview, dimensions + fingerprint. Throws (after marking the model failed) if any
  * part can't be processed, so the caller leaves the model in 'failed'.
  */
-async function processModelParts(modelId: string): Promise<void> {
+async function processModelParts(
+  modelId: string,
+  uploaderId?: string | null,
+  selfMatches?: string[],
+): Promise<void> {
   const { rows: parts } = await db.query(
     `SELECT id, name, stl_file_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
     [modelId]
@@ -2004,13 +2068,18 @@ async function processModelParts(modelId: string): Promise<void> {
       // Dedup each part against every other model + part (not this model's own).
       const fileHash = computeFileHash(stlBuffer);
       const fingerprint = await computeGeometryFingerprint(stlTmp);
-      const geoDup = await findGeometryDuplicate(fingerprint, modelId);
-      if (geoDup) {
-        const reason = `Part "${part.name}" appears to be a copy of an existing model ("${geoDup.name}")`;
+      const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
+      if (geoDup.foreign) {
+        const reason = duplicateMessage('geometry', part.name);
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
         await markModelFailed(modelId, reason);
         await safeDeleteObject(part.stl_file_path);
         throw new Error(reason);
+      }
+      // The artist's own model — allowed (that's the point of selling a piece both
+      // ways); recorded so the roll-up notice can mention it.
+      if (geoDup.own && selfMatches && !selfMatches.includes(geoDup.own.name)) {
+        selfMatches.push(geoDup.own.name);
       }
 
       const stlData = await processSTL(stlTmp);
@@ -2061,26 +2130,42 @@ async function processModelParts(modelId: string): Promise<void> {
  * first likely match (a re-upload), or null. O(N) — fine at this scale; swap for
  * a vector index if the catalogue grows large.
  */
+interface GeometryMatch { id: string; name: string; artistId: string }
+
+/**
+ * Split the result of a fingerprint scan into the match that BLOCKS an upload and
+ * the match that merely informs it.
+ *
+ * `foreign` is another artist's model — that's the theft case dedup exists for.
+ * `own` is the uploader's own model, which is allowed: an artist can legitimately
+ * sell a piece on its own and again inside a set (migration 039). Both are
+ * reported, and `foreign` always wins, so a file that matches the uploader's model
+ * AND someone else's is still rejected rather than waved through on the self-match.
+ */
+interface GeometryDuplicates { foreign: GeometryMatch | null; own: GeometryMatch | null }
+
 async function findGeometryDuplicate(
   fingerprint: GeometryFingerprint,
   excludeId: string,
-): Promise<{ id: string; name: string } | null> {
+  uploaderId?: string | null,
+): Promise<GeometryDuplicates> {
   // Scan both whole models and individual set parts (excluding the model being
   // processed and its own parts), so a stolen file re-uploaded as a "part" is
   // still caught.
   const { rows: modelRows } = await db.query(
-    `SELECT id, name, geometry_fingerprint FROM models
+    `SELECT id, name, artist_id, geometry_fingerprint FROM models
      WHERE geometry_fingerprint IS NOT NULL AND id <> $1`,
     [excludeId]
   );
   const { rows: partRows } = await db.query(
-    `SELECT mp.model_id AS id, COALESCE(m.name, mp.name) AS name, mp.geometry_fingerprint
+    `SELECT mp.model_id AS id, COALESCE(m.name, mp.name) AS name, m.artist_id, mp.geometry_fingerprint
      FROM model_parts mp JOIN models m ON m.id = mp.model_id
      WHERE mp.geometry_fingerprint IS NOT NULL AND mp.model_id <> $1`,
     [excludeId]
   );
   const rows = [...modelRows, ...partRows];
-  let match: { id: string; name: string } | null = null;
+  let foreign: GeometryMatch | null = null;
+  let own: GeometryMatch | null = null;
   // Track the closest candidate so a false positive / near-miss is diagnosable
   // in the logs (compare against FINGERPRINT_MATCH_THRESHOLD).
   let best = { id: '', name: '', dist: Infinity };
@@ -2088,8 +2173,10 @@ async function findGeometryDuplicate(
     const fp = row.geometry_fingerprint as GeometryFingerprint;
     const dist = fingerprintDistance(fingerprint, fp);
     if (dist < best.dist) best = { id: row.id, name: row.name, dist };
-    if (!match && isLikelyDuplicate(fingerprint, fp)) {
-      match = { id: row.id, name: row.name };
+    if (isLikelyDuplicate(fingerprint, fp)) {
+      const hit: GeometryMatch = { id: row.id, name: row.name, artistId: row.artist_id };
+      if (uploaderId && row.artist_id === uploaderId) { own ??= hit; }
+      else { foreign ??= hit; }
     }
   }
   logger.info('Geometry dedup check', {
@@ -2097,9 +2184,10 @@ async function findGeometryDuplicate(
     closest: best.name || null,
     closestDistance: Number.isFinite(best.dist) ? Number(best.dist.toFixed(4)) : null,
     threshold: MATCH_THRESHOLD,
-    matched: match?.name ?? null,
+    matched: foreign?.name ?? null,
+    ownMatch: own?.name ?? null,
   });
-  return match;
+  return { foreign, own };
 }
 
 /**
@@ -2186,11 +2274,36 @@ async function streamWatermarkedZip(
   await archive.finalize();
 }
 
+/**
+ * Mark an upload as failed AND tell the artist why.
+ *
+ * Processing runs in the background after the artist has already left the upload
+ * form, so a failure that only lands in `processing_error` is invisible: the
+ * model just sits there without a preview. Every rejection path (duplicate file,
+ * duplicate geometry, conversion error) funnels through here, so this is the one
+ * place that guarantees the seller is told. Best-effort — a failed notification
+ * must never mask the failure itself.
+ */
 async function markModelFailed(modelId: string, reason: string): Promise<void> {
   await db.query(
     `UPDATE models SET processing_status = 'failed', processing_error = $1, updated_at = NOW() WHERE id = $2`,
     [reason, modelId]
   ).catch((err) => logger.error('Failed to mark model as failed', { error: err, modelId }));
+
+  try {
+    const row = (await db.query('SELECT artist_id, name FROM models WHERE id = $1', [modelId])).rows[0];
+    if (!row?.artist_id) return;
+    await createNotification({
+      userId: row.artist_id,
+      type: 'model.upload_failed',
+      title: `Upload failed: ${row.name || 'your model'}`,
+      body: reason,
+      link: '/artist/models',
+      modelId,
+    });
+  } catch (err) {
+    logger.error('Upload-failure notification failed', { error: err, modelId });
+  }
 }
 
 async function safeDeleteObject(key: string): Promise<void> {

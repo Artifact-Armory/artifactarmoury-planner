@@ -191,6 +191,65 @@ named **component** ("included model"):
   old `SET · N parts` list). **Planner** labels a part by its component ("Village Tower — Roof")
   instead of the listing name; parts still sit flat under one SET tile (nested palette = follow-up).
 
+## Upload failures are now told to the artist (2026-08-23)
+Processing runs in the background *after* the artist has left the upload form, so a rejection
+only ever landed in `models.processing_error` and was never shown — the model just sat there
+with no preview (hit live: a 7-part "Houses" upload was rejected as a duplicate and the seller
+was told nothing). Fixed on three fronts:
+- **Notification on every failure.** `markModelFailed()` (the single choke point for upload-time
+  rejections) and `failJob()` in `proxyBake/queue.ts` (permanent bake failures) both now
+  `createNotification({type:'model.upload_failed'})` to the artist, with the reason in the body
+  and a link to `/artist/models`. The bell renders title/body generically, so no UI work needed.
+- **My Models shows the reason** (`ArtistModels.tsx`), not a bare "Preview failed" pill: the row
+  gets a red block with `processingError` + advice, and the badge reads **Rejected** vs
+  **Upload failed**. `publishBlocker()` returns the real reason — it used to say "re-upload this
+  model", which is actively wrong for a duplicate (re-uploading fails identically).
+  `isDuplicateRejection()` matches both the new and the pre-2026-08-23 wordings.
+- **Duplicate messages are clearer and don't leak.** Dedup scans *every* artist's models
+  (that's the anti-theft point), but the old message pasted the clashing model's **name** into
+  the error — handing a stranger another artist's listing name, and reading as gibberish
+  ("matches \"Model 2\"") to someone who's never seen it. `duplicateMessage()` now names the
+  model **only when the uploader owns it** (where it's actually actionable) and otherwise says
+  "already on the marketplace"; part rejections name **which file** clashed.
+- **The artist is now exempt from dedup (migration 039).** Dedup exists to stop THEFT, so it
+  only rejects a match against **another artist**. An artist may upload the same file as many
+  times as they like — that's how a piece gets sold **individually and inside a set**. This
+  required dropping the **UNIQUE constraint on `models.file_hash`** (from schema.sql's inline
+  `UNIQUE` *and* migration 006's unique index — 039 drops both and re-creates a plain index),
+  or the second upload would have died on a constraint violation instead.
+  `findGeometryDuplicate(fp, excludeId, uploaderId)` now returns `{foreign, own}` and **foreign
+  always wins**, so a file matching both the uploader's model and a stranger's is still
+  rejected. Applied at all four dedup sites (direct upload, parts, new-version replace, legacy
+  multipart create). Self-matches are collected and roll up into **one** informational
+  notification per upload (`model.duplicate_allowed`) — an accidental double upload is now
+  otherwise invisible. `duplicateMessage()` lost its "your own model" branch as unreachable.
+  `npm run test:stage4` still passes (it exercises the fingerprint maths directly).
+
+## Planner on tablets (built 2026-08-23)
+The planner was **hard-gated to ≥1024px** (`pages/Planner.tsx`) and had **zero touch
+handling** — a touch pointer always reports `button === 0` and never fires `wheel`, so
+`BuilderCamera`'s right-drag/middle-drag/wheel handlers could never see it: on an iPad the
+camera was frozen solid. Touch is now a **separate input path**, so no desktop control changed:
+- **Gestures** (`scene/BuilderCamera.ts`): fingers are tracked in a `touches` map. **Two**
+  fingers = pinch → zoom (via the extracted `zoomToward()`, shared with the wheel), twist →
+  orbit, vertical drag → pitch. Mouse buttons keep their exact handlers.
+- **One finger** (`scene/ThreeStage.tsx`): tap = place/select (the existing `maybe`/`maybePlace`
+  movement threshold already distinguishes tap from drag), drag on a **piece** = move it (as on
+  desktop), drag on **empty table** = pan the camera (`kind:'pan'` → `cam.panByScreenDelta`).
+  Box-select is desktop-only. A second finger sets `gestureLatch`, cancels the in-flight drag
+  (**and closes any terrain stroke**), and suppresses the trailing tap until all fingers lift;
+  `pointercancel` resets everything (iOS steals touches).
+- **On-screen controls**: rotate / place-level / delete have no finger equivalent, so a
+  `.tb-touchbar` cluster renders **only** when `matchMedia('(pointer: coarse)')` matches
+  (`ui/useDeviceLayout.ts`). Driven by a new store `stageApi` (`rotate`, `nudgeLevel`) that
+  ThreeStage registers alongside `cameraApi`. Help overlay swaps to a gesture reference.
+- **Compact layout** (`≤1100px`): the fixed 250px palette / 270px basket become **drawers**
+  behind edge handles (one open at a time; picking a model closes it). `≤760px` they go full
+  width. Touch bumps every icon button to 44px. The width gate is now **640px** — tablets in,
+  phones still out.
+- **Untested on real hardware**: synthetic pointer events verified the handlers run clean and
+  the layout was checked at 1440/1024/700px, but multi-touch was never exercised on a device.
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,

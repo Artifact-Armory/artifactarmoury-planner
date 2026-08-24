@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { CheckCircle2, Loader2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { modelsApi } from '../../api/endpoints/models'
 import { TerrainModel } from '../../api/types'
 import { FEATURES } from '../../config/features'
@@ -11,12 +11,38 @@ function errMessage(err: unknown, fallback: string): string {
   return anyErr?.response?.data?.message || anyErr?.message || fallback
 }
 
+/**
+ * A model rejected for being a duplicate can never be fixed by uploading the same
+ * file again, so it needs different advice from a technical failure. Matches the
+ * wordings `duplicateMessage()` produces in the backend (plus the older ones, so
+ * models that failed before that change still read correctly); anything else is
+ * treated as a processing error, so a reworded message degrades to generic advice
+ * rather than to a wrong claim.
+ */
+function isDuplicateRejection(reason?: string | null): boolean {
+  if (!reason) return false
+  return /already on (your account|the marketplace)|nearly identical|already been uploaded|copy of an existing model/i.test(
+    reason,
+  )
+}
+
+/** What the artist should actually do about a failed upload. */
+function failureAdvice(reason?: string | null): string {
+  // Dedup only ever rejects a clash with ANOTHER account — re-listing your own
+  // piece (on its own and inside a set) is allowed — so this is never "you already
+  // uploaded this"; uploading the same file again will fail identically.
+  return isDuplicateRejection(reason)
+    ? 'Uploading the same file again won’t work. Upload a different file, then delete this draft — or contact support if this is your own work.'
+    : 'Delete this draft and upload the file again. If it keeps failing, the mesh may be corrupt or too heavy to process.'
+}
+
 /** Why a draft can't be published yet, or null if it's good to go. */
 function publishBlocker(m: TerrainModel): string | null {
   if (m.processingStatus && m.processingStatus !== 'ready') {
-    return m.processingStatus === 'failed'
-      ? 'Processing failed — re-upload this model'
-      : 'Still processing…'
+    if (m.processingStatus !== 'failed') return 'Still processing…'
+    // Show the real reason — "re-upload this model" was actively wrong for a
+    // duplicate rejection, which is the most common failure by far.
+    return m.processingError || 'Processing failed'
   }
   if (!m.thumbnailUrl) return 'Add a thumbnail before publishing'
   return null
@@ -54,7 +80,7 @@ const PreviewBadge: React.FC<{ model: TerrainModel; recentlyReady: boolean }> = 
   if (p === 'failed') {
     return (
       <span className="inline-block px-2 py-0.5 rounded-sm text-xs font-medium bg-red-100 text-red-800">
-        Preview failed
+        {isDuplicateRejection(model.processingError) ? 'Rejected' : 'Upload failed'}
       </span>
     )
   }
@@ -246,7 +272,16 @@ const ArtistModels: React.FC = () => {
         if (state === 'failed') {
           return (
             <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {label} was uploaded but its 3D preview couldn’t be generated. Open it to see why, or re-upload the file.
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">
+                    {label} couldn’t be {isDuplicateRejection(jm?.processingError) ? 'accepted' : 'processed'}.
+                  </p>
+                  {jm?.processingError && <p className="mt-1">{jm.processingError}</p>}
+                  <p className="mt-1 text-red-700">{failureAdvice(jm?.processingError)}</p>
+                </div>
+              </div>
             </div>
           )
         }
@@ -316,7 +351,16 @@ const ArtistModels: React.FC = () => {
                     {m.downloadCount != null && <> · {m.downloadCount} downloads</>}
                     {m.saleCount != null && <> · {m.saleCount} sales</>}
                   </p>
-                  {isDraft && blocker && <p className="text-xs text-amber-700 mt-1">{blocker}</p>}
+                  {m.processingStatus === 'failed' ? (
+                    // A failed upload gets the reason inline and in red — an amber
+                    // "blocker" line reads like a to-do, not a rejection.
+                    <div className="mt-1.5 rounded-sm border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800">
+                      <p className="font-medium">{m.processingError || 'Processing failed'}</p>
+                      <p className="mt-0.5 text-red-700">{failureAdvice(m.processingError)}</p>
+                    </div>
+                  ) : (
+                    isDraft && blocker && <p className="text-xs text-amber-700 mt-1">{blocker}</p>
+                  )}
                   {rowError[m.id] && <p className="text-xs text-red-600 mt-1">{rowError[m.id]}</p>}
 
                   {FEATURES.printAndShip && (quote || m.printPrice != null) && (

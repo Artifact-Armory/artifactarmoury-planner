@@ -5,7 +5,7 @@ import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
-  Paintbrush,
+  Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -23,6 +23,7 @@ import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
+import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
@@ -75,6 +76,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const instances = useAppStore((s) => s.instances)
   const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
   const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
+  const removeInstances = useAppStore((s) => s.actions.removeInstances)
   const selectedAssetId = useAppStore((s) => s.selectedAssetId)
   const setSelectedAsset = useAppStore((s) => s.setSelectedAsset)
   const snapBaseline = useAppStore((s) => s.snapBaseline)
@@ -200,6 +202,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
   const [showHelp, setShowHelp] = React.useState(false)
+  // Tablet support. `coarse` adds on-screen buttons for the keyboard-only actions;
+  // `compact` turns the two fixed side panels into drawers. Both are false on a
+  // desktop, where every existing control keeps working exactly as before.
+  const coarse = useCoarsePointer()
+  const compact = useCompactLayout()
+  const [paletteOpen, setPaletteOpen] = React.useState(false)
+  const [bomOpen, setBomOpen] = React.useState(false)
+  // Only one drawer at a time on a narrow screen — together they'd cover the table.
+  const openPalette = (open: boolean) => { setPaletteOpen(open); if (open) setBomOpen(false) }
+  const openBom = (open: boolean) => { setBomOpen(open); if (open) setPaletteOpen(false) }
   const [toast, setToast] = React.useState<{ count: number } | null>(null)
   const startedRef = React.useRef(false)
   const onboardRef = React.useRef(false)
@@ -480,7 +492,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       <button
         key={id}
         className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
-        onClick={() => setSelectedAsset(selectedAssetId === a.id ? null : a.id)}
+        onClick={() => { pickAsset(a.id); }}
         title={`Place ${a.name}`}
       >
         <div className="tb-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}</div>
@@ -493,6 +505,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     )
   }
 
+  // Choosing a model to place. On a narrow screen the palette is a drawer covering
+  // the table, so close it — otherwise you'd tap a tile and have nowhere to place it.
+  const pickAsset = (id: string) => {
+    setSelectedAsset(selectedAssetId === id ? null : id)
+    if (compact) setPaletteOpen(false)
+  }
+
   // A tile for one of the artist's OWN models (incl. unpublished drafts), with a
   // status pill instead of owned/basket. Registered assets resolve via getAssetById.
   const renderOwnModelTile = (m: { id: string; name: string; thumbnail?: string; status: string }) => {
@@ -501,7 +520,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       <button
         key={m.id}
         className={`tb-tile ${selectedAssetId === m.id ? 'is-active' : ''}`}
-        onClick={() => setSelectedAsset(selectedAssetId === m.id ? null : m.id)}
+        onClick={() => pickAsset(m.id)}
         title={`Place ${m.name}`}
       >
         <div className="tb-thumb">{m.thumbnail ? <img src={m.thumbnail} alt="" /> : <Box size={22} />}</div>
@@ -659,7 +678,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }
 
   return (
-    <div className="tb-fs">
+    <div className={`tb-fs${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}`}>
       <ThreeStage />
 
       {/* Loading gate — blocks interaction until the table + its textures are ready */}
@@ -687,7 +706,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {selectedAssetId && (
             <span className="tb-level" data-manual={placementManual}>
               Level {Math.round(placementLevel)}
-              <span className="tb-small">· {placementManual ? 'manual (PgUp/PgDn)' : 'on surface'}</span>
+              <span className="tb-small">
+                · {placementManual ? (coarse ? 'manual' : 'manual (PgUp/PgDn)') : 'on surface'}
+              </span>
             </span>
           )}
         </div>
@@ -779,6 +800,82 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </span>
             )}
           </div>
+
+          {/* On-screen equivalents of the keyboard-only actions, for tablets. R,
+              PageUp/PageDown and Delete have no finger equivalent; everything else
+              (undo, snap, fit, tilt) already has a toolbar button. Rendered only on
+              touch-primary devices, so the desktop toolbar is unchanged. */}
+          {coarse && (
+            <div className="tb-touchbar">
+              <button
+                className="tb-icon"
+                title="Rotate anticlockwise"
+                onClick={() => useAppStore.getState().stageApi?.rotate(-1)}
+              >
+                <RotateLeftIcon size={18} />
+              </button>
+              <button
+                className="tb-icon"
+                title="Rotate clockwise"
+                onClick={() => useAppStore.getState().stageApi?.rotate(1)}
+              >
+                <RotateCw size={18} />
+              </button>
+              {selectedAssetId && (
+                <>
+                  <div className="tb-sep" />
+                  <span className="tb-touch-label"><Layers size={14} /> Level</span>
+                  <button
+                    className="tb-icon"
+                    title="Place a level higher"
+                    onClick={() => useAppStore.getState().stageApi?.nudgeLevel(1)}
+                  >
+                    <ArrowUp size={18} />
+                  </button>
+                  <button
+                    className="tb-icon"
+                    title="Place a level lower"
+                    onClick={() => useAppStore.getState().stageApi?.nudgeLevel(-1)}
+                  >
+                    <ArrowDown size={18} />
+                  </button>
+                </>
+              )}
+              {selectedInstanceIds.length > 0 && (
+                <>
+                  <div className="tb-sep" />
+                  <button
+                    className="tb-icon"
+                    title="Delete selection"
+                    onClick={() => removeInstances(selectedInstanceIds)}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Drawer handles — only when the viewport is too narrow to pin both
+              panels open (tablet). On desktop the panels are always visible. */}
+          {compact && (
+            <>
+              <button
+                className={`tb-drawer-tab is-left ${paletteOpen ? 'is-open' : ''}`}
+                title="Models"
+                onClick={() => openPalette(!paletteOpen)}
+              >
+                <PanelLeft size={18} />
+              </button>
+              <button
+                className={`tb-drawer-tab is-right ${bomOpen ? 'is-open' : ''}`}
+                title="Your build"
+                onClick={() => openBom(!bomOpen)}
+              >
+                <PanelRight size={18} />
+              </button>
+            </>
+          )}
 
           {/* Terrain panel. The sculpt brushes and printable-tile export are gated
               behind FEATURES.terrainSculpt (parked — clunky, to be rebuilt); the
@@ -907,7 +1004,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           )}
 
           {/* Catalogue / palette */}
-          <aside className="tb-palette" data-tour="planner-palette">
+          <aside
+            className={`tb-palette${compact && !paletteOpen ? ' is-stowed' : ''}`}
+            data-tour="planner-palette"
+          >
             <div className="tb-palette-tabs" data-tour="planner-tabs">
               <button
                 className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
@@ -990,7 +1090,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                           <button
                             key={a.id}
                             className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
-                            onClick={() => setSelectedAsset(selectedAssetId === a.id ? null : a.id)}
+                            onClick={() => pickAsset(a.id)}
                             title={`Place ${a.name}`}
                           >
                             <div className="tb-thumb">
@@ -1069,7 +1169,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           </aside>
 
           {/* Bill of materials / cart */}
-          <aside className="tb-bom" data-tour="planner-bom">
+          <aside
+            className={`tb-bom${compact && !bomOpen ? ' is-stowed' : ''}`}
+            data-tour="planner-bom"
+          >
             <div className="tb-bom-head">
               <strong>Models on this table</strong>
               <span className="tb-small">{bom.pieceCount} pieces</span>
@@ -1213,7 +1316,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {/* Docked marketplace basket — the SAME cartStore as the shop, so it
               stays consistent everywhere. Add individual models by tapping them,
               or drop the whole build in at once. */}
-          <aside className="tb-bom tb-view-basket">
+          <aside className={`tb-bom tb-view-basket${compact && !bomOpen ? ' is-stowed' : ''}`}>
             <div className="tb-bom-head">
               <strong>Your basket</strong>
               <span className="tb-small">{cartItems.length} item{cartItems.length === 1 ? '' : 's'}</span>
@@ -1307,7 +1410,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
       {!readOnly && <CoachMarks />}
       {showHelp && (
-        <HelpOverlay
+        <HelpOverlay touch={coarse}
           onClose={() => setShowHelp(false)}
           onReplayTour={() => { setShowHelp(false); startTour() }}
         />

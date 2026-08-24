@@ -9,6 +9,15 @@
 //   • WASD / arrows → pan across the table
 //   • Always "up"   → camera.up is fixed, lookAt(target) every frame
 //
+// TOUCH (tablets) is a strictly separate path — a touch pointer always reports
+// button 0 and never fires `wheel`, so none of the mouse handlers above can ever
+// see it, and none of this can regress a desktop control:
+//
+//   • Two-finger pinch  → zoom toward the midpoint (same maths as the wheel)
+//   • Two-finger twist  → orbit
+//   • Two-finger drag ↕ → pitch
+//   • One finger        → left to the host (tap = place/select, drag = pan/move)
+//
 // All motion is damped toward a desired state; nothing snaps. The controller only
 // reports `isMoving` so the host can drive on-demand rendering.
 
@@ -48,6 +57,10 @@ export class BuilderCamera {
   private dragButton: number | null = null
   private lastX = 0
   private lastY = 0
+  // Live touch points, by pointerId. Two of them = a camera gesture; one is the
+  // host's business (tap to place, drag to pan or move a piece).
+  private touches = new Map<number, { x: number; y: number }>()
+  private gesture: { dist: number; angle: number; midY: number } | null = null
   private keys = new Set<string>()
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
   private raycaster = new THREE.Raycaster()
@@ -128,6 +141,20 @@ export class BuilderCamera {
     this.onChange()
   }
 
+  /**
+   * Pan the view by a screen-space delta. Public so the host can drive a
+   * one-finger drag across empty table as a pan (touch has no middle button).
+   */
+  panByScreenDelta(dx: number, dy: number) {
+    this.panByPixels(dx, dy)
+    this.onChange()
+  }
+
+  /** True while two or more fingers are down — the host suppresses its own drag. */
+  isGesturing(): boolean {
+    return this.touches.size >= 2
+  }
+
   dispose() {
     this.detach()
   }
@@ -149,6 +176,7 @@ export class BuilderCamera {
     this.dom.addEventListener('pointerdown', this.onPointerDown)
     window.addEventListener('pointermove', this.onPointerMove)
     window.addEventListener('pointerup', this.onPointerUp)
+    window.addEventListener('pointercancel', this.onPointerUp)
     this.dom.addEventListener('wheel', this.onWheel, { passive: false })
     this.dom.addEventListener('contextmenu', this.onContextMenu)
     window.addEventListener('keydown', this.onKeyDown)
@@ -159,6 +187,7 @@ export class BuilderCamera {
     this.dom.removeEventListener('pointerdown', this.onPointerDown)
     window.removeEventListener('pointermove', this.onPointerMove)
     window.removeEventListener('pointerup', this.onPointerUp)
+    window.removeEventListener('pointercancel', this.onPointerUp)
     this.dom.removeEventListener('wheel', this.onWheel)
     this.dom.removeEventListener('contextmenu', this.onContextMenu)
     window.removeEventListener('keydown', this.onKeyDown)
@@ -167,6 +196,13 @@ export class BuilderCamera {
 
   // Right (2) = orbit, Middle (1) = pan. Left (0) is left for the host (place/select).
   private onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      // The second finger starts a camera gesture; capture its baseline so the
+      // first move frame doesn't jump.
+      if (this.touches.size === 2) this.gesture = this.readGesture()
+      return
+    }
     if (e.button === 2 || e.button === 1) {
       this.dragButton = e.button
       this.lastX = e.clientX
@@ -176,6 +212,12 @@ export class BuilderCamera {
   }
 
   private onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      if (!this.touches.has(e.pointerId)) return
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (this.touches.size >= 2) this.applyTouchGesture()
+      return
+    }
     if (this.dragButton === null) return
     const dx = e.clientX - this.lastX
     const dy = e.clientY - this.lastY
@@ -197,7 +239,58 @@ export class BuilderCamera {
   }
 
   private onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      this.touches.delete(e.pointerId)
+      // Dropping below two fingers ends the gesture. Re-baseline if fingers are
+      // still down, so lifting one of three doesn't snap the view.
+      this.gesture = this.touches.size >= 2 ? this.readGesture() : null
+      return
+    }
     if (e.button === this.dragButton) this.dragButton = null
+  }
+
+  // ---- touch gestures -----------------------------------------------------
+
+  /** Pinch distance, twist angle and midpoint height of the first two fingers. */
+  private readGesture(): { dist: number; angle: number; midY: number } {
+    const [a, b] = [...this.touches.values()]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    return {
+      dist: Math.max(1, Math.hypot(dx, dy)),
+      angle: Math.atan2(dy, dx),
+      midY: (a.y + b.y) / 2,
+    }
+  }
+
+  /**
+   * Two fingers: pinch zooms (toward the midpoint, like the wheel zooms toward
+   * the cursor), twisting orbits, and dragging both fingers up/down pitches.
+   * Midpoint horizontal travel is deliberately ignored — it's nearly always the
+   * by-product of a twist, and panning it too makes the view feel slippery.
+   */
+  private applyTouchGesture() {
+    const prev = this.gesture
+    const now = this.readGesture()
+    this.gesture = now
+    if (!prev) return
+
+    const [a, b] = [...this.touches.values()]
+    this.zoomToward((a.x + b.x) / 2, (a.y + b.y) / 2, prev.dist / now.dist)
+
+    // Twist → orbit. Normalise to (-π, π] so crossing the ±180° seam doesn't spin.
+    let dAngle = now.angle - prev.angle
+    if (dAngle > Math.PI) dAngle -= 2 * Math.PI
+    if (dAngle < -Math.PI) dAngle += 2 * Math.PI
+    this.desiredAzimuth += dAngle
+
+    // Both fingers travelling vertically → pitch, same sensitivity as a right-drag.
+    this.desiredPolar = THREE.MathUtils.clamp(
+      this.desiredPolar - (now.midY - prev.midY) * 0.005,
+      this.minPolar,
+      this.maxPolar,
+    )
+    this.onChange()
   }
 
   private onContextMenu = (e: Event) => e.preventDefault()
@@ -214,16 +307,24 @@ export class BuilderCamera {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault()
-    const rect = this.dom.getBoundingClientRect()
-    this.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    this.zoomToward(e.clientX, e.clientY, Math.exp(e.deltaY * 0.0012)) // smooth, multiplicative
+  }
 
-    // world point currently under the cursor (on the ground plane)
+  /**
+   * Scale the view distance by `factor`, keeping the world point under
+   * (clientX, clientY) pinned on screen. Shared by the wheel and pinch-zoom.
+   */
+  private zoomToward(clientX: number, clientY: number, factor: number) {
+    if (!isFinite(factor) || factor <= 0) return
+    const rect = this.dom.getBoundingClientRect()
+    this.ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1
+    this.ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1
+
+    // world point currently under the cursor / pinch centre (on the ground plane)
     this.raycaster.setFromCamera(this.ndc, this.camera)
     const hit = new THREE.Vector3()
     const hasHit = this.raycaster.ray.intersectPlane(this.groundPlane, hit) !== null
 
-    const factor = Math.exp(e.deltaY * 0.0012) // smooth, multiplicative
     const newDistance = THREE.MathUtils.clamp(
       this.desiredDistance * factor,
       this.minDistance,
@@ -231,7 +332,7 @@ export class BuilderCamera {
     )
 
     if (hasHit) {
-      // Shift the target toward the cursor point so that point stays put on screen.
+      // Shift the target toward that point so it stays put on screen.
       const t = 1 - newDistance / this.desiredDistance
       this.desiredTarget.lerp(hit, THREE.MathUtils.clamp(t, -1, 1))
     }

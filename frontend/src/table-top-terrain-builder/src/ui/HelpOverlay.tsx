@@ -2,7 +2,44 @@
 import React from 'react'
 import { X } from 'lucide-react'
 
-const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
+type Group = { title: string; rows: Array<[string, string]> }
+
+// Shown instead of the mouse/keyboard reference on touch-primary devices — none
+// of the keys below exist on a tablet, so listing them there is just misleading.
+const TOUCH_GROUPS: Group[] = [
+  {
+    title: 'Camera',
+    rows: [
+      ['Pan', 'Drag one finger on empty table'],
+      ['Zoom', 'Pinch'],
+      ['Look around (orbit)', 'Twist two fingers'],
+      ['Tilt the view', 'Drag two fingers up / down'],
+      ['Fit to selection or table', 'Fit button'],
+    ],
+  },
+  {
+    title: 'Building',
+    rows: [
+      ['Pick a piece', 'Tap it in the palette'],
+      ['Place / stamp piece', 'Tap the table'],
+      ['Rotate', 'Rotate buttons (bottom bar)'],
+      ['Raise / lower place level', 'Level ▲ / ▼ (bottom bar)'],
+      ['Toggle snap ⇄ free', 'Grid button (top bar)'],
+    ],
+  },
+  {
+    title: 'Editing',
+    rows: [
+      ['Select piece', 'Tap it'],
+      ['Move', 'Drag it'],
+      ['Tilt upright / lay flat', 'Tilt buttons (top bar)'],
+      ['Delete', 'Bin button (bottom bar)'],
+      ['Undo / Redo', 'Top bar buttons'],
+    ],
+  },
+]
+
+const GROUPS: Group[] = [
   {
     title: 'Camera',
     rows: [
@@ -49,7 +86,16 @@ const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
   },
 ]
 
-export function HelpOverlay({ onClose, onReplayTour }: { onClose: () => void; onReplayTour?: () => void }) {
+export function HelpOverlay({
+  onClose,
+  onReplayTour,
+  touch = false,
+}: {
+  onClose: () => void
+  onReplayTour?: () => void
+  /** Show the finger-gesture reference instead of the mouse/keyboard one. */
+  touch?: boolean
+}) {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -71,7 +117,7 @@ export function HelpOverlay({ onClose, onReplayTour }: { onClose: () => void; on
           </div>
         </div>
         <div className="tb-help-grid">
-          {GROUPS.map((g) => (
+          {(touch ? TOUCH_GROUPS : GROUPS).map((g) => (
             <div key={g.title} className="tb-help-col">
               <div className="tb-help-title">{g.title}</div>
               {g.rows.map(([label, keys]) => (
