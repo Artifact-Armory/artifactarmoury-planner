@@ -305,6 +305,13 @@ const CreateModel: React.FC = () => {
         Upload your files and details — one model, a multi-part piece, or a whole group like a
         “Small Village” sold as one product. We’ll generate the 3D previews and print estimate for you.
       </p>
+      <p className="text-muted-foreground mt-2 text-sm">
+        Visitors never receive your real file, and each buyer’s download is prepared just for
+        them.{' '}
+        <Link to="/creator-protection" className="text-primary hover:underline">
+          How we look after your files
+        </Link>
+      </p>
 
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
         <div>

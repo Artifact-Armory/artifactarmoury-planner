@@ -28,6 +28,7 @@ import Tag from './pages/Tag';
 import PublicTables from './pages/PublicTables';
 import Contact from './pages/Contact';
 import About from './pages/About';
+import CreatorProtection from './pages/CreatorProtection';
 import NotFound from './pages/NotFound';
 import PrivacyPolicy from './pages/legal/PrivacyPolicy';
 import TermsOfService from './pages/legal/TermsOfService';
@@ -188,6 +189,7 @@ function App() {
               <Route path="tables/:id" element={<TableRedirect />} />
               <Route path="about" element={<About />} />
               <Route path="contact" element={<Contact />} />
+              <Route path="creator-protection" element={<CreatorProtection />} />
               <Route path="privacy-policy" element={<PrivacyPolicy />} />
               <Route path="terms-of-service" element={<TermsOfService />} />
               

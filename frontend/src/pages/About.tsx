@@ -61,6 +61,12 @@ const About: React.FC = () => {
           upload — rotation, scale and re-export resistant — so stolen models
           can’t be quietly re-listed by someone else.
         </p>
+        <p className="text-muted-foreground mt-3 leading-relaxed">
+          <Link to="/creator-protection" className="text-primary hover:underline">
+            Read how we protect your models
+          </Link>{' '}
+          — what each measure does, and what it deliberately doesn’t claim to do.
+        </p>
       </section>
 
       <section className="mt-8">

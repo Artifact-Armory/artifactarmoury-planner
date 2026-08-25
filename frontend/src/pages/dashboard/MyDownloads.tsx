@@ -2,7 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Package, ShieldCheck } from 'lucide-react'
+import { Download, Package } from 'lucide-react'
 import { ordersApi } from '../../api/endpoints/orders'
 import { modelsApi } from '../../api/endpoints/models'
 import Spinner from '../../components/ui/Spinner'
@@ -48,11 +48,8 @@ const MyDownloads: React.FC = () => {
         <h1 className="text-2xl font-semibold text-foreground">My downloads</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           Every STL you own, ready to download whenever you like — you only pay once and can
-          re-download any time.
-        </p>
-        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-          <ShieldCheck size={13} />
-          Each file is watermarked to your account
+          re-download any time. Each file is prepared for your account, so please keep it to
+          yourself rather than passing it on.
         </p>
       </section>
 

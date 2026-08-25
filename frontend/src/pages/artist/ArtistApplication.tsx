@@ -1,4 +1,5 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import Button from '../../components/ui/Button'
 import { SITE_NAME } from '../../config/brand'
 
@@ -32,6 +33,25 @@ const ArtistApplication: React.FC = () => {
               <li>3. Email everything to <span className="font-medium">artists@artifactarmoury.com</span></li>
             </ol>
           </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground">
+            How we look after your files
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Visitors browsing the site never receive your real model — they see a low-detail
+            stand-in that can&apos;t be printed. Each buyer&apos;s download is prepared
+            individually, so if a file ever turns up where it shouldn&apos;t, we can tell you
+            which sale it came from. And every new upload is checked against the whole
+            marketplace, so nobody can re-list your work as their own.
+          </p>
+          <Link
+            to="/creator-protection"
+            className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+          >
+            The full detail, including what we don&apos;t claim →
+          </Link>
         </div>
 
         <div className="mt-8 rounded-2xl border border-dashed border-border bg-muted p-6 text-sm text-muted-foreground">

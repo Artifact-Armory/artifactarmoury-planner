@@ -8,6 +8,7 @@ import { payoutsApi } from '../../api/endpoints/payouts'
 import { useAnalyticsRange, DateRangePicker } from '../../components/analytics/dateRange'
 import { formatPrice } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
+import GettingStarted from '../../components/artist/GettingStarted'
 
 const pct = (cur: number, prev: number): number | null => {
   if (prev === 0) return cur > 0 ? 100 : null
@@ -83,6 +84,8 @@ const ArtistDashboard: React.FC = () => {
           <DateRangePicker range={range} setRange={setRange} setPreset={setPreset} />
         </div>
       </div>
+
+      <GettingStarted />
 
       {isLoading || !data || !t || !prev ? (
         <div className="flex justify-center py-24"><Spinner size="lg" /></div>

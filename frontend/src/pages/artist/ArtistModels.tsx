@@ -287,9 +287,19 @@ const ArtistModels: React.FC = () => {
         }
         if (jm && state !== 'processing') {
           return (
-            <div className="mt-6 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-              <CheckCircle2 size={16} />
-              {label}’s 3D preview is ready. It’s saved as a draft — publish it when you’re ready for buyers to see it.
+            <div className="mt-6 flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+              <span>
+                {label}’s 3D preview is ready. It’s saved as a draft — publish it when you’re ready
+                for buyers to see it.
+                {/* Plain-language result of the geometry dedup check: a model only reaches
+                    'ready' if it matched nothing from another artist, so this is always true
+                    here. Deliberately stated as an outcome, not as a security feature. */}
+                <span className="mt-1 block text-green-700/90">
+                  We checked it against everything else on the marketplace — nothing there matches
+                  your file.
+                </span>
+              </span>
             </div>
           )
         }

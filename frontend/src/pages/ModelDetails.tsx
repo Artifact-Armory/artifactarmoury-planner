@@ -532,6 +532,10 @@ const ModelDetails: React.FC = () => {
                   {downloading ? 'Preparing…' : model.partCount && model.partCount > 1 ? `Download ZIP (${model.partCount} parts)` : 'Download STL'}
                 </Button>
                 {downloadError && <p className="mt-2 text-xs text-destructive">{downloadError}</p>}
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Prepared for your account — print it as often as you like, but please don’t pass
+                  the file on.
+                </p>
               </>
             ) : inCart ? (
               <Button className="mt-6 w-full" onClick={() => openCart()} variant="outline" leftIcon={<ShoppingCart size={16} />}>
