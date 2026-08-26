@@ -5,6 +5,8 @@ import { X, Trash2 } from 'lucide-react'
 import Button from '../ui/Button'
 import { useCartStore, cartKey } from '../../store/cartStore'
 import PriceDisplay from '../models/PriceDisplay'
+import { useTaxStore, grossFromLines } from '../../store/taxStore'
+import { formatPrice } from '../../utils/format'
 import { Badge } from '../shadcn/badge'
 
 const CartDrawer: React.FC = () => {
@@ -18,6 +20,12 @@ const CartDrawer: React.FC = () => {
     removeItem,
   } = useCartStore()
   const navigate = useNavigate()
+
+  // Cart prices are net. The total is the sum of the *gross lines* rendered above
+  // (each grossed up by PriceDisplay), not the rate applied to the net subtotal —
+  // otherwise the visible line items wouldn't add up to it.
+  const taxRate = useTaxStore((s) => s.rate())
+  const grossSubtotal = grossFromLines(items.map((i) => i.price), taxRate)
 
   useEffect(() => {
     if (isOpen) {
@@ -130,13 +138,20 @@ const CartDrawer: React.FC = () => {
 
         <footer className="border-t border-border px-6 py-4">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-muted-foreground">Subtotal</span>
+            <span className="text-sm font-medium text-muted-foreground">Total</span>
             <span className="text-lg font-semibold text-foreground">
-              £{subtotal.toFixed(2)}
+              {formatPrice(grossSubtotal)}
             </span>
           </div>
+          {/*
+            This used to read "Taxes and discounts calculated at checkout" — the exact
+            surprise the tax-inclusive pricing exists to remove. The line items above
+            are already gross, so this total is the amount that will be charged.
+          */}
           <p className="mt-1 text-xs text-muted-foreground">
-            Taxes and discounts calculated at checkout.
+            {taxRate > 0
+              ? `Includes ${taxRate}% VAT. This is the total you'll pay.`
+              : "No VAT applies where you are. This is the total you'll pay."}
           </p>
           <Button
             className="mt-4 w-full"

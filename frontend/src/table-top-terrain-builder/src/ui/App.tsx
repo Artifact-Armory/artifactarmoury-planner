@@ -28,6 +28,7 @@ import { HelpOverlay } from './HelpOverlay'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
+import { useTaxStore, grossFromNet, grossFromLines } from '@/store/taxStore'
 import Logo from '@/components/common/Logo'
 import FacetRail from '@/components/taxonomy/FacetRail'
 import { facetAppliesTo, MODEL_CLASSES, MODEL_CLASS_SLUG } from '@/api/endpoints/taxonomy'
@@ -556,6 +557,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const count = addLayoutToShopCart()
     if (count > 0) setToast({ count })
   }
+
+  // Model prices are stored net; the planner shows the same tax-inclusive figures as
+  // the shop so a build's total matches what checkout will charge.
+  const vatRate = useTaxStore((s) => s.rate())
+  const grossPrice = React.useCallback((net: number) => grossFromNet(net, vatRate), [vatRate])
 
   // The marketplace basket subtotal (the same cartStore the shop uses).
   const cartSubtotal = React.useMemo(
@@ -1099,7 +1105,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                             <div className="tb-tile-name">{a.name}</div>
                             <div className="tb-tile-meta">
                               <span className={`tb-pill ${a.fulfillment}`}>{a.fulfillment === 'stl' ? 'STL' : 'Print'}</span>
-                              {a.price != null && <span>£{a.price.toFixed(2)}</span>}
+                              {a.price != null && <span>£{grossPrice(a.price).toFixed(2)}</span>}
                             </div>
                           </button>
                         ))}
@@ -1133,7 +1139,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                           <div className="tb-tile-name">{g.name}</div>
                           <div className="tb-tile-meta">
                             <span className="tb-pill bundle">{g.kind === 'set' ? 'SET' : 'BUNDLE'} · {g.memberIds.length}</span>
-                            <span>{g.owned ? 'Owned' : `£${g.price.toFixed(2)}`}</span>
+                            <span>{g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`}</span>
                           </div>
                         </div>
                         <ChevronDown size={16} className={`tb-chev ${expanded ? 'is-open' : ''}`} />
@@ -1190,14 +1196,19 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   </div>
                   <div className="tb-bom-name">{r.asset!.name}</div>
                   <div className="tb-bom-qty" title={`${r.qty} on the table — you only pay once`}>×{r.qty}</div>
-                  <div className="tb-bom-price">£{(r.asset!.price ?? 0).toFixed(2)}</div>
+                  <div className="tb-bom-price">£{grossPrice(r.asset!.price ?? 0).toFixed(2)}</div>
                 </div>
               ))}
             </div>
             <div className="tb-bom-total">
               <span>Total cost of Table</span>
-              <strong>£{bom.total.toFixed(2)}</strong>
+              <strong>£{grossFromLines(bom.rows.map((r) => r.asset!.price ?? 0), vatRate).toFixed(2)}</strong>
             </div>
+            {vatRate > 0 && (
+              <div className="tb-small" style={{ textAlign: 'right', opacity: 0.7 }}>
+                incl. {vatRate}% VAT
+              </div>
+            )}
             <button className="tb-cta" disabled={bom.pieceCount === 0} onClick={handleAddAll}>
               <ShoppingCart size={16} /> Add all to basket
             </button>
@@ -1349,7 +1360,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             </div>
             <div className="tb-bom-total">
               <span>Subtotal</span>
-              <strong>£{cartSubtotal.toFixed(2)}</strong>
+              <strong>£{grossPrice(cartSubtotal).toFixed(2)}</strong>
             </div>
             <button className="tb-cta" disabled={cartItems.length === 0} onClick={() => navigate('/checkout')}>
               <ShoppingCart size={16} /> Checkout

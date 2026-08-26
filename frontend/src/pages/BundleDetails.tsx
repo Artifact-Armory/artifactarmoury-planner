@@ -119,6 +119,7 @@ const BundleDetails: React.FC = () => {
                 }
                 salePercent={bundle.salePercent}
                 size="lg"
+                showTaxNote
               />
               <span className="text-sm text-muted-foreground">for {bundle.models.length} models</span>
             </div>

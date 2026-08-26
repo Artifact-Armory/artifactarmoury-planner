@@ -476,6 +476,7 @@ const ModelDetails: React.FC = () => {
                 }
                 salePercent={model.salePercent}
                 size="lg"
+                showTaxNote
               />
               <span className="text-sm text-muted-foreground">
                 Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews

@@ -9,10 +9,16 @@ import { paymentRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, PaymentError } from '../middleware/error';
 import { validateEmail } from '../utils/validation';
-import { createPaymentIntent, getPaymentIntent } from '../services/stripe';
+import {
+  createPaymentIntent,
+  getPaymentIntent,
+  paymentMethodOf,
+  type OrderPaymentMethod,
+} from '../services/stripe';
 import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
 import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
+import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../services/vat';
 
 const router = Router();
 
@@ -30,7 +36,24 @@ router.post('/',
       // Buyer ticked "I want my download now and understand I lose my 14-day right to
       // cancel once it begins" — required to lawfully deliver instantly (UK CCRs 2013).
       downloadConsent,
+      // What the buyer picked at checkout ('stripe' = card, or 'paypal'). Advisory:
+      // on live Stripe they can still switch method inside the Payment Element, so
+      // this is only the opening guess and confirm/webhook overwrite it with the
+      // method actually used.
+      paymentMethod,
+      // ISO country the buyer says they're in — drives which VAT rate applies. Only
+      // the code is accepted; the rate itself is always looked up server-side.
+      taxCountry: requestedTaxCountry,
     } = req.body;
+
+    const requestedMethod: OrderPaymentMethod = paymentMethod === 'paypal' ? 'paypal' : 'stripe';
+
+    // An unrecognised code falls back to the default rather than erroring: the picker
+    // only ever offers codes from /api/tax/countries, so a bad one means a stale
+    // client, and refusing the sale over it would be the wrong trade.
+    const taxCountry = isKnownTaxCountry(requestedTaxCountry)
+      ? String(requestedTaxCountry).toUpperCase()
+      : DEFAULT_TAX_COUNTRY;
 
     if (!downloadConsent) {
       throw new ValidationError('Please confirm you agree to your download starting immediately (this waives the 14-day cancellation right) before purchasing');
@@ -73,6 +96,10 @@ router.post('/',
         bundleId: string | null; bundleName: string | null;
       }> = [];
       let subtotal = 0;
+      // The priced lines exactly as the buyer saw them in the cart — one entry per
+      // cart line, so a bundle counts once at its own price even though it expands
+      // into several order_items. VAT is charged on these (see vatOnLines).
+      const taxableLines: number[] = [];
 
       const pushModelRow = (model: any, price: number, bundleId: string | null, bundleName: string | null) => {
         const commissionRate = parseFloat(model.commission_rate);
@@ -138,6 +165,7 @@ router.post('/',
             pushModelRow(m, sharePence / 100, bundle.id, bundle.name);
           });
           subtotal += bundlePrice / 100;
+          taxableLines.push(bundlePrice / 100);
         } else if (item?.modelId) {
           // --- Single model -------------------------------------------------
           const modelResult = await client.query(
@@ -153,6 +181,7 @@ router.post('/',
           const price = Math.round(parseFloat(model.base_price) * (100 - modelDiscount.percent)) / 100;
           pushModelRow(model, price, null, null);
           subtotal += price;
+          taxableLines.push(price);
         } else {
           throw new ValidationError('Each item must be a modelId or bundleId');
         }
@@ -200,9 +229,18 @@ router.post('/',
         }
       }
 
-      const tax = 0;
+      // Destination VAT. `subtotal` is the NET total (artist prices are net, and
+      // order_items.unit_price stays net), so commission and payouts are unaffected —
+      // tax sits on top and belongs to the tax authority, not to us or the artist.
+      // Computed here rather than trusted from the client, which only sends a country.
+      const taxRate = rateFor(taxCountry);
+      // Per line, then summed — matching how the cart displays a gross price per
+      // line, so the buyer's basket adds up to exactly this total. See vatOnLines().
+      // A bundle is one priced line even though it expands into several order_items,
+      // so tax it on the bundle price the buyer was shown, not on the split shares.
+      const tax = vatOnLines(taxableLines, taxCountry);
       const shippingCost = 0; // digital — no shipping
-      const total = subtotal + shippingCost + tax;
+      const total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
 
       // Create order (no shipping address for digital STLs)
       const orderResult = await client.query(
@@ -210,10 +248,10 @@ router.post('/',
           user_id, customer_email,
           subtotal, shipping_cost, tax, total,
           payment_method, payment_status, fulfillment_status,
-          download_consent_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'stripe', 'pending', 'pending', CURRENT_TIMESTAMP)
+          download_consent_at, tax_country, tax_rate
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', CURRENT_TIMESTAMP, $8, $9)
         RETURNING id, order_number`,
-        [userId, email, subtotal, shippingCost, tax, total]
+        [userId, email, subtotal, shippingCost, tax, total, requestedMethod, taxCountry, taxRate]
       );
       const order = orderResult.rows[0];
 
@@ -240,7 +278,8 @@ router.post('/',
         );
       }
 
-      // Mock/real Stripe payment intent
+      // Mock/real Stripe payment intent. PayPal is accepted through Stripe (same
+      // intent, same webhook, same settlement) — see services/stripe.ts.
       const paymentIntent = await createPaymentIntent({
         amount: total,
         currency: 'gbp',
@@ -250,6 +289,7 @@ router.post('/',
           customer_email: email,
         },
         description: `Order ${order.order_number}`,
+        preferredMethod: requestedMethod,
       });
 
       await client.query(
@@ -259,13 +299,22 @@ router.post('/',
 
       await client.query('COMMIT');
 
-      logger.info('Order created', { orderId: order.id, orderNumber: order.order_number, total });
+      logger.info('Order created', {
+        orderId: order.id, orderNumber: order.order_number,
+        subtotal, tax, total, taxCountry, taxRate,
+      });
 
       res.status(201).json({
         message: 'Order created successfully',
         order: {
           id: order.id,
           orderNumber: order.order_number,
+          // The buyer sees gross everywhere, but return the breakdown so checkout can
+          // show what the VAT line actually was.
+          subtotal,
+          tax,
+          taxCountry,
+          taxRate,
           total,
           clientSecret: paymentIntent.client_secret,
           paymentIntentId: paymentIntent.payment_intent_id,
@@ -306,23 +355,57 @@ router.post('/:id/confirm',
 
     const order = orderResult.rows[0];
 
+    // Already confirmed — most likely the Stripe webhook won the race, or the buyer
+    // reloaded the PayPal return URL. Report success without re-sending the receipt
+    // or double-counting sales. (Redirect methods make this genuinely reachable; the
+    // card-only flow never hit it.)
+    if (order.payment_status === 'succeeded') {
+      return res.json({
+        message: 'Order already confirmed',
+        order: { id: order.id, orderNumber: order.order_number, status: 'processing' },
+      });
+    }
+
     // Verify payment with Stripe
     const payment = await getPaymentIntent(paymentIntentId);
+
+    // Redirect-based methods (PayPal among them) can land back on the site while the
+    // payment is still settling. Record the attempt but do NOT mark it paid or unlock
+    // any download — the payment_intent.succeeded webhook finishes the job.
+    if (payment.status === 'processing') {
+      await db.query(
+        `UPDATE orders SET payment_status = 'processing', payment_method = $2 WHERE id = $1`,
+        [id, paymentMethodOf(payment)]
+      );
+      return res.json({
+        message: 'Payment is still being processed',
+        order: { id: order.id, orderNumber: order.order_number, status: 'processing', pending: true },
+      });
+    }
 
     if (payment.status !== 'succeeded') {
       throw new PaymentError('Payment not completed');
     }
 
     // Digital STL orders are fulfilled instantly on payment — the buyer can
-    // download straight away (no print farm, no shipping).
-    await db.query(
+    // download straight away (no print farm, no shipping). The method is read off the
+    // intent rather than trusted from the client: the buyer may have switched to
+    // PayPal inside the Payment Element after this order row was written.
+    //
+    // `AND payment_status <> 'succeeded'` makes this the atomic claim on the order:
+    // whoever updates a row is the one that sends the receipt and counts the sale.
+    // The check above catches the ordinary case, but it reads and writes separately,
+    // so a webhook landing mid-request could still slip past it.
+    const claim = await db.query(
       `UPDATE orders
        SET payment_status = 'succeeded',
            paid_at = CURRENT_TIMESTAMP,
-           fulfillment_status = 'delivered'
-       WHERE id = $1`,
-      [id]
+           fulfillment_status = 'delivered',
+           payment_method = $2
+       WHERE id = $1 AND payment_status <> 'succeeded'`,
+      [id, paymentMethodOf(payment)]
     );
+    const firstConfirm = (claim.rowCount ?? 0) > 0;
 
     // Accrue the artists' earnings into the ledger (held for the payout hold window,
     // then cleared + paid out by the payout job). Idempotent — safe if the Stripe
@@ -337,28 +420,32 @@ router.post('/:id/confirm',
       [id]
     );
 
-    // Send confirmation email (digital STL order — no shipping, files ready now)
-    sendOrderConfirmation({
-      order: {
-        id: order.id,
-        order_number: order.order_number,
-        created_at: order.created_at,
-        user_email: order.customer_email,
-        pricing: { total: Number(order.total) },
-      } as any,
-      items: itemsResult.rows.map((r: any) => ({
-        asset: { name: r.model_name, base_price: Number(r.unit_price) } as any,
-        quantity: Number(r.quantity),
-        modelId: r.model_id,
-      }))
-    }).catch(err => logger.error('Failed to send confirmation email', { error: err }));
+    // Send confirmation email (digital STL order — no shipping, files ready now).
+    // Only the request that actually claimed the order does this, so a reloaded
+    // PayPal return page can't send a second receipt or double-count the sale.
+    if (firstConfirm) {
+      sendOrderConfirmation({
+        order: {
+          id: order.id,
+          order_number: order.order_number,
+          created_at: order.created_at,
+          user_email: order.customer_email,
+          pricing: { total: Number(order.total) },
+        } as any,
+        items: itemsResult.rows.map((r: any) => ({
+          asset: { name: r.model_name, base_price: Number(r.unit_price) } as any,
+          quantity: Number(r.quantity),
+          modelId: r.model_id,
+        }))
+      }).catch(err => logger.error('Failed to send confirmation email', { error: err }));
 
-    // Increment model sale counts
-    for (const item of itemsResult.rows) {
-      db.query(
-        'UPDATE models SET sale_count = sale_count + $1 WHERE id = $2',
-        [item.quantity, item.model_id]
-      ).catch(err => logger.error('Failed to update sale count', { error: err }));
+      // Increment model sale counts
+      for (const item of itemsResult.rows) {
+        db.query(
+          'UPDATE models SET sale_count = sale_count + $1 WHERE id = $2',
+          [item.quantity, item.model_id]
+        ).catch(err => logger.error('Failed to update sale count', { error: err }));
+      }
     }
 
     logger.info('Order confirmed', { orderId: id, orderNumber: order.order_number });

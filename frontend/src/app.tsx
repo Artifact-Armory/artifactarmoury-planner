@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useAuthStore } from './store/authStore';
+import { useTaxStore } from './store/taxStore';
 import { authApi } from './api/endpoints/auth';
 import { Toaster } from 'react-hot-toast';
 
@@ -113,6 +114,12 @@ const queryClient = new QueryClient({
 
 function App() {
   const { setUser, setLoading, isAuthenticated, token, clearAuth } = useAuthStore();
+  const loadTaxCountries = useTaxStore((s) => s.loadCountries);
+
+  // VAT rates drive every price on the storefront, so fetch them once at boot rather
+  // than per page — a product card must be able to render its gross price straight
+  // away. `loadCountries` no-ops if it has already run.
+  useEffect(() => { loadTaxCountries(); }, [loadTaxCountries]);
 
   // Fetch user profile if authenticated
   useEffect(() => {

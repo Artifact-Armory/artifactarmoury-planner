@@ -32,7 +32,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "test:vat": "node -r ts-node/register/transpile-only scripts/test-vat-parity.ts"
   },
   "keywords": [
     "terrain",

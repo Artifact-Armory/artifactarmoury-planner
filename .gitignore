@@ -7,6 +7,11 @@ node_modules/
 dist/
 build/
 
+# Stray tsc output next to vite.config.ts. Vite resolves vite.config.js BEFORE
+# vite.config.ts, so a committed compiled copy silently shadows the real config.
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
 # Environment files
 .env
 .env.local

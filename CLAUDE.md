@@ -225,6 +225,99 @@ was told nothing). Fixed on three fronts:
   otherwise invisible. `duplicateMessage()` lost its "your own model" branch as unreachable.
   `npm run test:stage4` still passes (it exercises the fingerprint maths directly).
 
+## PayPal at checkout (built 2026-08-25)
+PayPal is accepted **through Stripe**, not as a second processor: same PaymentIntent, same
+webhook, same settlement, same Connect payouts — one integration instead of two reconciliation
+paths. `automatic_payment_methods` already surfaces every method enabled on the account, so the
+Payment Element grows a PayPal tab on its own.
+- **Still required, and only you can do it:** activate PayPal in the Stripe Dashboard
+  (Settings → Payment methods). **Marketplaces on Connect must submit the onboarding request
+  first** — until that's approved the tab will not appear, however correct the code is.
+- **`return_url` was the real code change.** Cards settle in place under
+  `redirect: 'if_required'`, but PayPal always hands off to a hosted approval page; without a
+  `return_url` Stripe *rejects the confirm* rather than degrading. `Checkout.tsx` now passes
+  `/checkout?order=<id>` and handles the come-back leg (Stripe appends `payment_intent` +
+  `redirect_status`), because no in-page `confirmPayment` promise survives the round trip.
+- **StrictMode gotcha, cost an hour:** the page mounts → unmounts → mounts, so state set by the
+  first mount is thrown away, and `setSearchParams` (a router navigation) causes *another*
+  remount that did the same. Fixed by stripping the query with `window.history.replaceState`
+  (no popstate → React Router never sees it) and memoising the confirm **promise** at module
+  scope in `returnConfirms`, so one request goes out and every mount subscribes to it. A ref
+  guard does NOT work here — refs die with the discarded mount. Verified: one `/confirm` call.
+- **`orders.payment_method`** (already CHECK'd to `'stripe'|'paypal'`) is now actually written.
+  It's read **off the PaymentIntent**, never trusted from the client, since the buyer can switch
+  method inside the Payment Element after the order row exists. NB `payment_method_types` is
+  **not** a usable signal — with automatic methods it lists everything enabled on the account,
+  so `[0]` would relabel card orders as PayPal; `paymentMethodOf()` reads the attached
+  PaymentMethod (webhooks arrive unexpanded, hence `resolvePaymentMethod()` re-fetches).
+- **Async settlement handled:** a `processing` intent no longer 500s or unlocks downloads — the
+  order is marked `processing` and a "Payment processing" screen tells the buyer their files
+  will appear once it clears. The webhook finishes the order.
+- **Confirm is now idempotent.** Redirect returns make double-confirm genuinely reachable
+  (reload the return URL, or the webhook racing the request). The claim is atomic —
+  `UPDATE … WHERE id=$1 AND payment_status <> 'succeeded'` — and only the request that actually
+  claims the row sends the receipt and counts the sale.
+- **Test checkout** gained a Card / PayPal toggle (mock intent ids carry `_paypal`) so the path
+  is exercisable without live keys. Live mode shows no picker — Stripe renders its own tabs.
+- Verified in-browser on the mock path: toggle flips, cancelled-return shows its message and
+  keeps the cart, confirm fires exactly once and surfaces the backend's response.
+
+## Tax-inclusive pricing (built 2026-08-25, migration 040)
+Buyers now see the price they will actually pay, from the first product card. Artist
+prices are **NET**; the buyer picks their country and every buyer-facing surface renders
+**net + that country's VAT**. Nothing new appears at checkout — the panel there only
+*breaks out* tax the buyer has been looking at all along.
+- **Artist earnings are untouched.** `order_items.unit_price` stays net and commission is
+  still computed on net, so payouts and the earnings ledger are unaffected. Tax lives at
+  the order level only (`orders.tax` + new `tax_country` / `tax_rate`, snapshotted because
+  rates change and a historical order must report what was charged).
+- **Rates live in the backend** (`services/vat.ts`, served by `GET /api/tax/countries`), so a
+  rate change ships with a backend deploy and the storefront can't disagree with the charge.
+  UK + EU-27 standard rates; everywhere else is zero-rated. **These need verifying before
+  launch and re-checking periodically** — the real fix is Stripe Tax (~0.5%/txn), which the
+  single `rateFor()` lookup is shaped to be swapped for.
+- **Frontend:** `store/taxStore.ts` (persisted country, guessed from browser locale, never
+  overriding an explicit choice), `components/common/CountrySelect.tsx` (header + checkout).
+  `PriceDisplay` is where net becomes gross, which is why every buyer-facing price routes
+  through it. **Artist/admin screens deliberately do NOT** — they show net, which is what an
+  artist earns on. Cart drawer's "Taxes calculated at checkout" line is gone; it now states
+  the VAT-inclusive total.
+- **TWO money bugs were caught by testing, both would have shipped silently:**
+  1. *Displayed ≠ charged.* The frontend grossed up in one step, the backend added a
+     separately rounded VAT line — they disagreed by **1p on floating-point ties** (at 25%
+     VAT a £4.10 model displayed £5.13, charged £5.12). Both now work in **integer pence**
+     with the same expression. `grossFromNet`/`vatFromNet` in taxStore.ts and `vatPenceOn`
+     in vat.ts **must be changed together**.
+  2. *Baskets didn't add up.* VAT on the basket total ≠ sum of per-line VAT: lines of £5.13
+     + £0.73 displayed against a £5.85 total. VAT is now charged **per cart line, then
+     summed** (`vatOnLines` / `grossFromLines`), so the visible lines always reach the
+     total. A bundle is **one** line at its own price, even though it expands into several
+     `order_items`.
+- **`npm run test:vat`** (`scripts/test-vat-parity.ts`) guards both: 2M price/country
+  combinations + 160k multi-line baskets, asserting displayed == charged, the breakdown
+  reconciles, and the lines sum to the total. Run it after touching either rounding path.
+- Verified in-browser: header picker auto-detects locale, switching country re-prices the
+  whole basket live (GB 20% → HU 27% → US 0%), and the previously-mismatching Swedish case
+  now displays exactly what the backend charges.
+- **Still open:** EU VAT needs **two pieces of non-contradictory location evidence** — a
+  self-declared dropdown is not enough on its own. The card/PayPal country from Stripe is
+  the natural second piece and isn't wired up yet.
+
+## VAT: we are the deemed supplier, and that is not escapable
+Worth knowing before pricing decisions. Under EU/UK platform rules (Art. 9a of Implementing
+Reg. 282/2011) the presumption that the *platform* supplies the customer is **irrebuttable** if
+the platform sets the T&Cs, authorises the charge, **or** authorises delivery. We do all three —
+and delivery control is the watermarking pipeline itself, so it can't be given up. Consequence:
+VAT is owed on the **full price the buyer pays**, not on our commission, with **no threshold**
+for EU B2C digital sales (non-Union OSS registration from the first sale; the €10k threshold is
+for EU-established sellers, not UK ones). **The pricing side of this is now built** — see
+"Tax-inclusive pricing" above: listed prices are net, destination VAT is added at checkout, and
+commission is computed on the net. What remains is not code: **OSS registration and filing**,
+and verifying the rate table. **Get an accountant on this before launch.**
+Note Stripe *direct charges* (`application_fee_amount`, artist as merchant of record) is the
+only structural alternative, and it's a bad trade here: a 3-artist cart becomes 3 charges = 3×
+the fixed fee, disputes land on artists, and it still may not escape the delivery-control test.
+
 ## Planner on tablets (built 2026-08-23)
 The planner was **hard-gated to ≥1024px** (`pages/Planner.tsx`) and had **zero touch
 handling** — a touch pointer always reports `button === 0` and never fires `wheel`, so

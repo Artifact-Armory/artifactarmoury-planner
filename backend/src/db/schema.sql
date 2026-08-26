@@ -372,6 +372,12 @@ CREATE TABLE orders (
     subtotal DECIMAL(10,2) NOT NULL,
     shipping_cost DECIMAL(10,2) NOT NULL,
     tax DECIMAL(10,2) DEFAULT 0.00,
+    -- Destination VAT (migration 040). order_items.unit_price stays NET, so artist
+    -- commission and payouts are unaffected; tax lives only at the order level.
+    -- The rate is snapshotted because rates change and a historical order must keep
+    -- reporting what was actually charged.
+    tax_country VARCHAR(2),
+    tax_rate NUMERIC(5,2) NOT NULL DEFAULT 0,
     total DECIMAL(10,2) NOT NULL,
     
     -- Immediate-download consent: when the buyer agreed the download starts now and

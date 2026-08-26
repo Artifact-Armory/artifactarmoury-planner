@@ -179,11 +179,79 @@ export async function createOnboardingLink(
 // PAYMENT INTENTS
 // ============================================================================
 
+/**
+ * How the buyer paid, in the vocabulary of `orders.payment_method` (which is
+ * CHECK-constrained to 'stripe' | 'paypal'). PayPal is accepted *through* Stripe —
+ * one integration, one settlement, one webhook — so everything that isn't PayPal is
+ * recorded as plain 'stripe'.
+ */
+export type OrderPaymentMethod = 'stripe' | 'paypal'
+
+/**
+ * Read the method actually used off a PaymentIntent.
+ *
+ * NB `payment_method_types` is NOT a usable signal here: with
+ * `automatic_payment_methods` it lists every method *enabled on the account*, so
+ * `[0]` would label plain card orders as PayPal the moment PayPal is switched on.
+ * Only the attached PaymentMethod (or the charge's method details) says what the
+ * buyer actually used, and neither is expanded on a raw webhook payload — hence
+ * `resolvePaymentMethod()` below for that path. Anything we can't positively
+ * identify as PayPal is recorded as plain 'stripe'.
+ */
+export function paymentMethodOf(intent: Stripe.PaymentIntent): OrderPaymentMethod {
+  const pm = intent.payment_method
+  if (pm && typeof pm === 'object' && pm.type) {
+    return pm.type === 'paypal' ? 'paypal' : 'stripe'
+  }
+
+  const charge = intent.latest_charge
+  if (charge && typeof charge === 'object' && charge.payment_method_details?.type) {
+    return charge.payment_method_details.type === 'paypal' ? 'paypal' : 'stripe'
+  }
+
+  // Single-entry list means the intent was pinned to one method, so it is reliable.
+  if (intent.payment_method_types?.length === 1) {
+    return intent.payment_method_types[0] === 'paypal' ? 'paypal' : 'stripe'
+  }
+
+  return 'stripe'
+}
+
+/**
+ * Same, but for objects that arrive unexpanded (webhook payloads). Re-fetches the
+ * intent so the attached PaymentMethod is readable, and degrades to whatever the
+ * raw object can tell us if that call fails — recording the wrong method must never
+ * be the thing that stops an order being marked paid.
+ */
+async function resolvePaymentMethod(
+  intent: Stripe.PaymentIntent
+): Promise<OrderPaymentMethod> {
+  if (intent.payment_method && typeof intent.payment_method === 'object') {
+    return paymentMethodOf(intent)
+  }
+  try {
+    return paymentMethodOf(await getPaymentIntent(intent.id))
+  } catch (error) {
+    stripeLogger.warn('Could not resolve payment method; recording as stripe', {
+      error,
+      paymentIntentId: intent.id,
+    })
+    return paymentMethodOf(intent)
+  }
+}
+
 export interface CreatePaymentIntentParams {
   amount: number // In pounds (e.g., 15.99)
   currency?: string
   metadata?: Record<string, string>
   description?: string
+  /**
+   * What the buyer picked at checkout. Only used to shape the *mock* intent id so
+   * the test flow can exercise the PayPal redirect path; on live Stripe the method
+   * is chosen inside the Payment Element and read back off the intent, so this is
+   * advisory only and never restricts what the buyer can actually use.
+   */
+  preferredMethod?: OrderPaymentMethod
 }
 
 export interface CreatePaymentIntentResult {
@@ -200,8 +268,9 @@ export async function createPaymentIntent(
 ): Promise<CreatePaymentIntentResult> {
   if (STRIPE_MOCK) {
     const amount = Math.round((params.amount || 0) * 100) / 100
+    const suffix = params.preferredMethod === 'paypal' ? '_paypal' : ''
     return {
-      payment_intent_id: `pi_mock_${Date.now()}`,
+      payment_intent_id: `pi_mock${suffix}_${Date.now()}`,
       client_secret: `cs_mock_${Math.random().toString(36).slice(2)}`,
       amount,
     }
@@ -224,6 +293,11 @@ export async function createPaymentIntent(
       currency,
       metadata,
       description,
+      // Every method enabled on the Stripe account shows up in the Payment Element,
+      // PayPal included — activate it under Settings → Payment methods (marketplaces
+      // on Connect must submit the onboarding request first). `allow_redirects`
+      // defaults to 'always', which PayPal needs: it hands off to a hosted approval
+      // page and returns to our `return_url`.
       automatic_payment_methods: {
         enabled: true
       }
@@ -252,6 +326,9 @@ export async function getPaymentIntent(
   paymentIntentId: string
 ): Promise<Stripe.PaymentIntent> {
   if (STRIPE_MOCK) {
+    // Mock intent ids carry the method the test checkout picked (see
+    // createPaymentIntent), so the PayPal path can be exercised without live keys.
+    const method = paymentIntentId.includes('_paypal') ? 'paypal' : 'card'
     return {
       id: paymentIntentId,
       object: 'payment_intent',
@@ -259,10 +336,16 @@ export async function getPaymentIntent(
       currency: 'gbp',
       status: 'succeeded',
       metadata: {},
+      payment_method_types: [method],
+      payment_method: { type: method },
     } as unknown as Stripe.PaymentIntent
   }
   try {
-    return await stripe.paymentIntents.retrieve(paymentIntentId)
+    // `payment_method` is an id string unless expanded, and we need its `type` to
+    // record how the buyer actually paid.
+    return await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ['payment_method', 'latest_charge'],
+    })
   } catch (error) {
     stripeLogger.error('Failed to retrieve payment intent', {
       error,
@@ -415,13 +498,17 @@ async function handlePaymentIntentSucceeded(
   if (orderId) {
     // Mark paid + delivered (digital STLs fulfil instantly), then accrue the artists'
     // earnings into the ledger. Idempotent, so it's safe alongside the confirm route.
+    // The method is taken from the intent rather than from whatever the client said
+    // at checkout — the buyer can switch to PayPal inside the Payment Element after
+    // the order row was written.
     await db.query(
       `UPDATE orders
        SET payment_status = 'succeeded',
            paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
-           fulfillment_status = 'delivered'
+           fulfillment_status = 'delivered',
+           payment_method = $2
        WHERE id = $1`,
-      [orderId]
+      [orderId, await resolvePaymentMethod(paymentIntent)]
     )
 
     await accrueEarningsForOrder(orderId).catch(err =>

@@ -1,13 +1,20 @@
 import React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Trash2, CheckCircle, Lock } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Trash2, CheckCircle, Lock, Clock, CreditCard } from 'lucide-react'
 import { loadStripe, type Stripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { useCartStore, cartKey } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
-import { ordersApi, OrderItemInput, CreatedOrder } from '../api/endpoints/orders'
+import {
+  ordersApi,
+  OrderItemInput,
+  CreatedOrder,
+  PaymentMethodChoice,
+} from '../api/endpoints/orders'
 import { formatPrice } from '../utils/format'
 import Button from '../components/ui/Button'
+import CountrySelect from '../components/common/CountrySelect'
+import { useTaxStore, grossFromLines, vatFromLines } from '../store/taxStore'
 
 // Load Stripe.js once, only if a publishable key is configured. When it's absent
 // (or the backend is running in STRIPE_MOCK mode) checkout falls back to the mock
@@ -27,8 +34,24 @@ const MOCK_CHECKOUT = import.meta.env.VITE_MOCK_CHECKOUT !== 'false'
 /** A client secret from the mock Stripe path — no real card entry is possible. */
 const isMockSecret = (secret?: string) => !secret || secret.startsWith('cs_mock')
 
+/** No live Payment Element, so checkout completes through the mock path. */
+const testMode = MOCK_CHECKOUT || !stripePromise
+
+/**
+ * In-flight confirms for a PayPal redirect return, keyed by PaymentIntent id.
+ *
+ * StrictMode mounts this page, unmounts it, then mounts it again, so an effect that
+ * simply fired the request would send two — and any state the discarded mount set
+ * is thrown away with it. Memoising the *promise* at module scope means one request
+ * goes out while every mount subscribes to it, so whichever mount survives renders
+ * the result. Cleared by a full reload, which is fine: the backend confirm is
+ * idempotent and replays the same outcome.
+ */
+const returnConfirms = new Map<string, Promise<{ pending: boolean }>>()
+
 const Checkout: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const items = useCartStore((s) => s.items)
   const subtotal = useCartStore((s) => s.subtotal)
   const removeItem = useCartStore((s) => s.removeItem)
@@ -40,7 +63,21 @@ const Checkout: React.FC = () => {
   const [placing, setPlacing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [done, setDone] = React.useState(false)
+  const [pending, setPending] = React.useState(false)
   const [consent, setConsent] = React.useState(false)
+  const [method, setMethod] = React.useState<PaymentMethodChoice>('stripe')
+
+  // `subtotal` from the cart is NET. The backend recomputes all of this from the
+  // country code alone — these figures exist so the buyer can see the breakdown, and
+  // are never sent as the amount to charge.
+  const taxCountry = useTaxStore((s) => s.country)
+  const taxRate = useTaxStore((s) => s.rate())
+  // Per cart line, matching the gross prices listed above and what the backend
+  // charges (services/vat.ts vatOnLines) — so subtotal + VAT reaches exactly the
+  // total, and the total is exactly the sum of the line prices on screen.
+  const netLines = items.map((i) => i.price)
+  const taxAmount = vatFromLines(netLines, taxRate)
+  const grossTotal = grossFromLines(netLines, taxRate)
 
   // Whether this order will collect a real card (Stripe live) or complete via the mock path.
   const realPayment = !!stripePromise && !!order && !isMockSecret(order.clientSecret)
@@ -49,6 +86,64 @@ const Checkout: React.FC = () => {
     clearCart()
     setDone(true)
   }
+
+  // ---------------------------------------------------------------------------
+  // Returning from a redirect payment (PayPal).
+  //
+  // PayPal hands off to its own approval page, so the tab that started checkout is
+  // gone by the time payment completes — Stripe sends the buyer back to
+  // `/checkout?order=<id>` with its own `payment_intent` params appended. Pick that
+  // up and confirm the order, since no in-page `confirmPayment` promise survived.
+  // ---------------------------------------------------------------------------
+  const returningOrderId = searchParams.get('order')
+  const returningIntentId = searchParams.get('payment_intent')
+  const redirectStatus = searchParams.get('redirect_status')
+
+  React.useEffect(() => {
+    if (!returningOrderId || !returningIntentId) return
+
+    // Tidy the Stripe params off the address bar with `replaceState` rather than
+    // `setSearchParams` — the latter is a router navigation, which remounts this page
+    // and discards the state we're about to set. `replaceState` emits no popstate, so
+    // React Router keeps its own location (and these params stay readable on a
+    // remount, which is exactly what the subscribe-per-mount behaviour below needs).
+    window.history.replaceState(null, '', window.location.pathname)
+
+    if (redirectStatus === 'failed') {
+      setError('Your PayPal payment was declined or cancelled. Your cart is still here — you can try again.')
+      return
+    }
+
+    let live = true
+    let confirm = returnConfirms.get(returningIntentId)
+    if (!confirm) {
+      confirm = ordersApi.confirmOrder(returningOrderId, returningIntentId)
+      returnConfirms.set(returningIntentId, confirm)
+    }
+
+    setPlacing(true)
+    confirm
+      .then((result) => {
+        if (!live) return
+        if (result.pending) {
+          clearCart()
+          setPending(true)
+        } else {
+          finishSuccessfully()
+        }
+      })
+      .catch((err: any) => {
+        if (!live) return
+        setError(
+          err?.response?.data?.message ||
+            'We could not confirm your payment. If PayPal took the money it will appear in My Downloads shortly — please check there before paying again.',
+        )
+      })
+      .finally(() => { if (live) setPlacing(false) })
+
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returningOrderId, returningIntentId, redirectStatus])
 
   // Step 1: create the order (and its PaymentIntent). In mock mode we can confirm
   // immediately; in live mode we move to the card-entry step.
@@ -62,12 +157,12 @@ const Checkout: React.FC = () => {
       const orderItems: OrderItemInput[] = items.map((i) =>
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
-      const created = await ordersApi.createOrder(orderItems, user.email, consent)
+      const created = await ordersApi.createOrder(orderItems, user.email, consent, method, taxCountry)
       setOrder(created)
 
       if (MOCK_CHECKOUT || !stripePromise || isMockSecret(created.clientSecret)) {
         // Mock/test checkout: the payment auto-succeeds, so confirm and finish
-        // immediately — no card entry.
+        // immediately — no card entry and no PayPal round-trip.
         await ordersApi.confirmOrder(created.id, created.paymentIntentId ?? created.clientSecret ?? 'mock')
         finishSuccessfully()
       } else {
@@ -79,6 +174,31 @@ const Checkout: React.FC = () => {
     } finally {
       setPlacing(false)
     }
+  }
+
+  // PayPal can return to the site before the payment has settled. Nothing is
+  // unlocked yet — the Stripe webhook finishes the order — so say so honestly
+  // rather than showing a success screen over an empty downloads page.
+  if (pending) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+        <Clock className="mx-auto text-amber-500" size={56} />
+        <h1 className="mt-4 text-2xl font-semibold text-foreground">Payment processing</h1>
+        <p className="mt-2 text-muted-foreground">
+          PayPal is still confirming your payment. This usually takes a few moments — your files
+          will appear in My Downloads as soon as it clears, and we'll email your receipt. You have
+          not been charged twice, so there's no need to pay again.
+        </p>
+        <div className="mt-8 flex justify-center gap-3">
+          <Link to="/dashboard/downloads" className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            My downloads
+          </Link>
+          <Link to="/browse" className="rounded-md border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent">
+            Keep browsing
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   if (done) {
@@ -157,16 +277,78 @@ const Checkout: React.FC = () => {
           </ul>
 
           <aside className="h-fit rounded-lg border bg-card p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-xl font-bold text-foreground">{formatPrice(subtotal)}</span>
-            </div>
+            {/*
+              The prices in the list above are already tax-inclusive, so this panel
+              exists to *account* for the total, not to add to it — the VAT line
+              breaks out tax the buyer has been seeing all along, and the total
+              matches what the product page said. Nothing new appears here.
+            */}
+            <CountrySelect variant="full" className="mb-4 border-b border-border pb-4" />
+
+            {taxRate > 0 ? (
+              <>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
+                  <span className="text-foreground">{formatPrice(subtotal)}</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">VAT ({taxRate}%)</span>
+                  <span className="text-foreground">{formatPrice(taxAmount)}</span>
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                  <span className="text-sm font-medium text-foreground">Total</span>
+                  <span className="text-xl font-bold text-foreground">{formatPrice(grossTotal)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Total</span>
+                <span className="text-xl font-bold text-foreground">{formatPrice(grossTotal)}</span>
+              </div>
+            )}
             {!user && (
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
             )}
 
             {phase === 'review' ? (
               <>
+                {/*
+                  Live Stripe renders its own method tabs (PayPal included, once it's
+                  activated on the account), so this picker exists only for the test
+                  checkout — it drives which path the mock takes so the PayPal flow is
+                  exercisable without live keys.
+                */}
+                {testMode ? (
+                  <fieldset className="mt-4">
+                    <legend className="text-xs font-medium text-muted-foreground">Pay with</legend>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {([
+                        { value: 'stripe', label: 'Card', icon: <CreditCard size={14} /> },
+                        { value: 'paypal', label: 'PayPal', icon: null },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setMethod(opt.value)}
+                          aria-pressed={method === opt.value}
+                          className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                            method === opt.value
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:bg-accent'
+                          }`}
+                        >
+                          {opt.icon}
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : (
+                  <p className="mt-4 text-xs text-muted-foreground">
+                    Pay by card or PayPal — choose on the next step.
+                  </p>
+                )}
+
                 <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
@@ -184,13 +366,13 @@ const Checkout: React.FC = () => {
                 <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !consent}>
                   {placing
                     ? 'Processing…'
-                    : stripePromise && !MOCK_CHECKOUT
-                      ? `Continue to payment · ${formatPrice(subtotal)}`
-                      : `Pay ${formatPrice(subtotal)} (test)`}
+                    : !testMode
+                      ? `Continue to payment · ${formatPrice(grossTotal)}`
+                      : `Pay ${formatPrice(grossTotal)} with ${method === 'paypal' ? 'PayPal' : 'card'} (test)`}
                 </Button>
                 <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
                   <Lock size={11} />
-                  {stripePromise && !MOCK_CHECKOUT ? 'Payments secured by Stripe' : 'Test checkout — no real payment is taken.'}
+                  {!testMode ? 'Card and PayPal, secured by Stripe' : 'Test checkout — no real payment is taken.'}
                 </p>
               </>
             ) : (
@@ -201,8 +383,9 @@ const Checkout: React.FC = () => {
                 >
                   <PaymentForm
                     order={order}
-                    total={subtotal}
+                    total={grossTotal}
                     onSuccess={finishSuccessfully}
+                    onPending={() => { clearCart(); setPending(true) }}
                     onBack={() => { setPhase('review'); setOrder(null) }}
                   />
                 </Elements>
@@ -222,8 +405,9 @@ const PaymentForm: React.FC<{
   order: CreatedOrder
   total: number
   onSuccess: () => void
+  onPending: () => void
   onBack: () => void
-}> = ({ order, total, onSuccess, onBack }) => {
+}> = ({ order, total, onSuccess, onPending, onBack }) => {
   const stripe = useStripe()
   const elements = useElements()
   const [paying, setPaying] = React.useState(false)
@@ -235,20 +419,33 @@ const PaymentForm: React.FC<{
     setPaying(true)
     setError(null)
     try {
+      // `return_url` is mandatory for any method that leaves the site. Cards settle
+      // in place and `redirect: 'if_required'` keeps them here, but PayPal always
+      // hands off to its approval page — without a return_url Stripe rejects the
+      // confirm outright rather than falling back. The order id rides along in the
+      // URL so the page we come back to knows what to confirm.
       const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
         elements,
         redirect: 'if_required',
+        confirmParams: {
+          return_url: `${window.location.origin}/checkout?order=${encodeURIComponent(order.id)}`,
+        },
       })
 
       if (stripeError) {
-        setError(stripeError.message || 'Payment could not be completed. Please check your card details.')
+        setError(stripeError.message || 'Payment could not be completed. Please check your payment details.')
         return
       }
 
-      if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'processing')) {
+      // Reached only for methods that settled without leaving the page — a redirect
+      // method never gets here, it resumes in the return-URL effect above.
+      if (paymentIntent?.status === 'succeeded') {
         // Tell our backend to verify the intent and unlock the downloads.
         await ordersApi.confirmOrder(order.id, order.paymentIntentId ?? paymentIntent.id)
         onSuccess()
+      } else if (paymentIntent?.status === 'processing') {
+        const result = await ordersApi.confirmOrder(order.id, order.paymentIntentId ?? paymentIntent.id)
+        result.pending ? onPending() : onSuccess()
       } else {
         setError('Payment did not complete. Please try again.')
       }

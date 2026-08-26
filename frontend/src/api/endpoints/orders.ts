@@ -21,9 +21,24 @@ type Pagination = {
 // A cart line sent to the backend: either a single model or a bundle.
 export type OrderItemInput = { modelId: string } | { bundleId: string }
 
+/**
+ * How the buyer intends to pay. PayPal runs *through* Stripe, so both are one
+ * integration — this only seeds the order row and picks the mock path; on live
+ * Stripe the buyer's actual choice is made inside the Payment Element and read back
+ * off the intent server-side.
+ */
+export type PaymentMethodChoice = 'stripe' | 'paypal'
+
 export type CreatedOrder = {
   id: string
   orderNumber: string
+  /** Net of tax. */
+  subtotal?: number
+  /** Destination VAT the backend actually charged. */
+  tax?: number
+  taxCountry?: string
+  taxRate?: number
+  /** Gross — what the buyer pays. */
   total: number
   clientSecret?: string
   paymentIntentId?: string
@@ -63,21 +78,45 @@ export const ordersApi = {
   /** Create a digital order from cart items (models and/or bundles).
    * `downloadConsent` records the buyer waiving their 14-day cancellation right so the
    * download can start immediately — the backend rejects the order without it. */
-  async createOrder(items: OrderItemInput[], customerEmail?: string, downloadConsent = true): Promise<CreatedOrder> {
-    const response = await apiClient.post(BASE_URL, { items, customerEmail, downloadConsent })
+  async createOrder(
+    items: OrderItemInput[],
+    customerEmail?: string,
+    downloadConsent = true,
+    paymentMethod: PaymentMethodChoice = 'stripe',
+    /**
+     * ISO country the buyer selected. Only the *code* goes over the wire — the
+     * backend looks up the rate and computes the tax itself, so a tampered client
+     * can't change what it is charged.
+     */
+    taxCountry?: string | null,
+  ): Promise<CreatedOrder> {
+    const response = await apiClient.post(BASE_URL, {
+      items, customerEmail, downloadConsent, paymentMethod, taxCountry,
+    })
     const o = response.data?.order ?? response.data
     return {
       id: o.id,
       orderNumber: o.orderNumber ?? o.order_number,
+      subtotal: o.subtotal != null ? Number(o.subtotal) : undefined,
+      tax: o.tax != null ? Number(o.tax) : undefined,
+      taxCountry: o.taxCountry ?? o.tax_country,
+      taxRate: o.taxRate != null ? Number(o.taxRate) : undefined,
       total: Number(o.total ?? 0),
       clientSecret: o.clientSecret ?? o.client_secret,
       paymentIntentId: o.paymentIntentId ?? o.payment_intent_id,
     }
   },
 
-  /** Confirm payment (mock Stripe returns 'succeeded'), unlocking downloads. */
-  async confirmOrder(orderId: string, paymentIntentId: string): Promise<void> {
-    await apiClient.post(`${BASE_URL}/${orderId}/confirm`, { paymentIntentId })
+  /**
+   * Confirm payment (mock Stripe returns 'succeeded'), unlocking downloads.
+   *
+   * `pending` comes back when a redirect method (PayPal) returned to the site while
+   * the payment is still settling: nothing is unlocked yet and the Stripe webhook
+   * completes the order, so the UI must say "processing", not "done".
+   */
+  async confirmOrder(orderId: string, paymentIntentId: string): Promise<{ pending: boolean }> {
+    const response = await apiClient.post(`${BASE_URL}/${orderId}/confirm`, { paymentIntentId })
+    return { pending: !!response.data?.order?.pending }
   },
 
   /** The signed-in buyer's purchased models (full detail + their own review). */

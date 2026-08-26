@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
+import CountrySelect from '../common/CountrySelect';
 import { Menu, X, Search, User, ShoppingCart, ChevronDown, LogOut, Settings, Heart, Package, UserPlus, Download } from 'lucide-react';
 import { authApi } from '../../api/endpoints/auth';
 import NotificationBell from '../notifications/NotificationBell';
@@ -158,6 +159,9 @@ const Header: React.FC = () => {
                 <Search size={20} className="text-muted-foreground" />
               </button>
             </form>
+
+            {/* Country picker — sets the VAT baked into every price on the site. */}
+            <CountrySelect variant="compact" />
 
             {/* Cart Button */}
             <button
