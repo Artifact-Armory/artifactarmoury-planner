@@ -421,9 +421,14 @@ CREATE TABLE orders (
     tax_rate NUMERIC(5,2) NOT NULL DEFAULT 0,
     total DECIMAL(10,2) NOT NULL,
     
-    -- Immediate-download consent: when the buyer agreed the download starts now and
-    -- thereby waived the 14-day cancellation right (UK Consumer Contracts Regs 2013).
+    -- Retired: used to record the buyer waiving their 14-day cancellation right.
+    -- No longer collected — buyers keep that right regardless (see migration 042).
     download_consent_at TIMESTAMP,
+
+    -- When the buyer ticked "I agree to the Terms of Service" at checkout (migration
+    -- 042). Evidence the licence terms (personal/commercial use, no redistribution)
+    -- were agreed to — not a rights waiver.
+    terms_accepted_at TIMESTAMP,
 
     -- Payment
     payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('stripe', 'paypal')),

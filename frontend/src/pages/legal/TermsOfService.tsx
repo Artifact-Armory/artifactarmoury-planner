@@ -63,17 +63,17 @@ const TermsOfService: React.FC = () => {
 
       <LegalSection heading="5. Refunds and your right to cancel">
         <p>
-          Because our products are digital files delivered immediately, they are treated as
-          digital content under UK/EU consumer law. When you buy a model you are asked to
-          agree that your download begins immediately and that, by doing so, you{' '}
-          <strong>lose the 14-day right to cancel</strong> once the download has started.
+          Because our products are digital files, they are treated as digital content under
+          UK/EU consumer law. Your download unlocks immediately after purchase, and you keep
+          your <strong>statutory 14-day right to cancel</strong> for a full refund during that
+          window, whether or not you have already downloaded the file.
         </p>
         <p>
-          We still want you to be happy with your purchase. If a file is faulty, corrupt,
-          not as described, or you have not yet downloaded it, contact us or the artist
-          through your dashboard and we will help put it right — including a refund where
-          appropriate. Disputes are handled artist-first through our messaging system, with
-          our support team stepping in if needed.
+          We still want you to be happy with your purchase. If a file is faulty, corrupt, not
+          as described, or you simply change your mind within 14 days, contact us or the
+          artist through your dashboard and we will help put it right — including a refund
+          where appropriate. Disputes are handled artist-first through our messaging system,
+          with our support team stepping in if needed.
         </p>
       </LegalSection>
 

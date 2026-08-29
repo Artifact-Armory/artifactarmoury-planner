@@ -33,9 +33,6 @@ router.post('/',
     const {
       items, // [{ modelId } | { bundleId }]
       customerEmail,
-      // Buyer ticked "I want my download now and understand I lose my 14-day right to
-      // cancel once it begins" — required to lawfully deliver instantly (UK CCRs 2013).
-      downloadConsent,
       // What the buyer picked at checkout ('stripe' = card, or 'paypal'). Advisory:
       // on live Stripe they can still switch method inside the Payment Element, so
       // this is only the opening guess and confirm/webhook overwrite it with the
@@ -44,6 +41,11 @@ router.post('/',
       // ISO country the buyer says they're in — drives which VAT rate applies. Only
       // the code is accepted; the rate itself is always looked up server-side.
       taxCountry: requestedTaxCountry,
+      // Buyer ticked "I agree to the Terms of Service" — required so the per-model
+      // licence terms (personal vs. commercial use, no redistribution) are agreed to
+      // before purchase. This is NOT the retired 14-day-waiver checkbox: the buyer
+      // keeps their statutory cancellation right regardless of this flag.
+      termsAccepted,
     } = req.body;
 
     const requestedMethod: OrderPaymentMethod = paymentMethod === 'paypal' ? 'paypal' : 'stripe';
@@ -55,9 +57,14 @@ router.post('/',
       ? String(requestedTaxCountry).toUpperCase()
       : DEFAULT_TAX_COUNTRY;
 
-    if (!downloadConsent) {
-      throw new ValidationError('Please confirm you agree to your download starting immediately (this waives the 14-day cancellation right) before purchasing');
+    if (!termsAccepted) {
+      throw new ValidationError('Please agree to the Terms of Service before purchasing');
     }
+
+    // No cancellation-right waiver is collected any more, so the buyer keeps their
+    // statutory 14-day right to cancel for a refund even though the download unlocks
+    // immediately. The artist's payout is held for that same window (PAYOUT_HOLD_DAYS
+    // in services/earnings.ts) so a refund doesn't claw back money already paid out.
 
     // Validate items
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -242,14 +249,16 @@ router.post('/',
       const shippingCost = 0; // digital — no shipping
       const total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
 
-      // Create order (no shipping address for digital STLs)
+      // Create order (no shipping address for digital STLs). download_consent_at
+      // stays NULL — we no longer collect a waiver of the 14-day cancellation right.
+      // terms_accepted_at is stamped now that termsAccepted has been checked above.
       const orderResult = await client.query(
         `INSERT INTO orders (
           user_id, customer_email,
           subtotal, shipping_cost, tax, total,
           payment_method, payment_status, fulfillment_status,
-          download_consent_at, tax_country, tax_rate
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', CURRENT_TIMESTAMP, $8, $9)
+          tax_country, tax_rate, terms_accepted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', $8, $9, CURRENT_TIMESTAMP)
         RETURNING id, order_number`,
         [userId, email, subtotal, shippingCost, tax, total, requestedMethod, taxCountry, taxRate]
       );

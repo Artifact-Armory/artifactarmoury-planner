@@ -64,7 +64,7 @@ const Checkout: React.FC = () => {
   const [error, setError] = React.useState<string | null>(null)
   const [done, setDone] = React.useState(false)
   const [pending, setPending] = React.useState(false)
-  const [consent, setConsent] = React.useState(false)
+  const [termsAccepted, setTermsAccepted] = React.useState(false)
   const [method, setMethod] = React.useState<PaymentMethodChoice>('stripe')
 
   // `subtotal` from the cart is NET. The backend recomputes all of this from the
@@ -150,14 +150,14 @@ const Checkout: React.FC = () => {
   async function handleContinue() {
     if (!user) { navigate('/login'); return }
     if (items.length === 0) return
-    if (!consent) { setError('Please confirm you agree to your download starting immediately.'); return }
+    if (!termsAccepted) { setError('Please agree to the Terms of Service before purchasing.'); return }
     setPlacing(true)
     setError(null)
     try {
       const orderItems: OrderItemInput[] = items.map((i) =>
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
-      const created = await ordersApi.createOrder(orderItems, user.email, consent, method, taxCountry)
+      const created = await ordersApi.createOrder(orderItems, user.email, termsAccepted, method, taxCountry)
       setOrder(created)
 
       if (MOCK_CHECKOUT || !stripePromise || isMockSecret(created.clientSecret)) {
@@ -352,18 +352,23 @@ const Checkout: React.FC = () => {
                 <label className="mt-4 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
-                    checked={consent}
-                    onChange={(e) => setConsent(e.target.checked)}
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
                     className="mt-0.5"
                   />
                   <span>
-                    I want my download to start immediately and I understand I lose my 14-day right
-                    to cancel once it begins.
+                    I agree to the{' '}
+                    <Link to="/terms-of-service" target="_blank" className="underline hover:text-foreground">
+                      Terms of Service
+                    </Link>
+                    , including the licence terms for each item in my cart — I will not use a
+                    model beyond what its licence permits (e.g. selling prints of a
+                    personal-use-only model).
                   </span>
                 </label>
 
                 {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-                <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !consent}>
+                <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !termsAccepted}>
                   {placing
                     ? 'Processing…'
                     : !testMode
