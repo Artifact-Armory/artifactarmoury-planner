@@ -324,22 +324,31 @@ export function calculatePrintStats(stl: ParsedSTL, aabb: AABB): PrintStats {
  * Convert parsed STL geometry to a GLB binary using @gltf-transform/core.
  * No external tools required — runs entirely in Node.js.
  */
-async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<void> {
-  const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
-
-  const positions: number[] = []
-
-  // STL uses Z-up (the 3D-printing convention); glTF/GLB is Y-up. Without this
-  // conversion the model renders lying on its side. Rotate -90° about X so the
-  // STL's +Z becomes glTF's +Y:  (x, y, z) → (x, z, -y). (Blender's glTF exporter
-  // does the same; this keeps the pure-Node path consistent with it.)
-  //
-  // We deliberately do NOT emit the STL's flat per-face normals: they give every
-  // triangle its own normals, which blocks welding/decimation (every edge becomes
-  // a seam). We weld by position, decimate, then recompute smooth normals.
+/**
+ * Build a single-primitive glTF Document holding the STL's raw triangle soup.
+ *
+ * STL uses Z-up (the 3D-printing convention); glTF/GLB is Y-up. Without this
+ * conversion the model renders lying on its side. Rotate -90° about X so the
+ * STL's +Z becomes glTF's +Y:  (x, y, z) → (x, z, -y). (Blender's glTF exporter
+ * does the same; this keeps the pure-Node path consistent with it.)
+ *
+ * We deliberately do NOT emit the STL's flat per-face normals: they give every
+ * triangle its own normals, which blocks welding (every edge becomes a seam) and
+ * therefore blocks both decimation and Draco's vertex sharing. Normals are
+ * recomputed with a crease angle after welding, in both the preview and the
+ * full-fidelity paths.
+ *
+ * Shared by the decimated preview GLB and the owner full-fidelity GLB so the two
+ * can never disagree about orientation or units.
+ */
+function stlToDocument(Document: any, stl: ParsedSTL): { doc: any; buf: any } {
+  const positions = new Float32Array(stl.triangles.length * 9)
+  let i = 0
   for (const tri of stl.triangles) {
     for (const v of tri.vertices) {
-      positions.push(v.x, v.z, -v.y)
+      positions[i++] = v.x
+      positions[i++] = v.z
+      positions[i++] = -v.y
     }
   }
 
@@ -348,7 +357,7 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
 
   const posAccessor = doc.createAccessor()
     .setType('VEC3')
-    .setArray(new Float32Array(positions))
+    .setArray(positions)
     .setBuffer(buf)
 
   const prim = doc.createPrimitive()
@@ -358,6 +367,13 @@ async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<
   const node = doc.createNode('node').setMesh(mesh)
   const scene = doc.createScene('scene').addChild(node)
   doc.getRoot().setDefaultScene(scene)
+  return { doc, buf }
+}
+
+async function convertSTLtoGLBPure(stl: ParsedSTL, outputPath: string): Promise<void> {
+  const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
+
+  const { doc } = stlToDocument(Document, stl)
 
   // Shrink the PREVIEW GLB (the STL that buyers download/print is never touched):
   // weld+dedup, decimate to a triangle budget so the planner stays smooth on heavy
@@ -479,6 +495,93 @@ async function optimizeAndBuildIO(NodeIO: any, doc: any, triangleCount: number):
   return new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
     .registerDependencies({ 'draco3d.encoder': await draco3d.createEncoderModule() })
+}
+
+// ============================================================================
+// FULL-FIDELITY GLB (owner-only)
+// ============================================================================
+// A buyer already holds the STL, so there is nothing left to protect from them:
+// they get the real mesh, not the decimated + watermarked preview proxy. This is
+// the same STL→GLB conversion as above with the two lossy steps removed:
+//
+//   - NO simplify(): every triangle of the canonical STL survives.
+//   - NO watermark: the emboss lives in the Blender bake (blender/bake_proxy.py),
+//     which this path never touches.
+//
+// weld() merges only BITWISE-IDENTICAL vertices, so it changes vertex *sharing*,
+// never vertex positions — the STL's geometry is reproduced exactly. Draco is the
+// one remaining approximation: it quantizes coordinates to a fixed grid over the
+// mesh bounding box. At the default 14 bits a 300 mm model lands on an ~18 µm
+// grid; POSITION is raised to 16 bits here (~4.6 µm on the same model), which is
+// far below both FDM and resin resolution — and this GLB is a *viewer* asset, not
+// a printable deliverable. The STL the buyer downloads is untouched by all of it.
+
+/** Draco POSITION quantization for the owner GLB. 16 ≈ 4.6 µm on a 300 mm model. */
+const FULL_GLB_POSITION_BITS = Number(process.env.FULL_GLB_POSITION_BITS ?? 16)
+
+export interface FullGlbResult {
+  /** Triangles written (post-weld; equals the STL's triangle count). */
+  triangles: number
+  /** Size of the Draco-compressed GLB in bytes. */
+  bytes: number
+}
+
+/**
+ * Convert a canonical STL to an un-decimated, un-watermarked GLB.
+ *
+ * Returns the triangle count and output size so the caller can record them; the
+ * caller decides where the bytes go (they are owner-gated, so never a public key).
+ */
+export async function convertSTLtoGLBFull(
+  stlPath: string,
+  outputPath: string,
+): Promise<FullGlbResult> {
+  const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
+  const { weld, dedup } = await importESM<typeof import('@gltf-transform/functions')>(
+    '@gltf-transform/functions',
+  )
+
+  const stl = await parseSTL(stlPath)
+  const { doc } = stlToDocument(Document, stl)
+
+  // Index the mesh (STL verts are unshared), then rebuild normals with the same
+  // crease angle the preview uses so an owner's model doesn't suddenly shade
+  // differently from the one they were looking at before they bought it. The
+  // second weld re-indexes the crease-expanded primitive; crease seams keep their
+  // distinct normals, so hard edges survive.
+  await doc.transform(weld())
+  for (const mesh of doc.getRoot().listMeshes()) {
+    for (const prim of mesh.listPrimitives()) applyCreaseNormals(doc, prim, CREASE_ANGLE_DEG)
+  }
+  await doc.transform(weld(), dedup())
+
+  const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
+    '@gltf-transform/extensions',
+  )
+  doc.createExtension(KHRDracoMeshCompression)
+    .setRequired(true)
+    .setEncoderOptions({
+      // Higher position precision than the preview default (14): this mesh is
+      // meant to read as "the actual model", so the quantization grid should be
+      // well under anything a printer could resolve.
+      quantizationBits: { POSITION: FULL_GLB_POSITION_BITS, NORMAL: 10, TEX_COORD: 12 },
+    })
+
+  const draco3dMod: any = await importESM('draco3dgltf')
+  const draco3d = draco3dMod.default ?? draco3dMod
+  const io = new NodeIO()
+    .registerExtensions([KHRDracoMeshCompression])
+    .registerDependencies({ 'draco3d.encoder': await draco3d.createEncoderModule() })
+
+  const glbBytes = await io.writeBinary(doc)
+  await writeFile(outputPath, Buffer.from(glbBytes))
+
+  logger.info('STL→GLB conversion complete (full fidelity, owner copy)', {
+    outputPath,
+    triangles: stl.triangleCount,
+    bytes: glbBytes.byteLength,
+  })
+  return { triangles: stl.triangleCount, bytes: glbBytes.byteLength }
 }
 
 /**

@@ -24,6 +24,8 @@ import { uploadRateLimit, previewRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
 import { processSTL, generateGLB, computeFileHash } from '../services/fileProcessor';
+import { enqueueFullGlbJob } from '../services/fullGlb/queue';
+import crypto from 'crypto';
 import { readFile as fsReadFile } from 'fs/promises';
 import { promises as fsp } from 'fs';
 import os from 'os';
@@ -229,6 +231,11 @@ router.post('/',
       );
 
       const model = result.rows[0];
+
+      // Owner full-fidelity GLB (migration 041): queued, never awaited for its
+      // result — this legacy multipart path already has the artist's request
+      // blocked on the upload, so the build must not join it.
+      await enqueueFullGlbJob({ modelId: model.id, partId: null, sourceKey: stlStoragePath });
 
       // Log activity
       await db.query(
@@ -603,27 +610,104 @@ router.get('/my-models',
 // follow a cross-origin redirect on a preflighted request (→ every authed load
 // failed, planner showed box fallbacks). Streaming keeps everything same-origin.
 
-/** Stream the GLB if the viewer may see this model, else 404. */
+/**
+ * Has this viewer bought (or do they own) this model? Same rule as
+ * `GET /:id/download`: the artist, an admin, or a buyer with a succeeded order.
+ */
+async function isEntitledToModel(modelId: string, viewerId?: string, role?: string): Promise<boolean> {
+  if (!viewerId) return false;
+  if (role === 'admin') return true;
+  const { rows } = await db.query(
+    `SELECT 1
+       FROM models m
+       LEFT JOIN order_items oi ON oi.model_id = m.id
+       LEFT JOIN orders o ON o.id = oi.order_id
+                         AND o.user_id = $2
+                         AND o.payment_status = 'succeeded'
+      WHERE m.id = $1 AND (m.artist_id = $2 OR o.id IS NOT NULL)
+      LIMIT 1`,
+    [modelId, viewerId],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Stream the GLB if the viewer may see this model, else 404.
+ *
+ * TWO variants live behind this one URL:
+ *
+ *   - the PREVIEW proxy (`glb_file_path`) — decimated and, on the bake path,
+ *     carrying an embossed watermark. What anyone browsing the marketplace gets.
+ *   - the OWNER copy (`full_glb_path`) — every triangle of the canonical STL, no
+ *     watermark. Served only to someone who has bought the model (or its artist,
+ *     or an admin), who already holds the STL and has nothing left to be
+ *     protected from (migration 041).
+ *
+ * Serving both from one URL — rather than a second endpoint the planner has to
+ * choose between — keeps the entitlement decision on the server, where it belongs,
+ * and means the planner needs no ownership logic at load time. It does make the
+ * response vary by viewer, which is why the cache lifetime below is minutes rather
+ * than the hour it used to be: buy a model and the planner picks up the real mesh
+ * on the next load, instead of serving the cached proxy for the rest of the hour.
+ * `?variant=preview` forces the proxy (an artist checking what buyers actually see).
+ *
+ * If the owner copy isn't built yet, has been skipped, or failed, this silently
+ * serves the proxy — the full build is a bonus, never a dependency.
+ */
 async function servePreviewGlb(
   req: any,
   res: any,
-  row: { artist_id: string; status: string; visibility: string; glb_file_path: string | null },
+  row: {
+    model_id: string;
+    artist_id: string;
+    status: string;
+    visibility: string;
+    glb_file_path: string | null;
+    full_glb_path: string | null;
+  },
 ) {
-  if (!row.glb_file_path) throw new NotFoundError('Preview');
   const isPublic = row.status === 'published' && row.visibility === 'public';
   const viewerId = req.userId;
   const isOwnerOrAdmin = viewerId && (viewerId === row.artist_id || req.user?.role === 'admin');
   if (!isPublic && !isOwnerOrAdmin) throw new NotFoundError('Preview');
+
+  let key = row.glb_file_path;
+  let variant: 'preview' | 'full' = 'preview';
+  if (row.full_glb_path && req.query?.variant !== 'preview') {
+    if (await isEntitledToModel(row.model_id, viewerId, req.user?.role)) {
+      key = row.full_glb_path;
+      variant = 'full';
+    }
+  }
+  if (!key) throw new NotFoundError('Preview');
+
   if (!isR2Enabled()) {
     // Dev/local fallback: serve via the public asset path (no R2 configured).
-    res.redirect(302, `/uploads/${row.glb_file_path.replace(/^\/+/, '')}`);
+    res.redirect(302, `/uploads/${key.replace(/^\/+/, '')}`);
     return;
   }
-  const { stream, size } = await getObjectStream(row.glb_file_path);
+
+  // The ETag hashes the key rather than exposing it: full_glb_path is deliberately
+  // unguessable (the bucket is public through the CDN) and must not leak in a header.
+  // It still changes whenever the served object does — a rebuild mints a new key —
+  // so a stale cached copy revalidates into a 304 or the new bytes.
+  const etag = `W/"${crypto.createHash('sha256').update(key).digest('hex').slice(0, 24)}"`;
+  res.set('ETag', etag);
+  // Short, not the hour this used to hold. The URL is now viewer-dependent, so a
+  // long cache would keep serving the proxy to someone who has just bought the
+  // model (and a stale full GLB after a file-version rebuild). Five minutes still
+  // absorbs reload bursts — which matters, because previewRateLimit counts every
+  // request that isn't served from cache and a planner load is dozens of them.
+  res.set('Cache-Control', 'private, max-age=300');
+  res.set('X-Preview-Variant', variant);
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  const { stream, size } = await getObjectStream(key);
   res.set('Content-Type', 'model/gltf-binary');
   if (size) res.set('Content-Length', String(size));
-  // Cache the immutable preview in the browser for the session (key is stable per id).
-  res.set('Cache-Control', 'private, max-age=3600');
   stream.on('error', () => { if (!res.headersSent) res.status(502).end(); else res.destroy(); });
   stream.pipe(res);
 }
@@ -634,7 +718,8 @@ router.get('/:id/preview.glb',
   optionalAuth,
   asyncHandler(async (req, res) => {
     const row = (await db.query(
-      `SELECT artist_id, status, visibility, glb_file_path FROM models WHERE id = $1`,
+      `SELECT id AS model_id, artist_id, status, visibility, glb_file_path, full_glb_path
+         FROM models WHERE id = $1`,
       [req.params.id],
     )).rows[0];
     if (!row) throw new NotFoundError('Preview');
@@ -647,8 +732,11 @@ router.get('/parts/:partId/preview.glb',
   previewRateLimit,
   optionalAuth,
   asyncHandler(async (req, res) => {
+    // Entitlement for a set part is the PARENT model's — one purchase covers
+    // every part — so the model's id travels with the part's file paths.
     const row = (await db.query(
-      `SELECT m.artist_id, m.status, m.visibility, p.glb_file_path
+      `SELECT m.id AS model_id, m.artist_id, m.status, m.visibility,
+              p.glb_file_path, p.full_glb_path
        FROM model_parts p JOIN models m ON m.id = p.model_id
        WHERE p.id = $1`,
       [req.params.partId],
@@ -1857,6 +1945,12 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
     }
 
+    // 6b. Owner full-fidelity GLB (migration 041) — a SEPARATE queue, always from
+    //     the canonical STL. Enqueued after the model has already been marked
+    //     'ready' above, and it never feeds back into processing_status, so it adds
+    //     exactly nothing to how long the artist waits on this upload.
+    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: canonicalStlPath ?? rawKey });
+
     // Allowed self-duplicates: tell the artist once, neutrally. Listing a piece on
     // its own AND in a set is exactly what this permits, but an accidental double
     // upload now looks identical from here — this is the only signal they'd get.
@@ -2012,6 +2106,12 @@ async function processModelVersionUpdate(
       await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
     }
 
+    // Rebuild the owner GLB against the NEW file. Owners re-download a new version
+    // free, so what they see in the planner has to follow the file too. The old
+    // full GLB keeps serving until the rebuild lands, then completeFullGlbJob
+    // deletes it — a buyer never gets a broken model mid-rebuild.
+    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: newStlPath });
+
     // Record the changelog entry, then notify owners they can re-download free.
     await db.query(
       `INSERT INTO model_versions (model_id, version, notes) VALUES ($1, $2, $3)
@@ -2119,6 +2219,13 @@ async function processModelParts(
         const partSourceFormat = format === 'obj' ? 'obj' : 'stl';
         await enqueueBakeJob({ modelId, partId: part.id, sourceKey: partSourceKey, sourceFormat: partSourceFormat });
       }
+
+      // Owner full-fidelity GLB for this part. Each part of a set is placed
+      // individually in the planner, so each needs its own full mesh — one
+      // purchase, N owner GLBs. Off the critical path, same as the primary.
+      await enqueueFullGlbJob({
+        modelId, partId: part.id, sourceKey: canonicalStlPath ?? part.stl_file_path,
+      });
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }

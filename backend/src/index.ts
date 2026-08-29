@@ -42,6 +42,7 @@ import taxRoutes from './routes/tax';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
+import { startFullGlbInlineDrainer } from './services/fullGlb/inline';
 
 // ============================================================================
 // CONFIGURATION
@@ -189,6 +190,11 @@ async function startServer() {
     // Keep the artist analytics rollups current. Without this, any day on which
     // no artist opened a dashboard never gets rolled up and reads as zero.
     startAnalyticsRollupScheduler();
+
+    // Owner full-fidelity GLBs are normally built by the proxy bake worker. When
+    // no worker is deployed this drains the queue in-process instead, so the
+    // feature degrades to "slower" rather than "silently off". No-op otherwise.
+    startFullGlbInlineDrainer();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {

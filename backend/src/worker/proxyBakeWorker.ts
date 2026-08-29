@@ -10,6 +10,12 @@
 // steal a live job. SIGTERM/SIGINT RELEASE the in-flight job back to the queue
 // and exit immediately, so a Railway redeploy hands the bake to another worker
 // in seconds instead of orphaning it.
+//
+// It also drains the OWNER FULL-GLB queue (migration 041) — but strictly second.
+// Only when there is no preview bake waiting does it pick up a full-GLB build, so
+// a backlog of owner GLBs can never delay the preview an artist is waiting on.
+// That build is pure Node (no Blender), it just lives here to keep its CPU off the
+// web service.
 
 import 'dotenv/config'
 import os from 'os'
@@ -24,6 +30,8 @@ import {
   HEARTBEAT_INTERVAL_MS,
   type BakeJobRow,
 } from '../services/proxyBake/queue'
+import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb/runner'
+import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { closeDatabase } from '../db'
 
 const POLL_INTERVAL_MS = Number(process.env.PROXY_BAKE_POLL_MS ?? 5000)
@@ -100,6 +108,11 @@ async function main(): Promise<void> {
     let didWork = false
     try {
       didWork = await processOne()
+      // Preview bakes always win. Only reach for an owner full-GLB build when the
+      // bake queue is empty, so an artist's preview is never stuck behind one.
+      if (!didWork && !stopping && isFullGlbEnabled()) {
+        didWork = await runOneFullGlbJob(WORKER_ID)
+      }
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })
     }
@@ -123,6 +136,16 @@ async function shutdown(signal: string): Promise<void> {
   // exception, so failJob never ran, and the row stayed 'running' until the
   // stale-lock window expired. Releasing takes milliseconds and lets another
   // worker restart it immediately.
+  // An owner full-GLB build may be the thing in flight instead of a bake; hand it
+  // back for the same reason (it is minutes of CPU, the drain window is seconds).
+  // If we released one we must exit NOW — the loop is still awaiting that build,
+  // and letting it finish would write a result for a job someone else now owns.
+  const releasedFullGlb = await releaseInFlightFullGlbJob(WORKER_ID).catch(() => false)
+  if (releasedFullGlb) {
+    await closeDatabase().catch(() => {})
+    process.exit(0)
+  }
+
   const job = currentJob
   if (!job) {
     logger.info(`Worker received ${signal} — idle, exiting`)

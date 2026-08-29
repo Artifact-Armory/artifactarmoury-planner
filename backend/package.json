@@ -33,7 +33,9 @@
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "test:vat": "node -r ts-node/register/transpile-only scripts/test-vat-parity.ts"
+    "test:vat": "node -r ts-node/register/transpile-only scripts/test-vat-parity.ts",
+    "backfill:full-glb": "node -r ts-node/register/transpile-only scripts/backfill-full-glb.ts",
+    "test:fullglb": "node -r ts-node/register/transpile-only scripts/test-full-glb.ts"
   },
   "keywords": [
     "terrain",

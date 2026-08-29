@@ -99,7 +99,16 @@ CREATE TABLE models (
     
     -- Files
     stl_file_path VARCHAR(500) NOT NULL, -- canonical STL (converted from source if needed)
-    glb_file_path VARCHAR(500), -- For 3D preview
+    glb_file_path VARCHAR(500), -- For 3D preview (decimated + watermarked proxy)
+    -- Owner-only full-fidelity GLB: the canonical STL converted with no
+    -- decimation and no watermark, served only to the artist or a buyer with a
+    -- succeeded order (migration 041). Built by a SEPARATE queue that never
+    -- gates processing_status. The key is deliberately unguessable and must
+    -- never appear in an API payload — the bucket is public through the CDN.
+    full_glb_path VARCHAR(500),
+    full_glb_status VARCHAR(20),   -- queued|processing|ready|failed|skipped
+    full_glb_error TEXT,
+    full_glb_tris INTEGER,
     thumbnail_path VARCHAR(500),
     -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
     -- is the artist's original file (delivered to the buyer alongside the STL).
@@ -239,6 +248,11 @@ CREATE TABLE model_parts (
     source_format VARCHAR(10) NOT NULL DEFAULT 'stl',
     source_file_path VARCHAR(500),
     glb_file_path VARCHAR(500),
+    -- Owner-only full-fidelity GLB for this part (see models.full_glb_path).
+    full_glb_path VARCHAR(500),
+    full_glb_status VARCHAR(20),
+    full_glb_error TEXT,
+    full_glb_tris INTEGER,
     width DECIMAL(10,2), depth DECIMAL(10,2), height DECIMAL(10,2), -- mm
     file_hash VARCHAR(64),
     geometry_fingerprint JSONB,
@@ -254,6 +268,33 @@ CREATE TABLE model_parts (
 );
 
 CREATE INDEX idx_model_parts_model ON model_parts(model_id);
+
+-- Queue for the owner full-fidelity GLB build (migration 041). Independent of
+-- proxy_bake_jobs so a backlog of full-GLB work can never delay a preview bake,
+-- and never gates models.processing_status — a late or failed full build just
+-- means the owner keeps seeing the preview proxy.
+CREATE TABLE full_glb_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    part_id UUID REFERENCES model_parts(id) ON DELETE CASCADE,
+    source_key VARCHAR(500) NOT NULL,   -- canonical STL key
+    status VARCHAR(20) NOT NULL DEFAULT 'queued',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    report JSONB,
+    error TEXT,
+    locked_at TIMESTAMP,
+    locked_by VARCHAR(120),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_full_glb_jobs_open ON full_glb_jobs (created_at)
+    WHERE status IN ('queued', 'running');
+CREATE INDEX idx_full_glb_jobs_model ON full_glb_jobs (model_id);
+CREATE UNIQUE INDEX idx_full_glb_jobs_one_open
+    ON full_glb_jobs (model_id, (COALESCE(part_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+    WHERE status IN ('queued', 'running');
 
 -- ============================================================================
 -- BUNDLES (Several models grouped under one name + one price)

@@ -36,6 +36,9 @@ auto-rebuilds the frontend. There is **no Dockerfile** (Nixpacks/Railpack).
 `FRONTEND_URL`, `STRIPE_MOCK=true`, `PAYMENTS_ENABLED=false`, `PRINT_FARM_PROVIDER=mock`,
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL`,
 and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PORT` or `DB_MOCK`.
+Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (`false` disables),
+`FULL_GLB_INLINE` (force the API server to drain the queue; defaults to on only when
+`PROXY_BAKE_ENABLED` is off), `FULL_GLB_MAX_TRIS` (3M) and `FULL_GLB_POSITION_BITS` (16).
 **Frontend (Cloudflare Pages, baked in at build):** `VITE_API_BASE_URL` (backend URL),
 `VITE_ASSET_BASE_URL=https://assets.artifactplanner.com`. Local values live in `frontend/.env`, `backend/.env` (gitignored; R2 keys are already in `backend/.env`).
 
@@ -317,6 +320,61 @@ and verifying the rate table. **Get an accountant on this before launch.**
 Note Stripe *direct charges* (`application_fee_amount`, artist as merchant of record) is the
 only structural alternative, and it's a bad trade here: a 3-artist cart becomes 3 charges = 3×
 the fixed fee, disputes land on artists, and it still may not escape the delivery-control test.
+
+## Owner full-fidelity GLB in the planner (built 2026-08-26, migration 041)
+The GLB the planner draws is a **preview proxy**: decimated to `PREVIEW_TARGET_TRIS` and,
+on the bake path, carrying an embossed watermark round the model's base — deliberately
+useless on a print bed. Someone who has **bought** the model already holds the STL, so
+there is nothing left to protect them from: they now get the real mesh instead.
+- **Second, independent pipeline.** `full_glb_jobs` (041) is a separate queue from
+  `proxy_bake_jobs` and **never touches `models.processing_status`** — a model goes
+  `ready`, and the artist leaves the upload form, on exactly the schedule it did before.
+  A late/failed/skipped owner build just means the buyer keeps seeing the proxy, i.e. the
+  pre-041 behaviour, so a failure notifies **nobody** (unlike a failed preview bake, which
+  leaves a listing with no picture and must reach the artist).
+- **Who builds it.** The bake worker drains this queue too, but **strictly second** — only
+  when no preview bake is waiting, so an owner backlog can never delay an artist's preview.
+  The build is pure Node (no Blender); it lives in the worker to keep its CPU off the web
+  dyno. With no worker deployed, `services/fullGlb/inline.ts` drains it in the API server
+  instead (default ON only when `PROXY_BAKE_ENABLED` is off), so switching the worker off
+  degrades this to "slower", not "silently dead".
+- **What "perfect" means.** `convertSTLtoGLBFull` (fileProcessor.ts) is the preview
+  converter with the two lossy steps removed: **no `simplify()`**, **no watermark**. `weld()`
+  merges only *bitwise-identical* vertices, so positions are untouched; crease normals are
+  rebuilt at the same 45° as the preview so an owner's model doesn't suddenly shade
+  differently from the one they were looking at before they bought it. Draco is the one
+  remaining approximation and POSITION is raised to **16 bits** (`FULL_GLB_POSITION_BITS`)
+  ≈ 4.6 µm on a 300 mm model. **The STL the buyer downloads is untouched by all of it.**
+- **One URL, two variants.** `GET /api/models/:id/preview.glb` (and `/parts/:partId/…`)
+  now serves the owner copy when the viewer is entitled — artist, admin, or a buyer with a
+  `succeeded` order, the same rule as `/:id/download`. Keeping it on one URL puts the
+  entitlement decision on the server and means the planner needs **no ownership logic at
+  load time** (which matters: `loadAssetCatalogue` registers assets *before* it fetches
+  entitlements). `?variant=preview` forces the proxy. **No frontend change was needed.**
+- **Cache lifetime dropped 3600s → 300s** on that route, with an ETag. The response is now
+  viewer-dependent, so an hour-long cache would keep serving the proxy to someone who just
+  bought the model. It can't go to `no-cache`: `previewRateLimit` is 150 requests / 15 min
+  and a planner load is dozens of them, so reload bursts must still hit the browser cache.
+- **The R2 key is random on purpose.** The bucket is public through the CDN and model ids
+  are public, so `previews/<modelId>/full.glb` would have been a free, un-watermarked,
+  full-resolution copy of every paid mesh. Keys are `owner-glb/<modelId>/<leaf>-<16 random
+  bytes>.glb`, live only in `models.full_glb_path` / `model_parts.full_glb_path`, and are
+  **never returned by any API** (not even in the ETag, which hashes them). Don't "helpfully"
+  expose that column. Locking the bucket down is still the proper fix.
+- **Backfill is required after deploying.** 041 only enqueues on new uploads and file-version
+  replacements, so the existing catalogue would sit at `full_glb_status = NULL` forever:
+  `railway run npm run backfill:full-glb -- --dry-run`, then without the flag. It queues
+  most-sold-first and is safe to re-run.
+- **`npm run test:fullglb`** proves the claim against the real service fn: the owner GLB
+  decodes to *exactly* the STL's triangle count, the public preview is *still* decimated
+  (guards the converse mistake — leaking the full mesh as the free preview), and the bbox
+  survives Draco (0.0037% drift on a 307k-tri fixture → 5.86 MB).
+- **Untested against a real Postgres:** there is no local DB (dev is `DB_MOCK`), so migration
+  041 and the queue SQL have not actually been executed. Watch the first Railway deploy.
+- **Known cost, accepted:** a full-resolution mesh is heavy to raster. Instancing shares the
+  geometry, so N copies of one piece cost one upload, but an owner filling a table with
+  million-triangle models will see the framerate the decimation was hiding. `FULL_GLB_MAX_TRIS`
+  (default 3M) refuses to build the truly absurd ones (job → `skipped`, owner keeps the proxy).
 
 ## Planner on tablets (built 2026-08-23)
 The planner was **hard-gated to ≥1024px** (`pages/Planner.tsx`) and had **zero touch
