@@ -38,7 +38,8 @@ auto-rebuilds the frontend. There is **no Dockerfile** (Nixpacks/Railpack).
 and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PORT` or `DB_MOCK`.
 Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (`false` disables),
 `FULL_GLB_INLINE` (force the API server to drain the queue; defaults to on only when
-`PROXY_BAKE_ENABLED` is off), `FULL_GLB_MAX_TRIS` (3M) and `FULL_GLB_POSITION_BITS` (16).
+`PROXY_BAKE_ENABLED` is off), `FULL_GLB_MAX_TRIS` (1M — a memory ceiling, ~1.1 KB RSS/triangle) and
+`FULL_GLB_POSITION_BITS` (16).
 **Frontend (Cloudflare Pages, baked in at build):** `VITE_API_BASE_URL` (backend URL),
 `VITE_ASSET_BASE_URL=https://assets.artifactplanner.com`. Local values live in `frontend/.env`, `backend/.env` (gitignored; R2 keys are already in `backend/.env`).
 
@@ -371,10 +372,19 @@ there is nothing left to protect them from: they now get the real mesh instead.
   survives Draco (0.0037% drift on a 307k-tri fixture → 5.86 MB).
 - **Untested against a real Postgres:** there is no local DB (dev is `DB_MOCK`), so migration
   041 and the queue SQL have not actually been executed. Watch the first Railway deploy.
+- **`FULL_GLB_MAX_TRIS` is a MEMORY ceiling, and the guard runs before conversion.**
+  Measured peak RSS of the real pipeline: **307k tris → 419 MB, 614k → 704 MB, 1.23M →
+  1318 MB** — about **1.1 KB of RSS per source triangle**, near-linear, at only ~8.6s even
+  at 1.23M. So time isn't the constraint, memory is. Default is **1M ≈ 1.1 GB peak**; size it
+  to whatever is building (the bake worker, or the API server itself when the inline drainer
+  is on, where a 1 GB spike is far worse). The cap is checked from the **binary STL header**
+  before anything is parsed — checking it after conversion, which the first cut did, guards
+  nothing: the OOM happens *during* the conversion, the container dies mid-job, the row sits
+  `running` until the stale lock expires, and the retry OOMs identically — which would take
+  out the preview bakes this queue is supposed to stay out of the way of.
 - **Known cost, accepted:** a full-resolution mesh is heavy to raster. Instancing shares the
   geometry, so N copies of one piece cost one upload, but an owner filling a table with
-  million-triangle models will see the framerate the decimation was hiding. `FULL_GLB_MAX_TRIS`
-  (default 3M) refuses to build the truly absurd ones (job → `skipped`, owner keeps the proxy).
+  million-triangle models will see the framerate the decimation was hiding.
 
 ## Planner on tablets (built 2026-08-23)
 The planner was **hard-gated to ≥1024px** (`pages/Planner.tsx`) and had **zero touch

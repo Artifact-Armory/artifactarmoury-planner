@@ -25,12 +25,42 @@ import { downloadObject, uploadObject } from '../r2'
 import { convertSTLtoGLBFull } from '../fileProcessor'
 
 /**
- * Meshes above this are not built at all (job → 'skipped', owner keeps the
- * proxy). A full-resolution GLB is uncompressed on the GPU, so a genuinely
- * enormous mesh would hurt the very people it's meant to reward — and the build
- * itself is minutes of CPU. Raise it if the planner turns out to cope.
+ * Meshes above this are not built at all (job → 'skipped', owner keeps the proxy).
+ *
+ * This is a MEMORY ceiling first and a framerate ceiling second. Measured peak RSS
+ * of the conversion, on the real pipeline:
+ *
+ *     307k tris →  419 MB      614k tris →  704 MB      1.23M tris → 1318 MB
+ *
+ * i.e. roughly **1.1 KB of resident memory per source triangle**, near enough
+ * linear, and the build is only ~8.6s even at 1.23M — so time is not the binding
+ * constraint, memory is. Set this from the memory limit of whatever is building:
+ * the bake worker normally, but the API server itself when the inline drainer is
+ * on (see inline.ts), where a 1 GB spike is far more disruptive.
+ *
+ * Default 1M ≈ 1.1 GB peak. Raise it only if the builder has the headroom.
  */
-export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 3_000_000)
+export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 1_000_000)
+
+/** Refuse a source file this large outright, before parsing it. */
+const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 400 * 1024 * 1024)
+
+/**
+ * Triangle count from an STL *without* parsing it — a binary STL states it in the
+ * 4 bytes at offset 80. Returns null when the file isn't binary STL (ASCII STLs
+ * have no header count; those fall back to the byte-size guard).
+ *
+ * This has to be cheap and it has to happen BEFORE conversion: the whole point of
+ * the cap is to avoid allocating gigabytes, so checking the count afterwards —
+ * which is what the first cut of this did — guards nothing. The process would be
+ * OOM-killed during the conversion it was supposed to prevent.
+ */
+function binaryStlTriangleCount(buf: Buffer): number | null {
+  if (buf.length < 84) return null
+  const n = buf.readUInt32LE(80)
+  // The header count is only trustworthy if it agrees with the file length.
+  return 84 + n * 50 === buf.length ? n : null
+}
 
 export interface FullGlbBuildInput {
   jobId: string
@@ -63,19 +93,35 @@ export async function runFullGlbBuild(input: FullGlbBuildInput): Promise<FullGlb
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-fullglb-'))
   const log = logger.child('FULL_GLB')
   try {
+    const srcBuf = await downloadObject(input.sourceKey)
+
+    // Both guards run BEFORE any parsing or allocation — an over-cap mesh must
+    // cost nothing, because an OOM here is worse than a skip: the container dies
+    // mid-job, the row sits 'running' until the stale lock expires, and the retry
+    // OOMs identically. On the bake worker that would also take out the preview
+    // bakes this queue is supposed to stay out of the way of.
+    const skip = (reason: string, triangles: number): FullGlbBuildResult => {
+      log.info('Full GLB skipped', { jobId: input.jobId, modelId: input.modelId, reason })
+      return { glbKey: null, skippedReason: reason, triangles, bytes: 0, durationMs: Date.now() - started }
+    }
+    if (srcBuf.length > MAX_SOURCE_BYTES) {
+      return skip(`source file is ${(srcBuf.length / 1024 / 1024).toFixed(0)} MB (limit ${(MAX_SOURCE_BYTES / 1024 / 1024).toFixed(0)} MB)`, 0)
+    }
+    const declaredTris = binaryStlTriangleCount(srcBuf)
+    if (declaredTris !== null && declaredTris > FULL_GLB_MAX_TRIS) {
+      return skip(`mesh has ${declaredTris} triangles (limit ${FULL_GLB_MAX_TRIS})`, declaredTris)
+    }
+
     const stlPath = path.join(work, 'source.stl')
-    await fsp.writeFile(stlPath, await downloadObject(input.sourceKey))
+    await fsp.writeFile(stlPath, srcBuf)
 
     const outPath = path.join(work, 'full.glb')
     const { triangles, bytes } = await convertSTLtoGLBFull(stlPath, outPath)
 
+    // Backstop for ASCII STLs, whose triangle count isn't knowable without
+    // parsing. Rare, and the byte-size guard above already bounds the damage.
     if (triangles > FULL_GLB_MAX_TRIS) {
-      // Converted before we could count triangles cheaply, but still worth not
-      // shipping: throw the artefact away rather than serve something that would
-      // stall the planner.
-      const reason = `mesh has ${triangles} triangles (limit ${FULL_GLB_MAX_TRIS})`
-      log.info('Full GLB skipped', { jobId: input.jobId, modelId: input.modelId, reason })
-      return { glbKey: null, skippedReason: reason, triangles, bytes, durationMs: Date.now() - started }
+      return skip(`mesh has ${triangles} triangles (limit ${FULL_GLB_MAX_TRIS})`, triangles)
     }
 
     const glbKey = ownerGlbKey(input.modelId, input.partId)
