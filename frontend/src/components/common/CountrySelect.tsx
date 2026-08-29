@@ -1,5 +1,4 @@
 import React from 'react'
-import { Globe } from 'lucide-react'
 import { useTaxStore } from '../../store/taxStore'
 
 interface CountrySelectProps {
@@ -7,6 +6,17 @@ interface CountrySelectProps {
   variant?: 'compact' | 'full'
   className?: string
   id?: string
+}
+
+/**
+ * ISO 3166-1 alpha-2 → flag emoji, via the regional-indicator-symbol trick
+ * (each letter A-Z maps to U+1F1E6.. by offsetting from 'A'). Every code this
+ * store deals with is a real alpha-2, so this always yields a valid flag.
+ */
+function flagEmoji(code: string): string {
+  return code
+    .toUpperCase()
+    .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
 }
 
 /**
@@ -27,37 +37,50 @@ const CountrySelect: React.FC<CountrySelectProps> = ({
   // in which case prices are showing net and a picker would imply otherwise).
   if (countries.length === 0) return null
 
+  if (variant === 'compact') {
+    // Just a country picker here — the flag identifies the selection, no VAT
+    // number attached. The rate still applies to prices; it's just not spelled
+    // out in the nav bar (that detail belongs to the checkout breakdown).
+    const current = countries.find((c) => c.code === country)
+    return (
+      <span className={`relative inline-flex items-center ${className}`}>
+        <span className="pointer-events-none text-base leading-none" aria-hidden="true">
+          {current ? flagEmoji(current.code) : '🏳️'}
+        </span>
+        <label htmlFor={id} className="sr-only">
+          Your country, for tax-inclusive prices
+        </label>
+        <select
+          id={id}
+          value={country ?? ''}
+          onChange={(e) => setCountry(e.target.value)}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        >
+          {countries.map((c) => (
+            <option key={c.code} value={c.code}>
+              {flagEmoji(c.code)} {c.name}
+            </option>
+          ))}
+        </select>
+      </span>
+    )
+  }
+
   const select = (
     <select
       id={id}
       value={country ?? ''}
       onChange={(e) => setCountry(e.target.value)}
-      className={
-        variant === 'compact'
-          ? 'cursor-pointer rounded-md border-0 bg-transparent py-1 pl-1 pr-6 text-xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-primary'
-          : 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:ring-1 focus:ring-primary'
-      }
+      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:ring-1 focus:ring-primary"
     >
       {countries.map((c) => (
         <option key={c.code} value={c.code}>
-          {variant === 'compact' ? c.code : c.name}
+          {c.name}
           {c.rate > 0 ? ` — ${c.rate}% VAT` : ''}
         </option>
       ))}
     </select>
   )
-
-  if (variant === 'compact') {
-    return (
-      <span className={`inline-flex items-center gap-1 ${className}`}>
-        <Globe size={13} className="text-muted-foreground" aria-hidden="true" />
-        <label htmlFor={id} className="sr-only">
-          Your country, for tax-inclusive prices
-        </label>
-        {select}
-      </span>
-    )
-  }
 
   return (
     <div className={className}>
