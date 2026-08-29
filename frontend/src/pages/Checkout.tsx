@@ -361,9 +361,10 @@ const Checkout: React.FC = () => {
                     <Link to="/terms-of-service" target="_blank" className="underline hover:text-foreground">
                       Terms of Service
                     </Link>
-                    , including the licence terms for each item in my cart — I will not use a
-                    model beyond what its licence permits (e.g. selling prints of a
-                    personal-use-only model).
+                    , including the licence terms for each item in my cart (I will not use a
+                    model beyond what its licence permits, e.g. selling prints of a
+                    personal-use-only model). I want my download to start immediately and I
+                    understand this means I lose my 14-day right to cancel once it begins.
                   </span>
                 </label>
 

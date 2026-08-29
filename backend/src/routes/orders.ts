@@ -41,10 +41,13 @@ router.post('/',
       // ISO country the buyer says they're in — drives which VAT rate applies. Only
       // the code is accepted; the rate itself is always looked up server-side.
       taxCountry: requestedTaxCountry,
-      // Buyer ticked "I agree to the Terms of Service" — required so the per-model
-      // licence terms (personal vs. commercial use, no redistribution) are agreed to
-      // before purchase. This is NOT the retired 14-day-waiver checkbox: the buyer
-      // keeps their statutory cancellation right regardless of this flag.
+      // Buyer ticked the single checkout checkbox agreeing to the Terms of Service.
+      // As of migration 042 that one checkbox covers two distinct things — the
+      // per-model licence terms (personal vs. commercial use, no redistribution) AND
+      // the immediate-download / 14-day-cancellation-waiver (UK CCRs 2013 reg. 37 /
+      // EU CRD art. 16(m)) — the checkbox copy in Checkout.tsx spells out the waiver
+      // explicitly rather than relying solely on the linked document, since the
+      // regulation requires clear, informed consent to that specific point.
       termsAccepted,
     } = req.body;
 
@@ -60,11 +63,6 @@ router.post('/',
     if (!termsAccepted) {
       throw new ValidationError('Please agree to the Terms of Service before purchasing');
     }
-
-    // No cancellation-right waiver is collected any more, so the buyer keeps their
-    // statutory 14-day right to cancel for a refund even though the download unlocks
-    // immediately. The artist's payout is held for that same window (PAYOUT_HOLD_DAYS
-    // in services/earnings.ts) so a refund doesn't claw back money already paid out.
 
     // Validate items
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -249,16 +247,17 @@ router.post('/',
       const shippingCost = 0; // digital — no shipping
       const total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
 
-      // Create order (no shipping address for digital STLs). download_consent_at
-      // stays NULL — we no longer collect a waiver of the 14-day cancellation right.
-      // terms_accepted_at is stamped now that termsAccepted has been checked above.
+      // Create order (no shipping address for digital STLs). Both terms_accepted_at
+      // and download_consent_at are stamped from the one termsAccepted checkbox
+      // checked above — its on-screen copy covers both the licence terms and the
+      // immediate-download/cancellation-waiver explicitly.
       const orderResult = await client.query(
         `INSERT INTO orders (
           user_id, customer_email,
           subtotal, shipping_cost, tax, total,
           payment_method, payment_status, fulfillment_status,
-          tax_country, tax_rate, terms_accepted_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', $8, $9, CURRENT_TIMESTAMP)
+          tax_country, tax_rate, terms_accepted_at, download_consent_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id, order_number`,
         [userId, email, subtotal, shippingCost, tax, total, requestedMethod, taxCountry, taxRate]
       );
