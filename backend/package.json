@@ -35,7 +35,8 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "test:vat": "node -r ts-node/register/transpile-only scripts/test-vat-parity.ts",
     "backfill:full-glb": "node -r ts-node/register/transpile-only scripts/backfill-full-glb.ts",
-    "test:fullglb": "node -r ts-node/register/transpile-only scripts/test-full-glb.ts"
+    "test:fullglb": "node -r ts-node/register/transpile-only scripts/test-full-glb.ts",
+    "test:connect-payouts": "node -r ts-node/register/transpile-only scripts/test-connect-payouts.ts"
   },
   "keywords": [
     "terrain",

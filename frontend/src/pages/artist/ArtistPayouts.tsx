@@ -34,6 +34,24 @@ const ArtistPayouts: React.FC = () => {
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not start onboarding'),
   })
 
+  // Stripe's Express dashboard is where the artist sees their own payout history,
+  // bank details and tax documents, so AA doesn't rebuild any of it. The link is
+  // one-time, hence minting it on click rather than rendering it as an href.
+  const dashboard = useMutation({
+    mutationFn: () => payoutsApi.dashboardLink(),
+    onSuccess: ({ url }) => { window.open(url, '_blank', 'noopener') },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not open Stripe dashboard'),
+  })
+
+  // Local-only: there is no hosted Stripe form to complete under STRIPE_MOCK, so
+  // without this the onboarded state is unreachable in dev. The button only renders
+  // when the backend reports mock mode, and the route 404s on a live one.
+  const mockComplete = useMutation({
+    mutationFn: () => payoutsApi.mockCompleteOnboarding(true),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['artist-payouts'] }) },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not simulate onboarding'),
+  })
+
   if (isLoading || !data) return <div className="flex justify-center py-24"><Spinner size="lg" /></div>
 
   const { summary, earnings, payouts, connect, config } = data
@@ -42,8 +60,8 @@ const ArtistPayouts: React.FC = () => {
     <div className="mx-auto max-w-5xl px-4 py-8">
       <h1 className="text-2xl font-semibold text-foreground">Payouts</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        You keep {100 - 15}% of each sale. Earnings clear after a {config.holdDays}-day hold, then pay
-        out automatically once your balance passes {formatPrice(config.minPayout)}.
+        You keep {config.artistSharePercent}% of each sale. Earnings clear after a {config.holdDays}-day
+        hold, then pay out automatically once your balance passes {formatPrice(config.minPayout)}.
       </p>
 
       {/* Connect status banner */}
@@ -54,18 +72,57 @@ const ArtistPayouts: React.FC = () => {
             <div>
               <p className="font-medium text-amber-900">Set up payouts to get paid</p>
               <p className="text-sm text-amber-700">
-                {connect.accountId
-                  ? 'Your Stripe account needs a few more details before we can send money.'
-                  : 'Connect a Stripe account so we can pay your earnings. Your sales still accrue in the meantime.'}
+                {!connect.accountId
+                  ? 'Connect a Stripe account so we can pay your earnings. Your sales still accrue in the meantime.'
+                  : !connect.detailsSubmitted
+                    ? 'Your Stripe account needs a few more details before we can send money.'
+                    : 'Stripe is still reviewing your details. Your earnings keep accruing and will pay out once it clears.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!connect.detailsSubmitted && (
+              <button
+                onClick={() => onboard.mutate()}
+                disabled={onboard.isPending}
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {onboard.isPending ? 'Redirecting…' : connect.accountId ? 'Finish setup' : 'Set up payouts'}
+                <ExternalLink size={15} />
+              </button>
+            )}
+            {config.mockMode && connect.accountId && (
+              <button
+                onClick={() => mockComplete.mutate()}
+                disabled={mockComplete.isPending}
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                title="Local mock mode only — stands in for completing Stripe's hosted form"
+              >
+                {mockComplete.isPending ? 'Simulating…' : 'Simulate completed onboarding'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Connected and live → let them into their own Stripe dashboard. */}
+      {connect.onboardingComplete && (
+        <div className="mt-6 flex flex-col gap-3 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 text-green-600" size={20} />
+            <div>
+              <p className="font-medium text-foreground">Payouts are set up</p>
+              <p className="text-sm text-muted-foreground">
+                Bank details, payout history and tax documents live in your Stripe dashboard.
               </p>
             </div>
           </div>
           <button
-            onClick={() => onboard.mutate()}
-            disabled={onboard.isPending}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            onClick={() => dashboard.mutate()}
+            disabled={dashboard.isPending}
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
-            {onboard.isPending ? 'Redirecting…' : connect.accountId ? 'Finish setup' : 'Set up payouts'}
+            {dashboard.isPending ? 'Opening…' : 'View payout dashboard'}
             <ExternalLink size={15} />
           </button>
         </div>

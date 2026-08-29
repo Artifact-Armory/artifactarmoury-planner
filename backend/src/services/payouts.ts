@@ -11,7 +11,7 @@
 
 import { db } from '../db'
 import logger from '../utils/logger'
-import { createTransfer } from './stripe'
+import { createTransfer, isStripeMock, isUsableAccountId } from './stripe'
 import { createNotification } from './notifications'
 
 const log = logger.child('PAYOUTS')
@@ -63,8 +63,10 @@ export async function runPayouts(): Promise<Array<{ artistId: string; amount: nu
     const accountId = row.stripe_account_id as string | null
 
     // No completed payout account yet → leave the balance cleared; it'll pay out once
-    // they finish Stripe onboarding.
-    if (!accountId || !row.stripe_onboarding_complete) {
+    // they finish Stripe onboarding. `isUsableAccountId` also rejects a leftover
+    // `acct_mock_...` from before real keys were switched on, which Stripe would
+    // reject anyway — better to hold the money than to book a failed transfer.
+    if (!isUsableAccountId(accountId) || !row.stripe_onboarding_complete) {
       log.warn('Artist has cleared balance but no active Connect account — holding', { artistId, amount })
       results.push({ artistId, amount, status: 'no_account' })
       continue
@@ -161,9 +163,26 @@ async function payArtist(artistId: string, accountId: string, amount: number): P
   }
 }
 
+// Paying out under STRIPE_MOCK would mark earnings `paid` against a fake `tr_mock_`
+// transfer id while no money moved — and `paid` is terminal: refund reversal only
+// touches pending/cleared rows, so the ledger would be permanently wrong about what
+// the artist is owed. This deployment currently runs STRIPE_MOCK=true in production,
+// so the guard is not hypothetical. Clearing is still safe and still runs.
+// PAYOUTS_ALLOW_MOCK_TRANSFERS=true opts back in for a deliberate dry run.
+const ALLOW_MOCK_TRANSFERS = process.env.PAYOUTS_ALLOW_MOCK_TRANSFERS === 'true'
+
 /** Run both steps once. Exposed for the scheduler and for a manual admin trigger. */
-export async function runPayoutCycle(): Promise<{ cleared: number; payouts: Array<{ artistId: string; amount: number; status: string }> }> {
+export async function runPayoutCycle(): Promise<{ cleared: number; payouts: Array<{ artistId: string; amount: number; status: string }>; skipped?: string }> {
   const cleared = await clearMaturedEarnings()
+
+  if (isStripeMock() && !ALLOW_MOCK_TRANSFERS) {
+    log.warn('Payments are mocked — clearing earnings but NOT transferring', {
+      cleared,
+      hint: 'set PAYMENTS_ENABLED=true with a real STRIPE_SECRET_KEY to pay artists',
+    })
+    return { cleared, payouts: [], skipped: 'payments_mocked' }
+  }
+
   const payouts = await runPayouts()
   return { cleared, payouts }
 }

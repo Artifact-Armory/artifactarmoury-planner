@@ -40,6 +40,106 @@ stripeLogger.info(`Payments ${STRIPE_MOCK ? 'MOCKED (no real charges)' : 'LIVE'}
 // STRIPE CONNECT - ARTIST ONBOARDING
 // ============================================================================
 
+/** Whether payments are running against the mock (no real Stripe calls happen). */
+export const isStripeMock = (): boolean => STRIPE_MOCK
+
+/** Prefix of the fake account ids handed out while payments are mocked. */
+export const MOCK_ACCOUNT_PREFIX = 'acct_mock'
+
+/**
+ * Is this stored account id one Stripe will actually recognise?
+ *
+ * An artist who set up payouts while the site was in mock mode has a fake
+ * `acct_mock_...` id saved against them. The moment real keys are switched on, every
+ * call about that id fails — retrieving it, minting an onboarding link, transferring
+ * to it — and the artist is stuck with no way to start again. Treating it as "no
+ * account yet" instead sends them cleanly back through onboarding, which is exactly
+ * what they need to do. Harmless in mock mode, where the id IS the real thing.
+ */
+export function isUsableAccountId(accountId?: string | null): boolean {
+  if (!accountId) return false
+  if (STRIPE_MOCK) return true
+  return !accountId.startsWith(MOCK_ACCOUNT_PREFIX)
+}
+
+/**
+ * The onboarding state of a connected account, as the artist's Payouts page needs to
+ * see it. Stripe's three flags are kept separate rather than collapsed into one
+ * boolean because they mean different things to the artist: `detailsSubmitted` false
+ * means "you never finished the form", while `payoutsEnabled` false *with* details
+ * submitted means "Stripe is still reviewing you, or wants more from you".
+ */
+export interface ConnectAccountStatus {
+  accountId: string
+  chargesEnabled: boolean
+  payoutsEnabled: boolean
+  detailsSubmitted: boolean
+  /** What the payout job gates on: money can actually reach this account. */
+  onboardingComplete: boolean
+  /** Stripe's outstanding requirement ids, so the UI can say what is missing. */
+  requirementsDue: string[]
+  /**
+   * True when Stripe could not be reached, so every flag above is a pessimistic
+   * default rather than a fact. Callers that hold a previously-persisted status
+   * should prefer it over these values — telling a fully onboarded artist they are
+   * not set up because Stripe blipped is worse than showing a slightly stale state.
+   */
+  unavailable?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// MOCK CONNECT ACCOUNTS
+// ---------------------------------------------------------------------------
+// Under STRIPE_MOCK there is no Stripe to ask, so mock accounts keep their state
+// here. New ones start INCOMPLETE on purpose: `checkOnboardingStatus` used to return
+// true unconditionally, which made every mocked artist look fully onboarded and left
+// the un-onboarded paths — the payout job's `no_account` hold, the "finish setup"
+// banner — impossible to exercise locally. Set STRIPE_MOCK_ONBOARDING_COMPLETE=true
+// for the old always-onboarded behaviour.
+//
+// In-memory, so it resets when the server restarts. That is fine for its only two
+// consumers (local dev and test:connect-payouts) and keeps it out of the schema.
+
+const MOCK_STARTS_COMPLETE = process.env.STRIPE_MOCK_ONBOARDING_COMPLETE === 'true'
+const MOCK_REQUIREMENT = 'individual.verification.document'
+const mockAccounts = new Map<string, ConnectAccountStatus>()
+
+function mockAccount(accountId: string): ConnectAccountStatus {
+  let state = mockAccounts.get(accountId)
+  if (!state) {
+    state = {
+      accountId,
+      chargesEnabled: MOCK_STARTS_COMPLETE,
+      payoutsEnabled: MOCK_STARTS_COMPLETE,
+      detailsSubmitted: MOCK_STARTS_COMPLETE,
+      onboardingComplete: MOCK_STARTS_COMPLETE,
+      requirementsDue: MOCK_STARTS_COMPLETE ? [] : [MOCK_REQUIREMENT],
+    }
+    mockAccounts.set(accountId, state)
+  }
+  return state
+}
+
+/**
+ * Flip a mocked account's onboarding state — the local stand-in for an artist
+ * actually completing Stripe's hosted form. Drives the dev-only
+ * `POST /api/payouts/connect/mock-complete` route and test:connect-payouts.
+ * Returns null when payments are live: real accounts are Stripe's to decide.
+ */
+export function setMockOnboardingState(
+  accountId: string,
+  complete: boolean
+): ConnectAccountStatus | null {
+  if (!STRIPE_MOCK) return null
+  const state = mockAccount(accountId)
+  state.chargesEnabled = complete
+  state.payoutsEnabled = complete
+  state.detailsSubmitted = complete
+  state.onboardingComplete = complete
+  state.requirementsDue = complete ? [] : [MOCK_REQUIREMENT]
+  return { ...state }
+}
+
 export interface CreateConnectAccountResult {
   account_id: string
   onboarding_url: string
@@ -55,10 +155,12 @@ export async function createConnectAccount(
   refreshUrl: string
 ): Promise<CreateConnectAccountResult> {
   if (STRIPE_MOCK) {
-    return {
-      account_id: `acct_mock_${Date.now()}`,
-      onboarding_url: returnUrl,
-    }
+    const accountId = `acct_mock_${Date.now()}`
+    mockAccount(accountId)
+    // Persist exactly as the live path does, so the artist's half-finished state
+    // survives a reload in local dev instead of minting a fresh account each time.
+    await db.query('UPDATE users SET stripe_account_id = $1 WHERE id = $2', [accountId, artistId])
+    return { account_id: accountId, onboarding_url: returnUrl }
   }
   try {
     stripeLogger.info('Creating Stripe Connect account', { artistId, email })
@@ -108,27 +210,44 @@ export async function createConnectAccount(
 }
 
 /**
- * Check if artist has completed Stripe onboarding
+ * Full onboarding state for one connected account (mock-aware).
  */
-export async function checkOnboardingStatus(accountId: string): Promise<boolean> {
-  if (STRIPE_MOCK) return true
+export async function getAccountStatus(accountId: string): Promise<ConnectAccountStatus> {
+  if (STRIPE_MOCK) return { ...mockAccount(accountId) }
   try {
     const account = await stripe.accounts.retrieve(accountId)
-    
-    const isComplete = account.charges_enabled && account.payouts_enabled
-    
-    stripeLogger.debug('Onboarding status checked', {
+    return {
       accountId,
-      chargesEnabled: account.charges_enabled,
-      payoutsEnabled: account.payouts_enabled,
-      isComplete
-    })
-    
-    return isComplete
+      chargesEnabled: !!account.charges_enabled,
+      payoutsEnabled: !!account.payouts_enabled,
+      detailsSubmitted: !!account.details_submitted,
+      onboardingComplete: !!(account.charges_enabled && account.payouts_enabled),
+      requirementsDue: account.requirements?.currently_due ?? [],
+    }
   } catch (error) {
-    stripeLogger.error('Failed to check onboarding status', { error, accountId })
-    return false
+    stripeLogger.error('Failed to retrieve Connect account', { error, accountId })
+    // An account we cannot read is treated as not-ready, which holds the artist's
+    // balance rather than attempting a transfer that would fail anyway.
+    return {
+      accountId,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      detailsSubmitted: false,
+      onboardingComplete: false,
+      requirementsDue: [],
+      unavailable: true,
+    }
   }
+}
+
+/**
+ * Can this account actually receive money? The single boolean the payout job and
+ * `users.stripe_onboarding_complete` are keyed on.
+ */
+export async function checkOnboardingStatus(accountId: string): Promise<boolean> {
+  const status = await getAccountStatus(accountId)
+  stripeLogger.debug('Onboarding status checked', status)
+  return status.onboardingComplete
 }
 
 /**
@@ -172,6 +291,23 @@ export async function createOnboardingLink(
   } catch (error) {
     stripeLogger.error('Failed to create onboarding link', { error, accountId })
     throw new Error('Failed to create onboarding link')
+  }
+}
+
+/**
+ * A one-time link into the artist's Stripe Express dashboard, where they can see
+ * their own payout history, bank details and tax documents — everything AA would
+ * otherwise have to rebuild. Stripe rejects login links for accounts that never
+ * submitted their details, so callers should gate on `detailsSubmitted` first.
+ */
+export async function createLoginLink(accountId: string): Promise<string> {
+  if (STRIPE_MOCK) return `https://connect.stripe.com/mock/express/${accountId}`
+  try {
+    const link = await stripe.accounts.createLoginLink(accountId)
+    return link.url
+  } catch (error) {
+    stripeLogger.error('Failed to create Express dashboard login link', { error, accountId })
+    throw new Error('Failed to create dashboard link')
   }
 }
 
@@ -626,6 +762,11 @@ export default {
   stripe,
   createConnectAccount,
   checkOnboardingStatus,
+  getAccountStatus,
+  setMockOnboardingState,
+  createLoginLink,
+  isStripeMock,
+  isUsableAccountId,
   updateOnboardingStatus,
   createOnboardingLink,
   createPaymentIntent,

@@ -39,8 +39,27 @@ export interface PayoutsMe {
   summary: EarningsSummary
   earnings: EarningRow[]
   payouts: PayoutRow[]
-  connect: { accountId: string | null; onboardingComplete: boolean }
-  config: { holdDays: number; minPayout: number }
+  connect: ConnectStatus
+  config: {
+    holdDays: number
+    minPayout: number
+    /** The artist's OWN share percent (users.commission_rate), not a global constant. */
+    artistSharePercent: number
+    /** True when the backend is on STRIPE_MOCK, so the dev-only shortcut exists. */
+    mockMode: boolean
+  }
+}
+
+export interface ConnectStatus {
+  accountId: string | null
+  /** Money can actually reach this account (charges + payouts both enabled). */
+  onboardingComplete: boolean
+  /** False means the artist never finished Stripe's form, as opposed to Stripe
+   *  still reviewing them — which is what the banner wording turns on. */
+  detailsSubmitted: boolean
+  payoutsEnabled: boolean
+  chargesEnabled: boolean
+  requirementsDue: string[]
 }
 
 export const payoutsApi = {
@@ -55,8 +74,23 @@ export const payoutsApi = {
     return res.data
   },
 
-  async checkStatus(): Promise<{ onboardingComplete: boolean; accountId: string | null }> {
+  async checkStatus(): Promise<ConnectStatus> {
     const res = await apiClient.get(`${BASE_URL}/connect/status`)
+    return res.data
+  },
+
+  /** One-time link into the artist's own Stripe Express dashboard. */
+  async dashboardLink(): Promise<{ url: string }> {
+    const res = await apiClient.post(`${BASE_URL}/connect/dashboard-link`)
+    return res.data
+  },
+
+  /**
+   * DEV/MOCK ONLY — stands in for completing Stripe's hosted onboarding form, which
+   * cannot be reached under STRIPE_MOCK. 404s on any live backend.
+   */
+  async mockCompleteOnboarding(complete = true): Promise<ConnectStatus> {
+    const res = await apiClient.post(`${BASE_URL}/connect/mock-complete`, { complete })
     return res.data
   },
 }
