@@ -39,6 +39,7 @@ import payoutsRoutes from './routes/payouts';
 import salesRoutes from './routes/sales';
 import messagesRoutes from './routes/messages';
 import taxRoutes from './routes/tax';
+import contactRoutes from './routes/contact';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
@@ -128,6 +129,7 @@ app.use(`${API_PREFIX}/reports`, reportsRoutes);
 app.use(`${API_PREFIX}/payouts`, payoutsRoutes);
 app.use(`${API_PREFIX}/messages`, messagesRoutes);
 app.use(`${API_PREFIX}/tax`, taxRoutes);
+app.use(`${API_PREFIX}/contact`, contactRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {

@@ -89,10 +89,13 @@ const GROUPS: Group[] = [
 export function HelpOverlay({
   onClose,
   onReplayTour,
+  onShowPreviewQuality,
   touch = false,
 }: {
   onClose: () => void
   onReplayTour?: () => void
+  /** Re-open the "previews aren't your final print" comparison. */
+  onShowPreviewQuality?: () => void
   /** Show the finger-gesture reference instead of the mouse/keyboard one. */
   touch?: boolean
 }) {
@@ -110,6 +113,9 @@ export function HelpOverlay({
         <div className="tb-help-head">
           <strong>Controls</strong>
           <div className="tb-help-head-actions">
+            {onShowPreviewQuality && (
+              <button className="tb-btn" onClick={onShowPreviewQuality}>Preview vs print</button>
+            )}
             {onReplayTour && (
               <button className="tb-btn" onClick={onReplayTour}>Replay walkthrough</button>
             )}

@@ -50,14 +50,16 @@ export interface SendEmailParams {
   subject: string
   html: string
   text?: string
+  /** Lets the recipient hit "Reply" and land in the sender's inbox, not ours. */
+  replyTo?: string
 }
 
 /**
  * Send email via Resend or log if not configured
  */
 export async function sendEmail(params: SendEmailParams): Promise<void> {
-  const { to, subject, html, text } = params
-  
+  const { to, subject, html, text, replyTo } = params
+
   try {
     if (!resend) {
       emailLogger.warn('Email not sent (Resend not configured)', {
@@ -67,13 +69,14 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       emailLogger.debug('Email content', { html, text })
       return
     }
-    
+
     const result = await resend.emails.send({
       from: FROM_EMAIL,
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
-      text: text || stripHtml(html)
+      text: text || stripHtml(html),
+      ...(replyTo ? { reply_to: replyTo } : {})
     })
     
     emailLogger.info('Email sent', {
@@ -481,6 +484,127 @@ export async function sendArtistSaleNotification(
 }
 
 // ============================================================================
+// CONTACT FORM
+// ============================================================================
+
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@artifactarmoury.com'
+
+export interface ContactMessageParams {
+  name: string
+  email: string
+  subject: string
+  message: string
+  /** Signed-in sender, if any — lets support cross-reference their account. */
+  userId?: string
+  /** Public CDN URLs for any files the sender attached, for support to review. */
+  attachmentUrls?: string[]
+}
+
+/**
+ * Notify support@ of a new Contact page submission. `replyTo` is set to the
+ * sender's own address, so support can just hit Reply in their inbox.
+ */
+export async function sendContactMessageToSupport(params: ContactMessageParams): Promise<void> {
+  const { name, email, subject, message, userId, attachmentUrls = [] } = params
+
+  const attachmentsHtml = attachmentUrls.length
+    ? `<div style="margin-top: 16px;">
+         <strong style="color: #111827;">Attachments:</strong>
+         <ul style="margin: 8px 0 0 0; padding-left: 20px; color: #2563eb;">
+           ${attachmentUrls.map((u) => `<li><a href="${u}" style="color: #2563eb;">${u}</a></li>`).join('')}
+         </ul>
+       </div>`
+    : ''
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="margin-bottom: 24px;">
+    <h1 style="color: #111827; font-size: 22px; margin: 0;">New contact form message</h1>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+    <tr>
+      <td style="padding: 6px 0; color: #6b7280; width: 90px;">From:</td>
+      <td style="padding: 6px 0; font-weight: 600;">${name} &lt;${email}&gt;</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #6b7280;">Account:</td>
+      <td style="padding: 6px 0;">${userId ? `Signed in (user ${userId})` : 'Not signed in'}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #6b7280;">Subject:</td>
+      <td style="padding: 6px 0; font-weight: 600;">${subject}</td>
+    </tr>
+  </table>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 16px; white-space: pre-wrap;">${message}</div>
+
+  ${attachmentsHtml}
+
+  <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">Reply to this email to respond directly to ${name}.</p>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to: SUPPORT_EMAIL,
+    subject: `[Contact] ${subject}`,
+    html,
+    replyTo: email
+  })
+}
+
+/**
+ * Courtesy "we got your message" reply to the sender's own address.
+ */
+export async function sendContactConfirmation(params: { name: string; email: string; subject: string }): Promise<void> {
+  const { name, email, subject } = params
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 24px; margin: 0;">We've got your message</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 12px 0; color: #4b5563;">Hi ${name},</p>
+    <p style="margin: 0; color: #4b5563;">
+      Thanks for reaching out about "${subject}". Our support team has received your
+      message and will get back to you at this address as soon as they can.
+    </p>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to: email,
+    subject: `We've received your message — ${subject}`,
+    html
+  })
+}
+
+// ============================================================================
 // WELCOME EMAIL
 // ============================================================================
 
@@ -556,5 +680,7 @@ export default {
   sendOrderConfirmation,
   sendShippingNotification,
   sendArtistSaleNotification,
-  sendArtistWelcome
+  sendArtistWelcome,
+  sendContactMessageToSupport,
+  sendContactConfirmation
 }

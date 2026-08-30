@@ -637,6 +637,32 @@ CREATE TABLE model_report_attachments (
 CREATE INDEX idx_report_attachments_report ON model_report_attachments(report_id);
 
 -- ============================================================================
+-- CONTACT MESSAGES (migration 043): public "Contact us" page submissions
+-- ============================================================================
+
+CREATE TABLE contact_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL, -- NULL for an anonymous sender
+    name    VARCHAR(200) NOT NULL,
+    email   VARCHAR(255) NOT NULL,
+    subject VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_contact_messages_created ON contact_messages(created_at DESC);
+CREATE INDEX idx_contact_messages_user ON contact_messages(user_id);
+
+CREATE TABLE contact_message_attachments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contact_message_id UUID NOT NULL REFERENCES contact_messages(id) ON DELETE CASCADE,
+    file_path    VARCHAR(500) NOT NULL,
+    file_name    VARCHAR(255),
+    content_type VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_contact_message_attachments_message ON contact_message_attachments(contact_message_id);
+
+-- ============================================================================
 -- MESSAGING (migration 022): direct buyer<->artist threads + site/system messages
 -- ============================================================================
 

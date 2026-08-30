@@ -386,6 +386,29 @@ there is nothing left to protect them from: they now get the real mesh instead.
   geometry, so N copies of one piece cost one upload, but an owner filling a table with
   million-triangle models will see the framerate the decimation was hiding.
 
+## "Previews aren't your final print" popup (built 2026-08-30)
+The planner draws a decimated + watermarked proxy, which reads to a buyer as "this model is
+low quality" rather than "this is a preview". `ui/PreviewQualityNotice.tsx` shows the two side
+by side once, with the explanation and an acknowledgement checkbox.
+- **Images are NOT in the repo yet** — the user is supplying them. They go at
+  `frontend/public/assets/preview-quality/{planner-preview,stl-detail}.png`; paths are the
+  exported `PREVIEW_IMG`/`STL_IMG` constants at the top of the component. A missing file
+  renders a labelled placeholder naming the expected path, **not** a broken image, so the
+  popup ships safely before the assets land. Spec + "how to shoot the comparison" guidance is
+  in that folder's `README.md` (same camera/lighting/model, PNG not JPEG, pick a model where
+  decimation actually shows, use the *real* watermark — don't composite a fake one).
+- **The checkbox is what persists the dismissal.** `Got it` is disabled until it's ticked and
+  writes `aa_planner_preview_quality_ack_v1`; Esc / the X close for this session only, so
+  nobody is trapped in a modal and nobody is silently recorded as having understood it.
+- **Timing avoids modal pile-up.** The first-visit effect waits for `sceneReady` and holds off
+  while `tourActive` or `showHelp` is up (the buyer/artist walkthroughs already fire on first
+  visit), then opens 600ms later against a table the user can actually see.
+- Re-openable any time from **Help → "Preview vs print"** (`onShowPreviewQuality` prop on
+  `HelpOverlay`); its backdrop is z-index 45 so it sits above the help overlay's 40.
+- Verified in-browser: auto-opens on first visit, button stays disabled until ticked, closes and
+  persists, does not reappear after reload, re-opens from Help, and the 4:3 frames lay out
+  correctly with real images in place.
+
 ## Planner on tablets (built 2026-08-23)
 The planner was **hard-gated to ≥1024px** (`pages/Planner.tsx`) and had **zero touch
 handling** — a touch pointer always reports `button === 0` and never fires `wheel`, so
@@ -410,6 +433,36 @@ camera was frozen solid. Touch is now a **separate input path**, so no desktop c
   phones still out.
 - **Untested on real hardware**: synthetic pointer events verified the handlers run clean and
   the layout was checked at 1440/1024/700px, but multi-touch was never exercised on a device.
+
+## Contact page (built 2026-08-29, migration 043)
+The Contact page (`frontend/src/pages/Contact.tsx`) was a static "email us" stub — now a real
+form: name, email, subject, message, and up to 5 file attachments, open to anonymous visitors
+(pre-filled from the account if signed in). Mirrors the `routes/reports.ts` proof-upload pattern.
+- **Backend** `routes/contact.ts`, mounted at `/api/contact`, both endpoints on `optionalAuth`
+  (works signed-out or in): `POST /presign-attachment` (rate-limited via `uploadRateLimit`) signs
+  an R2 PUT under the `contact/` prefix for images/PDF/zip/txt; `POST /` (rate-limited via
+  `emailRateLimit`, 3/hour/IP-or-user) validates the fields, **writes the message to
+  `contact_messages` + `contact_message_attachments` first**, then emails support — the DB write
+  happens before the email send so a message survives even if Resend is down or misconfigured
+  (`services/email.ts`'s `sendEmail()` logs and swallows failures by design, it never throws).
+- **Email** (`services/email.ts`): `sendContactMessageToSupport` → `SUPPORT_EMAIL` (env, defaults
+  `support@artifactarmoury.com`) with `reply_to` set to the sender's own address, so support can
+  just hit Reply; `sendContactConfirmation` → a courtesy "we got it" reply to the sender. `sendEmail`
+  gained a `replyTo` param (maps to Resend's `reply_to` field — **not** `replyTo`, that's silently
+  ignored by the SDK's types).
+- **Attachments** are served straight off the public R2 CDN via `publicUrl(key)` in the email body
+  (same trust model as `model_report_attachments`: the bucket is public through the CDN, so the
+  32-hex-char random key is what keeps them unguessable — no signed download URL needed).
+- **No admin inbox built** — messages are queryable via `npm run db:query` if needed
+  (`SELECT * FROM contact_messages ORDER BY created_at DESC`); a dashboard is a follow-up if
+  volume ever justifies it.
+- **Known DB_MOCK-only crash**: `POST /api/contact` 500s in local dev (`DB_MOCK=true`) because the
+  mock `db.query()` returns `{rows:[]}` for the `INSERT ... RETURNING id`, so `r.rows[0].id` throws
+  — the exact same shape as the pre-existing gap in `routes/reports.ts`. Confirmed harmless against
+  a real DB: this is a mock-only artifact, not a bug in the new route. Verified in-browser: form
+  renders, client + server validation both fire correctly (empty required field, <10-char message),
+  the request reaches the backend and gets rejected/accepted as expected, and `/presign-attachment`
+  round-trips a real signed R2 PUT URL under `contact/` using the project's live R2 credentials.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as

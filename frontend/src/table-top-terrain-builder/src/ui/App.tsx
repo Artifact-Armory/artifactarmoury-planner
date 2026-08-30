@@ -25,6 +25,7 @@ import { subscribeLoading } from '@scene/loadManager'
 import { CoachMarks } from './CoachMarks'
 import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
+import { PreviewQualityNotice, hasAcknowledgedPreviewQuality } from './PreviewQualityNotice'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
@@ -203,6 +204,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
   const [showHelp, setShowHelp] = React.useState(false)
+  const [showPreviewQuality, setShowPreviewQuality] = React.useState(false)
   // Tablet support. `coarse` adds on-screen buttons for the keyboard-only actions;
   // `compact` turns the two fixed side panels into drawers. Both are false on a
   // desktop, where every existing control keeps working exactly as before.
@@ -217,6 +219,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const startedRef = React.useRef(false)
   const onboardRef = React.useRef(false)
   const startTour = useOnboardingStore((s) => s.startTour)
+  const tourActive = useOnboardingStore((s) => s.tourActive)
 
   // ---- Palette catalogue filters (model class + facet terms) ----
   const appliesToBySlug = React.useMemo(() => {
@@ -319,6 +322,17 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       }
     } catch { /* localStorage unavailable (private mode) — just skip */ }
   }, [readOnly, sceneReady, isAuthenticated, user, startTour])
+
+  // First visit: explain that the table shows decimated + watermarked previews,
+  // not the STL they'd print. Deliberately waits until the walkthrough and the
+  // controls overlay are done — three modals stacked on load is worse than the
+  // confusion this is meant to prevent — so it lands on a table they can see.
+  React.useEffect(() => {
+    if (readOnly || !sceneReady || tourActive || showHelp) return
+    if (hasAcknowledgedPreviewQuality()) return
+    const t = window.setTimeout(() => setShowPreviewQuality(true), 600)
+    return () => window.clearTimeout(t)
+  }, [readOnly, sceneReady, tourActive, showHelp])
 
   // Clear any tour left active elsewhere (e.g. the dashboard walkthrough) so it
   // can't bleed into the planner; our own effect above starts it when relevant.
@@ -1424,6 +1438,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         <HelpOverlay touch={coarse}
           onClose={() => setShowHelp(false)}
           onReplayTour={() => { setShowHelp(false); startTour() }}
+          onShowPreviewQuality={() => setShowPreviewQuality(true)}
+        />
+      )}
+      {showPreviewQuality && (
+        <PreviewQualityNotice
+          onClose={() => setShowPreviewQuality(false)}
+          onAcknowledge={() => setShowPreviewQuality(false)}
         />
       )}
       {!readOnly && (
