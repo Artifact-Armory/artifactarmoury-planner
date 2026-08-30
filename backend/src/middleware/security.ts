@@ -66,7 +66,13 @@ export const corsOptions: cors.CorsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-Id'],
-  exposedHeaders: ['X-Total-Count', 'X-Page-Count'],
+  // Content-Disposition must be exposed or the frontend can't read the
+  // server-chosen filename on a cross-origin download (pages.dev -> railway.app):
+  // without this, response.headers['content-disposition'] is always undefined in
+  // the browser, silently falling back to a wrong-extension filename (e.g. a
+  // multi-part ZIP saved as "model.stl" — the archive is downloaded correctly,
+  // it's just misnamed, so it doesn't look/behave like a ZIP to the buyer).
+  exposedHeaders: ['X-Total-Count', 'X-Page-Count', 'Content-Disposition'],
   maxAge: 86400 // 24 hours
 };
 

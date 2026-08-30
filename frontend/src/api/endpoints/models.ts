@@ -321,10 +321,18 @@ export const modelsApi = {
       responseType: 'blob',
       timeout: 600000, // large STLs can take a while
     });
-    // Prefer the server-provided filename from Content-Disposition.
+    // Prefer the server-provided filename from Content-Disposition (requires the
+    // backend to list it in CORS exposedHeaders — see middleware/security.ts —
+    // otherwise the browser hides this header on a cross-origin response and we
+    // fall through to a guessed name below).
     const cd = String(response.headers?.['content-disposition'] ?? '');
     const match = cd.match(/filename="?([^"]+)"?/i);
-    const filename = match?.[1] || `${fallbackName.replace(/[^a-z0-9._-]+/gi, '_')}.stl`;
+    // Fall back to the content-type to pick the right extension: a multi-part
+    // model downloads as a ZIP, and naming it "model.stl" makes a correctly
+    // downloaded archive look like a single broken STL to the buyer.
+    const contentType = String(response.headers?.['content-type'] ?? '');
+    const guessedExt = contentType.includes('zip') ? 'zip' : 'stl';
+    const filename = match?.[1] || `${fallbackName.replace(/[^a-z0-9._-]+/gi, '_')}.${guessedExt}`;
 
     const url = window.URL.createObjectURL(response.data as Blob);
     const a = document.createElement('a');
