@@ -72,9 +72,10 @@ const Checkout: React.FC = () => {
   // live mode until a real address has been entered.
   const [billingAddress, setBillingAddress] = React.useState<{ country: string; postalCode?: string } | null>(null)
 
-  // `subtotal` from the cart is NET. The backend recomputes all of this from the
-  // country code alone — these figures exist so the buyer can see the breakdown, and
-  // are never sent as the amount to charge.
+  // `subtotal` from the cart is NET. The backend always recomputes tax itself — from
+  // the real billing address in live checkout (Stripe Tax), or from this country code
+  // as a mock/test fallback — so these figures exist only for the buyer to see a
+  // breakdown before that happens, and are never sent as the amount to charge.
   const taxCountry = useTaxStore((s) => s.country)
   const taxRate = useTaxStore((s) => s.rate())
   // Per cart line, matching the gross prices listed above and what the backend
@@ -291,30 +292,61 @@ const Checkout: React.FC = () => {
               exists to *account* for the total, not to add to it — the VAT line
               breaks out tax the buyer has been seeing all along, and the total
               matches what the product page said. Nothing new appears here.
-            */}
-            <CountrySelect variant="full" className="mb-4 border-b border-border pb-4" />
 
-            {taxRate > 0 ? (
-              <>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
-                  <span className="text-foreground">{formatPrice(subtotal)}</span>
-                </div>
-                <div className="mt-1.5 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">VAT ({taxRate}%)</span>
-                  <span className="text-foreground">{formatPrice(taxAmount)}</span>
-                </div>
-                <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-                  <span className="text-sm font-medium text-foreground">Total</span>
-                  <span className="text-xl font-bold text-foreground">{formatPrice(grossTotal)}</span>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Total</span>
-                <span className="text-xl font-bold text-foreground">{formatPrice(grossTotal)}</span>
+              Live checkout replaces the country picker with a real billing address
+              (below): what's actually charged comes from Stripe Tax reading that
+              address, not from this picker, so the figures here are an estimate the
+              buyer can freely change without it affecting the final charge. Test/mock
+              checkout has no Stripe Tax to ask, so it keeps using the picker as the
+              real (mock) tax input, same as before Stripe Tax existed.
+            */}
+            {testMode ? (
+              <CountrySelect variant="full" className="mb-4 border-b border-border pb-4" />
+            ) : phase === 'review' ? (
+              <div className="mb-4 border-b border-border pb-4">
+                <p className="text-sm font-medium text-foreground">Billing address</p>
+                <p className="mb-2 mt-0.5 text-xs text-muted-foreground">
+                  Your exact tax is calculated from this address.
+                </p>
+                <Elements
+                  stripe={stripePromise}
+                  options={{ mode: 'payment', amount: Math.max(1, Math.round(grossTotal * 100)), currency: 'gbp' }}
+                >
+                  <BillingAddressCapture onChange={setBillingAddress} />
+                </Elements>
               </div>
-            )}
+            ) : null}
+
+            {/* Once a live order exists, its tax/total came back from Stripe Tax and
+                are authoritative; before that (or in test mode throughout) these are
+                the storefront's own estimate. */}
+            {(() => {
+              const showingFinal = !testMode && !!order
+              const displayTax = showingFinal ? (order!.tax ?? 0) : taxAmount
+              const displayTotal = showingFinal ? order!.total : grossTotal
+              const displayRate = showingFinal ? (order!.taxRate ?? 0) : taxRate
+              return displayRate > 0 ? (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
+                    <span className="text-foreground">{formatPrice(subtotal)}</span>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">VAT ({displayRate}%){!showingFinal && !testMode ? ' — estimated' : ''}</span>
+                    <span className="text-foreground">{formatPrice(displayTax)}</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                    <span className="text-sm font-medium text-foreground">Total</span>
+                    <span className="text-xl font-bold text-foreground">{formatPrice(displayTotal)}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Total</span>
+                  <span className="text-xl font-bold text-foreground">{formatPrice(displayTotal)}</span>
+                </div>
+              )
+            })()}
             {!user && (
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
             )}
@@ -378,11 +410,15 @@ const Checkout: React.FC = () => {
                 </label>
 
                 {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-                <Button className="mt-4 w-full" onClick={handleContinue} disabled={placing || !termsAccepted}>
+                <Button
+                  className="mt-4 w-full"
+                  onClick={handleContinue}
+                  disabled={placing || !termsAccepted || (!testMode && !billingAddress)}
+                >
                   {placing
                     ? 'Processing…'
                     : !testMode
-                      ? `Continue to payment · ${formatPrice(grossTotal)}`
+                      ? `Continue to payment · ${formatPrice(grossTotal)} est.`
                       : `Pay ${formatPrice(grossTotal)} with ${method === 'paypal' ? 'PayPal' : 'card'} (test)`}
                 </Button>
                 <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
@@ -398,7 +434,7 @@ const Checkout: React.FC = () => {
                 >
                   <PaymentForm
                     order={order}
-                    total={grossTotal}
+                    total={order.total}
                     onSuccess={finishSuccessfully}
                     onPending={() => { clearCart(); setPending(true) }}
                     onBack={() => { setPhase('review'); setOrder(null) }}
@@ -410,6 +446,30 @@ const Checkout: React.FC = () => {
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Live billing-address step, rendered inside its own (deferred, clientSecret-less)
+// <Elements> instance ahead of order creation — this is what Stripe Tax computes the
+// real charge from, replacing the storefront country picker for this purpose. Only
+// reports a value once the buyer has entered a complete address; anything partial or
+// cleared reports null so "Continue" stays disabled rather than sending a stale one.
+// ---------------------------------------------------------------------------
+const BillingAddressCapture: React.FC<{
+  onChange: (address: { country: string; postalCode?: string } | null) => void
+}> = ({ onChange }) => {
+  return (
+    <AddressElement
+      options={{ mode: 'billing' }}
+      onChange={(event) => {
+        if (event.complete) {
+          onChange({ country: event.value.address.country, postalCode: event.value.address.postal_code || undefined })
+        } else {
+          onChange(null)
+        }
+      }}
+    />
   )
 }
 
