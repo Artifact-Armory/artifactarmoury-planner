@@ -14,6 +14,7 @@ import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
+import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
 import { publicUrl } from '../services/r2';
 
 const router = Router();
@@ -141,6 +142,8 @@ router.get('/users',
       `SELECT
         u.id, u.email, u.display_name, u.role, u.account_status,
         u.artist_name, u.created_at, u.last_login, u.commission_rate,
+        u.intro_commission_rate, u.intro_commission_months, u.standard_commission_rate,
+        u.intro_commission_starts_at, u.intro_commission_ends_at,
         COUNT(DISTINCT m.id) as model_count,
         COUNT(DISTINCT o.id) as order_count
        FROM users u
@@ -259,6 +262,74 @@ router.patch('/users/:id/commission-rate',
     });
 
     res.json({ message: 'Commission rate updated', commissionRate: Number(result.rows[0].commission_rate) });
+  })
+);
+
+// Set an introductory commission offer: the artist keeps introRate% for
+// `months` starting from their FIRST-EVER model publish (not from now), then
+// automatically reverts to standardRate%. Pending until that publish happens —
+// see services/introCommission.ts. Only settable while no offer is running.
+router.put('/users/:id/intro-commission',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { introRate, months, standardRate } = req.body;
+
+    const intro = Number(introRate);
+    const term = Number(months);
+    const std = standardRate == null ? undefined : Number(standardRate);
+
+    if (!Number.isFinite(intro) || intro <= 0 || intro > 100) {
+      throw new ValidationError('introRate must be a number between 0 (exclusive) and 100');
+    }
+    if (!Number.isInteger(term) || term <= 0 || term > 60) {
+      throw new ValidationError('months must be a whole number between 1 and 60');
+    }
+
+    // Default the "revert to" rate to whatever the artist's rate currently is.
+    let finalStandard = std;
+    if (finalStandard === undefined) {
+      const current = await db.query(`SELECT commission_rate FROM users WHERE id = $1`, [id]);
+      if (current.rows.length === 0) throw new NotFoundError('Artist');
+      finalStandard = Number(current.rows[0].commission_rate);
+    }
+    if (!Number.isFinite(finalStandard) || finalStandard <= 0 || finalStandard > 100) {
+      throw new ValidationError('standardRate must be a number between 0 (exclusive) and 100');
+    }
+
+    const { startedImmediately } = await setIntroOffer(id, intro, term, finalStandard);
+
+    logger.warn('Introductory commission offer set by admin', {
+      adminId: (req as any).userId,
+      targetUserId: id,
+      introRate: intro,
+      months: term,
+      standardRate: finalStandard,
+      startedImmediately,
+    });
+
+    res.json({
+      message: startedImmediately
+        ? `Introductory offer set and started immediately (this artist already has a published model)`
+        : `Introductory offer set — it will start on this artist's first published model`,
+      startedImmediately,
+    });
+  })
+);
+
+// Cancel a pending or active introductory offer. If it was active, the artist's
+// commission_rate reverts to their standard rate immediately.
+router.delete('/users/:id/intro-commission',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    await cancelIntroOffer(id);
+
+    logger.warn('Introductory commission offer cancelled by admin', {
+      adminId: (req as any).userId,
+      targetUserId: id,
+    });
+
+    res.json({ message: 'Introductory offer cancelled' });
   })
 );
 

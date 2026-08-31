@@ -42,6 +42,7 @@ import taxRoutes from './routes/tax';
 import contactRoutes from './routes/contact';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
+import { startIntroCommissionScheduler } from './services/introCommission';
 import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
 import { startFullGlbInlineDrainer } from './services/fullGlb/inline';
 
@@ -188,6 +189,9 @@ async function startServer() {
 
     // Start the payout job: clears matured earnings + pays eligible artists on a timer.
     startPayoutScheduler();
+
+    // Revert any artist's introductory commission rate once its window has lapsed.
+    startIntroCommissionScheduler();
 
     // Keep the artist analytics rollups current. Without this, any day on which
     // no artist opened a dashboard never gets rolled up and reads as zero.

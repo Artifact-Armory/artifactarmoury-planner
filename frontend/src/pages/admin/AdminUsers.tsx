@@ -16,6 +16,17 @@ const statusBadge: Record<string, string> = {
   banned: 'bg-red-100 text-red-700',
 }
 
+type IntroState = 'none' | 'pending' | 'active' | 'ended'
+
+function introState(u: AdminUserRow): IntroState {
+  if (!u.intro_commission_rate) return 'none'
+  if (!u.intro_commission_starts_at) return 'pending'
+  if (u.intro_commission_ends_at && new Date(u.intro_commission_ends_at) > new Date()) return 'active'
+  return 'ended'
+}
+
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB')
+
 const AdminUsers: React.FC = () => {
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
@@ -26,6 +37,7 @@ const AdminUsers: React.FC = () => {
   const [page, setPage] = useState(1)
   const [editingRateId, setEditingRateId] = useState<string | null>(null)
   const [rateInput, setRateInput] = useState('')
+  const [introModalUser, setIntroModalUser] = useState<AdminUserRow | null>(null)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin', 'users', { search, role, status, page }],
@@ -69,6 +81,24 @@ const AdminUsers: React.FC = () => {
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to update commission rate'),
   })
+
+  const cancelIntroMut = useMutation({
+    mutationFn: (id: string) => adminApi.cancelIntroCommission(id),
+    onSuccess: () => {
+      toast.success('Introductory offer cancelled')
+      invalidate()
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to cancel introductory offer'),
+  })
+
+  const confirmCancelIntro = (u: AdminUserRow) => {
+    const state = introState(u)
+    const msg =
+      state === 'active'
+        ? `Cancel ${u.email}'s introductory offer? Their rate reverts to ${u.standard_commission_rate}% immediately.`
+        : `Cancel the pending introductory offer for ${u.email}?`
+    if (window.confirm(msg)) cancelIntroMut.mutate(u.id)
+  }
 
   const startEditRate = (u: AdminUserRow) => {
     setEditingRateId(u.id)
@@ -244,6 +274,37 @@ const AdminUsers: React.FC = () => {
                         {u.commission_rate ? `${Number(u.commission_rate)}%` : '—'}
                       </button>
                     )}
+                    {u.role === 'artist' && (
+                      <div className="mt-0.5 text-xs">
+                        {introState(u) === 'pending' && (
+                          <span className="text-amber-600">
+                            🎁 pending: {Number(u.intro_commission_rate)}% × {u.intro_commission_months}mo{' '}
+                            <button onClick={() => setIntroModalUser(u)} className="underline">
+                              edit
+                            </button>{' '}
+                            <button onClick={() => confirmCancelIntro(u)} className="underline">
+                              cancel
+                            </button>
+                          </span>
+                        )}
+                        {introState(u) === 'active' && (
+                          <span className="text-green-700">
+                            🎁 until {fmtDate(u.intro_commission_ends_at!)}{' '}
+                            <button onClick={() => confirmCancelIntro(u)} className="underline">
+                              cancel
+                            </button>
+                          </span>
+                        )}
+                        {(introState(u) === 'none' || introState(u) === 'ended') && (
+                          <button
+                            onClick={() => setIntroModalUser(u)}
+                            className="text-muted-foreground hover:underline"
+                          >
+                            {introState(u) === 'ended' ? `ended ${fmtDate(u.intro_commission_ends_at!)} · + new offer` : '+ intro offer'}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-foreground">{u.model_count}</td>
                   <td className="px-4 py-3 text-right text-foreground">{u.order_count}</td>
@@ -325,6 +386,136 @@ const AdminUsers: React.FC = () => {
           </div>
         </div>
       )}
+
+      {introModalUser && (
+        <IntroOfferModal
+          user={introModalUser}
+          onClose={() => setIntroModalUser(null)}
+          onSaved={() => {
+            setIntroModalUser(null)
+            invalidate()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+const IntroOfferModal: React.FC<{
+  user: AdminUserRow
+  onClose: () => void
+  onSaved: () => void
+}> = ({ user, onClose, onSaved }) => {
+  const [introRate, setIntroRate] = useState('')
+  const [months, setMonths] = useState('3')
+  const [standardRate, setStandardRate] = useState(user.commission_rate ?? '85')
+
+  const mut = useMutation({
+    mutationFn: () =>
+      adminApi.setIntroCommission(user.id, {
+        introRate: Number(introRate),
+        months: Number(months),
+        standardRate: Number(standardRate),
+      }),
+    onSuccess: (res) => {
+      toast.success(res.message)
+      onSaved()
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to set introductory offer'),
+  })
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const rate = Number(introRate)
+    const term = Number(months)
+    const std = Number(standardRate)
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
+      toast.error('Introductory rate must be between 0 and 100')
+      return
+    }
+    if (!Number.isInteger(term) || term <= 0 || term > 60) {
+      toast.error('Months must be a whole number between 1 and 60')
+      return
+    }
+    if (!Number.isFinite(std) || std <= 0 || std > 100) {
+      toast.error('Standard rate must be between 0 and 100')
+      return
+    }
+    mut.mutate()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <form
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm space-y-4 rounded-lg bg-card p-6 shadow-xl"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Introductory offer</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            For {user.artist_name || user.display_name} ({user.email}). The clock starts on their first
+            published model, not today, then reverts automatically at the end of the term.
+          </p>
+        </div>
+
+        <label className="block text-sm">
+          <span className="text-foreground">Introductory rate (their share, %)</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            step="0.01"
+            required
+            autoFocus
+            value={introRate}
+            onChange={(e) => setIntroRate(e.target.value)}
+            placeholder="e.g. 95"
+            className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-foreground">Duration (months)</span>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            step="1"
+            required
+            value={months}
+            onChange={(e) => setMonths(e.target.value)}
+            className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-foreground">Standard rate to revert to (%)</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            step="0.01"
+            required
+            value={standardRate}
+            onChange={(e) => setStandardRate(e.target.value)}
+            className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+          />
+        </label>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-muted-foreground hover:underline">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={mut.isPending}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {mut.isPending ? 'Saving…' : 'Set offer'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

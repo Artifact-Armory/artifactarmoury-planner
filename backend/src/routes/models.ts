@@ -42,6 +42,7 @@ import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYT
 import { isBakeWorkerEnabled, enqueueBakeJob } from '../services/proxyBake/queue';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate, createNotification } from '../services/notifications';
+import { maybeStartIntroOffer } from '../services/introCommission';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
@@ -1261,6 +1262,13 @@ router.post('/:id/publish',
     if (isFirstPublish) {
       notifyFollowersOfRelease(model.artist_id, id);
     }
+
+    // If this artist has a pending introductory commission offer, this is the
+    // trigger that starts its clock — but only the very first time ANY of their
+    // models goes live, not every publish.
+    maybeStartIntroOffer(model.artist_id).catch(err =>
+      logger.error('maybeStartIntroOffer failed', { error: err, artistId: model.artist_id, modelId: id })
+    );
 
     res.json({
       message: 'Model published successfully',

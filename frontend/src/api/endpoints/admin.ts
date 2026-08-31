@@ -60,6 +60,11 @@ export interface AdminUserRow {
   model_count: string
   order_count: string
   commission_rate: string | null
+  intro_commission_rate: string | null
+  intro_commission_months: number | null
+  standard_commission_rate: string | null
+  intro_commission_starts_at: string | null
+  intro_commission_ends_at: string | null
 }
 
 export interface AdminOrderRow {
@@ -149,6 +154,19 @@ export const adminApi = {
 
   setCommissionRate: async (id: string, commissionRate: number) => {
     const { data } = await apiClient.patch(`${BASE}/users/${id}/commission-rate`, { commissionRate })
+    return data
+  },
+
+  setIntroCommission: async (
+    id: string,
+    body: { introRate: number; months: number; standardRate?: number },
+  ): Promise<{ message: string; startedImmediately: boolean }> => {
+    const { data } = await apiClient.put(`${BASE}/users/${id}/intro-commission`, body)
+    return data
+  },
+
+  cancelIntroCommission: async (id: string) => {
+    const { data } = await apiClient.delete(`${BASE}/users/${id}/intro-commission`)
     return data
   },
 

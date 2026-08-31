@@ -29,6 +29,16 @@ CREATE TABLE users (
     stripe_account_id VARCHAR(255), -- Stripe Connect account
     stripe_onboarding_complete BOOLEAN DEFAULT false,
 
+    -- Introductory commission offer (see migration 046). Pending until the
+    -- artist's first-ever model is published, then commission_rate is set to
+    -- intro_commission_rate until intro_commission_ends_at, when a scheduler
+    -- reverts commission_rate to standard_commission_rate.
+    intro_commission_rate DECIMAL(5,2),
+    intro_commission_months INTEGER,
+    standard_commission_rate DECIMAL(5,2),
+    intro_commission_starts_at TIMESTAMP,
+    intro_commission_ends_at TIMESTAMP,
+
     -- Account status
     email_verified BOOLEAN DEFAULT false,
     -- Email verification + password reset: only the SHA-256 HASH of the token is
