@@ -498,38 +498,80 @@ async function optimizeAndBuildIO(NodeIO: any, doc: any, triangleCount: number):
 }
 
 // ============================================================================
-// FULL-FIDELITY GLB (owner-only)
+// OWNER GLB (buyer/artist/admin only)
 // ============================================================================
 // A buyer already holds the STL, so there is nothing left to protect from them:
-// they get the real mesh, not the decimated + watermarked preview proxy. This is
-// the same STL→GLB conversion as above with the two lossy steps removed:
+// they get a much higher-fidelity mesh than the public preview, with no
+// watermark. This is the same STL→GLB conversion as the preview above, with:
 //
-//   - NO simplify(): every triangle of the canonical STL survives.
+//   - a MUCH LIGHTER simplify(): only meshes denser than OWNER_GLB_TARGET_TRIS
+//     get decimated at all (most listings never hit it and pass through with
+//     every triangle intact), and when it does trigger it aims for a budget
+//     several times the public preview's, at a much tighter error bound — so an
+//     owner still sees visibly more detail than a buyer who hasn't purchased,
+//     without the framerate a genuinely unbounded million-triangle mesh cost
+//     the planner (see FULL_GLB_MAX_TRIS above this used to make "unbounded" a
+//     real possibility for outlier uploads).
 //   - NO watermark: the emboss lives in the Blender bake (blender/bake_proxy.py),
 //     which this path never touches.
 //
-// weld() merges only BITWISE-IDENTICAL vertices, so it changes vertex *sharing*,
-// never vertex positions — the STL's geometry is reproduced exactly. Draco is the
-// one remaining approximation: it quantizes coordinates to a fixed grid over the
-// mesh bounding box. At the default 14 bits a 300 mm model lands on an ~18 µm
-// grid; POSITION is raised to 16 bits here (~4.6 µm on the same model), which is
-// far below both FDM and resin resolution — and this GLB is a *viewer* asset, not
-// a printable deliverable. The STL the buyer downloads is untouched by all of it.
+// weld() merges only BITWISE-IDENTICAL vertices, so on its own it changes vertex
+// *sharing*, never vertex positions. Draco is the other approximation: it
+// quantizes coordinates to a fixed grid over the mesh bounding box. At the
+// default 14 bits a 300 mm model lands on an ~18 µm grid; POSITION is raised to
+// 16 bits here (~4.6 µm on the same model), which is far below both FDM and
+// resin resolution — and this GLB is a *viewer* asset, not a printable
+// deliverable. The STL the buyer downloads is untouched by all of it, always.
 
 /** Draco POSITION quantization for the owner GLB. 16 ≈ 4.6 µm on a 300 mm model. */
 const FULL_GLB_POSITION_BITS = Number(process.env.FULL_GLB_POSITION_BITS ?? 16)
 
+/**
+ * Triangle budget for the owner GLB. A mesh at or under this passes through with
+ * every triangle intact (true "full fidelity") — the overwhelming majority of
+ * listings never approach it. Only denser meshes get decimated, and only down
+ * toward this number, which defaults to several times the public preview's
+ * budget (PREVIEW_TARGET_TRIS) so a buyer's copy is still visibly more detailed
+ * than what a non-owner sees.
+ */
+const OWNER_GLB_TARGET_TRIS = Number(process.env.FULL_GLB_TARGET_TRIS ?? TARGET_PREVIEW_TRIS * 3)
+/**
+ * Simplifier error bound for the owner GLB's light decimation — much tighter
+ * than the public preview's 0.004 (which has to hit a small budget from
+ * anything up to 1M+ source triangles) since this only ever trims the excess
+ * above OWNER_GLB_TARGET_TRIS.
+ */
+const OWNER_GLB_SIMPLIFY_ERROR = Number(process.env.FULL_GLB_SIMPLIFY_ERROR ?? 0.001)
+
+/** Sum of triangle counts across every primitive in the document. */
+function countTriangles(doc: any): number {
+  let n = 0
+  for (const mesh of doc.getRoot().listMeshes()) {
+    for (const prim of mesh.listPrimitives()) {
+      const idx = prim.getIndices()
+      const pos = prim.getAttribute('POSITION')
+      n += (idx ? idx.getCount() : pos.getCount()) / 3
+    }
+  }
+  return n
+}
+
 export interface FullGlbResult {
-  /** Triangles written (post-weld; equals the STL's triangle count). */
+  /** Triangles actually written to the GLB, after any light decimation. */
   triangles: number
+  /** Triangles in the source STL, before decimation. */
+  sourceTriangles: number
   /** Size of the Draco-compressed GLB in bytes. */
   bytes: number
 }
 
 /**
- * Convert a canonical STL to an un-decimated, un-watermarked GLB.
+ * Convert a canonical STL to an un-watermarked, near-full-fidelity GLB — every
+ * triangle survives unless the source is denser than OWNER_GLB_TARGET_TRIS, in
+ * which case it's lightly decimated toward that budget (still well above the
+ * public preview's).
  *
- * Returns the triangle count and output size so the caller can record them; the
+ * Returns the triangle counts and output size so the caller can record them; the
  * caller decides where the bytes go (they are owner-gated, so never a public key).
  */
 export async function convertSTLtoGLBFull(
@@ -537,23 +579,46 @@ export async function convertSTLtoGLBFull(
   outputPath: string,
 ): Promise<FullGlbResult> {
   const { Document, NodeIO } = await importESM<typeof import('@gltf-transform/core')>('@gltf-transform/core')
-  const { weld, dedup } = await importESM<typeof import('@gltf-transform/functions')>(
+  const { weld, dedup, simplify } = await importESM<typeof import('@gltf-transform/functions')>(
     '@gltf-transform/functions',
   )
 
   const stl = await parseSTL(stlPath)
   const { doc } = stlToDocument(Document, stl)
 
-  // Index the mesh (STL verts are unshared), then rebuild normals with the same
-  // crease angle the preview uses so an owner's model doesn't suddenly shade
-  // differently from the one they were looking at before they bought it. The
-  // second weld re-indexes the crease-expanded primitive; crease seams keep their
-  // distinct normals, so hard edges survive.
+  // Index the mesh (STL verts are unshared) before anything else can act on it.
   await doc.transform(weld())
+
+  // Light decimation: only meshes denser than the owner budget get touched, and
+  // with a much tighter error bound than the public preview uses (that one has to
+  // hit a small budget from anything up to 1M+ source triangles; this one only
+  // ever trims the excess above a much larger number). Most listings are already
+  // under budget and this is a no-op for them — true full fidelity.
+  if (stl.triangleCount > OWNER_GLB_TARGET_TRIS) {
+    const meshopt: any = await importESM('meshoptimizer')
+    const MeshoptSimplifier = meshopt.MeshoptSimplifier ?? meshopt.default?.MeshoptSimplifier
+    if (MeshoptSimplifier?.ready) await MeshoptSimplifier.ready
+    if (MeshoptSimplifier) {
+      await doc.transform(
+        simplify({
+          simplifier: MeshoptSimplifier,
+          ratio: OWNER_GLB_TARGET_TRIS / stl.triangleCount,
+          error: OWNER_GLB_SIMPLIFY_ERROR,
+        }),
+      )
+    }
+  }
+
+  // Rebuild normals with the same crease angle the preview uses so an owner's
+  // model doesn't suddenly shade differently from the one they were looking at
+  // before they bought it. The following weld re-indexes the crease-expanded
+  // primitive; crease seams keep their distinct normals, so hard edges survive.
   for (const mesh of doc.getRoot().listMeshes()) {
     for (const prim of mesh.listPrimitives()) applyCreaseNormals(doc, prim, CREASE_ANGLE_DEG)
   }
   await doc.transform(weld(), dedup())
+
+  const outputTriangles = countTriangles(doc)
 
   const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
     '@gltf-transform/extensions',
@@ -576,12 +641,14 @@ export async function convertSTLtoGLBFull(
   const glbBytes = await io.writeBinary(doc)
   await writeFile(outputPath, Buffer.from(glbBytes))
 
-  logger.info('STL→GLB conversion complete (full fidelity, owner copy)', {
+  logger.info('STL→GLB conversion complete (owner copy)', {
     outputPath,
-    triangles: stl.triangleCount,
+    sourceTriangles: stl.triangleCount,
+    triangles: outputTriangles,
+    decimated: outputTriangles < stl.triangleCount,
     bytes: glbBytes.byteLength,
   })
-  return { triangles: stl.triangleCount, bytes: glbBytes.byteLength }
+  return { triangles: outputTriangles, sourceTriangles: stl.triangleCount, bytes: glbBytes.byteLength }
 }
 
 /**

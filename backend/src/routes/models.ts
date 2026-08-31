@@ -642,10 +642,12 @@ async function isEntitledToModel(modelId: string, viewerId?: string, role?: stri
  *
  *   - the PREVIEW proxy (`glb_file_path`) — decimated and, on the bake path,
  *     carrying an embossed watermark. What anyone browsing the marketplace gets.
- *   - the OWNER copy (`full_glb_path`) — every triangle of the canonical STL, no
- *     watermark. Served only to someone who has bought the model (or its artist,
- *     or an admin), who already holds the STL and has nothing left to be
- *     protected from (migration 041).
+ *   - the OWNER copy (`full_glb_path`) — every triangle of the canonical STL (or,
+ *     above a triangle budget several times the public preview's, a light
+ *     decimation toward that budget — see OWNER_GLB_TARGET_TRIS in
+ *     fileProcessor.ts), no watermark. Served only to someone who has bought the
+ *     model (or its artist, or an admin), who already holds the STL and has
+ *     nothing left to be protected from (migration 041).
  *
  * Serving both from one URL — rather than a second endpoint the planner has to
  * choose between — keeps the entitlement decision on the server, where it belongs,

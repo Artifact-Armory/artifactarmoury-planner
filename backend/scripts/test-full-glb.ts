@@ -1,23 +1,26 @@
 // backend/scripts/test-full-glb.ts
 //
-// Proof that the OWNER full-fidelity GLB (migration 041) is what it claims to be,
-// run against the same service function production uses — no DB, no network.
+// Proof that the OWNER GLB (migration 041, lightly decimated as of the follow-up
+// change below) is what it claims to be, run against the same service function
+// production uses — no DB, no network.
 //
-// The claim is "no watermark, no decimation", and the second half of that is the
-// part that could silently regress: the preview and full converters share
-// stlToDocument() and applyCreaseNormals(), so someone tidying the preview's
-// decimation could easily drag simplify() into the full path and nobody would
-// notice by looking at a render. So this asserts on triangle counts:
+// The claim is "no watermark, near-full fidelity, still meaningfully better than
+// the public preview", and that last part is what could silently regress: the
+// preview and owner converters share stlToDocument() and applyCreaseNormals(),
+// and both now run a simplify() step, so it would be easy for the owner budget
+// to drift down toward (or the preview's up toward) the other. So this asserts
+// on triangle counts:
 //
-//   1. FULL PATH KEEPS EVERY TRIANGLE — the GLB decodes to exactly the STL's
-//      triangle count.
-//   2. PREVIEW PATH STILL DECIMATES    — same STL through generateGLB() comes back
-//      under the preview budget. (Guards the converse mistake: accidentally
-//      shipping the full mesh as the public preview, which would hand away the
-//      thing the proxy-bake pipeline exists to protect.)
-//   3. GEOMETRY IS FAITHFUL            — the full GLB's bounding box matches the
-//      STL's to well under a printable tolerance, so Draco quantization isn't
-//      distorting the model.
+//   1. OWNER PATH RESPECTS ITS BUDGET  — on a mesh denser than
+//      OWNER_GLB_TARGET_TRIS, the GLB decodes to no more than that budget (with
+//      slack for the simplifier not hitting the ratio exactly).
+//   2. OWNER PATH STAYS HIGHER-FIDELITY THAN THE PREVIEW — same STL through
+//      generateGLB() (the public preview) comes back with meaningfully fewer
+//      triangles than the owner copy. (Guards the mistake of the two budgets
+//      converging, or the owner mesh leaking down to preview quality.)
+//   3. GEOMETRY IS FAITHFUL            — the owner GLB's bounding box matches the
+//      STL's to well under the configured simplifier error bound, so decimation
+//      + Draco quantization aren't distorting the model.
 //
 //   npm run test:fullglb
 
@@ -82,7 +85,7 @@ async function main() {
   await fs.copyFile(path.join(DIR, SUBJECT), stlPath)
   const fullPath = path.join(work, 'full.glb')
 
-  console.log('\nOwner full-fidelity GLB (migration 041)')
+  console.log('\nOwner GLB (migration 041, lightly decimated above a budget)')
   console.log(`  subject: ${SUBJECT}`)
 
   const stl = await parseSTL(stlPath)
@@ -102,44 +105,62 @@ async function main() {
   const stlSize = [sMax[0] - sMin[0], sMax[1] - sMin[1], sMax[2] - sMin[2]]
   console.log(`  source triangles: ${stl.triangleCount}`)
 
-  // ---- 1. the owner GLB keeps every triangle -------------------------------
+  // ---- 1. the owner GLB respects its triangle budget -----------------------
+  const ownerBudget = Number(process.env.FULL_GLB_TARGET_TRIS ?? 80000 * 3)
   const built = await convertSTLtoGLBFull(stlPath, fullPath)
   const full = await inspectGlb(fullPath)
+  if (stl.triangleCount <= ownerBudget) {
+    console.log(`  ⚠️  fixture is under the owner budget (${ownerBudget}) — expecting full fidelity, not decimation`)
+    check(
+      'owner GLB keeps every triangle (under budget, no decimation)',
+      full.triangles === stl.triangleCount,
+      `${full.triangles} / ${stl.triangleCount}`,
+    )
+  } else {
+    // meshopt's simplifier targets the ratio, it doesn't guarantee hitting it
+    // exactly — allow 15% slack above the nominal budget.
+    check(
+      'owner GLB is decimated toward its budget, not left at source density',
+      full.triangles <= ownerBudget * 1.15 && full.triangles < stl.triangleCount,
+      `${full.triangles} (budget ${ownerBudget}, source ${stl.triangleCount})`,
+    )
+  }
   check(
-    'owner GLB keeps every triangle (no decimation)',
-    full.triangles === stl.triangleCount,
-    `${full.triangles} / ${stl.triangleCount}`,
+    'reported triangle count matches what was actually written',
+    built.triangles === full.triangles,
+    `${built.triangles} / ${full.triangles}`,
   )
   check(
-    'reported triangle count matches the STL',
-    built.triangles === stl.triangleCount,
-    `${built.triangles}`,
+    'reported source triangle count matches the STL',
+    built.sourceTriangles === stl.triangleCount,
+    `${built.sourceTriangles}`,
   )
 
-  // ---- 2. the public preview still decimates -------------------------------
-  const budget = Number(process.env.PREVIEW_TARGET_TRIS ?? 80000)
-  if (stl.triangleCount <= budget) {
-    console.log(`  ⚠️  fixture is under the preview budget (${budget}) — decimation check skipped`)
+  // ---- 2. the owner GLB stays meaningfully better than the public preview --
+  const previewBudget = Number(process.env.PREVIEW_TARGET_TRIS ?? 80000)
+  if (stl.triangleCount <= previewBudget) {
+    console.log(`  ⚠️  fixture is under the preview budget (${previewBudget}) — comparison check skipped`)
   } else {
     const previewPath = await generateGLB(stlPath)
     const preview = await inspectGlb(previewPath)
     check(
-      'public preview is still decimated (owner mesh did not leak into it)',
-      preview.triangles < stl.triangleCount,
-      `${preview.triangles} < ${stl.triangleCount}`,
+      'owner mesh has meaningfully more detail than the public preview',
+      full.triangles > preview.triangles,
+      `${full.triangles} owner > ${preview.triangles} preview`,
     )
   }
 
   // ---- 3. geometry is faithful --------------------------------------------
-  // Draco quantizes positions onto a grid across the mesh bounds. At the 16 bits
-  // convertSTLtoGLBFull asks for, the error is ~1/65535 of the largest extent —
-  // microns on a terrain piece. Allow 0.01% and it should still pass easily.
+  // Two lossy steps can move a vertex here: the light simplify() (bounded by
+  // FULL_GLB_SIMPLIFY_ERROR, default 0.001 = 0.1% of the mesh extent) and Draco
+  // quantization on top (microns, at the 16 bits convertSTLtoGLBFull asks for).
+  // Allow well above the simplifier's own error bound for headroom.
   const worstDrift = Math.max(
     ...stlSize.map((s, i) => (s > 0 ? Math.abs(full.size[i] - s) / s : 0)),
   )
   check(
-    'bounding box survives Draco quantization',
-    worstDrift < 1e-4,
+    'bounding box survives decimation + Draco quantization',
+    worstDrift < 5e-3,
     `worst axis drift ${(worstDrift * 100).toFixed(5)}%`,
   )
 

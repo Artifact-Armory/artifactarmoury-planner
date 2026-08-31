@@ -1,8 +1,8 @@
 // backend/src/services/fullGlb/build.ts
 //
-// Builds ONE owner full-fidelity GLB: pull the canonical STL from R2, convert it
-// with no decimation and no watermark, and upload the result under a key only the
-// database knows.
+// Builds ONE owner GLB: pull the canonical STL from R2, convert it with no
+// watermark and — for all but the densest outlier meshes — no decimation either,
+// and upload the result under a key only the database knows.
 //
 // Why the key is random
 // ---------------------
@@ -116,12 +116,14 @@ export async function runFullGlbBuild(input: FullGlbBuildInput): Promise<FullGlb
     await fsp.writeFile(stlPath, srcBuf)
 
     const outPath = path.join(work, 'full.glb')
-    const { triangles, bytes } = await convertSTLtoGLBFull(stlPath, outPath)
+    const { triangles, sourceTriangles, bytes } = await convertSTLtoGLBFull(stlPath, outPath)
 
     // Backstop for ASCII STLs, whose triangle count isn't knowable without
     // parsing. Rare, and the byte-size guard above already bounds the damage.
-    if (triangles > FULL_GLB_MAX_TRIS) {
-      return skip(`mesh has ${triangles} triangles (limit ${FULL_GLB_MAX_TRIS})`, triangles)
+    // Checked against the SOURCE count — the memory cost was paid parsing and
+    // building the full-resolution document, before any decimation trims it.
+    if (sourceTriangles > FULL_GLB_MAX_TRIS) {
+      return skip(`mesh has ${sourceTriangles} triangles (limit ${FULL_GLB_MAX_TRIS})`, sourceTriangles)
     }
 
     const glbKey = ownerGlbKey(input.modelId, input.partId)

@@ -339,12 +339,17 @@ there is nothing left to protect them from: they now get the real mesh instead.
   dyno. With no worker deployed, `services/fullGlb/inline.ts` drains it in the API server
   instead (default ON only when `PROXY_BAKE_ENABLED` is off), so switching the worker off
   degrades this to "slower", not "silently dead".
-- **What "perfect" means.** `convertSTLtoGLBFull` (fileProcessor.ts) is the preview
-  converter with the two lossy steps removed: **no `simplify()`**, **no watermark**. `weld()`
-  merges only *bitwise-identical* vertices, so positions are untouched; crease normals are
+- **What "owner GLB" means (revised 2026-08-31 — see follow-up note below).**
+  `convertSTLtoGLBFull` (fileProcessor.ts) is the preview converter with the watermark
+  removed and its decimation made much lighter: **no `simplify()` at all** unless the
+  source is denser than `OWNER_GLB_TARGET_TRIS` (default **3× `PREVIEW_TARGET_TRIS`**,
+  i.e. 240k), in which case it's trimmed toward that budget at a **much tighter error**
+  (`FULL_GLB_SIMPLIFY_ERROR`, default 0.001 vs the preview's 0.004). Most listings never
+  approach the budget and pass through with every triangle intact. `weld()` merges only
+  *bitwise-identical* vertices, so positions are untouched by it; crease normals are
   rebuilt at the same 45° as the preview so an owner's model doesn't suddenly shade
-  differently from the one they were looking at before they bought it. Draco is the one
-  remaining approximation and POSITION is raised to **16 bits** (`FULL_GLB_POSITION_BITS`)
+  differently from the one they were looking at before they bought it. Draco is the other
+  approximation and POSITION is raised to **16 bits** (`FULL_GLB_POSITION_BITS`)
   ≈ 4.6 µm on a 300 mm model. **The STL the buyer downloads is untouched by all of it.**
 - **One URL, two variants.** `GET /api/models/:id/preview.glb` (and `/parts/:partId/…`)
   now serves the owner copy when the viewer is entitled — artist, admin, or a buyer with a
@@ -366,10 +371,11 @@ there is nothing left to protect them from: they now get the real mesh instead.
   replacements, so the existing catalogue would sit at `full_glb_status = NULL` forever:
   `railway run npm run backfill:full-glb -- --dry-run`, then without the flag. It queues
   most-sold-first and is safe to re-run.
-- **`npm run test:fullglb`** proves the claim against the real service fn: the owner GLB
-  decodes to *exactly* the STL's triangle count, the public preview is *still* decimated
-  (guards the converse mistake — leaking the full mesh as the free preview), and the bbox
-  survives Draco (0.0037% drift on a 307k-tri fixture → 5.86 MB).
+- **`npm run test:fullglb`** proves the claim against the real service fn: on a mesh over
+  the owner budget, the GLB decodes to no more than that budget (and to the exact source
+  count when under it); the owner mesh stays meaningfully denser than the public preview;
+  and the bbox survives decimation + Draco (0.00365% drift on a 307k-tri fixture, decimated
+  to 240k → 4.70 MB).
 - **Untested against a real Postgres:** there is no local DB (dev is `DB_MOCK`), so migration
   041 and the queue SQL have not actually been executed. Watch the first Railway deploy.
 - **`FULL_GLB_MAX_TRIS` is a MEMORY ceiling, and the guard runs before conversion.**
@@ -382,9 +388,31 @@ there is nothing left to protect them from: they now get the real mesh instead.
   nothing: the OOM happens *during* the conversion, the container dies mid-job, the row sits
   `running` until the stale lock expires, and the retry OOMs identically — which would take
   out the preview bakes this queue is supposed to stay out of the way of.
-- **Known cost, accepted:** a full-resolution mesh is heavy to raster. Instancing shares the
-  geometry, so N copies of one piece cost one upload, but an owner filling a table with
-  million-triangle models will see the framerate the decimation was hiding.
+- **Known cost, accepted:** even a lightly-decimated dense mesh is heavier to raster than
+  the public preview. Instancing shares the geometry, so N copies of one piece cost one
+  upload, but an owner filling a table with many outlier-dense models will still see more
+  framerate cost than a non-owner viewing the same table.
+
+### Owner GLB given a light decimation budget (2026-08-31)
+Originally this pipeline applied **zero** decimation regardless of source size — a genuine
+"every triangle" full-fidelity copy. That meant an artist who uploaded a very dense mesh (up
+toward the `FULL_GLB_MAX_TRIS` memory ceiling, ~1M tris) handed every owner of it the full
+weight on their planner table, with no ceiling on the render cost. Changed so the owner tier
+is now **capped at `OWNER_GLB_TARGET_TRIS`** (default 3× the public preview's budget) and only
+decimated at all above that — using the same `weld → simplify → crease-normals → weld/dedup`
+shape as the preview converter, just with a far tighter error bound (`FULL_GLB_SIMPLIFY_ERROR`,
+default 0.001 vs the preview's 0.004) so the trim is close to invisible. **No watermark either
+way** — that was already true and is unaffected. The overwhelming majority of listings are
+still well under the new budget and get literally unchanged, full-fidelity treatment; this only
+bites the outlier dense uploads that were the actual framerate risk. `FullGlbResult` /
+`FullGlbBuildResult` now carry both `triangles` (what was actually written) and
+`sourceTriangles` (the pre-decimation STL count) — the `FULL_GLB_MAX_TRIS` memory-ceiling check
+in `build.ts`'s ASCII-STL backstop is checked against `sourceTriangles` (the number that
+actually drove peak RSS), not the post-decimation count. `npm run test:fullglb` updated and
+re-verified against the real `sandbags.stl` fixture (307k → 240k tris, 0.00365% bbox drift).
+Backward compatible: an artist's existing owner GLBs stay as they are until the model is
+re-uploaded / gets a new file version (or a backfill script is run) — nothing re-triggers a
+rebuild on its own.
 
 ## On-screen PREVIEW watermark REMOVED from the planner (2026-08-30)
 `scene/previewWatermark.ts` blended a tiled "ARTIFACT ARMOURY · PREVIEW" mark, in screen space,
