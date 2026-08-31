@@ -5,3 +5,6 @@
 export const SITE_NAME = 'Artifact Armoury'
 export const SITE_DOMAIN = 'artifactarmoury.com'
 export const SITE_TAGLINE = 'Plan the table. Print the legend.'
+// Short form used under the logo in the footer — the hero already spells out
+// the buy-once/print-many value prop, so this is a beat, not another sentence.
+export const FOOTER_TAGLINE = 'Build. Print. Play.'

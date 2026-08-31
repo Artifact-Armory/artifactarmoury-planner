@@ -30,8 +30,8 @@ const PublicTables: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
-        title="Shop the Look — Community Tables"
-        description="Browse tabletop layouts other builders have shared in the 3D planner — see a full board planned in terrain STLs and open any model straight from the table."
+        title="Shop the Look: Community Tables"
+        description="Browse tabletop layouts other builders have shared in the 3D planner. See a full board planned in terrain STLs and open any model straight from the table."
         path="/tables"
       />
       {/* Hero */}

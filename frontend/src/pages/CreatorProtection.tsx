@@ -52,7 +52,7 @@ const CreatorProtection: React.FC = () => {
     <div className="mx-auto max-w-3xl px-4 py-10">
       <Seo
         title="How We Protect Your Models"
-        description="Per-buyer watermarking, shape fingerprinting, and unprintable preview meshes: how Artifact Armoury protects artists' STL files from theft and re-upload — and what these protections don't claim to do."
+        description="Per-buyer watermarking, shape fingerprinting, and unprintable preview meshes: how Artifact Armoury protects artists' STL files from theft and re-upload, and what these protections don't claim to do."
         path="/creator-protection"
       />
       <p className="text-sm font-medium text-primary">For artists</p>

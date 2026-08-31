@@ -2,7 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { TRADEMARK_DISCLAIMER } from '../legal/TrademarkDisclaimer'
 import Logo from '../common/Logo'
-import { SITE_NAME } from '../../config/brand'
+import { SITE_NAME, FOOTER_TAGLINE } from '../../config/brand'
 
 const Footer: React.FC = () => {
   const year = new Date().getFullYear()
@@ -14,9 +14,7 @@ const Footer: React.FC = () => {
           <Link to="/" className="flex items-center text-foreground">
             <Logo variant="horizontal" title={SITE_NAME} className="h-9 w-auto" />
           </Link>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Design your battlefield, buy each model once, and print it as many times as your table needs.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{FOOTER_TAGLINE}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">

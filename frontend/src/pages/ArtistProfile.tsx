@@ -144,7 +144,7 @@ const ArtistProfile: React.FC = () => {
   return (
     <div className="relative min-h-screen" style={accent ? ({ ['--accent' as any]: accent }) : undefined}>
       <Seo
-        title={`${artist.name} — Terrain Artist`}
+        title={`${artist.name}: Terrain Artist`}
         description={
           artist.bio
             ? `${artist.bio.slice(0, 150)}${artist.bio.length > 150 ? '…' : ''} See ${artist.name}'s 3D-printable terrain STLs on Artifact Armoury.`

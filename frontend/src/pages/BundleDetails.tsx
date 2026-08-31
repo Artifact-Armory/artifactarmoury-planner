@@ -72,13 +72,13 @@ const BundleDetails: React.FC = () => {
   // Title/description PATTERN a real bundle's data plugs into — no invented
   // copy, just the fields the bundle already carries.
   const bundleDescription = bundle.description
-    ? `${bundle.description} Includes ${bundle.models.length} print-ready STL models${bundle.artistName ? ` from ${bundle.artistName}` : ''} — buy the bundle once, download every file.`
-    : `${bundle.name}: ${bundle.models.length} print-ready STL terrain models${bundle.artistName ? ` from ${bundle.artistName}` : ''}, grouped in one bundle at one price.`
+    ? `${bundle.description} Includes ${bundle.models.length} print-ready STL models${bundle.artistName ? ` from ${bundle.artistName}` : ''}. Buy the bundle once, download every file.`
+    : `${bundle.name}: ${bundle.models.length} print-ready terrain STLs${bundle.artistName ? ` from ${bundle.artistName}` : ''}, grouped in one bundle at one price.`
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
       <Seo
-        title={`${bundle.name} — ${bundle.models.length}-Model Bundle`}
+        title={`${bundle.name}: ${bundle.models.length}-Model Bundle`}
         description={bundleDescription}
         path={`/bundles/${bundle.id}`}
         image={bundle.thumbnailUrl}

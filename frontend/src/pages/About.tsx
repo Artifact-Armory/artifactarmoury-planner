@@ -31,7 +31,7 @@ const About: React.FC = () => {
             <Link to="/planner" className="text-primary hover:underline">
               full-screen 3D planner
             </Link>
-            — add pieces to a grid, stack and rotate them, then push the whole
+            : add pieces to a grid, stack and rotate them, then push the whole
             build into your cart in one click.
           </li>
           <li>

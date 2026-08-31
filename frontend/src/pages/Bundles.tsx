@@ -17,7 +17,7 @@ const Bundles: React.FC = () => {
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
         title="Terrain Bundles"
-        description="Multi-model terrain bundles from independent artists — several STLs grouped at one price. Buy once and download every file in the set."
+        description="Multi-model terrain bundles from independent artists: several STLs grouped at one price. Buy once and download every file in the set."
         path="/bundles"
       />
       <header className="border-b border-border pb-4">

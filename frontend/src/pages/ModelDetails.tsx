@@ -36,7 +36,7 @@ function modelSeoDescription(model: TerrainModel): string {
     const truncated = trimmed.length > 140 ? `${trimmed.slice(0, 137)}…` : trimmed
     return `${truncated} A print-ready ${category} STL by ${model.artistName} on ${SITE_NAME}.`
   }
-  return `Buy ${model.name} by ${model.artistName} — a print-ready ${category} STL, available on ${SITE_NAME}. Buy once, print as many times as your table needs.`
+  return `Buy ${model.name} by ${model.artistName}: a print-ready ${category} STL, available on ${SITE_NAME}. Buy once, print as many times as your table needs.`
 }
 
 /**
@@ -276,7 +276,7 @@ const ModelDetails: React.FC = () => {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <Seo
-        title={`${model.name} — 3D Printable ${model.category ? model.category.replace(/^\w/, (c) => c.toUpperCase()) : 'Terrain'} STL`}
+        title={`${model.name}: 3D Printable ${model.category ? model.category.replace(/^\w/, (c) => c.toUpperCase()) : 'Terrain'} STL`}
         description={modelSeoDescription(model)}
         path={`/models/${model.id}`}
         image={model.thumbnailUrl}

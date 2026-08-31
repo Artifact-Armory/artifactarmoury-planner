@@ -38,7 +38,7 @@ interface SeoProps {
 }
 
 const DEFAULT_DESCRIPTION =
-  'Browse 3D-printable tabletop terrain STLs from independent artists, plan your board in the free 3D table planner, and buy each file once — print it as many times as your table needs.'
+  'Browse 3D-printable tabletop terrain STLs from independent artists, plan your board in the free 3D table planner, and buy each file once. Print it as many times as your table needs.'
 
 function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)

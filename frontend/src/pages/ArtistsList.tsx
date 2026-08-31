@@ -98,7 +98,7 @@ const ArtistsList: React.FC = () => {
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
         title="Terrain Artists"
-        description="Discover independent artists making 3D-printable tabletop terrain — browse their storefronts and follow to stay up to date with new releases."
+        description="Discover independent artists making 3D-printable tabletop terrain. Browse their storefronts and follow to stay up to date with new releases."
         path="/artists"
       />
       <section className="rounded-3xl bg-primary px-6 py-12 text-primary-foreground shadow-lg sm:px-12">
