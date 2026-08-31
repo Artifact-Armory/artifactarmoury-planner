@@ -15,7 +15,7 @@ import {
 import { authRateLimit, emailRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, ConflictError, AuthenticationError } from '../middleware/error';
-import { sendEmail, sendVerificationEmail } from '../services/email';
+import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordChangedEmail } from '../services/email';
 import {
   generateTotpSecret,
   buildOtpauthUrl,
@@ -536,21 +536,19 @@ router.post('/password-reset/request', emailRateLimit, asyncHandler(async (req, 
   const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
   const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-  // Store reset token (you might want to add a password_reset_tokens table)
+  // Store reset token hash (never the raw token — mirrors email verification)
   await db.query(
-    `UPDATE users 
+    `UPDATE users
      SET password_reset_token = $1, password_reset_expires = $2
      WHERE id = $3`,
     [resetTokenHash, resetTokenExpiry, user.id]
   );
 
   // Send reset email
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-
-  await sendEmail({
+  await sendPasswordResetEmail({
     to: user.email,
-    subject: 'Password Reset Request',
-    html: `<p>Hi ${user.display_name}, reset your password using <a href="${resetUrl}">this link</a>. The link expires in 60 minutes.</p>`
+    name: user.display_name,
+    token: resetToken,
   });
 
   logger.info('Password reset email sent', { userId: user.id, email: user.email });
@@ -611,12 +609,9 @@ router.post('/password-reset/confirm', authRateLimit, asyncHandler(async (req, r
 
   logger.info('Password reset completed', { userId: user.id });
 
-  // Send confirmation email
-  sendEmail({
-    to: user.email,
-    subject: 'Password Changed Successfully',
-    html: `<p>Hi ${user.display_name}, your password has been changed successfully.</p>`
-  }).catch(err => logger.error('Failed to send password changed email', { error: err }));
+  // Send confirmation email (best-effort — the reset already succeeded)
+  sendPasswordChangedEmail({ to: user.email, name: user.display_name })
+    .catch(err => logger.error('Failed to send password changed email', { error: err }));
 
   res.json({ message: 'Password has been reset successfully' });
 }));

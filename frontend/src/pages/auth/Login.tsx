@@ -1,6 +1,6 @@
 import React from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { authApi } from '../../api/endpoints/auth'
 import { useAuthStore } from '../../store/authStore'
@@ -127,6 +127,11 @@ const Login: React.FC = () => {
               required
               {...register('password', { required: true })}
             />
+            <p className="-mt-2 text-right text-sm">
+              <Link to="/forgot-password" className="font-medium text-primary hover:underline">
+                Forgot password?
+              </Link>
+            </p>
             <Button type="submit" className="w-full" loading={formState.isSubmitting}>
               Sign in
             </Button>

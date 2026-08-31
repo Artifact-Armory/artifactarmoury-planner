@@ -183,6 +183,134 @@ export async function sendVerificationEmail(
 }
 
 // ============================================================================
+// PASSWORD RESET EMAILS
+// ============================================================================
+
+export interface PasswordResetEmailParams {
+  to: string
+  name?: string
+  /** The RAW (unhashed) token — goes in the link the user clicks. */
+  token: string
+}
+
+/**
+ * Send the "reset your password" email. The link lands on the frontend
+ * /reset-password page, which reads the token from the query string and POSTs
+ * it back with the new password. The token itself expires in 60 minutes
+ * (enforced server-side in routes/auth.ts) regardless of whether this email
+ * is ever opened.
+ */
+export async function sendPasswordResetEmail(
+  params: PasswordResetEmailParams
+): Promise<void> {
+  const { to, name, token } = params
+  const resetUrl = `${FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 28px; margin: 0;">Reset your password</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 16px 0; color: #4b5563;">${greeting}</p>
+    <p style="margin: 0; color: #4b5563;">
+      We received a request to reset the password on your Artifact Armoury account.
+      Click the button below to choose a new one. This link expires in 60 minutes.
+    </p>
+  </div>
+
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="${resetUrl}" style="display: inline-block; padding: 14px 28px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
+      Reset password
+    </a>
+  </div>
+
+  <div style="margin-bottom: 24px;">
+    <p style="margin: 0; color: #6b7280; font-size: 14px;">
+      If the button doesn't work, paste this link into your browser:
+    </p>
+    <p style="margin: 8px 0 0 0; word-break: break-all;">
+      <a href="${resetUrl}" style="color: #2563eb; font-size: 14px;">${resetUrl}</a>
+    </p>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0 0 8px 0;">If you didn't request this, you can safely ignore this email — your password won't change.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to,
+    subject: 'Reset your password',
+    html,
+  })
+}
+
+/**
+ * Confirmation sent once a password reset actually completes — lets the
+ * account owner notice (and contact support) if they didn't do it themselves.
+ */
+export async function sendPasswordChangedEmail(params: { to: string; name?: string }): Promise<void> {
+  const { to, name } = params
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 26px; margin: 0;">Your password was changed</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 16px 0; color: #4b5563;">${greeting}</p>
+    <p style="margin: 0; color: #4b5563;">
+      This confirms the password on your Artifact Armoury account was just changed.
+      If this was you, no action is needed.
+    </p>
+  </div>
+
+  <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <p style="margin: 0; color: #991b1b; font-size: 14px;">
+      <strong>Wasn't you?</strong> Reply to this email or contact
+      support@artifactarmoury.com right away.
+    </p>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to,
+    subject: 'Your password was changed',
+    html,
+  })
+}
+
+// ============================================================================
 // ORDER CONFIRMATION EMAIL
 // ============================================================================
 
@@ -677,6 +805,8 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
 
 export default {
   sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendPasswordChangedEmail,
   sendOrderConfirmation,
   sendShippingNotification,
   sendArtistSaleNotification,
