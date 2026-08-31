@@ -17,7 +17,7 @@ const FEATURES = [
   {
     icon: Compass,
     title: 'Plan your table in 3D',
-    body: 'Drag STL terrain onto a virtual board and lay out your whole battlefield before you print a single piece — no account required.',
+    body: 'Create unique maps and dioramas by adding STL terrain to your digital table — no account required.',
   },
   {
     icon: RefreshCcw,
@@ -78,7 +78,7 @@ const Home: React.FC = () => {
           />
           <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Print-ready terrain, built for the table.</h1>
           <p className="mt-4 text-white/80">
-            {SITE_TAGLINE} Browse artist-made 3D models, drag them onto a virtual table to plan your board, and buy
+            {SITE_TAGLINE} Browse artist-made 3D models, add them to your digital table to plan your board, and buy
             each STL once — print it as many times as your table needs.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">

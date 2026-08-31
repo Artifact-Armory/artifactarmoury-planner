@@ -32,7 +32,7 @@ export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
   const seo = (
     <Seo
       title="Free 3D Tabletop Terrain Planner"
-      description="Plan your wargaming table in 3D before you print. Drag terrain STLs onto a virtual board, stack and rotate pieces, then push the whole build into your cart — no account required."
+      description="Plan your wargaming table in 3D before you print. Add terrain STLs to a virtual board, stack and rotate pieces, then push the whole build into your cart — no account required."
       path="/planner"
       noindex={noindex}
     />
