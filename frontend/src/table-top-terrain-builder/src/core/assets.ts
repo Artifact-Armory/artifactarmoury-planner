@@ -174,9 +174,12 @@ export async function loadAssetsFromAPI(filter?: { terms?: string }): Promise<As
     }
 
     const mapped = models
-      // Only single-STL models with a GLB preview. Multi-part "set" models are
-      // surfaced via their individually-placeable parts (see loadSetsFromAPI).
-      .filter((m) => m.glbUrl && (m.partCount ?? 1) === 1)
+      // Only single-STL models with a GLB preview, opted in to the planner. Multi-part
+      // "set" models are surfaced via their individually-placeable parts (see
+      // loadSetsFromAPI); a model an artist has flagged as not planner-placeable (a
+      // misc item — paint brush holder, display base, …) still sells normally on the
+      // marketplace but never appears in this catalogue.
+      .filter((m) => m.glbUrl && (m.partCount ?? 1) === 1 && m.showInPlanner !== false)
       .map((m) => modelToAsset(m))
       .filter((a): a is Asset => a !== null)
 

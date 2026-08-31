@@ -355,6 +355,14 @@ const ArtistModels: React.FC = () => {
                     <span className="font-medium truncate">{m.name}</span>
                     <StatusBadge model={m} />
                     <PreviewBadge model={m} recentlyReady={recentlyReady.has(m.id)} />
+                    {m.showInPlanner === false && (
+                      <span
+                        className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                        title="This model won't appear as a placeable piece in the 3D Table Planner"
+                      >
+                        Not in planner
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     £{m.basePrice.toFixed(2)}

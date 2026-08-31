@@ -291,7 +291,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -383,6 +383,10 @@ router.post('/from-upload',
     const primaryGroup = typeof primaryGroupName === 'string' && primaryGroupName.trim()
       ? primaryGroupName.trim().slice(0, 255)
       : null;
+    // Opt-out of the 3D planner (misc items — a paint brush holder, a display base —
+    // aren't placeable scenery). Defaults to true so leaving it unset behaves exactly
+    // as before this field existed.
+    const modelShowInPlanner = showInPlanner === false ? false : true;
 
     // Validate taxonomy tags up-front (read-only) so a bad payload never creates a
     // half-tagged draft; they're written after the model row exists.
@@ -423,10 +427,10 @@ router.post('/from-upload',
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, 'draft', 'processing')
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, $13, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner]
     );
     const model = result.rows[0];
     // Seed price history (backs the anti-inflation guard on sales).
@@ -569,7 +573,7 @@ router.get('/my-models',
       `SELECT 
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, m.base_price, m.status, m.visibility,
-        m.processing_status, m.processing_error, m.part_count,
+        m.processing_status, m.processing_error, m.part_count, m.show_in_planner,
         m.view_count, m.download_count, m.sale_count,
         m.width, m.height, m.depth,
         m.print_provider_cost, m.print_price, m.print_provider, m.print_quoted_at,
@@ -761,6 +765,7 @@ router.get('/sets',
               m.primary_group_name
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
+         AND m.show_in_planner = true
        ORDER BY m.created_at DESC`
     )).rows;
 
@@ -821,6 +826,7 @@ router.get('/mine/planner',
        FROM models
        WHERE artist_id = $1 AND part_count = 1 AND glb_file_path IS NOT NULL
          AND (processing_status IS NULL OR processing_status = 'ready')
+         AND show_in_planner = true
        ORDER BY created_at DESC`,
       [(req as any).userId]
     )).rows;
@@ -1038,8 +1044,14 @@ router.patch('/:id',
 
     const allowedFields = [
       'name', 'description', 'category', 'tags', 'base_price', 'license', 'printer_type',
-      'supports_required', 'recommended_layer_height', 'recommended_infill', 'default_pitch_deg'
+      'supports_required', 'recommended_layer_height', 'recommended_infill', 'default_pitch_deg',
+      'show_in_planner'
     ];
+
+    // Whether this model may be placed on the 3D planner — coerce to a real boolean.
+    if (updates.show_in_planner !== undefined) {
+      updates.show_in_planner = updates.show_in_planner === true || updates.show_in_planner === 'true';
+    }
 
     // Default planner tilt: normalise to an integer in [0, 359] (any junk → 0).
     if (updates.default_pitch_deg !== undefined) {

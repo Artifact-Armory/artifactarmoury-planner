@@ -46,6 +46,12 @@ export const modelsApi = {
      */
     primaryGroupName?: string
     /**
+     * Whether this model may be placed on the 3D planner at all. Defaults to true —
+     * set false for a misc item (paint brush holder, display base, …) that isn't
+     * placeable scenery. Doesn't affect the normal marketplace listing/sale.
+     */
+    showInPlanner?: boolean
+    /**
      * Extra STL parts for a multi-part "set" model (primary is the main rawKey).
      * `groupIndex`/`groupName` place a part inside a named component — group 0 is
      * the primary file's component, 1..N are the ones added after it.
@@ -217,6 +223,8 @@ export const modelsApi = {
       recommendedInfill?: number | null
       /** Default planner tilt (pitch about X, degrees) so the model stands upright. */
       defaultPitchDeg?: number
+      /** Whether this model may be placed on the 3D planner at all (artist opt-out). */
+      showInPlanner?: boolean
     },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
@@ -233,6 +241,7 @@ export const modelsApi = {
     if (data.recommendedLayerHeight !== undefined) body.recommended_layer_height = data.recommendedLayerHeight;
     if (data.recommendedInfill !== undefined) body.recommended_infill = data.recommendedInfill;
     if (data.defaultPitchDeg !== undefined) body.default_pitch_deg = data.defaultPitchDeg;
+    if (data.showInPlanner !== undefined) body.show_in_planner = data.showInPlanner;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },

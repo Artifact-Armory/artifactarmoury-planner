@@ -169,6 +169,12 @@ CREATE TABLE models (
     -- upright (0/90/180/270) instead of every buyer re-tilting it (migration 036).
     default_pitch_deg INTEGER NOT NULL DEFAULT 0,
 
+    -- Whether this model may be placed on the 3D table planner (migration 045).
+    -- Artist-controlled opt-out for listings that aren't scenery at all (a paint
+    -- brush holder, a display base, a tool) — the model still sells normally on
+    -- the marketplace, it just never appears as a placeable planner asset.
+    show_in_planner BOOLEAN NOT NULL DEFAULT true,
+
     -- Buyer usage licence (migration 030): personal (own use) | commercial (may
     -- sell physical prints). Neither permits redistributing the digital file.
     license TEXT NOT NULL DEFAULT 'personal' CHECK (license IN ('personal', 'commercial')),

@@ -150,6 +150,10 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   })),
   // Default planner tilt baked in by the artist (degrees, pitch about X).
   defaultPitchDeg: Number(model.default_pitch_deg ?? model.defaultPitchDeg ?? 0),
+  // Artist opt-out: whether this model may be placed on the 3D planner at all
+  // (a misc item — paint brush holder, display base — still sells normally but
+  // never appears as a placeable asset). Defaults true when the API omits it.
+  showInPlanner: (model.show_in_planner ?? model.showInPlanner ?? true) as boolean,
   // Multi-part ("set") models: number of STL files + the extra parts.
   partCount: Number(model.part_count ?? model.partCount ?? 1),
   parts: model.parts?.map((p: any) => ({

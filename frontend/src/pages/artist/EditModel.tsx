@@ -51,6 +51,9 @@ const EditModel: React.FC = () => {
   const [infill, setInfill] = React.useState('')
   // Default tilt applied in the 3D planner so the model stands upright (0/90/180/270).
   const [defaultPitch, setDefaultPitch] = React.useState(0)
+  // Whether this model may be placed on the 3D planner at all (artist opt-out for
+  // misc items — a paint brush holder, a display base — that aren't table scenery).
+  const [showInPlanner, setShowInPlanner] = React.useState(true)
 
   // The model's class (set at upload) — scopes which facets the tag picker shows.
   const modelClass = React.useMemo(() => {
@@ -94,6 +97,7 @@ const EditModel: React.FC = () => {
       setLayerHeight(m.recommendedLayerHeight != null ? String(m.recommendedLayerHeight) : '')
       setInfill(m.recommendedInfill != null ? String(m.recommendedInfill) : '')
       setDefaultPitch(Number(m.defaultPitchDeg ?? 0))
+      setShowInPlanner(m.showInPlanner !== false)
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
     } finally {
@@ -152,6 +156,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
+        showInPlanner,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
       })
@@ -228,6 +233,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
+        showInPlanner,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
       })
@@ -359,13 +365,34 @@ const EditModel: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-lg border border-border p-3">
+        <div className="rounded-lg border border-border p-3 space-y-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={showInPlanner}
+              onChange={(e) => setShowInPlanner(e.target.checked)}
+              disabled={busy}
+            />
+            <span>
+              <span className="font-medium block">Available in the 3D Table Planner</span>
+              <span className="text-xs text-muted-foreground">
+                Turn this off for a listing that isn't table scenery — a paint brush holder, a
+                display base, a tool — so it still sells normally but never shows up as a
+                placeable piece in the planner.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div className={`rounded-lg border border-border p-3 ${showInPlanner ? '' : 'opacity-50'}`}>
           <p className="text-sm font-medium">Planner orientation</p>
           <p className="text-xs text-muted-foreground mt-1">
             If your model imports lying on its side in the 3D planner, pick the tilt that
             stands it upright — the live preview below sits it on the table exactly as buyers
             will see it. This is applied automatically whenever a buyer places it; the
             downloadable STL is never changed.
+            {!showInPlanner && ' (Not shown in the planner while "Available in the 3D Table Planner" is off.)'}
           </p>
           <Suspense
             fallback={

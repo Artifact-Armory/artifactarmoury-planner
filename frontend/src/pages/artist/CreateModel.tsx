@@ -124,6 +124,10 @@ const CreateModel: React.FC = () => {
   const [basePrice, setBasePrice] = React.useState('')
   const [license, setLicense] = React.useState<'personal' | 'commercial'>('personal')
   const [printerType, setPrinterType] = React.useState<'' | 'fdm' | 'resin' | 'both'>('')
+  // Whether this listing may be placed on the 3D table planner at all. Defaults on —
+  // most models are terrain/scenery; an artist unticks this for a misc item (a paint
+  // brush holder, a display base, a tool) that isn't meant to go on a battlefield table.
+  const [showInPlanner, setShowInPlanner] = React.useState(true)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
   // The listing's files, grouped into named models (see Component above). The very
   // first file of the first component is the primary — the model row's own STL.
@@ -251,6 +255,7 @@ const CreateModel: React.FC = () => {
         license,
         printerType: printerType || undefined,
         thumbnailKey,
+        showInPlanner,
         parts: parts.length ? parts : undefined,
         // Names the primary file's component — only meaningful once the listing is
         // split into several named models.
@@ -396,6 +401,26 @@ const CreateModel: React.FC = () => {
           <p className="text-xs text-muted-foreground mt-1">
             Tell buyers which printer this model is authored for — helps set expectations for detail and supports.
           </p>
+        </div>
+
+        <div className="rounded-lg border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={showInPlanner}
+              onChange={(e) => setShowInPlanner(e.target.checked)}
+              disabled={busy}
+            />
+            <span>
+              <span className="font-medium block">Available in the 3D Table Planner</span>
+              <span className="text-xs text-muted-foreground">
+                On by default. Turn this off for a listing that isn't table scenery — a paint
+                brush holder, a display base, a tool — so it still sells normally but never
+                shows up as a placeable piece in the planner.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="rounded-lg border border-border p-3">

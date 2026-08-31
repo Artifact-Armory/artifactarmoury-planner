@@ -173,6 +173,10 @@ export interface TerrainModel {
   // Default planner tilt (pitch about X, degrees) baked in by the artist so the
   // model stands upright when placed. 0 = no tilt.
   defaultPitchDeg?: number
+  // Artist opt-out: whether this model may be placed on the 3D planner at all.
+  // Default true — a misc item (paint brush holder, display base, …) can be
+  // turned off without affecting its normal marketplace listing/sale.
+  showInPlanner?: boolean
   images?: Array<{
     id: string
     imagePath?: string
