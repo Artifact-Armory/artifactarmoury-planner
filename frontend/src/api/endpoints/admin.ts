@@ -59,6 +59,7 @@ export interface AdminUserRow {
   last_login: string | null
   model_count: string
   order_count: string
+  commission_rate: string | null
 }
 
 export interface AdminOrderRow {
@@ -143,6 +144,11 @@ export const adminApi = {
 
   setUserShadowBan: async (id: string, shadowBanned: boolean) => {
     const { data } = await apiClient.patch(`${BASE}/users/${id}/shadow-ban`, { shadowBanned })
+    return data
+  },
+
+  setCommissionRate: async (id: string, commissionRate: number) => {
+    const { data } = await apiClient.patch(`${BASE}/users/${id}/commission-rate`, { commissionRate })
     return data
   },
 

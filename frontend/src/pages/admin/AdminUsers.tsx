@@ -24,6 +24,8 @@ const AdminUsers: React.FC = () => {
   const [role, setRole] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
+  const [editingRateId, setEditingRateId] = useState<string | null>(null)
+  const [rateInput, setRateInput] = useState('')
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin', 'users', { search, role, status, page }],
@@ -57,6 +59,30 @@ const AdminUsers: React.FC = () => {
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to delete user'),
   })
+
+  const rateMut = useMutation({
+    mutationFn: ({ id, rate }: { id: string; rate: number }) => adminApi.setCommissionRate(id, rate),
+    onSuccess: () => {
+      toast.success('Commission rate updated')
+      setEditingRateId(null)
+      invalidate()
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to update commission rate'),
+  })
+
+  const startEditRate = (u: AdminUserRow) => {
+    setEditingRateId(u.id)
+    setRateInput(u.commission_rate ?? '')
+  }
+
+  const saveRate = (id: string) => {
+    const rate = Number(rateInput)
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
+      toast.error('Enter a number between 0 and 100')
+      return
+    }
+    rateMut.mutate({ id, rate })
+  }
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -133,6 +159,7 @@ const AdminUsers: React.FC = () => {
                 <th className="px-4 py-3 font-medium">User</th>
                 <th className="px-4 py-3 font-medium">Role</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium text-right">Rate</th>
                 <th className="px-4 py-3 font-medium text-right">Models</th>
                 <th className="px-4 py-3 font-medium text-right">Orders</th>
                 <th className="px-4 py-3 font-medium">Joined</th>
@@ -142,14 +169,14 @@ const AdminUsers: React.FC = () => {
             <tbody className="divide-y divide-border">
               {isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                     Loading…
                   </td>
                 </tr>
               )}
               {isError && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-red-600">
+                  <td colSpan={8} className="px-4 py-8 text-center text-red-600">
                     Failed to load users.
                   </td>
                 </tr>
@@ -173,6 +200,50 @@ const AdminUsers: React.FC = () => {
                     >
                       {u.account_status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-foreground">
+                    {u.role !== 'artist' ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : editingRateId === u.id ? (
+                      <div className="flex items-center justify-end gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          step="0.01"
+                          autoFocus
+                          value={rateInput}
+                          onChange={(e) => setRateInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveRate(u.id)
+                            if (e.key === 'Escape') setEditingRateId(null)
+                          }}
+                          className="w-16 px-1.5 py-0.5 text-sm border border-border rounded-md text-right"
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                        <button
+                          onClick={() => saveRate(u.id)}
+                          disabled={rateMut.isPending}
+                          className="text-primary hover:underline text-xs disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingRateId(null)}
+                          className="text-muted-foreground hover:underline text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEditRate(u)}
+                        className="hover:underline"
+                        title="Click to change this artist's share of each sale"
+                      >
+                        {u.commission_rate ? `${Number(u.commission_rate)}%` : '—'}
+                      </button>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-foreground">{u.model_count}</td>
                   <td className="px-4 py-3 text-right text-foreground">{u.order_count}</td>
@@ -220,7 +291,7 @@ const AdminUsers: React.FC = () => {
               ))}
               {data && data.users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                     No users match your filters.
                   </td>
                 </tr>

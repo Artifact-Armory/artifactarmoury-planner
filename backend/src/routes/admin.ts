@@ -138,9 +138,9 @@ router.get('/users',
 
     // Get users
     const result = await db.query(
-      `SELECT 
+      `SELECT
         u.id, u.email, u.display_name, u.role, u.account_status,
-        u.artist_name, u.created_at, u.last_login,
+        u.artist_name, u.created_at, u.last_login, u.commission_rate,
         COUNT(DISTINCT m.id) as model_count,
         COUNT(DISTINCT o.id) as order_count
        FROM users u
@@ -228,6 +228,37 @@ router.patch('/users/:id/status',
     });
 
     res.json({ message: 'User status updated successfully' });
+  })
+);
+
+// Set an artist's commission share (% of each sale THEY keep — platform keeps the
+// remainder). Per-artist, so deals can differ from the site default (85).
+router.patch('/users/:id/commission-rate',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { commissionRate } = req.body;
+
+    const rate = Number(commissionRate);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
+      throw new ValidationError('commissionRate must be a number between 0 (exclusive) and 100');
+    }
+
+    const result = await db.query(
+      `UPDATE users SET commission_rate = $1 WHERE id = $2 AND role = 'artist' RETURNING id, commission_rate`,
+      [rate, id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Artist');
+    }
+
+    logger.warn('Artist commission rate changed by admin', {
+      adminId: (req as any).userId,
+      targetUserId: id,
+      newRate: rate,
+    });
+
+    res.json({ message: 'Commission rate updated', commissionRate: Number(result.rows[0].commission_rate) });
   })
 );
 

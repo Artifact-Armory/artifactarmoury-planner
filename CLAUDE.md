@@ -16,7 +16,7 @@ watermarked on download, and protected against re-upload.
 ## Live deployment (all separate services)
 | Piece | Where | URL |
 |---|---|---|
-| Backend API | Railway (service root dir = `backend`) | `https://confident-purpose-production-3e3f.up.railway.app` |
+| Backend API | Railway (service root dir = `backend`) | `https://api.artifactarmoury.com` (custom domain; underlying Railway service is `confident-purpose`, still reachable at `https://confident-purpose-production-3e3f.up.railway.app`) |
 | Postgres | Railway managed | (private, referenced via `${{Postgres.DATABASE_URL}}`) |
 | Frontend | Cloudflare **Pages** (root dir = `frontend`, build `npm install && npm run build`, output `dist`) | `https://artifactarmoury-planner.pages.dev` |
 | Static assets | Cloudflare R2 bucket `artifact-armoury-assets` | `https://assets.artifactplanner.com` |
@@ -33,7 +33,9 @@ auto-rebuilds the frontend. There is **no Dockerfile** (Nixpacks/Railpack).
 ## Environment variables
 **Backend (Railway):** `NODE_ENV=production`, `JWT_SECRET`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`,
 `ALLOWED_ORIGINS` (comma-sep, **exact match, no spaces/trailing slash** — must include the pages.dev origin),
-`FRONTEND_URL`, `STRIPE_MOCK=true`, `PAYMENTS_ENABLED=false`, `PRINT_FARM_PROVIDER=mock`,
+`FRONTEND_URL`, `STRIPE_MOCK=false`, `PAYMENTS_ENABLED=true` (**flipped live 2026-08-31** — real
+Stripe payments, real Connect payouts; a real test payment has gone through in production. Live
+`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` are set and the webhook is registered), `PRINT_FARM_PROVIDER=mock`,
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL`,
 and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PORT` or `DB_MOCK`.
 Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (`false` disables),
