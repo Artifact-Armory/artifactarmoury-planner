@@ -15,7 +15,7 @@ const Footer: React.FC = () => {
             <Logo variant="horizontal" title={SITE_NAME} className="h-9 w-auto" />
           </Link>
           <p className="mt-2 text-sm text-muted-foreground">
-            Craft immersive battlefields, share them with friends, and source the terrain you need.
+            Design your battlefield, buy each model once, and print it as many times as your table needs.
           </p>
         </div>
 

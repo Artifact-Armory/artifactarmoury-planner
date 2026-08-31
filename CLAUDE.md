@@ -386,17 +386,37 @@ there is nothing left to protect them from: they now get the real mesh instead.
   geometry, so N copies of one piece cost one upload, but an owner filling a table with
   million-triangle models will see the framerate the decimation was hiding.
 
+## On-screen PREVIEW watermark REMOVED from the planner (2026-08-30)
+`scene/previewWatermark.ts` blended a tiled "ARTIFACT ARMOURY · PREVIEW" mark, in screen space,
+over every marketplace piece the viewer didn't own. **It is gone** — file deleted, along with
+`InstancedScene.setWatermarkPredicate`/`shouldWatermark` and the predicate wired up in
+`ThreeStage.tsx`. Rationale: it duplicated protection the geometry already carries (the bake
+emboss, the decimation, the stripped interior/underside faces that make a ripped proxy
+unprintable) and the per-buyer AES watermark in the STL header, while making the planner look
+worse than the product it sells. **No claim anywhere depended on it** — `CreatorProtection.tsx`
+promises the proxy is *unprintable*, never that it is visibly marked, so that page stayed true
+as written; check it again before reinstating or removing any other protection.
+
 ## "Previews aren't your final print" popup (built 2026-08-30)
-The planner draws a decimated + watermarked proxy, which reads to a buyer as "this model is
-low quality" rather than "this is a preview". `ui/PreviewQualityNotice.tsx` shows the two side
-by side once, with the explanation and an acknowledgement checkbox.
-- **Images are NOT in the repo yet** — the user is supplying them. They go at
+The planner draws a decimated proxy, which reads to a buyer as "this model is low quality"
+rather than "this is a preview". `ui/PreviewQualityNotice.tsx` shows the two side by side once,
+with the explanation and an acknowledgement checkbox.
+- **The images are real pipeline output, not a mock-up** (generated 2026-08-30), at
   `frontend/public/assets/preview-quality/{planner-preview,stl-detail}.png`; paths are the
   exported `PREVIEW_IMG`/`STL_IMG` constants at the top of the component. A missing file
-  renders a labelled placeholder naming the expected path, **not** a broken image, so the
-  popup ships safely before the assets land. Spec + "how to shoot the comparison" guidance is
-  in that folder's `README.md` (same camera/lighting/model, PNG not JPEG, pick a model where
-  decimation actually shows, use the *real* watermark — don't composite a fake one).
+  renders a labelled placeholder naming the expected path, **not** a broken image. Source:
+  `top.stl` (2,064,876 tris) through the **actual** `convertSTLtoGLB` (→80k, a 26× cut) and
+  `convertSTLtoGLBFull` (→2.06M), rendered in Three.js with `ThreeStage.tsx`'s exact lighting,
+  identical camera, whole model in frame. Method + "if you replace these" rules are in that
+  folder's `README.md`. **Smooth models don't work** — sandbags/barrel were tried and the two
+  shots came out nearly identical (and anything under the 80k budget isn't decimated at all).
+- **KNOWN LIMITATION: at the ~215px the popup renders them, the two shots read as identical.**
+  A whole-model view of a 26× decimation simply doesn't resolve at thumbnail size — the
+  differences (rivet crispness, faceting on the circular vents, plank-line fineness) only
+  appear around 600px+. An earlier cropped-in pair *did* read at thumbnail size but showed a
+  wall detail rather than a model. If this needs to land visually, the options are a
+  click-to-enlarge, a magnified inset beside the whole-model shot, or a wider modal — none
+  are built.
 - **The checkbox is what persists the dismissal.** `Got it` is disabled until it's ticked and
   writes `aa_planner_preview_quality_ack_v1`; Esc / the X close for this session only, so
   nobody is trapped in a modal and nobody is silently recorded as having understood it.

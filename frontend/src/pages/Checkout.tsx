@@ -2,7 +2,7 @@ import React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Trash2, CheckCircle, Lock, Clock, CreditCard } from 'lucide-react'
 import { loadStripe, type Stripe } from '@stripe/stripe-js'
-import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
+import { Elements, AddressElement, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { useCartStore, cartKey } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import {
@@ -66,6 +66,11 @@ const Checkout: React.FC = () => {
   const [pending, setPending] = React.useState(false)
   const [termsAccepted, setTermsAccepted] = React.useState(false)
   const [method, setMethod] = React.useState<PaymentMethodChoice>('stripe')
+  // Real billing address, collected via Stripe's AddressElement in live checkout only
+  // (see BillingAddressCapture below). This — not the storefront-wide country picker
+  // — is what Stripe Tax actually charges from, so null here blocks "Continue" in
+  // live mode until a real address has been entered.
+  const [billingAddress, setBillingAddress] = React.useState<{ country: string; postalCode?: string } | null>(null)
 
   // `subtotal` from the cart is NET. The backend recomputes all of this from the
   // country code alone — these figures exist so the buyer can see the breakdown, and
@@ -151,13 +156,17 @@ const Checkout: React.FC = () => {
     if (!user) { navigate('/login'); return }
     if (items.length === 0) return
     if (!termsAccepted) { setError('Please agree to the Terms of Service before purchasing.'); return }
+    // Live checkout charges from the real billing address, not the storefront
+    // country picker — so it can't proceed without one. Test/mock checkout never hits
+    // this (billingAddress stays null, and the backend falls back to taxCountry).
+    if (!testMode && !billingAddress) { setError('Please enter your billing address.'); return }
     setPlacing(true)
     setError(null)
     try {
       const orderItems: OrderItemInput[] = items.map((i) =>
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
-      const created = await ordersApi.createOrder(orderItems, user.email, termsAccepted, method, taxCountry)
+      const created = await ordersApi.createOrder(orderItems, user.email, termsAccepted, method, taxCountry, billingAddress)
       setOrder(created)
 
       if (MOCK_CHECKOUT || !stripePromise || isMockSecret(created.clientSecret)) {

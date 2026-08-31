@@ -72,8 +72,11 @@ const About: React.FC = () => {
       <section className="mt-8">
         <h2 className="text-lg font-semibold">Questions?</h2>
         <p className="text-muted-foreground mt-3 leading-relaxed">
-          Head to your dashboard to start uploading or planning, or reach out to
-          our team and we’ll be happy to help.
+          Head to your dashboard to start uploading or planning, or{' '}
+          <Link to="/contact" className="text-primary hover:underline">
+            contact us
+          </Link>{' '}
+          — we typically reply within a day or two.
         </p>
       </section>
     </div>

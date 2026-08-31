@@ -19,6 +19,7 @@ import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
 import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
 import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../services/vat';
+import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
 
 const router = Router();
 
@@ -38,9 +39,16 @@ router.post('/',
       // this is only the opening guess and confirm/webhook overwrite it with the
       // method actually used.
       paymentMethod,
-      // ISO country the buyer says they're in — drives which VAT rate applies. Only
-      // the code is accepted; the rate itself is always looked up server-side.
+      // ISO country the buyer says they're in — the mock/fallback tax path when no
+      // real billing address is supplied (see billingAddress below). Only the code is
+      // accepted; the rate itself is always looked up server-side.
       taxCountry: requestedTaxCountry,
+      // Real billing address collected at checkout (live Stripe only — see
+      // Checkout.tsx's AddressElement). When present this — not taxCountry above —
+      // is what tax is actually calculated from, via Stripe Tax: a buyer can no
+      // longer change what they're charged by picking a different country in the
+      // storefront-wide picker, because that picker no longer feeds the charge.
+      billingAddress,
       // Buyer ticked the single checkout checkbox agreeing to the Terms of Service.
       // As of migration 042 that one checkbox covers two distinct things — the
       // per-model licence terms (personal vs. commercial use, no redistribution) AND
@@ -59,6 +67,17 @@ router.post('/',
     const taxCountry = isKnownTaxCountry(requestedTaxCountry)
       ? String(requestedTaxCountry).toUpperCase()
       : DEFAULT_TAX_COUNTRY;
+
+    // A real address only ever comes from Stripe's AddressElement, which already
+    // constrains `country` to a real ISO alpha-2 — this is just a shape guard against
+    // a malformed/tampered request, not a duplicate of that validation.
+    const address: { country: string; postalCode?: string } | null =
+      billingAddress && typeof billingAddress.country === 'string' && /^[A-Za-z]{2}$/.test(billingAddress.country)
+        ? {
+            country: billingAddress.country.toUpperCase(),
+            postalCode: typeof billingAddress.postalCode === 'string' ? billingAddress.postalCode : undefined,
+          }
+        : null;
 
     if (!termsAccepted) {
       throw new ValidationError('Please agree to the Terms of Service before purchasing');
@@ -234,18 +253,42 @@ router.post('/',
         }
       }
 
-      // Destination VAT. `subtotal` is the NET total (artist prices are net, and
+      // Destination tax. `subtotal` is the NET total (artist prices are net, and
       // order_items.unit_price stays net), so commission and payouts are unaffected —
       // tax sits on top and belongs to the tax authority, not to us or the artist.
-      // Computed here rather than trusted from the client, which only sends a country.
-      const taxRate = rateFor(taxCountry);
-      // Per line, then summed — matching how the cart displays a gross price per
-      // line, so the buyer's basket adds up to exactly this total. See vatOnLines().
-      // A bundle is one priced line even though it expands into several order_items,
-      // so tax it on the bundle price the buyer was shown, not on the split shares.
-      const tax = vatOnLines(taxableLines, taxCountry);
+      //
+      // When a real billing address was collected (live checkout), Stripe Tax
+      // computes this authoritatively from it — that address, not the storefront's
+      // self-declared country picker, is what determines the charge, which is the
+      // whole point: the picker can no longer be gamed for a lower rate because it no
+      // longer feeds the amount charged. Per line, then summed either way — matching
+      // how the cart displays a gross price per line, so the buyer's basket adds up
+      // to exactly this total. A bundle is one priced line even though it expands
+      // into several order_items, so it's taxed on the bundle price the buyer was
+      // shown, not on the split shares.
+      let taxCountryFinal = taxCountry;
+      let taxRate: number;
+      let tax: number;
+      let total: number;
+      let stripeTaxCalculationId: string | null = null;
       const shippingCost = 0; // digital — no shipping
-      const total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
+      if (address) {
+        const taxResult = await calculateOrderTax(
+          taxableLines.map((net, i) => ({ amountPence: Math.round(net * 100), reference: `line-${i}` })),
+          address
+        );
+        taxCountryFinal = taxResult.country;
+        taxRate = taxResult.ratePercent;
+        tax = taxResult.taxPence / 100;
+        total = taxResult.totalPence / 100; // Stripe's own subtotal+tax — not recomputed here
+        stripeTaxCalculationId = taxResult.calculationId;
+      } else {
+        // No real address supplied — mock/test checkout, or a client that hasn't
+        // been updated to collect one. Falls back to the pre-Stripe-Tax estimate.
+        taxRate = rateFor(taxCountry);
+        tax = vatOnLines(taxableLines, taxCountry);
+        total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
+      }
 
       // Create order (no shipping address for digital STLs). Both terms_accepted_at
       // and download_consent_at are stamped from the one termsAccepted checkbox
@@ -256,10 +299,11 @@ router.post('/',
           user_id, customer_email,
           subtotal, shipping_cost, tax, total,
           payment_method, payment_status, fulfillment_status,
-          tax_country, tax_rate, terms_accepted_at, download_consent_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          tax_country, tax_rate, stripe_tax_calculation_id,
+          terms_accepted_at, download_consent_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'pending', $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id, order_number`,
-        [userId, email, subtotal, shippingCost, tax, total, requestedMethod, taxCountry, taxRate]
+        [userId, email, subtotal, shippingCost, tax, total, requestedMethod, taxCountryFinal, taxRate, stripeTaxCalculationId]
       );
       const order = orderResult.rows[0];
 
@@ -309,7 +353,7 @@ router.post('/',
 
       logger.info('Order created', {
         orderId: order.id, orderNumber: order.order_number,
-        subtotal, tax, total, taxCountry, taxRate,
+        subtotal, tax, total, taxCountry: taxCountryFinal, taxRate, stripeTaxCalculationId,
       });
 
       res.status(201).json({
@@ -321,7 +365,7 @@ router.post('/',
           // show what the VAT line actually was.
           subtotal,
           tax,
-          taxCountry,
+          taxCountry: taxCountryFinal,
           taxRate,
           total,
           clientSecret: paymentIntent.client_secret,
@@ -414,6 +458,18 @@ router.post('/:id/confirm',
       [id, paymentMethodOf(payment)]
     );
     const firstConfirm = (claim.rowCount ?? 0) > 0;
+
+    // Record the sale with Stripe Tax — only the request that actually claimed the
+    // order does this, same reasoning as the receipt email below: a reloaded PayPal
+    // return page must not try to record it twice. `order_number` is the reference
+    // (unique per order), and `recordTaxTransaction` itself no-ops for mock/no
+    // calculation, so this is a harmless no-op for every mock-checkout order.
+    if (firstConfirm && order.stripe_tax_calculation_id && !order.stripe_tax_transaction_id) {
+      const transactionId = await recordTaxTransaction(order.stripe_tax_calculation_id, order.order_number);
+      if (transactionId) {
+        await db.query('UPDATE orders SET stripe_tax_transaction_id = $1 WHERE id = $2', [transactionId, id]);
+      }
+    }
 
     // Accrue the artists' earnings into the ledger (held for the payout hold window,
     // then cleared + paid out by the payout job). Idempotent — safe if the Stripe

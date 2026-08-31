@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import logger from '../utils/logger'
 import { db } from '../db'
 import { accrueEarningsForOrder } from './earnings'
+import { recordTaxTransaction } from './stripeTax'
 
 // ============================================================================
 // INITIALIZATION
@@ -632,20 +633,39 @@ async function handlePaymentIntentSucceeded(
   const orderId = paymentIntent.metadata.order_id
 
   if (orderId) {
-    // Mark paid + delivered (digital STLs fulfil instantly), then accrue the artists'
-    // earnings into the ledger. Idempotent, so it's safe alongside the confirm route.
-    // The method is taken from the intent rather than from whatever the client said
-    // at checkout — the buyer can switch to PayPal inside the Payment Element after
-    // the order row was written.
-    await db.query(
+    // Read first so the atomic claim below can tell us whether *this* call is the one
+    // that actually marked the order paid (the confirm route may have already won
+    // that race), and so a Stripe Tax transaction is only ever recorded once.
+    const existing = await db.query(
+      `SELECT order_number, payment_status, stripe_tax_calculation_id, stripe_tax_transaction_id
+       FROM orders WHERE id = $1`,
+      [orderId]
+    )
+    const order = existing.rows[0]
+
+    // Mark paid + delivered (digital STLs fulfil instantly). The method is taken from
+    // the intent rather than from whatever the client said at checkout — the buyer
+    // can switch to PayPal inside the Payment Element after the order row was written.
+    // `AND payment_status <> 'succeeded'` is the same atomic claim the confirm route
+    // uses, so whichever of the two actually wins the race is the one that runs the
+    // one-time side effects below.
+    const claim = await db.query(
       `UPDATE orders
        SET payment_status = 'succeeded',
            paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
            fulfillment_status = 'delivered',
            payment_method = $2
-       WHERE id = $1`,
+       WHERE id = $1 AND payment_status <> 'succeeded'`,
       [orderId, await resolvePaymentMethod(paymentIntent)]
     )
+    const firstConfirm = (claim.rowCount ?? 0) > 0
+
+    if (firstConfirm && order?.stripe_tax_calculation_id && !order.stripe_tax_transaction_id) {
+      const transactionId = await recordTaxTransaction(order.stripe_tax_calculation_id, order.order_number)
+      if (transactionId) {
+        await db.query('UPDATE orders SET stripe_tax_transaction_id = $1 WHERE id = $2', [transactionId, orderId])
+      }
+    }
 
     await accrueEarningsForOrder(orderId).catch(err =>
       stripeLogger.error('Failed to accrue earnings from webhook', { error: err, orderId })

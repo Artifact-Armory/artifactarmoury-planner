@@ -22,8 +22,8 @@ const FEATURES = [
   },
   {
     icon: ShieldCheck,
-    title: 'Made by real artists',
-    body: 'Independent creators upload every model. Files are watermarked to protect their work.',
+    title: 'Every file checked before it lists',
+    body: 'We process and verify each upload automatically, so what you download is a clean, print-ready file — not a broken mesh.',
   },
 ] as const
 
@@ -71,23 +71,23 @@ const Home: React.FC = () => {
             title={SITE_NAME}
             className="h-16 w-auto text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:h-20"
           />
-          <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Premium terrain, built for the table.</h1>
+          <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Print-ready terrain, built for the table.</h1>
           <p className="mt-4 text-white/80">
-            {SITE_TAGLINE} Browse artist-made 3D models, arrange your battlefield in the table builder, and buy
-            each STL once — print it as many times as you like.
+            {SITE_TAGLINE} Browse artist-made 3D models, drag them onto a virtual table to plan your board, and buy
+            each STL once — print it as many times as your table needs.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               to="/planner"
               className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 motion-safe:active:scale-[0.98]"
             >
-              Open the Table Builder
+              Open the table builder
             </Link>
             <Link
               to="/browse"
               className="inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20"
             >
-              Browse marketplace
+              Browse the marketplace
             </Link>
           </div>
         </div>

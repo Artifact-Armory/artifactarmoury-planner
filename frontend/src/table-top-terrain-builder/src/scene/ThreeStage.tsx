@@ -144,21 +144,13 @@ export function ThreeStage() {
       requestRender()
     })
     inst.setHeightSampler(terrainHeightAt)
-    // Visible "preview" watermark on marketplace pieces the viewer doesn't own — a
-    // deterrent for casual screenshot/mesh theft. Never watermark the artist's own
-    // work, owned models, or demo/manifest assets. Re-read live so it's fresh on each
-    // structural rebuild. (Owned/bundle → parent-model resolution matches the cart.)
-    inst.setWatermarkPredicate((asset) => {
-      if (!asset.artistId) return false // demo/manifest assets aren't sellable
-      const s = store()
-      const parentSet = s.sets.find((set) => set.partAssetIds.includes(asset.id))
-      const modelId = parentSet ? parentSet.id : asset.id
-      if (s.currentUserId && asset.artistId === s.currentUserId) return false
-      if (s.myModels.some((m) => m.id === modelId)) return false
-      if (s.ownedModelIds.has(modelId)) return false
-      if (s.bundles.some((b) => s.ownedBundleIds.has(b.id) && b.modelIds.includes(modelId))) return false
-      return true
-    })
+    // NB: placed pieces render un-marked. The on-screen "PREVIEW" watermark that used
+    // to be blended over unowned models was removed (2026-08-30) — the protection it
+    // duplicated lives in the mesh itself: the bake emboss, the decimation, and the
+    // stripped interior/underside faces that make a ripped proxy unprintable, plus the
+    // per-buyer watermark in the STL header. A legible overlay on every unowned piece
+    // made the planner look worse than the product it is selling, for no protection
+    // the geometry wasn't already providing.
     scene.add(inst.group)
 
     // ---- ghost ----

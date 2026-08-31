@@ -115,29 +115,29 @@ export function PreviewQualityNotice({
         <div className="tb-pq-shots">
           <Shot
             src={PREVIEW_IMG}
-            alt="The same model as it appears on the planner table: simplified mesh with a repeating PREVIEW watermark across its surface."
+            alt="The model as it appears on the planner table: a simplified mesh with softer edges and coarser surface detail."
             caption="On the planner table"
-            note="Simplified mesh, watermarked"
+            note="Simplified preview mesh"
           />
           <Shot
             src={STL_IMG}
-            alt="The same model from the STL file a buyer downloads: full detail, no watermark."
+            alt="The same model from the STL file a buyer downloads: every triangle intact, with crisp edges and fine surface detail."
             caption="The STL you download"
-            note="Full detail, no watermark"
+            note="Full detail, print-ready"
           />
         </div>
 
         <div className="tb-pq-body">
           <p>
             Models on the table are lightweight <strong>previews</strong>, not the real file. We
-            simplify the mesh so a full table loads quickly and stays smooth to build on, and we
-            stamp a watermark across it so a preview pulled off the page is no use on a print bed —
-            that’s what lets artists put their work here at all.
+            simplify the mesh so a whole table loads quickly and stays smooth to build on, and the
+            preview is deliberately built to be no use on a print bed — that’s what lets artists
+            put their work here at all.
           </p>
           <p>
-            The <strong>STL you download is the artist’s original</strong>, untouched: sharper
-            edges, finer surface detail, and no watermark anywhere on it. Your print will look
-            better than what you see here.
+            The <strong>STL you download is the artist’s original</strong>, untouched: every
+            triangle intact, with the crisp edges and fine surface detail the preview smooths
+            away. Your print will look better than what you see here.
           </p>
         </div>
 

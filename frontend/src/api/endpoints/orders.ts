@@ -91,14 +91,22 @@ export const ordersApi = {
     termsAccepted: boolean,
     paymentMethod: PaymentMethodChoice = 'stripe',
     /**
-     * ISO country the buyer selected. Only the *code* goes over the wire — the
-     * backend looks up the rate and computes the tax itself, so a tampered client
-     * can't change what it is charged.
+     * ISO country the buyer selected in the storefront-wide picker. Only ever used
+     * as a mock/fallback when `billingAddress` isn't supplied — the backend looks up
+     * the rate itself either way, so a tampered client can't change what it's
+     * charged.
      */
     taxCountry?: string | null,
+    /**
+     * Real billing address collected at checkout (live Stripe only, via an
+     * AddressElement) — when present, this is what tax is actually calculated from
+     * via Stripe Tax, not `taxCountry` above. This is what makes the charge
+     * non-gameable: the storefront country picker no longer feeds it.
+     */
+    billingAddress?: { country: string; postalCode?: string } | null,
   ): Promise<CreatedOrder> {
     const response = await apiClient.post(BASE_URL, {
-      items, customerEmail, termsAccepted, paymentMethod, taxCountry,
+      items, customerEmail, termsAccepted, paymentMethod, taxCountry, billingAddress,
     })
     const o = response.data?.order ?? response.data
     return {

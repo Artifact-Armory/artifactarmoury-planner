@@ -419,6 +419,12 @@ CREATE TABLE orders (
     -- reporting what was actually charged.
     tax_country VARCHAR(2),
     tax_rate NUMERIC(5,2) NOT NULL DEFAULT 0,
+    -- Stripe Tax (migration 044): the calculation the order was quoted from, and the
+    -- transaction recorded once payment succeeds (what counts the sale for filing).
+    -- Both NULL under mock payments, which keep using tax_country/tax_rate above via
+    -- the vat.ts estimate instead of a real Stripe Tax calculation.
+    stripe_tax_calculation_id VARCHAR(255),
+    stripe_tax_transaction_id VARCHAR(255),
     total DECIMAL(10,2) NOT NULL,
     
     -- Immediate-download consent: when the buyer agreed the download starts now and
