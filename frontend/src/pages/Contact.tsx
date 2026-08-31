@@ -5,6 +5,7 @@ import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import { contactApi, ContactAttachmentInput } from '../api/endpoints/contact'
+import Seo from '../components/common/Seo'
 import { SITE_NAME, SITE_DOMAIN } from '../config/brand'
 
 const SUPPORT_EMAIL = `support@${SITE_DOMAIN}`
@@ -92,6 +93,11 @@ const Contact: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
+      <Seo
+        title="Contact Us"
+        description={`Get in touch with ${SITE_NAME} about an order, a download issue, or general feedback. We typically reply within a day or two.`}
+        path="/contact"
+      />
       <p className="text-sm font-medium text-primary">Support</p>
       <h1 className="mt-2 text-3xl font-semibold text-foreground">Contact us</h1>
       <p className="mt-4 text-base leading-relaxed text-muted-foreground">

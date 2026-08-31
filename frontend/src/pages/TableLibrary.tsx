@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import Button from '../components/ui/Button';
+import Seo from '../components/common/Seo';
 import { useLibraryStore } from '../store/libraryStore';
 import { formatPrice } from '../utils/format';
 
@@ -26,6 +27,7 @@ export const TableLibrary: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 space-y-6">
+      <Seo title="Table Library" noindex />
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold text-foreground">Table Library</h1>
         <p className="text-sm text-muted-foreground">Assets currently linked to this table layout.</p>

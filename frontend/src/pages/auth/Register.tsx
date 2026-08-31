@@ -9,6 +9,7 @@ import { useAuthStore } from '../../store/authStore'
 import { SITE_NAME } from '../../config/brand'
 import { Card, CardContent } from '../../components/shadcn/card'
 import Logo from '../../components/common/Logo'
+import Seo from '../../components/common/Seo'
 
 type FormValues = {
   displayName: string
@@ -50,6 +51,7 @@ const Register: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto px-4 py-10">
+      <Seo title="Create Account" noindex />
       <Logo variant="lockup" title={SITE_NAME} className="mx-auto mb-8 h-20 w-auto text-foreground" />
       <Card>
         <CardContent>

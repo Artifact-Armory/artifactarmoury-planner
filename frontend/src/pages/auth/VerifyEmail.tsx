@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import Button from '../../components/ui/Button'
+import Seo from '../../components/common/Seo'
 import { authApi } from '../../api/endpoints/auth'
 import { useAuthStore } from '../../store/authStore'
 
@@ -60,6 +61,7 @@ const VerifyEmail: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto px-4 py-12 text-center">
+      <Seo title="Verify Email" noindex />
       {status === 'verifying' && (
         <>
           <h1 className="text-2xl font-semibold text-foreground">Verifying your email…</h1>

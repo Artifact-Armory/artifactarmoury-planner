@@ -14,6 +14,7 @@ import {
 import { formatPrice } from '../utils/format'
 import Button from '../components/ui/Button'
 import CountrySelect from '../components/common/CountrySelect'
+import Seo from '../components/common/Seo'
 import { useTaxStore, grossFromLines, vatFromLines } from '../store/taxStore'
 
 // Load Stripe.js once, only if a publishable key is configured. When it's absent
@@ -234,6 +235,7 @@ const Checkout: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
+      <Seo title="Checkout" noindex />
       <h1 className="text-2xl font-semibold text-foreground">Checkout</h1>
       <p className="text-muted-foreground mt-1">Digital STL downloads — no shipping. You pay once per item.</p>
 

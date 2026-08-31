@@ -41,6 +41,7 @@ import OnboardingTour from '../help/OnboardingTour';
 import { artistTourSteps } from '../help/tourSteps';
 import { useOnboardingStore, hasSeenArtistTour, markArtistTourSeen } from '../../store/onboardingStore';
 import Logo from '../common/Logo';
+import Seo from '../common/Seo';
 import { SITE_NAME } from '../../config/brand';
 
 const DashboardLayout: React.FC = () => {
@@ -111,6 +112,10 @@ const DashboardLayout: React.FC = () => {
 
   return (
     <>
+      {/* Every /dashboard, /artist and /admin page is behind ProtectedRoute and
+          private to the signed-in account — one noindex here covers all of them,
+          rather than a per-page Seo call on 30+ files a crawler can't reach anyway. */}
+      <Seo title={getPageTitle()} noindex />
       <div className="min-h-screen bg-background">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (

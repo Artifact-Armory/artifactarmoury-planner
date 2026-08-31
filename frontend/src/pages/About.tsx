@@ -1,9 +1,15 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import Seo from '../components/common/Seo'
 
 const About: React.FC = () => {
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
+      <Seo
+        title="About Us"
+        description="Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Buy print-ready STL models from independent artists, plan your table before you print, and sell your own work with anti-theft protection built in."
+        path="/about"
+      />
       <h1 className="text-2xl font-semibold">About Artifact Armoury</h1>
       <p className="text-muted-foreground mt-3 leading-relaxed">
         Artifact Armoury is a marketplace and planning tool for 3D-printable

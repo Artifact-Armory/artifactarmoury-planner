@@ -59,6 +59,21 @@ const MOCK_CALC_PREFIX = 'taxcalc_mock_'
  * unaffected. `lines` should be one entry per priced cart line (a bundle is one line
  * at its own price), matching how vatOnLines/the buyer's basket already work.
  */
+/** The vat.ts-based estimate, in the OrderTaxResult shape — used both for the mock
+ *  path and as the fallback when a real Stripe Tax call fails (see below). */
+function fallbackResult(lines: TaxLine[], country: string): OrderTaxResult {
+  const netLines = lines.map((l) => l.amountPence / 100)
+  const netTotal = netLines.reduce((s, n) => s + n, 0)
+  const tax = vatOnLines(netLines, country)
+  return {
+    calculationId: `${MOCK_CALC_PREFIX}${Date.now()}`,
+    taxPence: Math.round(tax * 100),
+    totalPence: Math.round((netTotal + tax) * 100),
+    country,
+    ratePercent: rateFor(country),
+  }
+}
+
 export async function calculateOrderTax(
   lines: TaxLine[],
   address: BillingAddress
@@ -66,16 +81,7 @@ export async function calculateOrderTax(
   const country = address.country.toUpperCase()
 
   if (isStripeMock()) {
-    const netLines = lines.map((l) => l.amountPence / 100)
-    const netTotal = netLines.reduce((s, n) => s + n, 0)
-    const tax = vatOnLines(netLines, country)
-    return {
-      calculationId: `${MOCK_CALC_PREFIX}${Date.now()}`,
-      taxPence: Math.round(tax * 100),
-      totalPence: Math.round((netTotal + tax) * 100),
-      country,
-      ratePercent: rateFor(country),
-    }
+    return fallbackResult(lines, country)
   }
 
   try {
@@ -108,8 +114,14 @@ export async function calculateOrderTax(
       ratePercent,
     }
   } catch (error) {
-    taxLogger.error('Tax calculation failed', { error, country })
-    throw new Error('Could not calculate tax for this order')
+    // A real Stripe Tax call fails outright while Stripe Tax isn't yet enabled on the
+    // account (Dashboard → Tax) — expected right now, not a bug. Checkout must not
+    // break over it: fall back to the same vat.ts estimate the mock path uses, which
+    // is registration-gated (see REGISTERED_COUNTRIES in vat.ts) and therefore safe
+    // to charge regardless of Stripe Tax's setup state. Once Stripe Tax is actually
+    // enabled and registered, calls succeed and this branch stops firing.
+    taxLogger.error('Live Stripe Tax calculation failed; falling back to the vat.ts estimate', { error, country })
+    return fallbackResult(lines, country)
   }
 }
 

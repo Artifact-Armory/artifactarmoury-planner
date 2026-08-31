@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Package } from 'lucide-react'
 import { bundlesApi } from '../api/endpoints/bundles'
 import Spinner from '../components/ui/Spinner'
+import Seo from '../components/common/Seo'
 import { formatPrice } from '../utils/format'
 
 const Bundles: React.FC = () => {
@@ -14,6 +15,11 @@ const Bundles: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <Seo
+        title="Terrain Bundles"
+        description="Multi-model terrain bundles from independent artists — several STLs grouped at one price. Buy once and download every file in the set."
+        path="/bundles"
+      />
       <header className="border-b border-border pb-4">
         <h1 className="text-2xl font-semibold text-foreground">Bundles</h1>
         <p className="mt-1 text-sm text-muted-foreground">

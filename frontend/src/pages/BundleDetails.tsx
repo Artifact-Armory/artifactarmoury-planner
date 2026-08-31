@@ -11,6 +11,7 @@ import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import PriceDisplay from '../components/models/PriceDisplay'
 import { Badge } from '../components/shadcn/badge'
+import Seo from '../components/common/Seo'
 
 const BundleDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -68,8 +69,20 @@ const BundleDetails: React.FC = () => {
     openCart()
   }
 
+  // Title/description PATTERN a real bundle's data plugs into — no invented
+  // copy, just the fields the bundle already carries.
+  const bundleDescription = bundle.description
+    ? `${bundle.description} Includes ${bundle.models.length} print-ready STL models${bundle.artistName ? ` from ${bundle.artistName}` : ''} — buy the bundle once, download every file.`
+    : `${bundle.name}: ${bundle.models.length} print-ready STL terrain models${bundle.artistName ? ` from ${bundle.artistName}` : ''}, grouped in one bundle at one price.`
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
+      <Seo
+        title={`${bundle.name} — ${bundle.models.length}-Model Bundle`}
+        description={bundleDescription}
+        path={`/bundles/${bundle.id}`}
+        image={bundle.thumbnailUrl}
+      />
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">

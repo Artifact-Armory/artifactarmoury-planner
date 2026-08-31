@@ -1,4 +1,5 @@
 import React from 'react'
+import Seo from '../../components/common/Seo'
 
 /**
  * Shared shell for the legal pages (Terms, Privacy). Renders a title, a
@@ -13,6 +14,7 @@ const LegalLayout: React.FC<{
   children: React.ReactNode
 }> = ({ title, updated, children }) => (
   <div className="mx-auto max-w-3xl px-4 py-10">
+    <Seo title={title} description={`${title} for Artifact Armoury, the marketplace and 3D planner for tabletop terrain.`} />
     <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
     <p className="mt-1 text-sm text-muted-foreground">Last updated: {updated}</p>
 

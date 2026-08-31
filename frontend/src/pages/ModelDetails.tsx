@@ -18,8 +18,26 @@ import { licenseInfo } from '../utils/licenses'
 import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 import ReportModelModal from '../components/reports/ReportModelModal'
+import Seo from '../components/common/Seo'
 import { FEATURES } from '../config/features'
 import { SITE_NAME } from '../config/brand'
+
+/**
+ * SEO title/description PATTERN for a product page. Every visible model on
+ * the live site right now is test data ("Model 2" by "Tester Artist"), so
+ * there's no real copy to hand-write here — this is the template real
+ * listings plug into once artists are onboarded. Keep it in sync with
+ * whatever fields a listing actually has (name/category/artistName/description).
+ */
+function modelSeoDescription(model: TerrainModel): string {
+  const category = model.category ? model.category.toLowerCase() : 'tabletop terrain'
+  if (model.description) {
+    const trimmed = model.description.trim()
+    const truncated = trimmed.length > 140 ? `${trimmed.slice(0, 137)}…` : trimmed
+    return `${truncated} A print-ready ${category} STL by ${model.artistName} on ${SITE_NAME}.`
+  }
+  return `Buy ${model.name} by ${model.artistName} — a print-ready ${category} STL, available on ${SITE_NAME}. Buy once, print as many times as your table needs.`
+}
 
 /**
  * Group a multi-file listing's parts into its components ("included models").
@@ -257,6 +275,12 @@ const ModelDetails: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
+      <Seo
+        title={`${model.name} — 3D Printable ${model.category ? model.category.replace(/^\w/, (c) => c.toUpperCase()) : 'Terrain'} STL`}
+        description={modelSeoDescription(model)}
+        path={`/models/${model.id}`}
+        image={model.thumbnailUrl}
+      />
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">

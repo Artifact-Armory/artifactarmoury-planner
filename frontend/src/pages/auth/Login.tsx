@@ -8,6 +8,7 @@ import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import { Card, CardContent } from '../../components/shadcn/card'
 import Logo from '../../components/common/Logo'
+import Seo from '../../components/common/Seo'
 import { SITE_NAME } from '../../config/brand'
 
 type FormValues = { email: string; password: string }
@@ -63,6 +64,7 @@ const Login: React.FC = () => {
   if (challengeToken) {
     return (
       <div className="max-w-md mx-auto px-4 py-10">
+        <Seo title="Sign In" noindex />
         <Logo variant="lockup" title={SITE_NAME} className="mx-auto mb-8 h-20 w-auto text-foreground" />
         <Card>
           <CardContent>
@@ -104,6 +106,7 @@ const Login: React.FC = () => {
   // ── First step: email + password ──────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto px-4 py-10">
+      <Seo title="Sign In" noindex />
       <Logo variant="lockup" title={SITE_NAME} className="mx-auto mb-8 h-20 w-auto text-foreground" />
       <Card>
         <CardContent>

@@ -6,6 +6,7 @@ import { tablesApi } from '../api/endpoints/tables'
 import type { PublicTableCard } from '../api/endpoints/tables'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
+import Seo from '../components/common/Seo'
 
 const sortOptions: { value: 'recent' | 'updated' | 'popular'; label: string }[] = [
   { value: 'recent', label: 'Newest' },
@@ -28,6 +29,11 @@ const PublicTables: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <Seo
+        title="Shop the Look — Community Tables"
+        description="Browse tabletop layouts other builders have shared in the 3D planner — see a full board planned in terrain STLs and open any model straight from the table."
+        path="/tables"
+      />
       {/* Hero */}
       <section className="overflow-hidden rounded-3xl bg-primary px-8 py-10 text-primary-foreground shadow-lg">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

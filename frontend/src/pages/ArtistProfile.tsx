@@ -11,6 +11,7 @@ import { artistsApi } from '../api/endpoints/artists'
 import { messagesApi } from '../api/endpoints/messages'
 import { ArtistShowcase } from '../api/types'
 import { useAuthStore } from '../store/authStore'
+import Seo from '../components/common/Seo'
 
 const sortOptions = [
   { value: 'recent', label: 'Newest' },
@@ -142,6 +143,16 @@ const ArtistProfile: React.FC = () => {
 
   return (
     <div className="relative min-h-screen" style={accent ? ({ ['--accent' as any]: accent }) : undefined}>
+      <Seo
+        title={`${artist.name} — Terrain Artist`}
+        description={
+          artist.bio
+            ? `${artist.bio.slice(0, 150)}${artist.bio.length > 150 ? '…' : ''} See ${artist.name}'s 3D-printable terrain STLs on Artifact Armoury.`
+            : `Browse 3D-printable tabletop terrain STLs by ${artist.name} on Artifact Armoury.`
+        }
+        path={`/artists/${artist.id}`}
+        image={artist.profileImageUrl}
+      />
       {/* Artist-chosen page background: a fixed image behind a translucent scrim so
           the white content cards stay readable. Falls back to the default page bg. */}
       {background && (

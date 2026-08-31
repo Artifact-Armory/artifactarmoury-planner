@@ -6,24 +6,28 @@ import Spinner from '../components/ui/Spinner'
 import ModelGrid from '../components/models/ModelGrid'
 import SaleCarousel from '../components/models/SaleCarousel'
 import Logo from '../components/common/Logo'
+import Seo from '../components/common/Seo'
 import { browseApi } from '../api/endpoints/browse'
 import { SITE_NAME, SITE_TAGLINE } from '../config/brand'
+
+const HOME_DESCRIPTION =
+  'Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Browse print-ready STL scenery from independent artists, lay out your wargaming table before you print, and buy each model once — print it as many times as your table needs.'
 
 const FEATURES = [
   {
     icon: Compass,
-    title: 'Design in 3D',
-    body: 'Drag terrain onto a virtual table and lay out your whole board. No account required.',
+    title: 'Plan your table in 3D',
+    body: 'Drag STL terrain onto a virtual board and lay out your whole battlefield before you print a single piece — no account required.',
   },
   {
     icon: RefreshCcw,
-    title: 'Buy once, print forever',
-    body: 'Every STL is a single purchase. Print it once or a hundred times — no per-print fees.',
+    title: 'Buy the STL once, print it forever',
+    body: 'One purchase per model, no per-print fee. Print one copy or twenty for a full table of scenery.',
   },
   {
     icon: ShieldCheck,
-    title: 'Every file checked before it lists',
-    body: 'We process and verify each upload automatically, so what you download is a clean, print-ready file — not a broken mesh.',
+    title: 'Every upload is mesh-checked',
+    body: 'We run each STL through automated watertight and manifold checks before it lists, so what you download prints cleanly — not a broken mesh.',
   },
 ] as const
 
@@ -50,6 +54,7 @@ const Home: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <Seo title={SITE_NAME} description={HOME_DESCRIPTION} path="/" />
       <section className="relative isolate overflow-hidden rounded-3xl border border-border px-6 py-20 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-24px_rgba(15,23,42,0.12)] sm:px-12 sm:py-28">
         <video
           className="absolute inset-0 -z-10 h-full w-full object-cover"

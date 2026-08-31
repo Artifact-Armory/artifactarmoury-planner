@@ -5,6 +5,7 @@ import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
 import ArtistCard from '../components/artists/ArtistCard'
+import Seo from '../components/common/Seo'
 import { artistsApi } from '../api/endpoints/artists'
 
 const sortOptions = [
@@ -95,6 +96,11 @@ const ArtistsList: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <Seo
+        title="Terrain Artists"
+        description="Discover independent artists making 3D-printable tabletop terrain — browse their storefronts and follow to stay up to date with new releases."
+        path="/artists"
+      />
       <section className="rounded-3xl bg-primary px-6 py-12 text-primary-foreground shadow-lg sm:px-12">
         <h1 className="text-3xl font-semibold">Artists</h1>
         <p className="mt-2 max-w-2xl text-primary-foreground/80">

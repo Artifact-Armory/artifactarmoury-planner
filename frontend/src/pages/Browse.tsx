@@ -7,6 +7,7 @@ import Button from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
 import ModelGrid from '../components/models/ModelGrid'
 import FacetRail from '../components/taxonomy/FacetRail'
+import Seo from '../components/common/Seo'
 import { browseApi } from '../api/endpoints/browse'
 import {
   taxonomyApi,
@@ -239,8 +240,19 @@ const Browse: React.FC = () => {
     setSearchParams(next)
   }
 
+  const selectedClassLabel = MODEL_CLASSES.find((c) => c.slug === selectedClass)?.label
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <Seo
+        title={selectedClassLabel ? `${selectedClassLabel} STLs` : 'Browse Tabletop Terrain STLs'}
+        description={
+          selectedClassLabel
+            ? `Browse print-ready ${selectedClassLabel.toLowerCase()} STLs from independent artists — filter by scale, era and print process, then plan them on the free 3D table planner.`
+            : 'Browse print-ready tabletop terrain, vehicles and character STLs from independent artists. Filter by scale, era and print process, then plan your table in 3D before you buy.'
+        }
+        path="/browse"
+      />
       {/* Fulfillment tabs: digital STL download vs third-party print-and-ship.
           Hidden while Print & Ship is parked — with one option the strip is noise. */}
       {FEATURES.printAndShip && (

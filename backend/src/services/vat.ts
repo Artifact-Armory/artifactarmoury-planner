@@ -94,10 +94,43 @@ const BY_CODE = new Map<string, TaxCountry>(
   [...VAT_TABLE, ...ZERO_RATED].map((c) => [c.code, c])
 )
 
-/** Every country the buyer can choose, VAT-charging ones first, then A–Z. */
+/**
+ * Countries we are *actually registered* to charge VAT in, right now. Empty as of
+ * 2026-08-31: the business has no UK VAT number (below the UK threshold, no
+ * registration filed) and no EU non-Union OSS registration either — see the "VAT: we
+ * are the deemed supplier" note in CLAUDE.md / project memory.
+ *
+ * VAT_TABLE above is reference data (what a country's rate *would* be if we were
+ * registered there) — it deliberately stays accurate even while this set is empty,
+ * so switching a country on later is a one-line change here, not a rewrite of the
+ * rate table. This set is the separate, harder gate: charging a rate without holding
+ * the matching registration isn't "safely conservative", it's not something we're
+ * allowed to do — so `rateFor()` (and therefore the country list served to the
+ * storefront, and every VAT calculation that goes through it) zero-rates anything not
+ * listed here, no matter how live payments currently are.
+ *
+ * ADD A CODE ONLY ONCE THE REGISTRATION ACTUALLY EXISTS:
+ *   - `'GB'` once a UK VAT number is issued.
+ *   - the rest of VAT_TABLE's codes, all at once, once the EU non-Union OSS
+ *     registration is done (one registration covers every EU state — see the memory
+ *     note on why there's no "just add France" step):
+ *     `...VAT_TABLE.map((c) => c.code).filter((c) => c !== 'GB')`
+ */
+const REGISTERED_COUNTRIES: ReadonlySet<string> = new Set<string>([])
+
+/** The rate we can *actually* charge for a country — 0 if we hold no registration
+ *  there, regardless of what VAT_TABLE says that country's rate nominally is. */
+function effectiveRate(code: string, nominalRate: number): number {
+  return REGISTERED_COUNTRIES.has(code) ? nominalRate : 0
+}
+
+/** Every country the buyer can choose, VAT-charging ones first, then A–Z. Rates are
+ *  already gated by REGISTERED_COUNTRIES, so the storefront never displays a rate we
+ *  can't actually charge. */
 export function taxCountries(): TaxCountry[] {
   const sortByName = (a: TaxCountry, b: TaxCountry) => a.name.localeCompare(b.name)
-  return [...[...VAT_TABLE].sort(sortByName), ...[...ZERO_RATED].sort(sortByName)]
+  const gated = (c: TaxCountry): TaxCountry => ({ ...c, rate: effectiveRate(c.code, c.rate) })
+  return [...[...VAT_TABLE].sort(sortByName), ...[...ZERO_RATED].sort(sortByName)].map(gated)
 }
 
 export function isKnownTaxCountry(code?: string | null): boolean {
@@ -108,15 +141,18 @@ export function isKnownTaxCountry(code?: string | null): boolean {
  * VAT percentage for a country. Unknown or missing codes are zero-rated rather
  * than defaulting to a UK 20% — over-charging a buyer we can't place is worse than
  * under-collecting, and the checkout always sends a code it got from `taxCountries()`.
+ * Also zero-rated: any country we don't currently hold a registration for, even one
+ * with a nonzero rate in VAT_TABLE — see REGISTERED_COUNTRIES above.
  */
 export function rateFor(code?: string | null): number {
   if (!code) return 0
-  const found = BY_CODE.get(code.toUpperCase())
+  const upper = code.toUpperCase()
+  const found = BY_CODE.get(upper)
   if (!found) {
     vatLogger.warn('Unknown tax country; zero-rating', { code })
     return 0
   }
-  return found.rate
+  return effectiveRate(upper, found.rate)
 }
 
 /**

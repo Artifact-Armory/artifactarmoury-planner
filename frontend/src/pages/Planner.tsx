@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useIsDesktop } from '../hooks/useIsDesktop'
 import Logo from '../components/common/Logo'
+import Seo from '../components/common/Seo'
 import { SITE_NAME } from '../config/brand'
 
 // The 3D Table Planner supports touch (pinch/twist to fly the camera, on-screen
@@ -25,6 +26,18 @@ export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
   const { id, token } = useParams<{ id?: string; token?: string }>()
   const isDesktop = useIsDesktop(PLANNER_MIN_WIDTH)
 
+  // A saved/shared/viewed table is one person's layout, not a page with its
+  // own search-worthy content — only the blank /planner tool is indexable.
+  const noindex = Boolean(id || token)
+  const seo = (
+    <Seo
+      title="Free 3D Tabletop Terrain Planner"
+      description="Plan your wargaming table in 3D before you print. Drag terrain STLs onto a virtual board, stack and rotate pieces, then push the whole build into your cart — no account required."
+      path="/planner"
+      noindex={noindex}
+    />
+  )
+
   // Haven't run the client-side check yet — render nothing rather than guess,
   // so neither the planner nor the fallback flashes before we know.
   if (isDesktop === null) return null
@@ -32,6 +45,7 @@ export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
   if (!isDesktop) {
     return (
       <div style={{ position: 'fixed', inset: 0, zIndex: 10 }}>
+        {seo}
         <PlannerUnavailable />
       </div>
     )
@@ -39,6 +53,7 @@ export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 10 }}>
+      {seo}
       <Suspense fallback={<PlannerLoading />}>
         <PlannerApp tableId={id} shareToken={token} readOnly={readOnly} />
       </Suspense>

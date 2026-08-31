@@ -1,0 +1,11 @@
+# Artifact Armoury is currently invite-only (see InviteGate.tsx) — every route
+# serves the same "enter your invite code" screen to a crawler that isn't
+# signed in, so nothing here actually gets indexed yet regardless of this
+# file. Left permissive so it's correct the moment the gate comes off; no
+# reason to also block crawling while it's already blocked at the UI layer.
+User-agent: *
+Allow: /
+
+# TODO: once a custom domain (artifactarmoury.com, see config/brand.ts) is
+# live, point this at that host instead of the pages.dev one.
+Sitemap: https://artifactarmoury-planner.pages.dev/sitemap.xml

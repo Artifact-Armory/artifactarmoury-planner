@@ -1,11 +1,15 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import Button from '../../components/ui/Button'
+import Seo from '../../components/common/Seo'
 import { SITE_NAME } from '../../config/brand'
 
 const ArtistApplication: React.FC = () => {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
+      {/* Behind ProtectedRoute (sign-in required), so a crawler can never actually
+          reach this content — noindex rather than let it index a login wall. */}
+      <Seo title="Become an Artist" noindex />
       <section className="rounded-3xl bg-card p-8 shadow-sm">
         <h1 className="text-3xl font-semibold text-foreground">Become an {SITE_NAME} artist</h1>
         <p className="mt-3 text-sm text-muted-foreground">
