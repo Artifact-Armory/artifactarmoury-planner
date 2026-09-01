@@ -630,16 +630,22 @@ router.get('/me/stats', authenticate, requireArtist, async (req, res, next) => {
   try {
     const artistId = (req as any).userId
 
-    // Earnings from succeeded orders (artist_commission_amount is the platform's
-    // 15% cut, so the artist keeps total_price − commission).
+    // Earnings from succeeded, un-refunded order lines. artist_commission_amount
+    // IS the artist's own share (schema.sql: commission_rate is "Artist's SHARE
+    // percent... platform keeps the remainder" — confirmed against the actual
+    // money movement in services/payouts.ts, which transfers exactly this figure
+    // to the artist's Stripe Connect account). This previously subtracted it from
+    // total_price instead, which computed the PLATFORM's ~15% cut and displayed
+    // that to the artist as their own earnings — fixed 2026-09-01, found while
+    // adding per-item refunds.
     const earnings = await db.query(
       `SELECT
          COALESCE(SUM(oi.total_price), 0) AS gross_revenue,
-         COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS net_earnings,
+         COALESCE(SUM(oi.artist_commission_amount), 0) AS net_earnings,
          COUNT(oi.id) AS total_sales
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
-       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'`,
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
       [artistId],
     )
 
@@ -687,18 +693,21 @@ router.get('/me/sales', authenticate, requireArtist, async (req, res, next) => {
     const countResult = await db.query(
       `SELECT COUNT(*) AS total
        FROM order_items oi JOIN orders o ON o.id = oi.order_id
-       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'`,
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
       [artistId],
     )
     const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
+    // `earnings` = artist_commission_amount directly — see the note on /me/stats
+    // above; this is what the artist actually keeps, and what "You earned" on
+    // the dashboard renders.
     const result = await db.query(
       `SELECT oi.id, oi.model_id, oi.model_name, oi.bundle_name,
               oi.total_price, oi.artist_commission_amount,
-              (oi.total_price - oi.artist_commission_amount) AS earnings,
+              oi.artist_commission_amount AS earnings,
               o.order_number, o.customer_email, o.created_at
        FROM order_items oi JOIN orders o ON o.id = oi.order_id
-       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded'
+       WHERE oi.artist_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
        ORDER BY o.created_at DESC
        LIMIT $2 OFFSET $3`,
       [artistId, limit, offset],

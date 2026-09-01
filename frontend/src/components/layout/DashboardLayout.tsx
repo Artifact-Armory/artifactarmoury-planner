@@ -30,7 +30,8 @@ import {
   MessageSquare,
   Megaphone,
   Flag,
-  Eye
+  Eye,
+  Mail
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
@@ -543,6 +544,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <Flag size={18} className="mr-3" />
                 Message Reports
+              </NavLink>
+              <NavLink
+                to="/admin/contact"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/admin/contact')
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
+                }`}
+              >
+                <Mail size={18} className="mr-3" />
+                Contact Messages
               </NavLink>
               {user?.isSuperAdmin && (
                 <NavLink

@@ -625,7 +625,7 @@ async function isEntitledToModel(modelId: string, viewerId?: string, role?: stri
   const { rows } = await db.query(
     `SELECT 1
        FROM models m
-       LEFT JOIN order_items oi ON oi.model_id = m.id
+       LEFT JOIN order_items oi ON oi.model_id = m.id AND oi.refunded_at IS NULL
        LEFT JOIN orders o ON o.id = oi.order_id
                          AND o.user_id = $2
                          AND o.payment_status = 'succeeded'
@@ -1472,7 +1472,7 @@ router.get('/:id/stats',
        FROM models m
        LEFT JOIN favorites f ON m.id = f.model_id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
-       LEFT JOIN order_items oi ON m.id = oi.model_id
+       LEFT JOIN order_items oi ON m.id = oi.model_id AND oi.refunded_at IS NULL
        WHERE m.id = $1
        GROUP BY m.id, m.view_count, m.download_count, m.sale_count`,
       [id]
@@ -1582,11 +1582,11 @@ router.post('/:id/reviews',
       throw new ValidationError('Rating must be a whole number from 1 to 5');
     }
 
-    // Only buyers (a succeeded order for this model) may review it.
+    // Only buyers (a succeeded, un-refunded order for this model) may review it.
     const purchase = (await db.query(
       `SELECT oi.id FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded'
+       WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
        ORDER BY o.created_at DESC LIMIT 1`,
       [id, userId]
     )).rows[0];
@@ -1699,14 +1699,14 @@ router.get('/:id/download',
     if (!model.stl_file_path) throw new NotFoundError('STL file');
     if (!isR2Enabled()) throw new ValidationError('Downloads are not configured (R2 disabled)');
 
-    // Entitlement: the artist, or a buyer with a succeeded order for this model.
+    // Entitlement: the artist, or a buyer with a succeeded, un-refunded order for this model.
     const isArtist = model.artist_id === userId;
     let orderId = WATERMARK_ZERO_ORDER;
     if (!isArtist) {
       const ent = (await db.query(
         `SELECT o.id FROM order_items oi
          JOIN orders o ON oi.order_id = o.id
-         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded'
+         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
          ORDER BY o.created_at DESC LIMIT 1`,
         [id, userId]
       )).rows[0];

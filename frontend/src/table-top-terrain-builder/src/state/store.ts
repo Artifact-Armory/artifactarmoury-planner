@@ -277,8 +277,6 @@ interface AppState {
     markAsPurchased: (assetIds: string[]) => void
     addLayoutToBasket: () => void
     syncBasketWithTable: () => void
-    /** Add a just-placed catalogue model to the shop cart (bundle-aware). */
-    addPlacedModelToShopCart: (assetId: string) => void
   }
 }
 
@@ -593,41 +591,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       return id
     },
 
-    // Add a just-placed model to the shop cart unless it's already owned, in the
-    // cart, or covered by an owned/in-cart bundle (bundle+standalone would clash
-    // at checkout). For a "set" part, the purchasable unit is the PARENT model.
-    // Does not pop the cart drawer open.
-    addPlacedModelToShopCart: (assetId) => {
-      const s = get()
-      // If the placed asset is a part of a set, buy the parent model (one purchase
-      // unlocks all parts).
-      const parentSet = s.sets.find(set => set.partAssetIds.includes(assetId))
-      const modelId = parentSet ? parentSet.id : assetId
-
-      if (s.ownedModelIds.has(modelId)) return
-      // Never add the artist's own models to their cart — you don't buy your own work.
-      if (s.myModels.some(m => m.id === modelId)) return
-      const inOwnedBundle = s.bundles.some(b => s.ownedBundleIds.has(b.id) && b.modelIds.includes(modelId))
-      if (inOwnedBundle) return
-
-      const cart = useCartStore.getState()
-      if (cart.hasItem('model', modelId)) return
-      const cartBundleIds = new Set(cart.items.filter(it => it.kind === 'bundle').map(it => it.id))
-      const inCartBundle = s.bundles.some(b => cartBundleIds.has(b.id) && b.modelIds.includes(modelId))
-      if (inCartBundle) return
-
-      // Name/price/thumbnail come from the set (parent) or the placed asset.
-      let item
-      if (parentSet) {
-        item = { kind: 'model' as const, id: modelId, name: parentSet.name, artistName: 'Artifact Armoury', price: parentSet.price, imageUrl: parentSet.thumbnail }
-      } else {
-        const asset = s.assets.find(a => a.id === assetId)
-        if (!asset) return
-        item = { kind: 'model' as const, id: assetId, name: asset.name, artistName: asset.artistName ?? 'Artifact Armoury', price: asset.price ?? 0, imageUrl: asset.thumbnail }
-      }
-      cart.addItem(item, false) // don't open the drawer over the planner
-    },
-    
     updateInstance: (id, patch) => {
       set(s => {
         const instances = s.instances.map(inst => inst.id === id ? { ...inst, ...patch } : inst)

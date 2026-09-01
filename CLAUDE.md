@@ -18,7 +18,7 @@ watermarked on download, and protected against re-upload.
 |---|---|---|
 | Backend API | Railway (service root dir = `backend`) | `https://api.artifactarmoury.com` (custom domain; underlying Railway service is `confident-purpose`, still reachable at `https://confident-purpose-production-3e3f.up.railway.app`) |
 | Postgres | Railway managed | (private, referenced via `${{Postgres.DATABASE_URL}}`) |
-| Frontend | Cloudflare **Pages** (root dir = `frontend`, build `npm install && npm run build`, output `dist`) | `https://artifactarmoury-planner.pages.dev` |
+| Frontend | Cloudflare **Pages** (root dir = `frontend`, build `npm install && npm run build`, output `dist`) | `https://artifactarmoury.com` (custom domain, added ~2026-08-31; still reachable at `https://artifactarmoury-planner.pages.dev`) |
 | Static assets | Cloudflare R2 bucket `artifact-armoury-assets` | `https://assets.artifactplanner.com` |
 | Repo | GitHub `Artifact-Armory/artifactarmoury-planner` | deploys from **`main`** |
 
@@ -32,7 +32,7 @@ auto-rebuilds the frontend. There is **no Dockerfile** (Nixpacks/Railpack).
 
 ## Environment variables
 **Backend (Railway):** `NODE_ENV=production`, `JWT_SECRET`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`,
-`ALLOWED_ORIGINS` (comma-sep, **exact match, no spaces/trailing slash** — must include the pages.dev origin),
+`ALLOWED_ORIGINS` (comma-sep, **exact match, no spaces/trailing slash** — must include `https://artifactarmoury.com`, and ideally the pages.dev origin too as a fallback),
 `FRONTEND_URL`, `STRIPE_MOCK=false`, `PAYMENTS_ENABLED=true` (**flipped live 2026-08-31** — real
 Stripe payments, real Connect payouts; a real test payment has gone through in production. Live
 `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` are set and the webhook is registered), `PRINT_FARM_PROVIDER=mock`,
@@ -503,9 +503,18 @@ form: name, email, subject, message, and up to 5 file attachments, open to anony
 - **Attachments** are served straight off the public R2 CDN via `publicUrl(key)` in the email body
   (same trust model as `model_report_attachments`: the bucket is public through the CDN, so the
   32-hex-char random key is what keeps them unguessable — no signed download URL needed).
-- **No admin inbox built** — messages are queryable via `npm run db:query` if needed
-  (`SELECT * FROM contact_messages ORDER BY created_at DESC`); a dashboard is a follow-up if
-  volume ever justifies it.
+- **Admin inbox built (2026-08-31, migration 047).** `/admin/contact` (`AdminContactMessages.tsx`,
+  nav link "Contact Messages" in the admin sidebar): a list (open/resolved tabs, unread dot,
+  attachment count) that opens a detail panel — sender, signed-in account if any, message body,
+  attachments, a "Reply by email" `mailto:` link (replies still happen over real email, not
+  in-app), and a Mark resolved / Reopen toggle. Backend `GET/PATCH /api/admin/contact*` in
+  `routes/admin.ts`, mirroring the `model_reports` moderation-queue pattern (list w/ pagination +
+  status filter, `GET /:id` marks it read, `PATCH /:id/status` toggles open↔resolved). Migration
+  047 added `is_read`/`status`/`resolved_by`/`resolved_at` to `contact_messages` (schema.sql
+  updated too). Both projects typecheck clean. **Untested against a real Postgres or a real admin
+  login** — local dev is `DB_MOCK=true`, and `authenticate` does a real `SELECT ... FROM users`
+  lookup that always 401s under the mock, so this couldn't be clicked through locally; verify on
+  the first deploy after the migration runs. `npm run db:query` remains available as a fallback.
 - **Known DB_MOCK-only crash**: `POST /api/contact` 500s in local dev (`DB_MOCK=true`) because the
   mock `db.query()` returns `{rows:[]}` for the `INSERT ... RETURNING id`, so `r.rows[0].id` throws
   — the exact same shape as the pre-existing gap in `routes/reports.ts`. Confirmed harmless against
@@ -513,6 +522,128 @@ form: name, email, subject, message, and up to 5 file attachments, open to anony
   renders, client + server validation both fire correctly (empty required field, <10-char message),
   the request reaches the backend and gets rejected/accepted as expected, and `/presign-attachment`
   round-trips a real signed R2 PUT URL under `contact/` using the project's live R2 credentials.
+
+## Promo codes (built 2026-08-31, migration 048)
+Artist-run discount codes — distinct from the existing **Sales** system (034, `services/sales.ts`,
+`/artist/promotions`): a Sale is automatic and public (everyone sees the reduced price; it can
+surface on the front-page carousel) and shares its cost proportionally with the platform (commission
+is a % of the already-discounted price). A promo code is **private** — a buyer must be given the
+code, entered at checkout — and **its entire cost comes out of the artist's own commission share,
+never the platform's**, per an explicit decision this session. v1 scope: a code discounts one
+model or an artist's whole portfolio; **bundles are not discountable** (kept out to avoid the
+bundle price-split + portfolio-code interaction; a clean follow-up if it's wanted).
+- **The commission-direction bug this almost shipped with.** `users.commission_rate` is the
+  **artist's** share (85 = artist keeps 85%, platform keeps 15% — see schema.sql's comment; it is
+  *not* a platform-fee rate, however the name reads). The first cut of `pushModelRow` in
+  `routes/orders.ts` computed the artist's cut off the original price and capped it at the
+  discounted total — which protects the *artist's* amount and lets the *platform's* cut collapse
+  under a big discount, the exact opposite of the requirement. Caught before shipping by tracing
+  `services/earnings.ts` (`artist_amount = oi.artist_commission_amount`) back to the schema
+  comment, then verified numerically (`node -e`, not just reasoned about): a £10 item at 85%
+  artist / 15% platform, £2 promo off → platform keeps its normal £1.50, artist absorbs the full
+  £2 (£8.50→£6.50); at 90% off the platform is capped at the £1 actually charged (artist floors at
+  £0, never negative); the no-discount path is bit-identical to the pre-existing formula (checked
+  against the original `Math.round(price * commissionRate) / 100`, not just re-derived) so every
+  order that never touches a promo code is provably unaffected.
+- **Schema (048):** `promo_codes` (artist_id, code — globally unique case-insensitive since a code
+  is entered with no artist context, discount_type `percent`\|`fixed`, discount_value, scope
+  `model`\|`portfolio` + target_id, active, starts_at/ends_at, max_redemptions,
+  max_redemptions_per_customer, redemption_count) + `promo_code_redemptions` (one row per
+  discounted order line — backs the redemption-limit checks and gives the artist usage stats).
+  `order_items` gained `original_price` (pre-code, post-Sale — what commission is calculated from),
+  `discount_amount`, `promo_code_id`. No 14-day/cooldown cap like Sales — that guard exists to keep
+  the *public* carousel fair, which doesn't apply to a code nobody sees unless the artist shares it.
+- **Safety floor:** after any discount a line can't drop below `PROMO_MIN_ITEM_PRICE` (50p) —
+  keeps it above Stripe's practical minimum charge and stops a code being a de facto free giveaway
+  of the whole marketplace fee. Enforced in `computeDiscountAmount` (`services/promoCodes.ts`).
+- **Redemption-limit race closed with a row lock.** `routes/orders.ts` resolves the code with
+  `findActiveCode(client, code, {forUpdate: true})` **inside** the order's transaction, so two
+  concurrent checkouts racing for a code's last redemption can't both succeed.
+- **One shared applier, used identically by the preview and the real charge.**
+  `createPromoApplier()` walks cart lines in order, discounting up to whatever's left of the
+  code's total/per-customer allowance and leaving the rest at full price (never rejecting the
+  whole cart over a limit) — `POST /api/promo-codes/validate` (checkout preview) and
+  `POST /api/orders` (the actual charge) both call it the same way, so they can't disagree about
+  what a code does. The preview is never trusted as the charge either way — orders.ts re-resolves
+  and re-applies the code itself.
+- **Backend:** `routes/promoCodes.ts` (mounted `/api/promo-codes`) — artist `GET /mine`,
+  `POST /` (create, gated `requireVerifiedEmail`+`requireTwoFactor` like Sales), `PATCH /:id/toggle`
+  (pause/resume — never hard-deleted, redemptions reference it); buyer `POST /validate`.
+  `routes/orders.ts` accepts an optional `promoCode` string; an invalid/expired/exhausted code
+  fails the whole order with a clear message rather than silently checking out at full price.
+- **Frontend:** `api/endpoints/promoCodes.ts`; `Checkout.tsx` gained a code field (shown only in
+  the review step) with a green "applied" state, a "Promo (CODE) −£x.xx" line above VAT (VAT is
+  correctly computed on the *discounted* net price via the existing per-line `vatOnLines`/
+  `grossFromLines` machinery — a promo code is just another per-line net-price adjustment to that
+  pipeline, not a separate tax path), and a green strikethrough on discounted cart rows. Clears
+  itself if the cart contents change after applying, rather than risk showing a stale discount.
+  `ArtistPromotions.tsx` (`/artist/promotions`) gained a "Promo codes" section below the existing
+  Sales UI — create/pause/resume, redemption-count display.
+- Both projects typecheck clean. **Untested against a real Postgres or a real checkout** — same
+  `DB_MOCK=true` local-dev limitation as the contact inbox above; the commission-split arithmetic
+  was verified numerically in isolation (see above), not through an actual paid order. Verify on
+  the first deploy after the migration runs, ideally with a real test purchase using a code.
+
+## Per-line-item refunds (built 2026-09-01, migration 049)
+Previously the **only** refund mechanism at all was `refund_buyers`, one action inside the admin
+moderation-report flow — it refunds **every buyer** of a model at once and only fires off the back
+of a filed report. There was no way to open a specific order and refund one line, and no self-serve
+buyer path either (Terms of Service promises "contact the artist or support," but nothing in code
+backed that beyond the report route). Admins can now open any order (`/admin/orders`, rows are
+clickable — the detail slide-over existed as an unused backend route already) and refund an
+individual model out of it with one click, leaving the order's other items untouched.
+- **Schema:** `order_items` gained `refunded_at` / `refunded_by` / `refund_amount`.
+  `orders.payment_status='refunded'` (already a valid value) is now reserved for "every item in
+  this order has been refunded" — flipped automatically once the last un-refunded item is refunded;
+  a single refunded line just sets `order_items.refunded_at`, so the order's other items keep their
+  entitlement.
+- **Refund amount is gross, not net — a bug in the pre-existing `refund_buyers` action too.**
+  `order_items.total_price` is NET (VAT lives only at the order level, see the tax-inclusive-pricing
+  section above), so refunding that figure under-refunds the buyer by their VAT share. Both refund
+  paths now compute gross via `vatPenceOn(netPence, order.tax_rate)` — the order's own snapshotted
+  rate, same rounding function checkout used — and `refund_buyers` was fixed to match (it also now
+  marks the underlying `order_items` refunded, which it never did before).
+- **`services/earnings.ts` gained `reverseEarningsForOrderItem`**, scoped to one `order_item_id`
+  (that column is UNIQUE on `artist_earnings`) rather than a whole model/order — voids the artist's
+  un-paid earning for just that line. Same caveat as the existing `reverseEarningsForModel`: money
+  already **paid out** to the artist isn't clawed back, just reported back to the admin
+  (`alreadyPaidToArtist` in the response) so they know to follow up manually if needed.
+- **A confirmed, separate, pre-existing bug found and fixed while doing this: `artist_commission_amount` had been read backwards on the artist's own dashboard.** That column IS the artist's
+  share (schema.sql: "Artist's SHARE percent... platform keeps the remainder" — confirmed against
+  the actual Stripe transfer in `services/payouts.ts`, which pays out exactly this figure). Three
+  places had instead computed `total_price − artist_commission_amount` — which is the *platform's*
+  cut — and shown that to the artist as their own money: the "You earned" column on
+  `ArtistDashboard.tsx`'s recent-sales table (fed by `GET /artists/me/sales`), the (currently
+  unrendered) `netEarnings` tile on `GET /artists/me/stats`, and — live and user-facing — the "Net
+  (you)" figures on the artist's own Sales Detail / Model Funnel analytics pages
+  (`daily_model_stats.net`, computed by the scheduled rollup in `services/analyticsRollup.ts`). All
+  three fixed to sum `artist_commission_amount` directly. The admin-only "site revenue" / "top
+  artists" aggregates in `routes/admin.ts` were already correct (they *want* the platform's cut) and
+  were untouched apart from adding the same `refunded_at IS NULL` exclusion.
+- **The analytics rollup fix needs a backfill to correct already-stored history**, since
+  `daily_model_stats` is a materialized table, not computed live — rows written by past scheduler
+  runs still hold the old (inverted) figures until recomputed. `rollupRange()` is idempotent
+  (DELETE+INSERT per day), so this is safe to re-run:
+  ```
+  cd backend
+  npm run rollup:analytics -- 365
+  ```
+  (or an explicit range: `npm run rollup:analytics -- 2026-01-01 2026-09-01`). Do this once after
+  deploying — the artist-facing "Net (you)" figures stay wrong until it's run.
+- **Entitlement sweep:** every place that checks "does this user own this model" now also excludes
+  a refunded line (`oi.refunded_at IS NULL`) — the STL download route, the owner-tier GLB
+  entitlement helper (`isEntitledToModel`), the review-eligibility gate, `GET /orders/entitlements`
+  and `GET /orders/library` (drives "My Downloads" + planner ownership), the buy-once
+  already-own check at checkout (a refunded buyer can re-purchase), and the shadow-banned-user
+  own-model report gate. A bundle still reads as "owned" as long as at least one constituent model
+  is un-refunded — only reads as un-owned once every model in it has been refunded.
+- **Frontend:** `AdminOrders.tsx` rows are now clickable, opening a slide-over (same pattern as
+  `AdminModeration`/`AdminContactMessages`) with every line item and a per-item Refund button
+  (confirm dialog, since it charges back through Stripe immediately and can't be undone from the
+  UI). Already-refunded lines show their refunded amount instead of the button.
+- Both projects typecheck clean. **Untested against a real Postgres, a real Stripe refund, or a
+  real login** — same `DB_MOCK=true` local-dev limitation as the contact inbox and promo codes
+  above. Verify on the first deploy after the migration runs, ideally with a real test refund.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as

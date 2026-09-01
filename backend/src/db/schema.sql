@@ -526,13 +526,80 @@ CREATE TABLE order_items (
     print_material VARCHAR(50),
     print_quality VARCHAR(20), -- 'draft', 'standard', 'fine'
     special_instructions TEXT,
-    
+
+    -- Per-line refund (migration 049). orders.payment_status='refunded' is
+    -- reserved for "every item refunded"; a single refunded line lives here so
+    -- the order's other items keep their entitlement (see the refunded_at IS
+    -- NULL filters in models.ts/orders.ts/reports.ts/artists.ts).
+    refunded_at TIMESTAMP,
+    refunded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    refund_amount DECIMAL(10,2), -- gross (net total_price + this line's VAT share)
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_order_items_order ON order_items(order_id);
+CREATE INDEX idx_order_items_refunded ON order_items(refunded_at) WHERE refunded_at IS NOT NULL;
 CREATE INDEX idx_order_items_model ON order_items(model_id);
 CREATE INDEX idx_order_items_artist ON order_items(artist_id);
+
+-- ============================================================================
+-- PROMO CODES (migration 048): artist-run codes, cost comes from the artist's
+-- own commission share, never the platform's. See services/promoCodes.ts.
+-- ============================================================================
+
+CREATE TABLE promo_codes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code VARCHAR(40) NOT NULL,
+    discount_type VARCHAR(10) NOT NULL CHECK (discount_type IN ('percent', 'fixed')),
+    discount_value NUMERIC(10, 2) NOT NULL CHECK (discount_value > 0),
+    scope VARCHAR(20) NOT NULL CHECK (scope IN ('model', 'portfolio')),
+    target_id UUID,
+    active BOOLEAN NOT NULL DEFAULT true,
+    starts_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ends_at TIMESTAMP,
+    max_redemptions INTEGER,
+    redemption_count INTEGER NOT NULL DEFAULT 0,
+    max_redemptions_per_customer INTEGER,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CHECK ((scope = 'portfolio' AND target_id IS NULL) OR (scope = 'model' AND target_id IS NOT NULL)),
+    CHECK (max_redemptions IS NULL OR max_redemptions >= 1),
+    CHECK (max_redemptions_per_customer IS NULL OR max_redemptions_per_customer >= 1)
+);
+
+CREATE UNIQUE INDEX idx_promo_codes_code ON promo_codes (UPPER(code));
+CREATE INDEX idx_promo_codes_artist ON promo_codes(artist_id);
+CREATE INDEX idx_promo_codes_target ON promo_codes(target_id) WHERE target_id IS NOT NULL;
+
+CREATE TABLE promo_code_redemptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    promo_code_id UUID NOT NULL REFERENCES promo_codes(id) ON DELETE CASCADE,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    order_item_id UUID REFERENCES order_items(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    discount_amount NUMERIC(10, 2) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_promo_redemptions_code ON promo_code_redemptions(promo_code_id);
+CREATE INDEX idx_promo_redemptions_user ON promo_code_redemptions(promo_code_id, user_id);
+CREATE INDEX idx_promo_redemptions_order ON promo_code_redemptions(order_id);
+
+-- Added onto order_items (defined above) rather than inline, since promo_codes
+-- must exist first for the FK.
+ALTER TABLE order_items
+  ADD COLUMN original_price NUMERIC(10, 2),
+  ADD COLUMN discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  ADD COLUMN promo_code_id UUID REFERENCES promo_codes(id) ON DELETE SET NULL;
+
+COMMENT ON TABLE promo_codes IS 'Artist-run promo codes (migration 048). Discount comes entirely from the artist''s own commission share.';
+COMMENT ON TABLE promo_code_redemptions IS 'One row per order line a promo code discounted.';
+COMMENT ON COLUMN order_items.original_price IS 'Pre-promo-code price (post-Sale if one was active). Commission is calculated from this, not unit_price.';
+COMMENT ON COLUMN order_items.discount_amount IS 'original_price - unit_price. Zero unless a promo code was applied.';
 
 -- ============================================================================
 -- PAYMENTS (Commission Tracking)
@@ -669,10 +736,16 @@ CREATE TABLE contact_messages (
     email   VARCHAR(255) NOT NULL,
     subject VARCHAR(200) NOT NULL,
     message TEXT NOT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT false, -- admin inbox: opened at least once
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_contact_messages_created ON contact_messages(created_at DESC);
 CREATE INDEX idx_contact_messages_user ON contact_messages(user_id);
+CREATE INDEX idx_contact_messages_status ON contact_messages(status);
+CREATE INDEX idx_contact_messages_unread ON contact_messages(is_read) WHERE is_read = false;
 
 CREATE TABLE contact_message_attachments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -108,6 +108,36 @@ export async function reverseEarningsForModel(modelId: string, reason: string): 
   }
 }
 
+/**
+ * Reverse the (single) un-paid earning row tied to one order line — used when
+ * an admin refunds an individual model out of an order (migration 049).
+ * `order_item_id` is UNIQUE on artist_earnings (see accrueEarningsForOrder),
+ * so this always affects at most one row.
+ */
+export async function reverseEarningsForOrderItem(
+  orderItemId: string,
+  reason: string,
+): Promise<{ reversed: boolean; alreadyPaid: boolean }> {
+  try {
+    const reversed = await db.query(
+      `UPDATE artist_earnings
+       SET status = 'reversed', reversed_reason = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE order_item_id = $1 AND status IN ('pending', 'cleared')`,
+      [orderItemId, reason],
+    )
+    const paid = await db.query(
+      `SELECT 1 FROM artist_earnings WHERE order_item_id = $1 AND status = 'paid' LIMIT 1`,
+      [orderItemId],
+    )
+    const alreadyPaid = paid.rows.length > 0
+    log.info('Reversed order-item earnings', { orderItemId, reversed: (reversed.rowCount ?? 0) > 0, alreadyPaid })
+    return { reversed: (reversed.rowCount ?? 0) > 0, alreadyPaid }
+  } catch (err) {
+    log.error('reverseEarningsForOrderItem failed', { error: err, orderItemId })
+    throw err
+  }
+}
+
 /** Money-by-status summary for an artist's Payouts tile. */
 export async function getArtistEarningsSummary(artistId: string): Promise<ArtistEarningsSummary> {
   const result = await db.query(

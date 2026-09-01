@@ -39,10 +39,15 @@ export async function rollupRange(fromDate: string, toDate: string): Promise<voi
                 0, 0, 0,
                 COUNT(*) AS units,
                 COALESCE(SUM(oi.total_price), 0) AS gross,
-                COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS net
+                -- artist_commission_amount IS the artist's own share (see the
+                -- fix note in routes/artists.ts) — this was subtracting it from
+                -- gross instead, which computed the PLATFORM's cut and rolled
+                -- that up as the artist's "net" on their own Sales/Model
+                -- analytics pages (labelled "Net (you)"). Fixed 2026-09-01.
+                COALESCE(SUM(oi.artist_commission_amount), 0) AS net
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
-         WHERE o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL
+         WHERE o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL AND oi.refunded_at IS NULL
            AND date(o.created_at) BETWEEN $1 AND $2
          GROUP BY 1, 2
        ) u

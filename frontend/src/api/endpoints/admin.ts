@@ -81,6 +81,43 @@ export interface AdminOrderRow {
   item_count: string
 }
 
+export interface AdminOrderItem {
+  id: string
+  model_id: string | null
+  artist_id: string | null
+  bundle_id: string | null
+  bundle_name: string | null
+  model_name: string
+  thumbnail_path: string | null
+  quantity: number
+  unit_price: string
+  total_price: string
+  artist_commission_rate: string
+  artist_commission_amount: string
+  refunded_at: string | null
+  refunded_by: string | null
+  refund_amount: string | null
+  created_at: string
+}
+
+export interface AdminOrderDetail {
+  id: string
+  order_number: string
+  customer_email: string
+  customer_name: string | null
+  user_id: string | null
+  subtotal: string
+  tax: string
+  tax_rate: string
+  total: string
+  payment_method: string
+  payment_status: string
+  fulfillment_status: string
+  payment_intent_id: string | null
+  created_at: string
+  paid_at: string | null
+}
+
 export interface AdminInvite {
   id: string
   code: string
@@ -185,8 +222,17 @@ export const adminApi = {
     return data
   },
 
-  getOrder: async (id: string): Promise<{ order: any; items: any[] }> => {
+  getOrder: async (id: string): Promise<{ order: AdminOrderDetail; items: AdminOrderItem[] }> => {
     const { data } = await apiClient.get(`${BASE}/orders/${id}`)
+    return data
+  },
+
+  /** Refund a single line item — the buyer's other items in this order are untouched. */
+  refundOrderItem: async (
+    orderId: string,
+    itemId: string,
+  ): Promise<{ message: string; refundAmount: number; alreadyPaidToArtist: boolean; orderFullyRefunded: boolean }> => {
+    const { data } = await apiClient.post(`${BASE}/orders/${orderId}/items/${itemId}/refund`)
     return data
   },
 

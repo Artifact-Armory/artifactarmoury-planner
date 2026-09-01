@@ -200,6 +200,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
   const [query, setQuery] = React.useState('')
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
+  // Right panel while editing: "table" is what's placed (a planning BOM — placing
+  // a model does NOT add it to the basket, see store.ts addInstance); "basket" is
+  // the real cartStore, so a builder can always see/manage what they're actually
+  // buying without leaving the planner (the site header/CartDrawer aren't mounted
+  // on this full-screen route).
+  const [buildTab, setBuildTab] = React.useState<'table' | 'basket'>('table')
   const [showFilters, setShowFilters] = React.useState(false)
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
@@ -708,7 +714,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <Logo variant="lockup" title="Artifact Armoury" className="tb-loading-logo" />
             <div className="tb-loading-title">Preparing your table…</div>
             <div className="tb-loading-track">
-              <div className="tb-loading-bar" style={{ width: `${Math.max(6, loadPct)}%` }} />
+              <div className="tb-loading-bar" style={{ transform: `scaleX(${Math.max(6, loadPct) / 100})` }} />
             </div>
             <div className="tb-loading-pct">{loadPct}%</div>
           </div>
@@ -889,10 +895,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </button>
               <button
                 className={`tb-drawer-tab is-right ${bomOpen ? 'is-open' : ''}`}
-                title="Your build"
+                title="Your build & basket"
                 onClick={() => openBom(!bomOpen)}
               >
                 <PanelRight size={18} />
+                {cartItems.length > 0 && <span className="tb-drawer-tab-dot">{cartItems.length}</span>}
               </button>
             </>
           )}
@@ -1188,55 +1195,108 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             )}
           </aside>
 
-          {/* Bill of materials / cart */}
+          {/* Table build (planning BOM) vs real basket — two tabs so "what I've
+              placed" and "what I'm actually buying" are never the same panel. */}
           <aside
             className={`tb-bom${compact && !bomOpen ? ' is-stowed' : ''}`}
             data-tour="planner-bom"
           >
-            <div className="tb-bom-head">
-              <strong>Models on this table</strong>
-              <span className="tb-small">{bom.pieceCount} pieces</span>
-            </div>
-            <div className="tb-bom-list">
-              {bom.rows.length === 0 && (
-                <div className="tb-small" style={{ padding: 8 }}>
-                  Pick terrain on the left and click the table to place it.
-                </div>
-              )}
-              {bom.rows.map((r) => (
-                <div className="tb-bom-row" key={r.asset!.id}>
-                  <div className="tb-thumb sm">
-                    {r.asset!.thumbnail ? <img src={r.asset!.thumbnail} alt="" /> : <Box size={16} />}
-                  </div>
-                  <div className="tb-bom-name">{r.asset!.name}</div>
-                  <div className="tb-bom-qty" title={`${r.qty} on the table — you only pay once`}>×{r.qty}</div>
-                  <div className="tb-bom-price">£{grossPrice(r.asset!.price ?? 0).toFixed(2)}</div>
-                </div>
-              ))}
-            </div>
-            <div className="tb-bom-total">
-              <span>Total cost of Table</span>
-              <strong>£{grossFromLines(bom.rows.map((r) => r.asset!.price ?? 0), vatRate).toFixed(2)}</strong>
-            </div>
-            {vatRate > 0 && (
-              <div className="tb-small" style={{ textAlign: 'right', opacity: 0.7 }}>
-                incl. {vatRate}% VAT
-              </div>
-            )}
-            <button className="tb-cta" disabled={bom.pieceCount === 0} onClick={handleAddAll}>
-              <ShoppingCart size={16} /> Add all to basket
-            </button>
-            <div className="tb-bom-foot">
+            <div className="tb-palette-tabs">
               <button
-                className="tb-btn tb-clear"
-                disabled={bom.pieceCount === 0}
-                onClick={() => {
-                  if (window.confirm('Clear the whole table?')) clearInstances()
-                }}
+                className={`tb-tab ${buildTab === 'table' ? 'is-active' : ''}`}
+                onClick={() => setBuildTab('table')}
               >
-                <Trash2 size={14} /> Clear
+                Table <span className="tb-small">{bom.pieceCount}</span>
+              </button>
+              <button
+                className={`tb-tab ${buildTab === 'basket' ? 'is-active' : ''}`}
+                onClick={() => setBuildTab('basket')}
+                title="What's actually in your basket — placing a model here doesn't add it automatically"
+              >
+                Basket <span className="tb-small">{cartItems.length}</span>
               </button>
             </div>
+
+            {buildTab === 'table' ? (
+              <>
+                <div className="tb-bom-list">
+                  {bom.rows.length === 0 && (
+                    <div className="tb-small" style={{ padding: 8 }}>
+                      Pick terrain on the left and click the table to place it.
+                    </div>
+                  )}
+                  {bom.rows.map((r) => (
+                    <div className="tb-bom-row" key={r.asset!.id}>
+                      <div className="tb-thumb sm">
+                        {r.asset!.thumbnail ? <img src={r.asset!.thumbnail} alt="" /> : <Box size={16} />}
+                      </div>
+                      <div className="tb-bom-name">{r.asset!.name}</div>
+                      <div className="tb-bom-qty" title={`${r.qty} on the table — you only pay once`}>×{r.qty}</div>
+                      <div className="tb-bom-price">£{grossPrice(r.asset!.price ?? 0).toFixed(2)}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="tb-bom-total">
+                  <span>Total cost of Table</span>
+                  <strong>£{grossFromLines(bom.rows.map((r) => r.asset!.price ?? 0), vatRate).toFixed(2)}</strong>
+                </div>
+                {vatRate > 0 && (
+                  <div className="tb-small" style={{ textAlign: 'right', opacity: 0.7 }}>
+                    incl. {vatRate}% VAT
+                  </div>
+                )}
+                <button className="tb-cta" disabled={bom.pieceCount === 0} onClick={handleAddAll}>
+                  <ShoppingCart size={16} /> Add all to basket
+                </button>
+                <div className="tb-bom-foot">
+                  <button
+                    className="tb-btn tb-clear"
+                    disabled={bom.pieceCount === 0}
+                    onClick={() => {
+                      if (window.confirm('Clear the whole table?')) clearInstances()
+                    }}
+                  >
+                    <Trash2 size={14} /> Clear
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="tb-bom-list">
+                  {cartItems.length === 0 && (
+                    <div className="tb-small" style={{ padding: 8 }}>
+                      Nothing in your basket yet. Build your table, then "Add all to basket" (or add pieces one at a time from the Table tab).
+                    </div>
+                  )}
+                  {cartItems.map((item) => (
+                    <div className="tb-bom-row" key={cartKey(item.kind, item.id)}>
+                      <div className="tb-thumb sm">
+                        {item.imageUrl ? <img src={item.imageUrl} alt="" /> : <Box size={16} />}
+                      </div>
+                      <div className="tb-bom-name">
+                        {item.name}
+                        {item.kind === 'bundle' && <span className="tb-pill bundle" style={{ marginLeft: 6 }}>BUNDLE</span>}
+                      </div>
+                      <div className="tb-bom-price">£{item.price.toFixed(2)}</div>
+                      <button
+                        className="tb-bom-x"
+                        title="Remove from basket"
+                        onClick={() => removeCartItem(cartKey(item.kind, item.id))}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="tb-bom-total">
+                  <span>Subtotal</span>
+                  <strong>£{grossPrice(cartSubtotal).toFixed(2)}</strong>
+                </div>
+                <button className="tb-cta" disabled={cartItems.length === 0} onClick={() => navigate('/checkout')}>
+                  <ShoppingCart size={16} /> Checkout
+                </button>
+              </>
+            )}
           </aside>
 
           {/* Table size (presets + custom, in feet) */}

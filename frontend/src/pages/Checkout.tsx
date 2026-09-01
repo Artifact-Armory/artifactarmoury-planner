@@ -11,6 +11,7 @@ import {
   CreatedOrder,
   PaymentMethodChoice,
 } from '../api/endpoints/orders'
+import { promoCodesApi, PromoValidationResult } from '../api/endpoints/promoCodes'
 import { formatPrice } from '../utils/format'
 import Button from '../components/ui/Button'
 import CountrySelect from '../components/common/CountrySelect'
@@ -73,6 +74,53 @@ const Checkout: React.FC = () => {
   // live mode until a real address has been entered.
   const [billingAddress, setBillingAddress] = React.useState<{ country: string; postalCode?: string } | null>(null)
 
+  // Promo code (artist-run, see promoCodesApi). Applies to standalone model
+  // lines only — bundles aren't discountable in v1. Re-validated server-side
+  // and authoritatively re-applied when the order is actually placed; this is
+  // only a preview so the buyer can see the discount before paying.
+  const [promoInput, setPromoInput] = React.useState('')
+  const [appliedPromo, setAppliedPromo] = React.useState<PromoValidationResult | null>(null)
+  const [promoBusy, setPromoBusy] = React.useState(false)
+  const [promoError, setPromoError] = React.useState<string | null>(null)
+
+  const itemKeys = items.map((i) => cartKey(i.kind, i.id)).join(',')
+  // If the cart changes after a code was applied (item added/removed), the
+  // preview may no longer match — clear it rather than show a stale discount.
+  React.useEffect(() => {
+    setAppliedPromo(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemKeys])
+
+  async function applyPromoCode() {
+    const code = promoInput.trim()
+    if (!code) return
+    const modelIds = items.filter((i) => i.kind === 'model').map((i) => i.id)
+    if (modelIds.length === 0) {
+      setPromoError('Promo codes only apply to individual models, and your basket has none.')
+      return
+    }
+    setPromoBusy(true)
+    setPromoError(null)
+    try {
+      const result = await promoCodesApi.validate(code, modelIds)
+      setAppliedPromo(result)
+    } catch (err: any) {
+      setAppliedPromo(null)
+      setPromoError(err?.response?.data?.message || 'That code could not be applied.')
+    } finally {
+      setPromoBusy(false)
+    }
+  }
+
+  function removePromoCode() {
+    setAppliedPromo(null)
+    setPromoInput('')
+    setPromoError(null)
+  }
+
+  const discountForItem = (modelId: string): number =>
+    appliedPromo?.lines.find((l) => l.modelId === modelId)?.discountAmount ?? 0
+
   // `subtotal` from the cart is NET. The backend always recomputes tax itself — from
   // the real billing address in live checkout (Stripe Tax), or from this country code
   // as a mock/test fallback — so these figures exist only for the buyer to see a
@@ -82,9 +130,10 @@ const Checkout: React.FC = () => {
   // Per cart line, matching the gross prices listed above and what the backend
   // charges (services/vat.ts vatOnLines) — so subtotal + VAT reaches exactly the
   // total, and the total is exactly the sum of the line prices on screen.
-  const netLines = items.map((i) => i.price)
+  const netLines = items.map((i) => Math.round((i.price - discountForItem(i.id)) * 100) / 100)
   const taxAmount = vatFromLines(netLines, taxRate)
   const grossTotal = grossFromLines(netLines, taxRate)
+  const promoNetTotal = appliedPromo?.totalDiscount ?? 0
 
   // Whether this order will collect a real card (Stripe live) or complete via the mock path.
   const realPayment = !!stripePromise && !!order && !isMockSecret(order.clientSecret)
@@ -168,7 +217,10 @@ const Checkout: React.FC = () => {
       const orderItems: OrderItemInput[] = items.map((i) =>
         i.kind === 'bundle' ? { bundleId: i.id } : { modelId: i.id },
       )
-      const created = await ordersApi.createOrder(orderItems, user.email, termsAccepted, method, taxCountry, billingAddress)
+      const created = await ordersApi.createOrder(
+        orderItems, user.email, termsAccepted, method, taxCountry, billingAddress,
+        appliedPromo?.code.code,
+      )
       setOrder(created)
 
       if (MOCK_CHECKOUT || !stripePromise || isMockSecret(created.clientSecret)) {
@@ -267,14 +319,31 @@ const Checkout: React.FC = () => {
                   </div>
                   <p className="text-xs text-muted-foreground">{item.artistName}</p>
                 </div>
-                {item.originalPrice != null && item.originalPrice > item.price ? (
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="font-semibold text-rose-600">{formatPrice(item.price)}</span>
-                    <span className="text-xs text-muted-foreground line-through">{formatPrice(item.originalPrice)}</span>
-                  </span>
-                ) : (
-                  <span className="font-semibold text-foreground">{formatPrice(item.price)}</span>
-                )}
+                {(() => {
+                  const promoDiscount = discountForItem(item.id)
+                  if (promoDiscount > 0) {
+                    return (
+                      <span className="flex flex-col items-end">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="font-semibold text-green-600">
+                            {formatPrice(Math.round((item.price - promoDiscount) * 100) / 100)}
+                          </span>
+                          <span className="text-xs text-muted-foreground line-through">{formatPrice(item.price)}</span>
+                        </span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Promo applied</span>
+                      </span>
+                    )
+                  }
+                  if (item.originalPrice != null && item.originalPrice > item.price) {
+                    return (
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="font-semibold text-rose-600">{formatPrice(item.price)}</span>
+                        <span className="text-xs text-muted-foreground line-through">{formatPrice(item.originalPrice)}</span>
+                      </span>
+                    )
+                  }
+                  return <span className="font-semibold text-foreground">{formatPrice(item.price)}</span>
+                })()}
                 {phase === 'review' && (
                   <button
                     onClick={() => removeItem(cartKey(item.kind, item.id))}
@@ -319,6 +388,43 @@ const Checkout: React.FC = () => {
               </div>
             ) : null}
 
+            {phase === 'review' && (
+              <div className="mb-4 border-b border-border pb-4">
+                {appliedPromo ? (
+                  <div className="flex items-center justify-between rounded-md bg-green-50 px-3 py-2 text-sm">
+                    <span className="text-green-700">
+                      <strong>{appliedPromo.code.code}</strong> applied — {formatPrice(appliedPromo.totalDiscount)} off
+                    </span>
+                    <button onClick={removePromoCode} className="text-xs font-medium text-green-700 underline hover:text-green-900">
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <label className="text-sm font-medium text-foreground">Promo code</label>
+                    <div className="mt-1.5 flex gap-2">
+                      <input
+                        type="text"
+                        value={promoInput}
+                        onChange={(e) => { setPromoInput(e.target.value); setPromoError(null) }}
+                        placeholder="Enter code"
+                        className="w-full rounded-md border border-border px-3 py-1.5 text-sm uppercase focus:border-primary/50 focus:outline-hidden"
+                        disabled={promoBusy}
+                      />
+                      <button
+                        onClick={applyPromoCode}
+                        disabled={promoBusy || !promoInput.trim()}
+                        className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+                      >
+                        {promoBusy ? '…' : 'Apply'}
+                      </button>
+                    </div>
+                    {promoError && <p className="mt-1.5 text-xs text-red-600">{promoError}</p>}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Once a live order exists, its tax/total came back from Stripe Tax and
                 are authoritative; before that (or in test mode throughout) these are
                 the storefront's own estimate. */}
@@ -333,6 +439,12 @@ const Checkout: React.FC = () => {
                     <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
                     <span className="text-foreground">{formatPrice(subtotal)}</span>
                   </div>
+                  {promoNetTotal > 0 && (
+                    <div className="mt-1.5 flex items-center justify-between text-sm">
+                      <span className="text-green-700">Promo ({appliedPromo!.code.code})</span>
+                      <span className="text-green-700">-{formatPrice(promoNetTotal)}</span>
+                    </div>
+                  )}
                   <div className="mt-1.5 flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">VAT ({displayRate}%){!showingFinal && !testMode ? ' — estimated' : ''}</span>
                     <span className="text-foreground">{formatPrice(displayTax)}</span>
@@ -343,10 +455,18 @@ const Checkout: React.FC = () => {
                   </div>
                 </>
               ) : (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Total</span>
-                  <span className="text-xl font-bold text-foreground">{formatPrice(displayTotal)}</span>
-                </div>
+                <>
+                  {promoNetTotal > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-green-700">Promo ({appliedPromo!.code.code})</span>
+                      <span className="text-green-700">-{formatPrice(promoNetTotal)}</span>
+                    </div>
+                  )}
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Total</span>
+                    <span className="text-xl font-bold text-foreground">{formatPrice(displayTotal)}</span>
+                  </div>
+                </>
               )
             })()}
             {!user && (

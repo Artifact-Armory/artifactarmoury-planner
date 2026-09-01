@@ -9,13 +9,14 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError } from '../middleware/error';
 import crypto from 'crypto';
 import { deleteFromStorage } from '../services/storage';
-import { reverseEarningsForModel } from '../services/earnings';
+import { reverseEarningsForModel, reverseEarningsForOrderItem } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
 import { publicUrl } from '../services/r2';
+import { vatPenceOn } from '../services/vat';
 
 const router = Router();
 
@@ -697,28 +698,46 @@ router.post('/reports/:id/resolve',
 
       case 'refund_buyers': {
         if (modelId) {
-          // Refund each buyer the amount they paid for this model, then void artist earnings
-          // and archive the model so downloads stop.
+          // Refund each buyer's line for this model individually — gross,
+          // including that line's own VAT share via the order's snapshotted
+          // tax_rate (same computation as the single-item refund route above),
+          // and marked refunded_at so their entitlement + this artist's
+          // dashboard stats correctly stop counting it (see the refunded_at IS
+          // NULL filters in models.ts/orders.ts/reports.ts/artists.ts). Then
+          // void artist earnings and archive the model so downloads stop.
           const affected = await db.query(
-            `SELECT o.id AS order_id, o.payment_intent_id, o.user_id,
-                    SUM(oi.total_price) AS amount
+            `SELECT oi.id AS order_item_id, o.id AS order_id, o.payment_intent_id,
+                    o.user_id, o.tax_rate, oi.total_price
              FROM orders o JOIN order_items oi ON oi.order_id = o.id
-             WHERE oi.model_id = $1 AND o.payment_status = 'succeeded'
-             GROUP BY o.id, o.payment_intent_id, o.user_id`,
+             WHERE oi.model_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
             [modelId],
           );
           let refundCount = 0;
           for (const row of affected.rows) {
             if (!row.payment_intent_id) continue;
+            const netPence = Math.round(Number(row.total_price) * 100);
+            const vatPence = vatPenceOn(netPence, Number(row.tax_rate) || 0);
+            const grossAmount = (netPence + vatPence) / 100;
             try {
-              await createRefund(row.payment_intent_id, Number(row.amount), 'requested_by_customer');
+              await createRefund(row.payment_intent_id, grossAmount, 'requested_by_customer');
+              await db.query(
+                `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2 WHERE id = $3`,
+                [adminId, grossAmount, row.order_item_id],
+              );
+              const remaining = await db.query(
+                `SELECT COUNT(*) FROM order_items WHERE order_id = $1 AND refunded_at IS NULL`,
+                [row.order_id],
+              );
+              if (parseInt(remaining.rows[0].count, 10) === 0) {
+                await db.query(`UPDATE orders SET payment_status = 'refunded' WHERE id = $1`, [row.order_id]);
+              }
               refundCount++;
               if (row.user_id) {
                 createNotification({
                   userId: row.user_id,
                   type: 'refund_issued',
                   title: `Refund issued for "${report.model_name}"`,
-                  body: `We've refunded £${Number(row.amount).toFixed(2)} for this model following a moderation review.`,
+                  body: `We've refunded £${grossAmount.toFixed(2)} for this model following a moderation review.`,
                   link: '/dashboard/purchases',
                 });
               }
@@ -980,6 +999,86 @@ router.get('/orders/:id',
   })
 );
 
+// ============================================================================
+// REFUND ONE LINE ITEM (migration 049) — the other items in the order are
+// untouched and keep their download entitlement; see the `refunded_at IS
+// NULL` filters added across models.ts/orders.ts/reports.ts/artists.ts.
+// ============================================================================
+
+router.post('/orders/:orderId/items/:itemId/refund',
+  asyncHandler(async (req, res) => {
+    const adminId = (req as any).userId as string;
+    const { orderId, itemId } = req.params;
+
+    const orderResult = await db.query(`SELECT * FROM orders WHERE id = $1`, [orderId]);
+    if (orderResult.rows.length === 0) throw new NotFoundError('Order');
+    const order = orderResult.rows[0];
+
+    const itemResult = await db.query(`SELECT * FROM order_items WHERE id = $1 AND order_id = $2`, [itemId, orderId]);
+    if (itemResult.rows.length === 0) throw new NotFoundError('Order item');
+    const item = itemResult.rows[0];
+
+    if (item.refunded_at) throw new ValidationError('This item has already been refunded');
+    if (order.payment_status !== 'succeeded') {
+      throw new ValidationError('Only a succeeded order can be refunded');
+    }
+    if (!order.payment_intent_id) {
+      throw new ValidationError('This order has no payment on file to refund');
+    }
+
+    // Refund the GROSS amount — total_price is net (tax lives only at the order
+    // level, see schema.sql), so this line's VAT share is added back on using the
+    // order's own snapshotted tax_rate (the rate actually charged), via the same
+    // rounding function checkout used (vatPenceOn — must stay the single
+    // definition of that rounding, see services/vat.ts).
+    const netPence = Math.round(Number(item.total_price) * 100);
+    const vatPence = vatPenceOn(netPence, Number(order.tax_rate) || 0);
+    const grossAmount = (netPence + vatPence) / 100;
+
+    await createRefund(order.payment_intent_id, grossAmount, 'requested_by_customer');
+
+    await db.query(
+      `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2 WHERE id = $3`,
+      [adminId, grossAmount, itemId],
+    );
+    const { alreadyPaid } = await reverseEarningsForOrderItem(itemId, `Refunded by admin — order ${order.order_number}`);
+
+    // If every item in the order is now refunded, reflect that at the order level.
+    const remaining = await db.query(
+      `SELECT COUNT(*) FROM order_items WHERE order_id = $1 AND refunded_at IS NULL`,
+      [orderId],
+    );
+    let orderFullyRefunded = false;
+    if (parseInt(remaining.rows[0].count, 10) === 0) {
+      await db.query(`UPDATE orders SET payment_status = 'refunded' WHERE id = $1`, [orderId]);
+      orderFullyRefunded = true;
+    }
+
+    if (order.user_id) {
+      createNotification({
+        userId: order.user_id,
+        type: 'refund_issued',
+        title: `Refund issued for "${item.model_name}"`,
+        body: `We've refunded £${grossAmount.toFixed(2)} for this item from order ${order.order_number}.`,
+        link: '/dashboard/purchases',
+      });
+    }
+
+    logger.warn('Order item refunded', {
+      adminId, orderId, itemId, grossAmount, alreadyPaidToArtist: alreadyPaid, orderFullyRefunded,
+    });
+
+    res.json({
+      message: alreadyPaid
+        ? `Refund issued (£${grossAmount.toFixed(2)}). Note: the artist had already been paid out for this sale — that payout was not clawed back.`
+        : `Refund issued (£${grossAmount.toFixed(2)}).`,
+      refundAmount: grossAmount,
+      alreadyPaidToArtist: alreadyPaid,
+      orderFullyRefunded,
+    });
+  }),
+);
+
 // Update order fulfillment status
 router.patch('/orders/:id/fulfillment',
   asyncHandler(async (req, res) => {
@@ -1058,6 +1157,12 @@ router.get('/analytics/overview',
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
         WHERE o.payment_status = 'succeeded'
+        -- NB: a PARTIAL refund (one item out of several) isn't backed out of these
+        -- two figures — o.total/oi.total_price stay as originally charged unless
+        -- every item in the order is refunded (which flips payment_status to
+        -- 'refunded' and excludes it here). Pre-existing coarseness, not something
+        -- this pass fixes; site_revenue would need order-level refund totals to do
+        -- properly. Low-stakes: superadmin-only dashboard, not customer/artist-facing.
       `),
       // Headline catalogue / user counts (all-time).
       db.query(`
@@ -1178,7 +1283,7 @@ router.get('/analytics/revenue',
        JOIN models m ON oi.model_id = m.id
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
-         AND o.payment_status = 'succeeded'
+         AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
        GROUP BY m.category
        ORDER BY revenue DESC`
     );
@@ -1195,7 +1300,7 @@ router.get('/analytics/revenue',
        JOIN users u ON m.artist_id = u.id
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
-         AND o.payment_status = 'succeeded'
+         AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
        GROUP BY m.id, u.artist_name
        ORDER BY sales_count DESC
        LIMIT 10`
@@ -1211,7 +1316,7 @@ router.get('/analytics/revenue',
        JOIN users u ON oi.artist_id = u.id
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
-         AND o.payment_status = 'succeeded'
+         AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
        GROUP BY u.id
        ORDER BY sales_count DESC
        LIMIT 10`
@@ -1556,6 +1661,109 @@ router.post('/conversation-reports/:id/resolve',
     logger.warn('Conversation report resolved', { adminId, reportId: id, action, notes });
     res.json({ message: 'Report resolved', action, status: newStatus, notes });
   })
+);
+
+// ============================================================================
+// CONTACT INBOX (migration 047): admin view of the public Contact page
+// (routes/contact.ts). Simple by design — no assignment/workflow, just an
+// unread flag for the nav badge and an open/resolved toggle.
+// ============================================================================
+
+router.get('/contact',
+  asyncHandler(async (req, res) => {
+    const { status, page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (status) { conditions.push(`status = $${params.length + 1}`); params.push(status); }
+    // Default view hides resolved messages unless explicitly asked for.
+    else conditions.push(`status = 'open'`);
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await db.query(`SELECT COUNT(*) FROM contact_messages ${whereClause}`, params);
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    const result = await db.query(
+      `SELECT cm.id, cm.name, cm.email, cm.subject, cm.message, cm.is_read, cm.status,
+              cm.created_at, cm.user_id, u.display_name AS user_display_name,
+              (SELECT COUNT(*) FROM contact_message_attachments a WHERE a.contact_message_id = cm.id) AS attachment_count
+       FROM contact_messages cm
+       LEFT JOIN users u ON cm.user_id = u.id
+       ${whereClause}
+       ORDER BY cm.is_read ASC, cm.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, Number(limit), offset],
+    );
+
+    const unreadResult = await db.query(
+      `SELECT COUNT(*) FROM contact_messages WHERE is_read = false AND status = 'open'`,
+    );
+
+    res.json({
+      messages: result.rows,
+      unreadCount: parseInt(unreadResult.rows[0].count),
+      pagination: { page: Number(page), limit: Number(limit), total: totalCount, pages: Math.ceil(totalCount / Number(limit)) },
+    });
+  }),
+);
+
+// Detail. Marks the message read on first open (like model_reports' open -> under_review).
+router.get('/contact/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const result = await db.query(
+      `SELECT cm.*, u.display_name AS user_display_name, u.email AS user_email, u.role AS user_role,
+              resu.display_name AS resolved_by_name
+       FROM contact_messages cm
+       LEFT JOIN users u ON cm.user_id = u.id
+       LEFT JOIN users resu ON cm.resolved_by = resu.id
+       WHERE cm.id = $1`,
+      [id],
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Message');
+    const message = result.rows[0];
+
+    const attachmentsResult = await db.query(
+      `SELECT id, file_path, file_name, content_type, created_at
+       FROM contact_message_attachments WHERE contact_message_id = $1 ORDER BY created_at ASC`,
+      [id],
+    );
+
+    if (!message.is_read) {
+      await db.query(`UPDATE contact_messages SET is_read = true WHERE id = $1`, [id]);
+      message.is_read = true;
+    }
+
+    res.json({
+      message,
+      attachments: attachmentsResult.rows.map((a: any) => ({ ...a, url: publicUrl(a.file_path) })),
+    });
+  }),
+);
+
+// Toggle open <-> resolved.
+router.patch('/contact/:id/status',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body ?? {};
+    const adminId = (req as any).userId as string;
+
+    if (status !== 'open' && status !== 'resolved') {
+      throw new ValidationError('status must be "open" or "resolved"');
+    }
+
+    const result = await db.query(
+      status === 'resolved'
+        ? `UPDATE contact_messages SET status = 'resolved', resolved_by = $2, resolved_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, status`
+        : `UPDATE contact_messages SET status = 'open', resolved_by = NULL, resolved_at = NULL WHERE id = $1 RETURNING id, status`,
+      status === 'resolved' ? [id, adminId] : [id],
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Message');
+
+    res.json({ message: result.rows[0] });
+  }),
 );
 
 // ============================================================================

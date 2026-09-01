@@ -18,6 +18,13 @@ import {
 import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
 import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
+import {
+  findActiveCode,
+  createPromoApplier,
+  remainingRedemptions,
+  remainingForCustomer,
+  recordRedemption,
+} from '../services/promoCodes';
 import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../services/vat';
 import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
 
@@ -57,6 +64,10 @@ router.post('/',
       // explicitly rather than relying solely on the linked document, since the
       // regulation requires clear, informed consent to that specific point.
       termsAccepted,
+      // A promo code the buyer entered at checkout (validated first via
+      // POST /api/promo-codes/validate, but re-resolved and re-applied here
+      // authoritatively — the preview is never trusted as the actual charge).
+      promoCode: promoCodeRaw,
     } = req.body;
 
     const requestedMethod: OrderPaymentMethod = paymentMethod === 'paypal' ? 'paypal' : 'stripe';
@@ -111,12 +122,32 @@ router.post('/',
     try {
       await client.query('BEGIN');
 
+      // Resolve the promo code (if any) up front, locking its row for the rest
+      // of this transaction — closes the race where two concurrent orders both
+      // read the last remaining redemption as available. An invalid/expired/
+      // exhausted code fails the whole order rather than silently ignoring it:
+      // the buyer explicitly entered it and saw a discount at /validate, so
+      // proceeding at full price without saying anything would be the wrong
+      // surprise. v1 only ever discounts standalone model lines, not bundles.
+      const promoCode = await findActiveCode(client, promoCodeRaw, { forUpdate: true });
+      if (promoCodeRaw && !promoCode) {
+        throw new ValidationError('That promo code is no longer valid. Remove it and try again.');
+      }
+      const promoApplier = promoCode
+        ? createPromoApplier(
+            promoCode,
+            remainingRedemptions(promoCode),
+            await remainingForCustomer(client, promoCode, userId),
+          )
+        : null;
+
       // Each entry becomes one order_items row per model. A bundle expands into
       // one row per constituent model (so per-model download entitlement + the
       // per-buyer watermark path "just work").
       const orderItems: Array<{
         modelId: string; artistId: string; modelName: string; modelSnapshot: any;
-        unitPrice: number; commissionRate: number; commissionAmount: number;
+        unitPrice: number; originalPrice: number; discountAmount: number; promoCodeId: string | null;
+        commissionRate: number; commissionAmount: number;
         bundleId: string | null; bundleName: string | null;
       }> = [];
       let subtotal = 0;
@@ -125,9 +156,39 @@ router.post('/',
       // into several order_items. VAT is charged on these (see vatOnLines).
       const taxableLines: number[] = [];
 
-      const pushModelRow = (model: any, price: number, bundleId: string | null, bundleName: string | null) => {
-        const commissionRate = parseFloat(model.commission_rate);
-        const commissionAmount = Math.round(price * commissionRate) / 100;
+      // `model.commission_rate` is the ARTIST'S share percent (85 = artist keeps
+      // 85%, platform keeps 15% — see schema.sql), and `commissionAmount` below
+      // (the order_items.artist_commission_amount column) is the artist's cut in
+      // £, exactly as it always has been for a non-promo order.
+      //
+      // When a promo code discounts this line, `originalPrice` (pre-code, post-
+      // Sale) still drives what the PLATFORM keeps: the platform's cut is held
+      // fixed at what it would have been on the original price, and the artist's
+      // amount is whatever's left of the discounted total — so the code's entire
+      // cost comes out of the artist's share, never the platform's. The platform
+      // amount is capped at `finalPrice` (defensively — can never exceed what was
+      // actually charged), which is the only way the artist's amount can hit £0.
+      const pushModelRow = (
+        model: any,
+        originalPrice: number,
+        bundleId: string | null,
+        bundleName: string | null,
+        discountAmount = 0,
+        promoCodeId: string | null = null,
+      ) => {
+        const commissionRate = parseFloat(model.commission_rate); // artist's share %
+        const finalPrice = Math.round((originalPrice - discountAmount) * 100) / 100;
+        let commissionAmount: number; // artist's amount, in £
+        if (discountAmount > 0) {
+          const normalArtistAmount = Math.round(originalPrice * commissionRate) / 100;
+          const normalPlatformAmount = Math.round((originalPrice - normalArtistAmount) * 100) / 100;
+          const platformAmount = Math.min(normalPlatformAmount, finalPrice);
+          commissionAmount = Math.round((finalPrice - platformAmount) * 100) / 100;
+        } else {
+          // No promo code on this line — identical to every order before promo
+          // codes existed.
+          commissionAmount = Math.round(originalPrice * commissionRate) / 100;
+        }
         orderItems.push({
           modelId: model.id,
           artistId: model.artist_id,
@@ -141,12 +202,16 @@ router.post('/',
             // public-CDN-served). Downloads resolve the key fresh from the model id.
             dimensions: { width: model.width, height: model.height, depth: model.depth },
           },
-          unitPrice: price,
+          unitPrice: finalPrice,
+          originalPrice,
+          discountAmount,
+          promoCodeId,
           commissionRate,
           commissionAmount,
           bundleId,
           bundleName,
         });
+        return finalPrice;
       };
 
       for (const item of items) {
@@ -203,9 +268,12 @@ router.post('/',
           // Apply any active sale on the model (or the artist's portfolio).
           const modelDiscount = await activeDiscountForModel(client, model.id, model.artist_id);
           const price = Math.round(parseFloat(model.base_price) * (100 - modelDiscount.percent)) / 100;
-          pushModelRow(model, price, null, null);
-          subtotal += price;
-          taxableLines.push(price);
+          // Then a promo code on top, if one was entered and applies here — its
+          // cost comes out of the artist's commission share (see pushModelRow).
+          const promoDiscount = promoApplier ? promoApplier.apply(price) : 0;
+          const finalPrice = pushModelRow(model, price, null, null, promoDiscount, promoCode?.id ?? null);
+          subtotal += finalPrice;
+          taxableLines.push(finalPrice);
         } else {
           throw new ValidationError('Each item must be a modelId or bundleId');
         }
@@ -221,12 +289,13 @@ router.post('/',
         seen.add(oi.modelId);
       }
 
-      // Buy-once: fetch what the user already owns among these models.
+      // Buy-once: fetch what the user already owns among these models. A
+      // refunded line doesn't count as owned — they're free to buy it again.
       const ownedRows = await client.query(
         `SELECT DISTINCT oi.model_id
          FROM order_items oi
          JOIN orders o ON oi.order_id = o.id
-         WHERE oi.model_id = ANY($1::uuid[]) AND o.user_id = $2 AND o.payment_status = 'succeeded'`,
+         WHERE oi.model_id = ANY($1::uuid[]) AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
         [[...seen], userId]
       );
       const ownedIds = new Set<string>(ownedRows.rows.map((r: any) => r.model_id));
@@ -308,13 +377,15 @@ router.post('/',
       const order = orderResult.rows[0];
 
       for (const item of orderItems) {
-        await client.query(
+        const itemResult = await client.query(
           `INSERT INTO order_items (
             order_id, model_id, artist_id, bundle_id, bundle_name,
             model_name, model_snapshot,
             quantity, unit_price, total_price,
-            artist_commission_rate, artist_commission_amount
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9, $10)`,
+            artist_commission_rate, artist_commission_amount,
+            original_price, discount_amount, promo_code_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9, $10, $11, $12, $13)
+          RETURNING id`,
           [
             order.id,
             item.modelId,
@@ -326,8 +397,21 @@ router.post('/',
             item.unitPrice,
             item.commissionRate,
             item.commissionAmount,
+            item.originalPrice,
+            item.discountAmount,
+            item.promoCodeId,
           ]
         );
+        if (item.discountAmount > 0 && item.promoCodeId) {
+          await recordRedemption(client, {
+            promoCodeId: item.promoCodeId,
+            orderId: order.id,
+            orderItemId: itemResult.rows[0].id,
+            userId,
+            modelId: item.modelId,
+            discountAmount: item.discountAmount,
+          });
+        }
       }
 
       // Mock/real Stripe payment intent. PayPal is accepted through Stripe (same
@@ -537,14 +621,17 @@ router.get('/entitlements',
       `SELECT DISTINCT oi.model_id
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL`,
+       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.model_id IS NOT NULL AND oi.refunded_at IS NULL`,
       [userId]
     );
+    // A bundle still counts as owned as long as at least one of its (unrefunded)
+    // constituent models does — only reads as un-owned once every model in it
+    // has been individually refunded.
     const bundles = await db.query(
       `SELECT DISTINCT oi.bundle_id
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.bundle_id IS NOT NULL`,
+       WHERE o.user_id = $1 AND o.payment_status = 'succeeded' AND oi.bundle_id IS NOT NULL AND oi.refunded_at IS NULL`,
       [userId]
     );
     res.json({
@@ -582,6 +669,7 @@ router.get('/library',
        WHERE o.user_id = $1
          AND o.payment_status = 'succeeded'
          AND oi.model_id IS NOT NULL
+         AND oi.refunded_at IS NULL
        GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url,
                 rev.id, rev.rating, rev.title, rev.comment
        ORDER BY purchased_at DESC`,

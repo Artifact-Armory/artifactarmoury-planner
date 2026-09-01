@@ -104,9 +104,16 @@ export const ordersApi = {
      * non-gameable: the storefront country picker no longer feeds it.
      */
     billingAddress?: { country: string; postalCode?: string } | null,
+    /**
+     * A promo code the buyer entered and had validated at checkout (see
+     * promoCodesApi.validate). The backend re-resolves and re-applies it itself
+     * — this is just what tells it a code was chosen; it's never trusted as the
+     * discount amount.
+     */
+    promoCode?: string | null,
   ): Promise<CreatedOrder> {
     const response = await apiClient.post(BASE_URL, {
-      items, customerEmail, termsAccepted, paymentMethod, taxCountry, billingAddress,
+      items, customerEmail, termsAccepted, paymentMethod, taxCountry, billingAddress, promoCode,
     })
     const o = response.data?.order ?? response.data
     return {

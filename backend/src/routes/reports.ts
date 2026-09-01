@@ -100,7 +100,7 @@ router.post(
       const owns = await db.query(
         `SELECT 1 FROM order_items oi
          JOIN orders o ON oi.order_id = o.id
-         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded'
+         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
          LIMIT 1`,
         [modelId, userId],
       )

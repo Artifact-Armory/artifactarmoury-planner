@@ -770,10 +770,12 @@
   overflow: hidden;
 }
 .tb-loading-bar {
+  width: 100%;
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #4da3ff, #6cc4ff);
-  transition: width 0.25s ease;
+  transform-origin: left center;
+  transition: transform 0.25s ease;
 }
 .tb-loading-pct {
   margin-top: 8px;
@@ -1148,6 +1150,23 @@
 .tb-drawer-tab.is-left { left: 0; border-radius: 0 12px 12px 0; border-left: none; }
 .tb-drawer-tab.is-right { right: 0; border-radius: 12px 0 0 12px; border-right: none; }
 .tb-drawer-tab.is-open { color: var(--tb-accent-2); border-color: var(--tb-accent); }
+/* Basket-count dot on the collapsed drawer toggle, so a builder can see there's
+   something in their basket without opening the panel. */
+.tb-drawer-tab-dot {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--tb-accent);
+  color: #111;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
 
 .tb-fs.is-compact .tb-palette,
 .tb-fs.is-compact .tb-bom {

@@ -111,7 +111,7 @@ export const plannerBuyerSteps: TourStep[] = [
   {
     target: 'planner-bom',
     title: 'Your build & basket',
-    body: 'Every unique model you place is listed here with its price. Hit “Add all to basket” to buy the whole set — you pay for each STL once and can print it as many times as you like.',
+    body: 'The “Table” tab lists every unique model you’ve placed, with its price — hit “Add all to basket” to buy the whole set (you pay for each STL once and can print it as many times as you like). Placing a model doesn’t add it to your basket by itself — switch to the “Basket” tab anytime to see exactly what you’re about to buy.',
   },
   {
     target: 'planner-save',
