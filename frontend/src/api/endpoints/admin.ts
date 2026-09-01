@@ -273,6 +273,7 @@ export const adminApi = {
   // -- Orders ---------------------------------------------------------------
   getOrders: async (params: {
     status?: string
+    search?: string
     page?: number
     limit?: number
   } = {}): Promise<{ orders: AdminOrderRow[]; pagination: AdminPagination }> => {

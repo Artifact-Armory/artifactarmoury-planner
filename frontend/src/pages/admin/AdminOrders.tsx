@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Undo2, Loader2 } from 'lucide-react'
+import { X, Undo2, Loader2, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminApi, AdminOrderRow } from '../../api/endpoints/admin'
 import { assetUrl } from '../../api/transformers'
@@ -19,13 +19,21 @@ const payBadge: Record<string, string> = {
 const AdminOrders: React.FC = () => {
   const qc = useQueryClient()
   const [status, setStatus] = useState('')
+  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [page, setPage] = useState(1)
   const [openId, setOpenId] = useState<string | null>(null)
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin', 'orders', { status, page }],
-    queryFn: () => adminApi.getOrders({ status: status || undefined, page, limit: 25 }),
+    queryKey: ['admin', 'orders', { status, search, page }],
+    queryFn: () => adminApi.getOrders({ status: status || undefined, search: search || undefined, page, limit: 25 }),
   })
+
+  const onSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    setPage(1)
+    setSearch(searchInput.trim())
+  }
 
   const fulfilMut = useMutation({
     mutationFn: ({ id, s }: { id: string; s: string }) =>
@@ -44,7 +52,16 @@ const AdminOrders: React.FC = () => {
         <p className="mt-1 text-sm text-muted-foreground">Track orders and fulfillment status.</p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={onSearch} className="relative">
+          <Search size={16} className="absolute left-3 top-2.5 text-muted-foreground" />
+          <input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search order # or customer…"
+            className="pl-9 pr-3 py-2 text-sm border border-border rounded-md w-64 focus:outline-hidden focus:ring-2 focus:ring-ring"
+          />
+        </form>
         <select
           value={status}
           onChange={(e) => {

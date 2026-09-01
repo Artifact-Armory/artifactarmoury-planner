@@ -958,31 +958,46 @@ router.delete('/invites/:id',
 // ORDER MANAGEMENT
 // ============================================================================
 
-// Get all orders
+// Get all orders. `search` matches the order number or the buyer (email or
+// display name) — the account's current display name/email, not just the
+// snapshotted customer_email on the order, so renamed/re-emailed accounts are
+// still findable by their current details.
 router.get('/orders',
   asyncHandler(async (req, res) => {
-    const { status, page = 1, limit = 50 } = req.query;
+    const { status, search, page = 1, limit = 50 } = req.query;
 
     const offset = (Number(page) - 1) * Number(limit);
-    
-    let whereClause = '';
+
+    const conditions: string[] = [];
     const params: any[] = [];
+    let paramIndex = 1;
 
     if (status) {
-      whereClause = 'WHERE o.fulfillment_status = $1';
+      conditions.push(`o.fulfillment_status = $${paramIndex}`);
       params.push(status);
+      paramIndex++;
     }
+
+    if (search && typeof search === 'string') {
+      conditions.push(
+        `(o.order_number ILIKE $${paramIndex} OR o.customer_email ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex} OR u.display_name ILIKE $${paramIndex})`
+      );
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count
     const countResult = await db.query(
-      `SELECT COUNT(*) FROM orders o ${whereClause}`,
+      `SELECT COUNT(*) FROM orders o LEFT JOIN users u ON o.user_id = u.id ${whereClause}`,
       params
     );
     const totalCount = parseInt(countResult.rows[0].count);
 
     // Get orders
     const result = await db.query(
-      `SELECT 
+      `SELECT
         o.id, o.order_number, o.customer_email, o.total,
         o.payment_status, o.fulfillment_status,
         o.created_at, o.paid_at, o.shipped_at,
@@ -994,7 +1009,7 @@ router.get('/orders',
        ${whereClause}
        GROUP BY o.id, u.display_name
        ORDER BY o.created_at DESC
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, Number(limit), offset]
     );
 
