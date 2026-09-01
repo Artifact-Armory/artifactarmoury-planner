@@ -695,7 +695,8 @@ CREATE TABLE model_reports (
     artist_id   UUID REFERENCES users(id) ON DELETE SET NULL,
     reporter_id UUID REFERENCES users(id) ON DELETE SET NULL,
     reason VARCHAR(30) NOT NULL CHECK (reason IN (
-        'copyright', 'offensive', 'not_as_advertised', 'no_printed_photo', 'broken_file', 'other'
+        'copyright', 'offensive', 'not_as_advertised', 'no_printed_photo', 'broken_file', 'other',
+        'admin_action' -- created directly by an admin (migration 051), not filed by a user; reporter_id is NULL
     )),
     detail TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN (

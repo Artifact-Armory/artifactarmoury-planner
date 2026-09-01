@@ -510,6 +510,111 @@ router.post('/models/:id/approve',
   })
 );
 
+// Aggregated per-model view of open user complaints — the "Flagged" tab on the
+// Models admin page (AdminModels.tsx). One row per MODEL with at least one
+// open/under_review/awaiting_info report, unlike GET /reports which is one row
+// per report (that's the Moderation queue's own granularity). Registered before
+// GET /models/:id so this literal path isn't swallowed by the dynamic one.
+router.get('/models/reported',
+  asyncHandler(async (req, res) => {
+    const result = await db.query(
+      `SELECT m.id, m.name, m.thumbnail_path, m.status, m.base_price, m.created_at,
+              u.id AS artist_id, u.artist_name, u.email AS artist_email,
+              COUNT(r.id) FILTER (WHERE r.status IN ('open','under_review','awaiting_info')) AS open_report_count,
+              COUNT(r.id) AS total_report_count,
+              MAX(r.created_at) AS last_reported_at,
+              array_agg(DISTINCT r.reason) FILTER (WHERE r.status IN ('open','under_review','awaiting_info')) AS open_reasons
+       FROM model_reports r
+       JOIN models m ON m.id = r.model_id
+       JOIN users u ON u.id = m.artist_id
+       GROUP BY m.id, u.id, u.artist_name, u.email
+       HAVING COUNT(r.id) FILTER (WHERE r.status IN ('open','under_review','awaiting_info')) > 0
+       ORDER BY MAX(r.created_at) DESC`
+    );
+
+    res.json({
+      models: result.rows.map((m: any) => ({
+        ...m,
+        open_reasons: (m.open_reasons || []).map((rsn: string) => REASON_LABELS[rsn] || rsn),
+      })),
+    });
+  })
+);
+
+// Full detail for the "admin mode" model panel (AdminModels.tsx slide-over):
+// the model + artist + its complete moderation history, both user-filed reports
+// and admin-initiated actions (reason 'admin_action', see /moderate below).
+router.get('/models/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const modelResult = await db.query(
+      `SELECT m.*, u.artist_name, u.email AS artist_email, u.account_status AS artist_account_status
+       FROM models m JOIN users u ON u.id = m.artist_id
+       WHERE m.id = $1`,
+      [id],
+    );
+    if (modelResult.rows.length === 0) throw new NotFoundError('Model');
+
+    const reportsResult = await db.query(
+      `SELECT r.id, r.reason, r.status, r.detail, r.resolution_action, r.resolution_summary,
+              r.created_at, r.resolved_at, ru.display_name AS reporter_name, resu.display_name AS resolved_by_name
+       FROM model_reports r
+       LEFT JOIN users ru ON r.reporter_id = ru.id
+       LEFT JOIN users resu ON r.resolved_by = resu.id
+       WHERE r.model_id = $1
+       ORDER BY r.created_at DESC`,
+      [id],
+    );
+
+    res.json({
+      model: modelResult.rows[0],
+      reports: reportsResult.rows.map((r: any) => ({ ...r, reason_label: REASON_LABELS[r.reason] || r.reason })),
+    });
+  })
+);
+
+// "Fast actions" from the admin model panel — act on a model directly, with no
+// existing user report required. Requires a message (forced in the frontend via
+// a confirmation modal) that reaches the artist exactly the way a report
+// decision does: a synthetic model_reports row (reporter_id NULL, reason
+// 'admin_action') is created and immediately resolved through the same
+// resolveReport() logic the moderation queue uses below, so the DB mutation,
+// earnings reversal/refund handling, and artist notification are all identical
+// — the artist sees this on their existing /artist/reports page.
+const DIRECT_MODEL_ACTIONS = ['warn_artist', 'unpublish_model', 'flag_model', 'remove_model', 'refund_buyers', 'reinstate_model'];
+
+router.post('/models/:id/moderate',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { action, message } = req.body ?? {};
+    const adminId = (req as any).userId as string;
+
+    if (!action || !DIRECT_MODEL_ACTIONS.includes(action)) {
+      throw new ValidationError(`action must be one of: ${DIRECT_MODEL_ACTIONS.join(', ')}`);
+    }
+    if (!message || typeof message !== 'string' || message.trim().length < 5) {
+      throw new ValidationError('Please write a short message to the artist explaining why (this is shown to them)');
+    }
+
+    const modelResult = await db.query(`SELECT id, artist_id FROM models WHERE id = $1`, [id]);
+    if (modelResult.rows.length === 0) throw new NotFoundError('Model');
+    const model = modelResult.rows[0];
+
+    const inserted = await db.query(
+      `INSERT INTO model_reports (model_id, artist_id, reporter_id, reason, status)
+       VALUES ($1, $2, NULL, 'admin_action', 'open')
+       RETURNING id`,
+      [id, model.artist_id],
+    );
+
+    const result = await resolveReport(inserted.rows[0].id, action, message.trim(), adminId);
+
+    logger.warn('Model moderated directly by admin', { adminId, modelId: id, action });
+    res.json({ message: 'Action applied', ...result });
+  })
+);
+
 // Delete model
 router.delete('/models/:id',
   asyncHandler(async (req, res) => {
@@ -610,6 +715,7 @@ const REASON_LABELS: Record<string, string> = {
   no_printed_photo: 'No photo of a printed model',
   broken_file: 'Broken / unprintable file',
   other: 'Other',
+  admin_action: 'Admin-initiated action',
 };
 
 // The moderation queue: report tiles, newest first, filterable by status.
@@ -713,13 +819,14 @@ router.get('/reports/:id',
   }),
 );
 
-// Resolve a report: apply an action, record findings, notify reporter + artist.
-router.post('/reports/:id/resolve',
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { action, summary, targetUserId } = req.body;
-    const adminId = (req as any).userId;
-
+// Apply a moderation action to a report, record findings, and notify the
+// reporter + artist. Shared by POST /reports/:id/resolve (an admin working the
+// report queue) and POST /models/:id/moderate (an admin acting on a model
+// directly, via a synthetic report — see that route for why). Keeping this in
+// one place means both paths mutate the model/earnings/refunds identically and
+// notify the artist identically — there's exactly one way this happens, not two
+// that could quietly drift apart.
+async function resolveReport(id: string, action: string, summary: string, adminId: string, targetUserId?: string) {
     const VALID_ACTIONS = [
       'dismiss', 'request_info', 'warn_artist', 'unpublish_model', 'flag_model',
       'remove_model', 'refund_buyers', 'suspend_artist', 'ban_artist',
@@ -889,7 +996,15 @@ router.post('/reports/:id/resolve',
     }
 
     logger.warn('Report resolved by admin', { adminId, reportId: id, action, notes });
-    res.json({ message: 'Report resolved', action, status: newStatus, notes });
+    return { action, status: newStatus, notes };
+}
+
+router.post('/reports/:id/resolve',
+  asyncHandler(async (req, res) => {
+    const { action, summary, targetUserId } = req.body;
+    const adminId = (req as any).userId;
+    const result = await resolveReport(req.params.id, action, summary, adminId, targetUserId);
+    res.json({ message: 'Report resolved', ...result });
   }),
 );
 
