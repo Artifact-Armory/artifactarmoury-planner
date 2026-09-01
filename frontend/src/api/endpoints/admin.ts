@@ -118,6 +118,56 @@ export interface AdminOrderDetail {
   paid_at: string | null
 }
 
+export interface AdminUserDetail extends AdminUserRow {
+  password_hash?: string
+  is_super_admin: boolean
+  shadow_banned: boolean
+  email_verified: boolean
+  total_spent: string | null
+}
+
+export interface AdminUserOrderRow {
+  id: string
+  order_number: string
+  total: string
+  payment_status: string
+  fulfillment_status: string
+  created_at: string
+  item_count: string
+}
+
+export interface AdminUserModelRow {
+  id: string
+  name: string
+  status: string
+  processing_status: string | null
+  thumbnail_path: string | null
+  base_price: string
+  sale_count: number
+  view_count: number
+  created_at: string
+}
+
+export interface AdminUserTableRow {
+  id: string
+  name: string
+  is_public: boolean
+  is_artist_display: boolean
+  view_count: number
+  clone_count: number
+  share_token: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AdminUserActivityRow {
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  metadata: any
+  created_at: string
+}
+
 export interface AdminInvite {
   id: string
   code: string
@@ -174,7 +224,15 @@ export const adminApi = {
     return data
   },
 
-  getUser: async (id: string): Promise<{ user: any; recentActivity: any[] }> => {
+  getUser: async (
+    id: string,
+  ): Promise<{
+    user: AdminUserDetail
+    recentActivity: AdminUserActivityRow[]
+    orders: AdminUserOrderRow[]
+    models: AdminUserModelRow[]
+    tables: AdminUserTableRow[]
+  }> => {
     const { data } = await apiClient.get(`${BASE}/users/${id}`)
     return data
   },

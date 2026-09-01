@@ -169,13 +169,16 @@ router.get('/users',
   })
 );
 
-// Get single user details
+// Get single user details — profile + order history + published models +
+// tables built, so an admin can click into a user from the Users list and
+// see everything about them in one place without hunting across the Orders
+// and Models admin screens.
 router.get('/users/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     const userResult = await db.query(
-      `SELECT 
+      `SELECT
         u.*,
         COUNT(DISTINCT m.id) as model_count,
         COUNT(DISTINCT o.id) as order_count,
@@ -192,7 +195,9 @@ router.get('/users/:id',
       throw new NotFoundError('User');
     }
 
-    // Get recent activity
+    const user = userResult.rows[0];
+
+    // Recent activity
     const activityResult = await db.query(
       `SELECT action, resource_type, resource_id, metadata, created_at
        FROM activity_log
@@ -202,9 +207,48 @@ router.get('/users/:id',
       [id]
     );
 
+    // Order history (as a buyer)
+    const ordersResult = await db.query(
+      `SELECT o.id, o.order_number, o.total, o.payment_status, o.fulfillment_status,
+              o.created_at, COUNT(oi.id) as item_count
+       FROM orders o
+       LEFT JOIN order_items oi ON o.id = oi.order_id
+       WHERE o.user_id = $1
+       GROUP BY o.id
+       ORDER BY o.created_at DESC
+       LIMIT 50`,
+      [id]
+    );
+
+    // Models uploaded/published (as an artist) — every status, not just published,
+    // so an admin can see drafts/flagged models too.
+    const modelsResult = await db.query(
+      `SELECT id, name, status, processing_status, thumbnail_path, base_price,
+              sale_count, view_count, created_at
+       FROM models
+       WHERE artist_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [id]
+    );
+
+    // Tables built in the planner. user_tables is keyed by email, not user id.
+    const tablesResult = await db.query(
+      `SELECT id, name, is_public, is_artist_display, view_count, clone_count,
+              share_token, created_at, updated_at
+       FROM user_tables
+       WHERE user_email = $1
+       ORDER BY updated_at DESC
+       LIMIT 50`,
+      [user.email]
+    );
+
     res.json({
-      user: userResult.rows[0],
-      recentActivity: activityResult.rows
+      user,
+      recentActivity: activityResult.rows,
+      orders: ordersResult.rows,
+      models: modelsResult.rows,
+      tables: tablesResult.rows,
     });
   })
 );

@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Search } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 import { adminApi, AdminUserRow } from '../../api/endpoints/admin'
 import { useAuthStore } from '../../store/authStore'
+import { assetUrl } from '../../api/transformers'
+import { formatPrice } from '../../utils/format'
+import Spinner from '../../components/ui/Spinner'
 
 const roleBadge: Record<string, string> = {
   admin: 'bg-purple-100 text-purple-700',
@@ -14,6 +17,12 @@ const statusBadge: Record<string, string> = {
   active: 'bg-green-100 text-green-700',
   suspended: 'bg-amber-100 text-amber-700',
   banned: 'bg-red-100 text-red-700',
+}
+const payBadge: Record<string, string> = {
+  succeeded: 'bg-green-100 text-green-700',
+  pending: 'bg-amber-100 text-amber-700',
+  failed: 'bg-red-100 text-red-700',
+  refunded: 'bg-muted text-foreground',
 }
 
 type IntroState = 'none' | 'pending' | 'active' | 'ended'
@@ -38,6 +47,7 @@ const AdminUsers: React.FC = () => {
   const [editingRateId, setEditingRateId] = useState<string | null>(null)
   const [rateInput, setRateInput] = useState('')
   const [introModalUser, setIntroModalUser] = useState<AdminUserRow | null>(null)
+  const [openUserId, setOpenUserId] = useState<string | null>(null)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin', 'users', { search, role, status, page }],
@@ -212,7 +222,7 @@ const AdminUsers: React.FC = () => {
                 </tr>
               )}
               {data?.users.map((u) => (
-                <tr key={u.id} className="hover:bg-accent">
+                <tr key={u.id} className="cursor-pointer hover:bg-accent" onClick={() => setOpenUserId(u.id)}>
                   <td className="px-4 py-3">
                     <div className="font-medium text-foreground">
                       {u.artist_name || u.display_name}
@@ -231,7 +241,7 @@ const AdminUsers: React.FC = () => {
                       {u.account_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-foreground">
+                  <td className="px-4 py-3 text-right text-foreground" onClick={(e) => e.stopPropagation()}>
                     {u.role !== 'artist' ? (
                       <span className="text-muted-foreground">—</span>
                     ) : editingRateId === u.id ? (
@@ -311,7 +321,7 @@ const AdminUsers: React.FC = () => {
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(u.created_at).toLocaleDateString('en-GB')}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     {u.id === me?.id ? (
                       <span className="text-xs text-muted-foreground italic block text-right">You</span>
                     ) : (
@@ -397,6 +407,222 @@ const AdminUsers: React.FC = () => {
           }}
         />
       )}
+
+      {openUserId && <UserDetailPanel userId={openUserId} onClose={() => setOpenUserId(null)} />}
+    </div>
+  )
+}
+
+const userStatusBadge: Record<string, string> = {
+  ready: 'bg-green-100 text-green-700',
+  processing: 'bg-amber-100 text-amber-700',
+  failed: 'bg-red-100 text-red-700',
+}
+
+const UserDetailPanel: React.FC<{ userId: string; onClose: () => void }> = ({ userId, onClose }) => {
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-user', userId],
+    queryFn: () => adminApi.getUser(userId),
+  })
+
+  const user = data?.user
+  const orders = data?.orders ?? []
+  const models = data?.models ?? []
+  const tables = data?.tables ?? []
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+      <div className="h-full w-full max-w-2xl overflow-y-auto bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-card px-6 py-4">
+          <h2 className="text-lg font-semibold text-foreground">
+            {user ? user.artist_name || user.display_name : 'User'}
+          </h2>
+          <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-accent">
+            <X size={20} />
+          </button>
+        </div>
+
+        {isLoading || !user ? (
+          <div className="flex justify-center py-24">
+            <Spinner size="lg" />
+          </div>
+        ) : (
+          <div className="space-y-6 px-6 py-5">
+            {/* Profile */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-border bg-muted/50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Account</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{user.email}</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge[user.role]}`}>
+                    {user.role}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge[user.account_status]}`}
+                  >
+                    {user.account_status}
+                  </span>
+                  {user.shadow_banned && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                      shadow-banned
+                    </span>
+                  )}
+                  {user.is_super_admin && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                      owner
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Activity</p>
+                <p className="mt-1 text-sm text-foreground">Joined {fmtDate(user.created_at)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {user.last_login ? `Last login ${fmtDate(user.last_login)}` : 'Never logged in'}
+                </p>
+                {user.role === 'artist' && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Commission: {user.commission_rate ? `${Number(user.commission_rate)}%` : '—'}
+                  </p>
+                )}
+                {user.total_spent && (
+                  <p className="text-xs text-muted-foreground">Total spent: {formatPrice(user.total_spent)}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Order history */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Order history ({orders.length})
+              </p>
+              {orders.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">No orders placed.</p>
+              ) : (
+                <div className="mt-2 divide-y divide-border rounded-lg border border-border">
+                  {orders.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{o.order_number}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {o.item_count} item{Number(o.item_count) === 1 ? '' : 's'} · {fmtDate(o.created_at)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm text-foreground">{formatPrice(o.total)}</p>
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                            payBadge[o.payment_status] || 'bg-muted text-foreground'
+                          }`}
+                        >
+                          {o.payment_status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Published / uploaded models */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Models ({models.length})
+              </p>
+              {models.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">No models uploaded.</p>
+              ) : (
+                <div className="mt-2 divide-y divide-border rounded-lg border border-border">
+                  {models.map((m) => (
+                    <div key={m.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-muted">
+                        {m.thumbnail_path && (
+                          <img src={assetUrl(m.thumbnail_path)} alt="" className="h-full w-full object-cover" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">{m.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatPrice(m.base_price)} · {m.sale_count} sold · {m.view_count} views
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-xs">
+                        <span className="inline-block rounded-full bg-muted px-2 py-0.5 font-medium text-foreground">
+                          {m.status}
+                        </span>
+                        {m.processing_status && m.processing_status !== 'ready' && (
+                          <span
+                            className={`ml-1 inline-block rounded-full px-2 py-0.5 font-medium ${
+                              userStatusBadge[m.processing_status] || 'bg-muted text-foreground'
+                            }`}
+                          >
+                            {m.processing_status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Planner tables built */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Tables built ({tables.length})
+              </p>
+              {tables.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">No planner tables saved.</p>
+              ) : (
+                <div className="mt-2 divide-y divide-border rounded-lg border border-border">
+                  {tables.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{t.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Updated {fmtDate(t.updated_at)} · {t.view_count} views · {t.clone_count} clones
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex gap-1.5">
+                        {t.is_artist_display && (
+                          <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
+                            display
+                          </span>
+                        )}
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            t.is_public ? 'bg-green-100 text-green-700' : 'bg-muted text-foreground'
+                          }`}
+                        >
+                          {t.is_public ? 'public' : 'private'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Recent activity */}
+            {data && data.recentActivity.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent activity</p>
+                <div className="mt-2 divide-y divide-border rounded-lg border border-border">
+                  {data.recentActivity.map((a, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                      <span className="text-foreground">
+                        {a.action}
+                        {a.resource_type && <span className="text-muted-foreground"> · {a.resource_type}</span>}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{fmtDate(a.created_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
