@@ -811,11 +811,65 @@ router.get('/reports/:id',
       report.status = 'under_review';
     }
 
+    const repliesResult = await db.query(
+      `SELECT rr.id, rr.is_admin, rr.body, rr.created_at, u.display_name AS sender_name
+       FROM model_report_replies rr
+       LEFT JOIN users u ON rr.sender_id = u.id
+       WHERE rr.report_id = $1
+       ORDER BY rr.created_at ASC`,
+      [id],
+    );
+
     res.json({
       report: { ...report, reason_label: REASON_LABELS[report.reason] || report.reason },
       attachments: attachmentsResult.rows.map((a: any) => ({ ...a, url: publicUrl(a.file_path) })),
       context: historyResult.rows[0],
+      replies: repliesResult.rows,
     });
+  }),
+);
+
+// Admin replies into a report's thread (e.g. following up on something the
+// artist said back) — mirrors POST /reports/:id/reply on the artist side.
+router.post('/reports/:id/reply',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { message } = req.body ?? {};
+    const adminId = (req as any).userId as string;
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      throw new ValidationError('A message is required');
+    }
+    const trimmed = message.trim().slice(0, 5000);
+
+    const reportResult = await db.query(
+      `SELECT r.id, r.artist_id, m.name AS model_name FROM model_reports r
+       LEFT JOIN models m ON r.model_id = m.id WHERE r.id = $1`,
+      [id],
+    );
+    if (reportResult.rows.length === 0) throw new NotFoundError('Report');
+    const report = reportResult.rows[0];
+
+    const inserted = await db.query(
+      `INSERT INTO model_report_replies (report_id, sender_id, is_admin, body)
+       VALUES ($1, $2, true, $3)
+       RETURNING id, is_admin, body, created_at`,
+      [id, adminId, trimmed],
+    );
+
+    if (report.artist_id) {
+      createNotification({
+        userId: report.artist_id,
+        type: 'report_reply',
+        title: `New reply on "${report.model_name || 'your model'}"`,
+        body: trimmed,
+        link: '/artist/reports',
+      });
+    }
+
+    const adminResult = await db.query(`SELECT display_name FROM users WHERE id = $1`, [adminId]);
+    logger.info('Admin replied to a report', { reportId: id, adminId });
+    res.status(201).json({ reply: { ...inserted.rows[0], sender_name: adminResult.rows[0]?.display_name ?? null } });
   }),
 );
 

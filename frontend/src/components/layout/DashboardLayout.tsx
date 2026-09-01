@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { 
   Menu, 
   X, 
@@ -44,6 +45,7 @@ import { useOnboardingStore, hasSeenArtistTour, markArtistTourSeen } from '../..
 import Logo from '../common/Logo';
 import Seo from '../common/Seo';
 import { SITE_NAME } from '../../config/brand';
+import { notificationsApi } from '../../api/endpoints/notifications';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -53,6 +55,15 @@ const DashboardLayout: React.FC = () => {
   const { user, isAdmin, logout } = useAuthStore();
   const { toggleCart } = useCartStore();
   const startTour = useOnboardingStore((s) => s.startTour);
+
+  // Badge on the "Reports" nav link: new moderation decisions / replies since the
+  // artist last opened that page (cleared there via notificationsApi.markReportsRead).
+  const { data: unreadReportsCount } = useQuery({
+    queryKey: ['artist-reports-unread'],
+    queryFn: () => notificationsApi.unreadReportsCount(),
+    enabled: user?.role === 'artist',
+    refetchInterval: 60_000,
+  });
 
   // First visit to the artist dashboard: auto-run the walkthrough once.
   useEffect(() => {
@@ -392,7 +403,12 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <ShieldAlert size={18} className="mr-3" />
-                Reports
+                <span className="flex-1">Reports</span>
+                {!!unreadReportsCount && (
+                  <span className="ml-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-semibold text-white">
+                    {unreadReportsCount > 99 ? '99+' : unreadReportsCount}
+                  </span>
+                )}
               </NavLink>
               <NavLink
                 to="/dashboard/messages"

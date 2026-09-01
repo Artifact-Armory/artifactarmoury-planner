@@ -716,6 +716,18 @@ CREATE INDEX idx_reports_reporter ON model_reports(reporter_id);
 CREATE UNIQUE INDEX idx_reports_reporter_model_open ON model_reports(reporter_id, model_id)
     WHERE status IN ('open', 'under_review', 'awaiting_info');
 
+-- Two-way reply thread on a report / admin action (migration 052) — lets the
+-- artist respond to a moderation decision instead of only reading it.
+CREATE TABLE model_report_replies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_id UUID NOT NULL REFERENCES model_reports(id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    is_admin BOOLEAN NOT NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_model_report_replies_report ON model_report_replies(report_id, created_at);
+
 CREATE TABLE model_report_attachments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     report_id  UUID NOT NULL REFERENCES model_reports(id) ON DELETE CASCADE,

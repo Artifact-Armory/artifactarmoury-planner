@@ -31,15 +31,22 @@ router.get(
   }),
 );
 
-// Unread count (drives the header badge).
+// Unread count (drives the header badge). An optional ?types=a,b,c narrows it to
+// specific notification types — e.g. the artist "Reports" nav badge only wants
+// moderation_decision/report_reply, not every unread notification.
 router.get(
   '/unread-count',
   authenticate,
   asyncHandler(async (req, res) => {
     const userId = (req as any).userId;
+    const types = typeof req.query.types === 'string'
+      ? req.query.types.split(',').map((t) => t.trim()).filter(Boolean)
+      : null;
     const result = await db.query(
-      'SELECT COUNT(*) AS c FROM notifications WHERE user_id = $1 AND is_read = false',
-      [userId],
+      types && types.length > 0
+        ? 'SELECT COUNT(*) AS c FROM notifications WHERE user_id = $1 AND is_read = false AND type = ANY($2::text[])'
+        : 'SELECT COUNT(*) AS c FROM notifications WHERE user_id = $1 AND is_read = false',
+      types && types.length > 0 ? [userId, types] : [userId],
     );
     res.json({ count: parseInt(result.rows[0]?.c ?? '0', 10) || 0 });
   }),
@@ -59,15 +66,22 @@ router.post(
   }),
 );
 
-// Mark all read.
+// Mark all read. Same optional ?types= scoping as unread-count, so visiting e.g.
+// the artist Reports page can clear just its own badge without also silently
+// marking unrelated notifications (a new-follower, a message) as read.
 router.post(
   '/read-all',
   authenticate,
   asyncHandler(async (req, res) => {
     const userId = (req as any).userId;
+    const types = typeof req.query.types === 'string'
+      ? req.query.types.split(',').map((t) => t.trim()).filter(Boolean)
+      : null;
     await db.query(
-      'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false',
-      [userId],
+      types && types.length > 0
+        ? 'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false AND type = ANY($2::text[])'
+        : 'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false',
+      types && types.length > 0 ? [userId, types] : [userId],
     );
     res.json({ ok: true });
   }),

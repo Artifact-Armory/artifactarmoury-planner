@@ -52,6 +52,14 @@ export interface ReportContext {
   artist_model_count: number
 }
 
+export interface ReportReply {
+  id: string
+  is_admin: boolean
+  body: string
+  created_at: string
+  sender_name?: string | null
+}
+
 export type ModerationAction =
   | 'dismiss' | 'request_info' | 'warn_artist' | 'unpublish_model' | 'flag_model'
   | 'remove_model' | 'refund_buyers' | 'suspend_artist' | 'ban_artist'
@@ -63,8 +71,13 @@ export const adminModerationApi = {
     return res.data
   },
 
-  async getReport(id: string): Promise<{ report: ReportDetail; attachments: ReportAttachment[]; context: ReportContext }> {
+  async getReport(id: string): Promise<{ report: ReportDetail; attachments: ReportAttachment[]; context: ReportContext; replies: ReportReply[] }> {
     const res = await apiClient.get(`${BASE_URL}/reports/${id}`)
+    return res.data
+  },
+
+  async reply(id: string, message: string): Promise<{ reply: ReportReply }> {
+    const res = await apiClient.post(`${BASE_URL}/reports/${id}/reply`, { message })
     return res.data
   },
 

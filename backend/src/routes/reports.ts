@@ -181,7 +181,74 @@ router.get(
        ORDER BY r.created_at DESC`,
       [artistId],
     )
-    res.json({ reports: result.rows })
+
+    const reportIds = result.rows.map((r: any) => r.id)
+    const repliesByReport: Record<string, any[]> = {}
+    if (reportIds.length > 0) {
+      const repliesResult = await db.query(
+        `SELECT rr.id, rr.report_id, rr.is_admin, rr.body, rr.created_at, u.display_name AS sender_name
+         FROM model_report_replies rr
+         LEFT JOIN users u ON rr.sender_id = u.id
+         WHERE rr.report_id = ANY($1::uuid[])
+         ORDER BY rr.created_at ASC`,
+        [reportIds],
+      )
+      for (const row of repliesResult.rows) {
+        (repliesByReport[row.report_id] ??= []).push(row)
+      }
+    }
+
+    res.json({ reports: result.rows.map((r: any) => ({ ...r, replies: repliesByReport[r.id] ?? [] })) })
+  }),
+)
+
+// ============================================================================
+// REPLY TO A REPORT AGAINST MY MODEL  (artist responding to a decision)
+// ============================================================================
+
+router.post(
+  '/:id/reply',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const artistId = req.userId!
+    const { id } = req.params
+    const { message } = req.body ?? {}
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      throw new ValidationError('A message is required')
+    }
+    const trimmed = message.trim().slice(0, 5000)
+
+    const reportResult = await db.query(
+      `SELECT r.id, r.artist_id, r.resolved_by, m.name AS model_name
+       FROM model_reports r LEFT JOIN models m ON r.model_id = m.id
+       WHERE r.id = $1`,
+      [id],
+    )
+    if (reportResult.rows.length === 0) throw new NotFoundError('Report')
+    const report = reportResult.rows[0]
+    // Not this artist's report — 404 rather than 403 so its existence isn't confirmed either way.
+    if (report.artist_id !== artistId) throw new NotFoundError('Report')
+
+    const inserted = await db.query(
+      `INSERT INTO model_report_replies (report_id, sender_id, is_admin, body)
+       VALUES ($1, $2, false, $3)
+       RETURNING id, report_id, is_admin, body, created_at`,
+      [id, artistId, trimmed],
+    )
+
+    if (report.resolved_by) {
+      createNotification({
+        userId: report.resolved_by,
+        type: 'report_reply',
+        title: `${req.user?.artist_name || req.user?.display_name || 'An artist'} replied about "${report.model_name || 'a model'}"`,
+        body: trimmed,
+        link: '/admin/moderation',
+      })
+    }
+
+    logger.info('Artist replied to a report', { reportId: id, artistId })
+    res.status(201).json({ reply: inserted.rows[0] })
   }),
 )
 

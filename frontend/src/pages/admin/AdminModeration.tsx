@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Paperclip, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react'
+import { X, Paperclip, ExternalLink, ShieldAlert, Loader2, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminModerationApi, ModerationAction, ReportTile } from '../../api/endpoints/adminModeration'
 import { assetUrl } from '../../api/transformers'
@@ -111,11 +111,27 @@ const Tile: React.FC<{ report: ReportTile; onOpen: () => void }> = ({ report: r,
 const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ reportId, onClose }) => {
   const qc = useQueryClient()
   const [summary, setSummary] = useState('')
+  const [replyText, setReplyText] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-report', reportId],
     queryFn: () => adminModerationApi.getReport(reportId),
   })
+
+  const sendReply = useMutation({
+    mutationFn: (message: string) => adminModerationApi.reply(reportId, message),
+    onSuccess: () => {
+      setReplyText('')
+      qc.invalidateQueries({ queryKey: ['admin-report', reportId] })
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to send reply'),
+  })
+
+  const submitReply = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!replyText.trim()) return
+    sendReply.mutate(replyText)
+  }
 
   const resolve = useMutation({
     // Shadow-ban targets the reporter by default (handled server-side).
@@ -231,6 +247,48 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
                 <p className="mt-1 text-xs text-muted-foreground">Action: {report.resolution_action}</p>
               </div>
             )}
+
+            {/* Reply thread — the artist can respond to a decision, and so can you */}
+            <div className="border-t border-border pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Conversation {data.replies.length > 0 ? `(${data.replies.length})` : ''}
+              </p>
+              {data.replies.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {data.replies.map((rep) => (
+                    <div
+                      key={rep.id}
+                      className={`rounded-lg p-3 text-sm ${rep.is_admin ? 'bg-primary/5 border border-primary/20' : 'bg-muted'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-foreground">
+                          {rep.is_admin ? (rep.sender_name || 'An admin') : (report.artist_name || report.artist_display_name || 'The artist')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{new Date(rep.created_at).toLocaleString()}</span>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-foreground">{rep.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={submitReply} className="mt-3 space-y-2">
+                <textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  rows={2}
+                  placeholder="Reply to the artist…"
+                  className="w-full resize-y rounded-lg border border-border px-3 py-2 text-sm focus:border-primary/50 focus:outline-hidden focus:ring-1 focus:ring-primary/50"
+                />
+                <button
+                  type="submit"
+                  disabled={sendReply.isPending || !replyText.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {sendReply.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                  Send reply
+                </button>
+              </form>
+            </div>
 
             {/* Findings + decisions */}
             <div className="border-t border-border pt-5">

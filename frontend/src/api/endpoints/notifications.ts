@@ -39,6 +39,20 @@ export const notificationsApi = {
     return Number(response.data?.count ?? 0)
   },
 
+  /** Just moderation decisions / report replies — drives the artist "Reports" nav badge. */
+  unreadReportsCount: async (): Promise<number> => {
+    const response = await apiClient.get('/api/notifications/unread-count', {
+      params: { types: 'moderation_decision,report_reply' },
+    })
+    return Number(response.data?.count ?? 0)
+  },
+
+  markReportsRead: async (): Promise<void> => {
+    await apiClient.post('/api/notifications/read-all', null, {
+      params: { types: 'moderation_decision,report_reply' },
+    })
+  },
+
   markRead: async (id: string): Promise<void> => {
     await apiClient.post(`/api/notifications/${id}/read`)
   },

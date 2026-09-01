@@ -29,6 +29,15 @@ export interface ReportAttachmentInput {
   contentType?: string
 }
 
+export interface ReportReply {
+  id: string
+  report_id?: string
+  is_admin: boolean
+  body: string
+  created_at: string
+  sender_name?: string | null
+}
+
 export interface MyReport {
   id: string
   reason: ReportReason
@@ -40,6 +49,7 @@ export interface MyReport {
   model_id?: string | null
   model_name?: string | null
   thumbnail_path?: string | null
+  replies: ReportReply[]
 }
 
 function putToR2(uploadUrl: string, file: File, contentType: string): Promise<void> {
@@ -71,5 +81,11 @@ export const reportsApi = {
   async getAgainstMe(): Promise<MyReport[]> {
     const res = await apiClient.get(`${BASE_URL}/against-me`)
     return res.data?.reports ?? []
+  },
+
+  /** Respond on a report against one of my models — the admin sees it too. */
+  async reply(reportId: string, message: string): Promise<{ reply: ReportReply }> {
+    const res = await apiClient.post(`${BASE_URL}/${reportId}/reply`, { message })
+    return res.data
   },
 }
