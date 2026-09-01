@@ -46,6 +46,7 @@ import Logo from '../common/Logo';
 import Seo from '../common/Seo';
 import { SITE_NAME } from '../../config/brand';
 import { notificationsApi } from '../../api/endpoints/notifications';
+import { adminModerationApi } from '../../api/endpoints/adminModeration';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -62,6 +63,14 @@ const DashboardLayout: React.FC = () => {
     queryKey: ['artist-reports-unread'],
     queryFn: () => notificationsApi.unreadReportsCount(),
     enabled: user?.role === 'artist',
+    refetchInterval: 60_000,
+  });
+
+  // Badge on the admin "Moderation" nav link: size of the open queue.
+  const { data: moderationCounts } = useQuery({
+    queryKey: ['admin-moderation-counts'],
+    queryFn: () => adminModerationApi.getCounts(),
+    enabled: isAdmin,
     refetchInterval: 60_000,
   });
 
@@ -537,7 +546,12 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <ShieldAlert size={18} className="mr-3" />
-                Moderation
+                <span className="flex-1">Moderation</span>
+                {!!moderationCounts?.openCount && (
+                  <span className="ml-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-semibold text-white">
+                    {moderationCounts.openCount > 99 ? '99+' : moderationCounts.openCount}
+                  </span>
+                )}
               </NavLink>
               <NavLink
                 to="/admin/messages"

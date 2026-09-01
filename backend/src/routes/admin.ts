@@ -718,6 +718,35 @@ const REASON_LABELS: Record<string, string> = {
   admin_action: 'Admin-initiated action',
 };
 
+// Counts behind every badge on the moderation queue: the sidebar nav link and
+// the three tabs on the page itself (Open queue / Upheld / Dismissed). One
+// query, shared so the two surfaces can never disagree.
+async function getReportCounts() {
+  const r = await db.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status IN ('open','under_review','awaiting_info')) AS open_count,
+       COUNT(*) FILTER (WHERE status = 'resolved_upheld') AS upheld_count,
+       COUNT(*) FILTER (WHERE status = 'resolved_dismissed') AS dismissed_count
+     FROM model_reports`,
+  );
+  const row = r.rows[0] ?? {};
+  return {
+    openCount: parseInt(row.open_count ?? '0', 10) || 0,
+    upheldCount: parseInt(row.upheld_count ?? '0', 10) || 0,
+    dismissedCount: parseInt(row.dismissed_count ?? '0', 10) || 0,
+  };
+}
+
+// Lightweight counts for the "Moderation" sidebar badge — mounted regardless of
+// which admin page is open, so it needs its own cheap endpoint rather than
+// fetching the full report list. Registered before /reports/:id so this literal
+// path isn't swallowed by the dynamic one.
+router.get('/reports/counts',
+  asyncHandler(async (req, res) => {
+    res.json(await getReportCounts());
+  }),
+);
+
 // The moderation queue: report tiles, newest first, filterable by status.
 router.get('/reports',
   asyncHandler(async (req, res) => {
@@ -752,14 +781,13 @@ router.get('/reports',
       [...params, Number(limit), offset],
     );
 
-    // Also surface open-count for the nav badge.
-    const openResult = await db.query(
-      `SELECT COUNT(*) FROM model_reports WHERE status IN ('open','under_review','awaiting_info')`,
-    );
+    // Also surface counts for all three tabs — not just the one currently being
+    // viewed — so switching tabs doesn't need a second round trip to know their badges.
+    const counts = await getReportCounts();
 
     res.json({
       reports: result.rows.map((r: any) => ({ ...r, reason_label: REASON_LABELS[r.reason] || r.reason })),
-      openCount: parseInt(openResult.rows[0].count),
+      ...counts,
       pagination: { page: Number(page), limit: Number(limit), total: totalCount, pages: Math.ceil(totalCount / Number(limit)) },
     });
   }),

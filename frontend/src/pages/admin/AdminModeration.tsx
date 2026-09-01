@@ -14,10 +14,10 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   resolved_dismissed: { label: 'Dismissed', cls: 'bg-green-100 text-green-700' },
 }
 
-const FILTERS = [
-  { key: '', label: 'Open queue' },
-  { key: 'resolved_upheld', label: 'Upheld' },
-  { key: 'resolved_dismissed', label: 'Dismissed' },
+const FILTERS: Array<{ key: string; label: string; countKey: 'openCount' | 'upheldCount' | 'dismissedCount' }> = [
+  { key: '', label: 'Open queue', countKey: 'openCount' },
+  { key: 'resolved_upheld', label: 'Upheld', countKey: 'upheldCount' },
+  { key: 'resolved_dismissed', label: 'Dismissed', countKey: 'dismissedCount' },
 ]
 
 // Decision buttons shown in the detail panel.
@@ -55,15 +55,24 @@ const AdminModeration: React.FC = () => {
       </div>
 
       <div className="mt-5 flex gap-2">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium ${filter === f.key ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground border border-border hover:bg-accent'}`}
-          >
-            {f.label}
-          </button>
-        ))}
+        {FILTERS.map((f) => {
+          const count = data?.[f.countKey] ?? 0
+          const active = filter === f.key
+          return (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${active ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground border border-border hover:bg-accent'}`}
+            >
+              {f.label}
+              {count > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${active ? 'bg-primary-foreground/20' : f.countKey === 'openCount' ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {isLoading ? (

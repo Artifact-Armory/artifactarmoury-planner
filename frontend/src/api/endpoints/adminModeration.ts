@@ -65,9 +65,21 @@ export type ModerationAction =
   | 'remove_model' | 'refund_buyers' | 'suspend_artist' | 'ban_artist'
   | 'shadow_ban_user' | 'reinstate_model'
 
+export interface ReportCounts {
+  openCount: number
+  upheldCount: number
+  dismissedCount: number
+}
+
 export const adminModerationApi = {
-  async listReports(status?: string): Promise<{ reports: ReportTile[]; openCount: number; pagination: any }> {
+  async listReports(status?: string): Promise<{ reports: ReportTile[]; pagination: any } & ReportCounts> {
     const res = await apiClient.get(`${BASE_URL}/reports`, { params: status ? { status } : {} })
+    return res.data
+  },
+
+  /** Lightweight — just the three tab counts, for the sidebar "Moderation" badge. */
+  async getCounts(): Promise<ReportCounts> {
+    const res = await apiClient.get(`${BASE_URL}/reports/counts`)
     return res.data
   },
 
