@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Paperclip, Mail, CheckCircle2, RotateCcw, Loader2, User as UserIcon } from 'lucide-react'
+import { X, Paperclip, Mail, Send, CheckCircle2, RotateCcw, Loader2, User as UserIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminContactApi, ContactStatus } from '../../api/endpoints/adminContact'
 import Spinner from '../../components/ui/Spinner'
@@ -86,6 +86,7 @@ const AdminContactMessages: React.FC = () => {
 
 const DetailPanel: React.FC<{ messageId: string; onClose: () => void }> = ({ messageId, onClose }) => {
   const qc = useQueryClient()
+  const [replyText, setReplyText] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-contact-message', messageId],
@@ -101,6 +102,22 @@ const DetailPanel: React.FC<{ messageId: string; onClose: () => void }> = ({ mes
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Action failed'),
   })
+
+  const sendReply = useMutation({
+    mutationFn: (body: string) => adminContactApi.reply(messageId, body),
+    onSuccess: () => {
+      toast.success('Reply sent from support@artifactarmoury.com')
+      setReplyText('')
+      qc.invalidateQueries({ queryKey: ['admin-contact-message', messageId] })
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to send reply'),
+  })
+
+  const submitReply = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!replyText.trim()) return
+    sendReply.mutate(replyText)
+  }
 
   const message = data?.message
   const mailtoHref = message
@@ -165,6 +182,27 @@ const DetailPanel: React.FC<{ messageId: string; onClose: () => void }> = ({ mes
               </div>
             )}
 
+            {data.replies.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Replies ({data.replies.length})
+                </p>
+                <div className="mt-2 space-y-3">
+                  {data.replies.map((r) => (
+                    <div key={r.id} className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-foreground">
+                          {r.admin_name || 'An admin'} <span className="font-normal text-muted-foreground">· support@artifactarmoury.com</span>
+                        </p>
+                        <p className="shrink-0 text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</p>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{r.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {message.status === 'resolved' && message.resolved_by_name && (
               <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
                 Marked resolved by {message.resolved_by_name}
@@ -172,13 +210,36 @@ const DetailPanel: React.FC<{ messageId: string; onClose: () => void }> = ({ mes
               </div>
             )}
 
+            <div className="border-t border-border pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reply</p>
+              <form onSubmit={submitReply} className="mt-2 space-y-2">
+                <textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={`Reply to ${message.name}…`}
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-ring"
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={sendReply.isPending || !replyText.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {sendReply.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Send from support@artifactarmoury.com
+                  </button>
+                  <a
+                    href={mailtoHref}
+                    className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    <Mail size={12} /> Open in your own email app instead
+                  </a>
+                </div>
+              </form>
+            </div>
+
             <div className="flex flex-wrap gap-2 border-t border-border pt-5">
-              <a
-                href={mailtoHref}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
-              >
-                <Mail size={14} /> Reply by email
-              </a>
               {message.status === 'open' ? (
                 <button
                   disabled={setStatus.isPending}

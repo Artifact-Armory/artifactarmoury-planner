@@ -12,11 +12,15 @@ import { deleteFromStorage } from '../services/storage';
 import { reverseEarningsForModel, reverseEarningsForOrderItem } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
+import { sendContactReply } from '../services/email';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
 import { publicUrl } from '../services/r2';
 import { vatPenceOn } from '../services/vat';
+import { getSummary, getProducts } from '../services/artistAnalytics';
+import { ensureRollupsFresh } from '../services/analyticsRollup';
+import { parseRange } from './analytics';
 
 const router = Router();
 
@@ -250,6 +254,38 @@ router.get('/users/:id',
       models: modelsResult.rows,
       tables: tablesResult.rows,
     });
+  })
+);
+
+// Sale analytics for an artist — the same read-side queries behind the artist's
+// own dashboard (services/artistAnalytics.ts), just parameterised on :id instead
+// of the caller's own userId, so an admin sees exactly what the artist sees.
+router.get('/users/:id/analytics/summary',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const roleResult = await db.query('SELECT role FROM users WHERE id = $1', [id]);
+    if (roleResult.rows.length === 0) throw new NotFoundError('User');
+    if (roleResult.rows[0].role !== 'artist') {
+      res.status(404).json({ error: 'Not an artist' });
+      return;
+    }
+    await ensureRollupsFresh();
+    res.json(await getSummary(id, parseRange(req.query)));
+  })
+);
+
+router.get('/users/:id/analytics/products',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const roleResult = await db.query('SELECT role FROM users WHERE id = $1', [id]);
+    if (roleResult.rows.length === 0) throw new NotFoundError('User');
+    if (roleResult.rows[0].role !== 'artist') {
+      res.status(404).json({ error: 'Not an artist' });
+      return;
+    }
+    await ensureRollupsFresh();
+    const sort = typeof req.query.sort === 'string' ? req.query.sort : 'units';
+    res.json({ products: await getProducts(id, parseRange(req.query), sort) });
   })
 );
 
@@ -1790,6 +1826,15 @@ router.get('/contact/:id',
       [id],
     );
 
+    const repliesResult = await db.query(
+      `SELECT r.id, r.body, r.created_at, r.admin_id, u.display_name AS admin_name
+       FROM contact_message_replies r
+       LEFT JOIN users u ON r.admin_id = u.id
+       WHERE r.contact_message_id = $1
+       ORDER BY r.created_at ASC`,
+      [id],
+    );
+
     if (!message.is_read) {
       await db.query(`UPDATE contact_messages SET is_read = true WHERE id = $1`, [id]);
       message.is_read = true;
@@ -1798,6 +1843,54 @@ router.get('/contact/:id',
     res.json({
       message,
       attachments: attachmentsResult.rows.map((a: any) => ({ ...a, url: publicUrl(a.file_path) })),
+      replies: repliesResult.rows,
+    });
+  }),
+);
+
+// Send a reply — in-app, via Resend as SUPPORT_EMAIL, so it never opens the
+// admin's own desktop email client under their personal address. Recorded in
+// contact_message_replies so the thread is visible to any admin who reopens this.
+router.post('/contact/:id/reply',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { body } = req.body ?? {};
+    const adminId = (req as any).userId as string;
+
+    if (!body || typeof body !== 'string' || !body.trim()) {
+      throw new ValidationError('Reply message is required');
+    }
+    const trimmedBody = body.trim().slice(0, 10000);
+
+    const msgResult = await db.query(
+      `SELECT id, name, email, subject, message FROM contact_messages WHERE id = $1`,
+      [id],
+    );
+    if (msgResult.rows.length === 0) throw new NotFoundError('Message');
+    const cm = msgResult.rows[0];
+
+    const inserted = await db.query(
+      `INSERT INTO contact_message_replies (contact_message_id, admin_id, body)
+       VALUES ($1, $2, $3)
+       RETURNING id, contact_message_id, admin_id, body, created_at`,
+      [id, adminId, trimmedBody],
+    );
+
+    // Best-effort send — sendEmail() logs and swallows failures rather than
+    // throwing (see services/email.ts), so the reply is recorded either way.
+    await sendContactReply({
+      to: cm.email,
+      name: cm.name,
+      subject: cm.subject,
+      originalMessage: cm.message,
+      replyBody: trimmedBody,
+    }).catch((err) => logger.error('Failed to send contact reply email', { error: err, messageId: id }));
+
+    const adminResult = await db.query(`SELECT display_name FROM users WHERE id = $1`, [adminId]);
+
+    logger.info('Contact message replied', { messageId: id, adminId });
+    res.status(201).json({
+      reply: { ...inserted.rows[0], admin_name: adminResult.rows[0]?.display_name ?? null },
     });
   }),
 );

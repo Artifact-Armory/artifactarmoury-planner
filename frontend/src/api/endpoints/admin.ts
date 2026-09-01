@@ -3,6 +3,7 @@
 // The backend returns bare objects (e.g. { users, pagination }), not an
 // ApiResponse envelope, so these types mirror the actual payloads.
 import apiClient from '../client'
+import type { AnalyticsRange, AnalyticsSummary, ProductRow } from './artistAnalytics'
 
 const BASE = '/api/admin'
 
@@ -268,6 +269,21 @@ export const adminApi = {
   deleteUser: async (id: string) => {
     const { data } = await apiClient.delete(`${BASE}/users/${id}`)
     return data
+  },
+
+  /** An artist's own sale-analytics summary (services/artistAnalytics.ts), viewed as an admin. */
+  getArtistSaleAnalytics: async (id: string, r?: AnalyticsRange): Promise<AnalyticsSummary> => {
+    const { data } = await apiClient.get(`${BASE}/users/${id}/analytics/summary`, {
+      params: r ? { from: r.from, to: r.to } : undefined,
+    })
+    return data
+  },
+
+  getArtistSaleProducts: async (id: string, r?: AnalyticsRange, sort = 'gross'): Promise<ProductRow[]> => {
+    const { data } = await apiClient.get(`${BASE}/users/${id}/analytics/products`, {
+      params: { ...(r ? { from: r.from, to: r.to } : {}), sort },
+    })
+    return data?.products ?? []
   },
 
   // -- Orders ---------------------------------------------------------------

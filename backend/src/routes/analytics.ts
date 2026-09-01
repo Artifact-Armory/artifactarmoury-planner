@@ -17,7 +17,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Parse ?from&to (YYYY-MM-DD) with a default of the last 30 days. */
-function parseRange(q: any): Range {
+export function parseRange(q: any): Range {
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const to = typeof q.to === 'string' && DATE_RE.test(q.to) ? q.to : iso(new Date());
   const from =

@@ -52,13 +52,15 @@ export interface SendEmailParams {
   text?: string
   /** Lets the recipient hit "Reply" and land in the sender's inbox, not ours. */
   replyTo?: string
+  /** Overrides FROM_EMAIL (the generic noreply@ sender) — e.g. support@ for a support reply. */
+  from?: string
 }
 
 /**
  * Send email via Resend or log if not configured
  */
 export async function sendEmail(params: SendEmailParams): Promise<void> {
-  const { to, subject, html, text, replyTo } = params
+  const { to, subject, html, text, replyTo, from } = params
 
   try {
     if (!resend) {
@@ -71,7 +73,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     }
 
     const result = await resend.emails.send({
-      from: FROM_EMAIL,
+      from: from || FROM_EMAIL,
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
@@ -729,6 +731,60 @@ export async function sendContactConfirmation(params: { name: string; email: str
     to: email,
     subject: `We've received your message — ${subject}`,
     html
+  })
+}
+
+export interface ContactReplyParams {
+  to: string
+  name: string
+  subject: string
+  /** The sender's original message, quoted underneath the reply for context. */
+  originalMessage: string
+  replyBody: string
+}
+
+/**
+ * An admin's in-app reply to a Contact page submission (AdminContactMessages.tsx).
+ * Sent — and reply-able — as SUPPORT_EMAIL rather than the noreply@ FROM_EMAIL used
+ * everywhere else, and never the replying admin's own address, which is the whole
+ * point of this function existing instead of a `mailto:` link.
+ */
+export async function sendContactReply(params: ContactReplyParams): Promise<void> {
+  const { to, name, subject, originalMessage, replyBody } = params
+  const replySubject = /^re:/i.test(subject) ? subject : `Re: ${subject}`
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <p style="margin: 0 0 16px 0; color: #4b5563;">Hi ${name},</p>
+
+  <div style="white-space: pre-wrap; margin-bottom: 24px;">${replyBody}</div>
+
+  <div style="margin-top: 8px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 13px;">
+    <p style="margin: 0 0 8px 0;">On your message to Artifact Armoury support:</p>
+    <blockquote style="margin: 0; padding-left: 12px; border-left: 3px solid #e5e7eb; white-space: pre-wrap; color: #6b7280;">${originalMessage}</blockquote>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; margin-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to,
+    subject: replySubject,
+    html,
+    from: SUPPORT_EMAIL,
+    replyTo: SUPPORT_EMAIL,
   })
 }
 

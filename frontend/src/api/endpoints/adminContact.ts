@@ -34,19 +34,33 @@ export interface ContactAttachment {
   url: string
 }
 
+export interface ContactReply {
+  id: string
+  body: string
+  created_at: string
+  admin_id: string | null
+  admin_name: string | null
+}
+
 export const adminContactApi = {
   async list(status?: string): Promise<{ messages: ContactMessageTile[]; unreadCount: number; pagination: any }> {
     const res = await apiClient.get(BASE_URL, { params: status ? { status } : {} })
     return res.data
   },
 
-  async get(id: string): Promise<{ message: ContactMessageDetail; attachments: ContactAttachment[] }> {
+  async get(id: string): Promise<{ message: ContactMessageDetail; attachments: ContactAttachment[]; replies: ContactReply[] }> {
     const res = await apiClient.get(`${BASE_URL}/${id}`)
     return res.data
   },
 
   async setStatus(id: string, status: ContactStatus): Promise<{ message: { id: string; status: ContactStatus } }> {
     const res = await apiClient.patch(`${BASE_URL}/${id}/status`, { status })
+    return res.data
+  },
+
+  /** Sends the reply from support@ via the backend — no mailto:, no personal inbox. */
+  async reply(id: string, body: string): Promise<{ reply: ContactReply }> {
+    const res = await apiClient.post(`${BASE_URL}/${id}/reply`, { body })
     return res.data
   },
 }

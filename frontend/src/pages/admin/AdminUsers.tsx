@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Search, X } from 'lucide-react'
+import { Search, X, ExternalLink, PoundSterling, ShoppingBag, Eye, Target, TrendingUp } from 'lucide-react'
 import { adminApi, AdminUserRow } from '../../api/endpoints/admin'
 import { useAuthStore } from '../../store/authStore'
 import { assetUrl } from '../../api/transformers'
@@ -326,6 +326,17 @@ const AdminUsers: React.FC = () => {
                       <span className="text-xs text-muted-foreground italic block text-right">You</span>
                     ) : (
                       <div className="flex justify-end gap-2 text-xs">
+                        {u.role === 'artist' && (
+                          <a
+                            href={`/artists/${u.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-primary hover:underline"
+                            title="Open their public artist page"
+                          >
+                            Profile <ExternalLink size={11} />
+                          </a>
+                        )}
                         {u.account_status === 'active' ? (
                           <>
                             <button
@@ -437,9 +448,21 @@ const UserDetailPanel: React.FC<{ userId: string; onClose: () => void }> = ({ us
           <h2 className="text-lg font-semibold text-foreground">
             {user ? user.artist_name || user.display_name : 'User'}
           </h2>
-          <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-accent">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-3">
+            {user?.role === 'artist' && (
+              <a
+                href={`/artists/${user.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                Public profile <ExternalLink size={14} />
+              </a>
+            )}
+            <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-accent">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {isLoading || !user ? (
@@ -490,6 +513,9 @@ const UserDetailPanel: React.FC<{ userId: string; onClose: () => void }> = ({ us
                 )}
               </div>
             </div>
+
+            {/* Sale analytics (artists only) */}
+            {user.role === 'artist' && <ArtistSaleAnalytics artistId={user.id} />}
 
             {/* Order history */}
             <div>
@@ -623,6 +649,81 @@ const UserDetailPanel: React.FC<{ userId: string; onClose: () => void }> = ({ us
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+const StatTile: React.FC<{ icon: React.ReactNode; label: string; children: React.ReactNode }> = ({
+  icon,
+  label,
+  children,
+}) => (
+  <div className="rounded-lg border border-border bg-muted/50 p-2.5">
+    <div className="flex items-center gap-1 text-muted-foreground">
+      {icon}
+      <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
+    </div>
+    <div className="mt-0.5 text-base font-semibold text-foreground">{children}</div>
+  </div>
+)
+
+/** The same data as the artist's own Sales Overview dashboard (services/artistAnalytics.ts),
+ * just fetched for :id instead of the caller's own account — so an admin sees what the
+ * artist sees, without needing the artist to share a screenshot. Fixed 30-day window; the
+ * artist's own dashboard has the date-range picker if a wider look is needed. */
+const ArtistSaleAnalytics: React.FC<{ artistId: string }> = ({ artistId }) => {
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-artist-analytics-summary', artistId],
+    queryFn: () => adminApi.getArtistSaleAnalytics(artistId),
+  })
+  const { data: products } = useQuery({
+    queryKey: ['admin-artist-analytics-products', artistId],
+    queryFn: () => adminApi.getArtistSaleProducts(artistId, undefined, 'gross'),
+  })
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Sale analytics (last 30 days)
+      </p>
+      {isLoading || !data ? (
+        <div className="mt-2 flex justify-center py-6">
+          <Spinner size="sm" />
+        </div>
+      ) : (
+        <>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <StatTile icon={<PoundSterling size={12} />} label="Net earnings">
+              {formatPrice(data.totals.net)}
+            </StatTile>
+            <StatTile icon={<ShoppingBag size={12} />} label="Sales">{data.totals.sales}</StatTile>
+            <StatTile icon={<Eye size={12} />} label="Views">{data.totals.views}</StatTile>
+            <StatTile icon={<Target size={12} />} label="Conversion">
+              {(data.totals.conversion * 100).toFixed(1)}%
+            </StatTile>
+            <StatTile icon={<TrendingUp size={12} />} label="Top model">
+              {data.topModels[0] ? (
+                <span className="line-clamp-1 text-sm">{data.topModels[0].name}</span>
+              ) : (
+                <span className="text-sm text-muted-foreground">—</span>
+              )}
+            </StatTile>
+          </div>
+
+          {products && products.length > 0 && (
+            <div className="mt-3 divide-y divide-border rounded-lg border border-border">
+              {products.slice(0, 5).map((p) => (
+                <div key={p.modelId} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                  <span className="truncate text-foreground">{p.name}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {p.units} sold · {formatPrice(p.gross)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

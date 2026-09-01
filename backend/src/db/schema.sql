@@ -757,6 +757,17 @@ CREATE TABLE contact_message_attachments (
 );
 CREATE INDEX idx_contact_message_attachments_message ON contact_message_attachments(contact_message_id);
 
+-- In-app admin replies (migration 050) — sent via Resend as SUPPORT_EMAIL, never
+-- the replying admin's own address, so it doesn't have to open their desktop mail app.
+CREATE TABLE contact_message_replies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contact_message_id UUID NOT NULL REFERENCES contact_messages(id) ON DELETE CASCADE,
+    admin_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_contact_message_replies_message ON contact_message_replies(contact_message_id, created_at);
+
 -- ============================================================================
 -- MESSAGING (migration 022): direct buyer<->artist threads + site/system messages
 -- ============================================================================
