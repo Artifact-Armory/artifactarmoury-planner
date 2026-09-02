@@ -4,9 +4,10 @@
 // call per sub-mesh, not N. Geometry/materials are shared from the template cache,
 // so a unique GLB is only uploaded to the GPU once.
 //
-// Also owns selection/hover outlines, a placement "pop" animation, and instance
-// picking. Selected pieces stay in their instanced batch (just lifted) with a
-// glowing wire outline drawn over them — cheap, since only a few are ever selected.
+// Also owns a selection/hover ground glow, a placement "pop" animation, and
+// instance picking. Selected pieces stay exactly where they rest (no lift) with
+// a soft warm-blue glow disc under them — cheap, since only a few are ever
+// selected, and it never occludes or reshapes the piece itself.
 
 import * as THREE from 'three'
 import type { Asset } from '@core/assets'
@@ -14,10 +15,12 @@ import type { Instance } from '@state/store'
 import { ensureTemplate, getResolvedTemplate, type AssetTemplate } from './loaders'
 import { levelToY } from '@core/elevation'
 
-const LIFT = 0.012 // metres a selected piece floats above the table
 const POP_MS = 180
-const SELECT_GLOW = new THREE.Color(0x6cc4ff)
+const SELECT_GLOW = new THREE.Color(0x5b9dff) // warm-leaning blue (vs. an icy cyan)
 const HOVER_GLOW = new THREE.Color(0x8aa0b8)
+const SELECT_GLOW_OPACITY = 0.45
+const HOVER_GLOW_OPACITY = 0.22
+const GLOW_LIFT = 0.003 // metres above the resting surface, just enough to avoid z-fighting
 
 const tmpQuat = new THREE.Quaternion()
 const tmpQuatPitch = new THREE.Quaternion()
@@ -26,6 +29,37 @@ const tmpXAxis = new THREE.Vector3(1, 0, 0)
 const tmpPos = new THREE.Vector3()
 const tmpScale = new THREE.Vector3()
 const tmpMat = new THREE.Matrix4()
+
+// A soft radial gradient (opaque centre → transparent edge), shared by every
+// glow disc in the app. Built once lazily; never disposed (one small texture
+// for the process lifetime).
+let sharedGlowTexture: THREE.Texture | null = null
+function getGlowTexture(): THREE.Texture {
+  if (sharedGlowTexture) return sharedGlowTexture
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)')
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.35)')
+  grad.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, size, size)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  sharedGlowTexture = tex
+  return tex
+}
+
+// A flat unit circle, laid on the XZ plane (facing +Y), reused by every glow
+// disc — only each mesh's own scale/position varies.
+let sharedGlowGeometry: THREE.CircleGeometry | null = null
+function getGlowGeometry(): THREE.CircleGeometry {
+  if (!sharedGlowGeometry) sharedGlowGeometry = new THREE.CircleGeometry(1, 40)
+  return sharedGlowGeometry
+}
 
 export class InstancedScene {
   readonly group = new THREE.Group()
@@ -43,16 +77,24 @@ export class InstancedScene {
   private popStart = new Map<string, number>()
   private selectChangedAt = 0
 
-  private outlineGroup = new THREE.Group()
-  private outlines = new Map<string, THREE.LineSegments>()
-  private hoverOutline: THREE.LineSegments | null = null
+  private glowGroup = new THREE.Group()
+  private selectGlows = new Map<string, THREE.Mesh>()
+  private hoverGlow: THREE.Mesh | null = null
+  private selectGlowMat = new THREE.MeshBasicMaterial({
+    map: getGlowTexture(), color: SELECT_GLOW, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, opacity: SELECT_GLOW_OPACITY,
+  })
+  private hoverGlowMat = new THREE.MeshBasicMaterial({
+    map: getGlowTexture(), color: HOVER_GLOW, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, opacity: HOVER_GLOW_OPACITY,
+  })
 
   private onNeedsTemplate: () => void
   /** Terrain height (m) at a world (x,z) — set by the stage so pieces ride the surface. */
   private heightAt: (x: number, z: number) => number = () => 0
   constructor(onNeedsTemplate: () => void) {
     this.onNeedsTemplate = onNeedsTemplate
-    this.group.add(this.outlineGroup)
+    this.group.add(this.glowGroup)
   }
 
   /** Provide a terrain-height sampler; call refreshTransforms() after a change. */
@@ -60,9 +102,9 @@ export class InstancedScene {
     this.heightAt = fn
   }
 
-  /** Recompute instance matrices + outlines (e.g. after the terrain was sculpted). */
+  /** Recompute instance matrices + glow discs (e.g. after the terrain was sculpted). */
   refreshTransforms() {
-    this.rebuildMatricesAndOutlines()
+    this.rebuildMatricesAndGlows()
   }
 
   /** Structural sync: (re)build instanced meshes from the current instance set. */
@@ -81,26 +123,26 @@ export class InstancedScene {
   setSelection(ids: Set<string>) {
     this.selected = new Set(ids)
     this.selectChangedAt = performance.now()
-    this.rebuildMatricesAndOutlines()
+    this.rebuildMatricesAndGlows()
   }
 
   setHover(id: string | null) {
     if (this.hovered === id) return
     this.hovered = id
-    this.updateHoverOutline()
+    this.updateHoverGlow()
   }
 
   /** Live (uncommitted) transform during a drag. Pass null to clear an id. */
   setLiveTransform(id: string, t: { x: number; z: number; rotDeg: number } | null) {
     if (t) this.liveOverride.set(id, t)
     else this.liveOverride.delete(id)
-    this.rebuildMatricesAndOutlines()
+    this.rebuildMatricesAndGlows()
   }
 
   clearLive() {
     if (this.liveOverride.size === 0) return
     this.liveOverride.clear()
-    this.rebuildMatricesAndOutlines()
+    this.rebuildMatricesAndGlows()
   }
 
   /** Raycast placed meshes → planner instance id (or null). */
@@ -147,23 +189,24 @@ export class InstancedScene {
       this.writeMatrices()
     }
 
-    // selection outline entrance pulse (settles, so the scene can go idle)
+    // selection glow entrance pulse (settles to a steady soft glow, so the
+    // scene can go idle instead of animating forever).
     if (this.selected.size && now - this.selectChangedAt < 600) {
       const t = (now - this.selectChangedAt) / 600
       const pulse = 0.5 + 0.5 * Math.cos(t * Math.PI * 3) * (1 - t)
-      for (const line of this.outlines.values()) {
-        const m = line.material as THREE.LineBasicMaterial
-        m.color.copy(SELECT_GLOW).multiplyScalar(0.7 + 0.6 * pulse)
-      }
+      this.selectGlowMat.opacity = SELECT_GLOW_OPACITY * (0.7 + 0.6 * pulse)
       animating = true
+    } else if (this.selectGlowMat.opacity !== SELECT_GLOW_OPACITY) {
+      this.selectGlowMat.opacity = SELECT_GLOW_OPACITY
     }
     return animating
   }
 
   dispose() {
     this.disposeMeshes()
-    this.outlines.forEach((o) => o.geometry.dispose())
-    this.hoverOutline?.geometry.dispose()
+    this.selectGlowMat.dispose()
+    this.hoverGlowMat.dispose()
+    // The glow texture/geometry are shared app-wide singletons — not disposed here.
   }
 
   // ---- internals ----------------------------------------------------------
@@ -208,7 +251,7 @@ export class InstancedScene {
       }
     }
     this.writeMatrices()
-    this.rebuildOutlines()
+    this.rebuildSelectGlows()
   }
 
   private composeMatrix(inst: Instance, partMatrix: THREE.Matrix4, out: THREE.Matrix4, aabb?: { x: number; y: number; z: number }) {
@@ -216,7 +259,6 @@ export class InstancedScene {
     const x = t ? t.x : inst.position.x
     const z = t ? t.z : inst.position.z
     const rotDeg = t ? t.rotDeg : inst.rotationDeg
-    const lift = this.selected.has(inst.id) ? LIFT : 0
 
     let scale = 1
     const pop = this.popStart.get(inst.id)
@@ -246,7 +288,7 @@ export class InstancedScene {
         groundOffset = -minY
       }
     }
-    tmpPos.set(x, levelToY(inst.level ?? 0) + lift + this.heightAt(x, z) + groundOffset, z)
+    tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z) + groundOffset, z)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
   }
@@ -287,69 +329,64 @@ export class InstancedScene {
     }
   }
 
-  private rebuildMatricesAndOutlines() {
+  private rebuildMatricesAndGlows() {
     this.writeMatrices()
-    this.rebuildOutlines()
+    this.rebuildSelectGlows()
   }
 
-  private rebuildOutlines() {
+  private rebuildSelectGlows() {
     // remove stale
-    for (const [id, line] of this.outlines) {
+    for (const [id, mesh] of this.selectGlows) {
       if (!this.selected.has(id)) {
-        this.outlineGroup.remove(line)
-        line.geometry.dispose()
-        this.outlines.delete(id)
+        this.glowGroup.remove(mesh)
+        this.selectGlows.delete(id)
       }
     }
     const instById = new Map(this.instances.map((i) => [i.id, i]))
     for (const id of this.selected) {
       const inst = instById.get(id)
       if (!inst) continue
-      let line = this.outlines.get(id)
-      if (!line) {
-        line = this.makeOutline(inst, SELECT_GLOW)
-        this.outlines.set(id, line)
-        this.outlineGroup.add(line)
+      let mesh = this.selectGlows.get(id)
+      if (!mesh) {
+        mesh = this.makeGlow(this.selectGlowMat)
+        this.selectGlows.set(id, mesh)
+        this.glowGroup.add(mesh)
       }
-      this.positionOutline(line, inst, LIFT)
+      this.positionGlow(mesh, inst)
     }
   }
 
-  private updateHoverOutline() {
-    if (this.hoverOutline) {
-      this.outlineGroup.remove(this.hoverOutline)
-      this.hoverOutline.geometry.dispose()
-      this.hoverOutline = null
+  private updateHoverGlow() {
+    if (this.hoverGlow) {
+      this.glowGroup.remove(this.hoverGlow)
+      this.hoverGlow = null
     }
     if (!this.hovered || this.selected.has(this.hovered)) return
     const inst = this.instances.find((i) => i.id === this.hovered)
     if (!inst) return
-    this.hoverOutline = this.makeOutline(inst, HOVER_GLOW)
-    this.outlineGroup.add(this.hoverOutline)
-    this.positionOutline(this.hoverOutline, inst, 0)
+    this.hoverGlow = this.makeGlow(this.hoverGlowMat)
+    this.glowGroup.add(this.hoverGlow)
+    this.positionGlow(this.hoverGlow, inst)
   }
 
-  private makeOutline(inst: Instance, color: THREE.Color): THREE.LineSegments {
-    const asset = this.assetsById.get(inst.assetId)
-    const a = asset?.aabb ?? { x: 0.1, y: 0.1, z: 0.1 }
-    const box = new THREE.BoxGeometry(a.x * 1.04, a.y * 1.04, a.z * 1.04)
-    const edges = new THREE.EdgesGeometry(box)
-    box.dispose()
-    const mat = new THREE.LineBasicMaterial({ color: color.clone(), transparent: true, depthTest: false })
-    const line = new THREE.LineSegments(edges, mat)
-    line.renderOrder = 999
-    return line
+  /** A flat glow disc lying on the ground under a piece — no crisp box edges,
+   *  no lift; it just marks the footprint the piece is actually resting on. */
+  private makeGlow(material: THREE.MeshBasicMaterial): THREE.Mesh {
+    const mesh = new THREE.Mesh(getGlowGeometry(), material)
+    mesh.rotation.x = -Math.PI / 2
+    mesh.renderOrder = 999
+    return mesh
   }
 
-  private positionOutline(line: THREE.LineSegments, inst: Instance, lift: number) {
+  private positionGlow(mesh: THREE.Mesh, inst: Instance) {
     const asset = this.assetsById.get(inst.assetId)
     const a = asset?.aabb ?? { x: 0.1, y: 0.1, z: 0.1 }
     const t = this.liveOverride.get(inst.id)
     const x = t ? t.x : inst.position.x
     const z = t ? t.z : inst.position.z
-    const rotDeg = t ? t.rotDeg : inst.rotationDeg
-    line.position.set(x, levelToY(inst.level ?? 0) + a.y / 2 + lift + this.heightAt(x, z), z)
-    line.rotation.y = THREE.MathUtils.degToRad(rotDeg)
+    const radius = Math.max(a.x, a.z) / 2 * 1.2 + 0.015
+    mesh.scale.setScalar(radius)
+    mesh.position.set(x, levelToY(inst.level ?? 0) + GLOW_LIFT + this.heightAt(x, z), z)
   }
 }
 
