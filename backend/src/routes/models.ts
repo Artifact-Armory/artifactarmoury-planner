@@ -292,13 +292,38 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
     }
     if (!meshFormatFromName(filename || rawKey)) {
       throw new ValidationError('The model file must be an STL, OBJ or 3MF file');
+    }
+
+    // Pre-supported print file → optional support-free "clean preview" companion
+    // (see migration 053). The checkbox and the file travel together: ticking it
+    // without attaching a file is rejected rather than silently ignored.
+    const presupported = isPresupported === true || isPresupported === 'true';
+    let cleanDisplayRawKey: string | null = null;
+    if (presupported) {
+      if (!displayRawKey || typeof displayRawKey !== 'string' || !displayRawKey.startsWith('raw/')) {
+        throw new ValidationError('Upload a support-free preview model, or untick "this file is pre-supported"');
+      }
+      if (!meshFormatFromName(displayFilename || displayRawKey)) {
+        throw new ValidationError('The preview model file must be an STL, OBJ or 3MF file');
+      }
+      const displayBytes = await objectSize(displayRawKey);
+      if (displayBytes == null) {
+        throw new ValidationError('Preview model file not found in storage — retry the upload');
+      }
+      if (displayBytes > MAX_MODEL_FILE_BYTES) {
+        await safeDeleteObject(displayRawKey);
+        throw new ValidationError(
+          `Preview model file is too large (${(displayBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`,
+        );
+      }
+      cleanDisplayRawKey = displayRawKey;
     }
     // A thumbnail is required up-front (it's also a hard requirement to publish),
     // so we never create a draft that can't be listed.
@@ -428,10 +453,10 @@ router.post('/from-upload',
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, $13, 'draft', 'processing')
+        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, $13, $14, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported]
     );
     const model = result.rows[0];
     // Seed price history (backs the anti-inflation guard on sales).
@@ -464,7 +489,7 @@ router.post('/from-upload',
     ).catch((err) => logger.error('activity_log insert failed', { error: err }));
 
     // Fire-and-forget: process in the background, seller polls GET /:id.
-    processUploadedModel(model.id, rawKey, filename).catch((err) =>
+    processUploadedModel(model.id, rawKey, filename, cleanDisplayRawKey ?? undefined, displayFilename).catch((err) =>
       logger.error('Async model processing crashed', { error: err, modelId: model.id })
     );
 
@@ -1811,7 +1836,13 @@ function duplicateMessage(kind: 'file' | 'geometry', partLabel?: string): string
     : `${subject} is nearly identical to a model already on the marketplace (same shape, even if re-exported or rescaled). If you believe this is your own work, contact support.`;
 }
 
-async function processUploadedModel(modelId: string, rawKey: string, filename?: string): Promise<void> {
+async function processUploadedModel(
+  modelId: string,
+  rawKey: string,
+  filename?: string,
+  displayRawKey?: string,
+  displayFilename?: string,
+): Promise<void> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-model-'));
   const format: MeshFormat = meshFormatFromName(filename || rawKey) ?? 'stl';
   const stlTmp = path.join(tmpDir, 'model.stl');
@@ -1858,16 +1889,78 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
     }
     if (geoDup.own && !selfMatches.includes(geoDup.own.name)) selfMatches.push(geoDup.own.name);
 
-    // 4. Analyse geometry + generate the GLB preview (from the canonical STL).
-    //    Preview generation has two modes: when the bake worker is enabled the GLB
-    //    is produced out-of-process (normal/AO-baked proxy) and glb_file_path is
-    //    filled in later by the worker; otherwise we fall back to the in-process
-    //    pure-Node decimator exactly as before.
+    // 3b. Optional "clean preview" companion file (pre-supported models, migration
+    //     053). When the artist attached one, IT — not the print file above —
+    //     becomes the source for the preview/owner GLBs; the print file (with its
+    //     supports) stays exactly what buyers download. It goes through the same
+    //     dedup as the print file (still someone's geometry, still worth
+    //     protecting), scanned against every model + part, foreign match rejects
+    //     the whole upload. Always treated as STL going forward (no OBJ-material
+    //     passthrough to the bake worker) — simpler, and this file only ever
+    //     drives a render, not a sale.
+    // Defaults for "no display file" — finalized once canonicalStlPath is known
+    // below; overwritten outright when a display file is present.
+    let previewSourceKey: string = rawKey;
+    let previewSourceFormat: 'stl' | 'obj' = format === 'obj' ? 'obj' : 'stl';
+    let previewSourceLocalPath = stlTmp;
+    let displayStlPathForDb: string | null = null;
+    if (displayRawKey) {
+      const displayFormat: MeshFormat = meshFormatFromName(displayFilename || displayRawKey) ?? 'stl';
+      const displayStlTmp = path.join(tmpDir, 'display.stl');
+      const displayRawBuffer = await downloadObject(displayRawKey);
+      const displayStlBuffer = convertToStl(displayRawBuffer, displayFormat);
+      await fsp.writeFile(displayStlTmp, displayStlBuffer);
+
+      const displayFileHash = computeFileHash(displayStlBuffer);
+      const displayHashDup = await db.query(
+        'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
+        [displayFileHash, modelId],
+      );
+      const foreignDisplayHashDup = displayHashDup.rows.find((r: any) => r.artist_id !== uploaderId);
+      if (foreignDisplayHashDup) {
+        await markModelFailed(modelId, duplicateMessage('file', 'preview model'));
+        await safeDeleteObject(rawKey);
+        await safeDeleteObject(displayRawKey);
+        return;
+      }
+
+      const displayFingerprint = await computeGeometryFingerprint(displayStlTmp);
+      const displayGeoDup = await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
+      if (displayGeoDup.foreign) {
+        await markModelFailed(modelId, duplicateMessage('geometry', 'preview model'));
+        await safeDeleteObject(rawKey);
+        await safeDeleteObject(displayRawKey);
+        return;
+      }
+      const displaySelfName = displayHashDup.rows[0]?.name ?? displayGeoDup.own?.name;
+      if (displaySelfName && !selfMatches.includes(displaySelfName)) selfMatches.push(displaySelfName);
+
+      // STL uploads keep the raw/ object in place (same convention as the print
+      // file); OBJ/3MF get canonicalized into a stored STL.
+      displayStlPathForDb = displayRawKey;
+      if (displayFormat !== 'stl') {
+        const displayCanonTmp = path.join(tmpDir, 'display-canonical.stl');
+        await fsp.writeFile(displayCanonTmp, displayStlBuffer);
+        displayStlPathForDb = await uploadToStorage(displayCanonTmp, 'models');
+      }
+
+      previewSourceLocalPath = displayStlTmp;
+      previewSourceKey = displayStlPathForDb;
+      previewSourceFormat = 'stl';
+    }
+
+    // 4. Analyse geometry + generate the GLB preview. Dimensions/print-estimate/
+    //    mesh QA always read the PRINT file (stlTmp) — those describe what a buyer
+    //    actually prints. Only the preview GLB's source swaps to the clean display
+    //    file when one was provided. Preview generation has two modes: when the
+    //    bake worker is enabled the GLB is produced out-of-process (normal/AO-baked
+    //    proxy) and glb_file_path is filled in later by the worker; otherwise we
+    //    fall back to the in-process pure-Node decimator exactly as before.
     const stlData = await processSTL(stlTmp);
     const bakeEnabled = isBakeWorkerEnabled();
     let glbStoragePath: string | null = null;
     if (!bakeEnabled) {
-      const glbPath = await generateGLB(stlTmp);
+      const glbPath = await generateGLB(previewSourceLocalPath);
       glbStoragePath = await uploadToStorage(glbPath, 'previews');
     }
 
@@ -1884,6 +1977,13 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       await fsp.writeFile(canonTmp, stlBuffer);
       canonicalStlPath = await uploadToStorage(canonTmp, 'models');
       sourceFilePath = rawKey;
+    }
+    // No display file → the preview/owner GLBs are sourced from the print file
+    // itself, same as before this feature existed (prefer the original OBJ for
+    // the bake worker's material atlas, else the canonical/raw STL).
+    if (!displayRawKey) {
+      previewSourceKey = format === 'obj' ? rawKey : (canonicalStlPath ?? rawKey);
+      previewSourceFormat = format === 'obj' ? 'obj' : 'stl';
     }
 
     const printEstimate = estimatePrintCost({
@@ -1918,6 +2018,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
          mesh_triangle_count = $16,
          mesh_open_edges = $17,
          mesh_report = $18,
+         display_stl_path = $21,
          processing_status = $19, processing_error = NULL,
          updated_at = NOW()
        WHERE id = $20`,
@@ -1942,6 +2043,7 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
         // the pure-Node path is ready now (unless it still has parts to convert).
         bakeEnabled || hasParts ? 'processing' : 'ready',
         modelId,
+        displayStlPathForDb,
       ]
     );
 
@@ -1959,19 +2061,19 @@ async function processUploadedModel(modelId: string, rawKey: string, filename?: 
       }
     }
 
-    // 6. Preview bake (worker mode): enqueue the primary mesh. Prefer the original
-    //    OBJ (materials survive for the baseColor atlas) over the canonical STL.
+    // 6. Preview bake (worker mode): enqueue the primary mesh. Sourced from the
+    //    clean display file when one was provided, else the print file (preferring
+    //    the original OBJ so its materials survive for the baseColor atlas).
     if (bakeEnabled) {
-      const bakeSourceKey = format === 'obj' ? rawKey : (canonicalStlPath ?? rawKey);
-      const bakeSourceFormat = format === 'obj' ? 'obj' : 'stl';
-      await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
+      await enqueueBakeJob({ modelId, partId: null, sourceKey: previewSourceKey, sourceFormat: previewSourceFormat });
     }
 
-    // 6b. Owner full-fidelity GLB (migration 041) — a SEPARATE queue, always from
-    //     the canonical STL. Enqueued after the model has already been marked
-    //     'ready' above, and it never feeds back into processing_status, so it adds
+    // 6b. Owner full-fidelity GLB (migration 041) — a SEPARATE queue. Same source
+    //     as the preview bake above: the display file when present, else the
+    //     canonical STL. Enqueued after the model has already been marked 'ready'
+    //     above, and it never feeds back into processing_status, so it adds
     //     exactly nothing to how long the artist waits on this upload.
-    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: canonicalStlPath ?? rawKey });
+    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: previewSourceKey });
 
     // Allowed self-duplicates: tell the artist once, neutrally. Listing a piece on
     // its own AND in a set is exactly what this permits, but an accidental double

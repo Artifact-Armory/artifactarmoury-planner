@@ -119,6 +119,14 @@ CREATE TABLE models (
     full_glb_status VARCHAR(20),   -- queued|processing|ready|failed|skipped
     full_glb_error TEXT,
     full_glb_tris INTEGER,
+    -- Optional "clean preview" companion file (migration 053). An artist whose
+    -- print STL already has supports attached ticks is_presupported and uploads a
+    -- separate support-free STL; that file, canonicalized here, becomes the
+    -- source for glb_file_path/full_glb_path instead of stl_file_path so the
+    -- marketplace/planner never shows the support structures. Never served for
+    -- download — stl_file_path (the print file) is unaffected either way.
+    is_presupported BOOLEAN NOT NULL DEFAULT false,
+    display_stl_path VARCHAR(500),
     thumbnail_path VARCHAR(500),
     -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
     -- is the artist's original file (delivered to the buyer alongside the STL).

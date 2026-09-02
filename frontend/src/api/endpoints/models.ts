@@ -52,6 +52,17 @@ export const modelsApi = {
      */
     showInPlanner?: boolean
     /**
+     * Set when the print file (rawKey) already has supports built in. When true,
+     * displayRawKey is required — a separate support-free STL used ONLY to build
+     * the marketplace/planner previews. The print file itself is unaffected and
+     * is still exactly what buyers download.
+     */
+    isPresupported?: boolean
+    /** The clean preview file's raw/ key — required when isPresupported is true. */
+    displayRawKey?: string
+    /** The clean preview file's original filename (drives its format detection). */
+    displayFilename?: string
+    /**
      * Extra STL parts for a multi-part "set" model (primary is the main rawKey).
      * `groupIndex`/`groupName` place a part inside a named component — group 0 is
      * the primary file's component, 1..N are the ones added after it.

@@ -132,6 +132,12 @@ const CreateModel: React.FC = () => {
   // The listing's files, grouped into named models (see Component above). The very
   // first file of the first component is the primary — the model row's own STL.
   const [components, setComponents] = React.useState<Component[]>([newComponent()])
+  // Pre-supported print file: when the primary STL already has supports built in
+  // (common for resin models), the marketplace/planner preview would otherwise
+  // show them. Ticking this reveals a separate, optional upload for a support-free
+  // version used ONLY to render the preview — the print file itself is untouched.
+  const [isPresupported, setIsPresupported] = React.useState(false)
+  const [previewFile, setPreviewFile] = React.useState<File | null>(null)
 
   const [phase, setPhase] = React.useState<Phase>('form')
   const [progress, setProgress] = React.useState(0)
@@ -185,6 +191,18 @@ const CreateModel: React.FC = () => {
       )
       return
     }
+    if (isPresupported && !previewFile) {
+      setError('Upload a support-free preview model, or untick "This model is pre-supported"')
+      return
+    }
+    if (previewFile && !MESH_FILE_RE.test(previewFile.name)) {
+      setError('The preview model must be an .stl, .obj or .3mf')
+      return
+    }
+    if (previewFile && previewFile.size > MAX_MODEL_FILE_BYTES) {
+      setError(`The preview model is ${(previewFile.size / (1024 * 1024)).toFixed(0)}MB — the maximum is ${MAX_MODEL_FILE_MB}MB.`)
+      return
+    }
     if (!thumbFile) { setError('Add a thumbnail image for your model'); return }
     const price = parseFloat(basePrice)
     if (!name.trim()) { setError('Give your model a name'); return }
@@ -200,9 +218,10 @@ const CreateModel: React.FC = () => {
       setPhase('uploading')
       setProgress(0)
 
-      // Every file (all components + the thumbnail) contributes to one bar, so a
-      // 12-file village doesn't look stuck at 100% after the first upload.
-      const totalUploads = allFiles.length + 1
+      // Every file (all components + the thumbnail + the optional preview model)
+      // contributes to one bar, so a 12-file village doesn't look stuck at 100%
+      // after the first upload.
+      const totalUploads = allFiles.length + 1 + (previewFile ? 1 : 0)
       let uploadsDone = 0
       const bump = (pct: number) =>
         setProgress(Math.round(((uploadsDone + pct / 100) / totalUploads) * 100))
@@ -242,6 +261,14 @@ const CreateModel: React.FC = () => {
       const thumbnailKey = (await uploadsApi.uploadDirect(thumbFile, 'thumbnails', bump)).key
       uploadsDone++
 
+      // 3b. Optional clean preview model (pre-supported print file).
+      let displayRawKey: string | undefined
+      if (previewFile) {
+        startFile(previewFile.name)
+        displayRawKey = (await uploadsApi.uploadDirect(previewFile, 'raw', bump)).key
+        uploadsDone++
+      }
+
       // 4. Create the model row; the API processes it (+ all parts) in the background.
       const created = await modelsApi.createFromUpload({
         rawKey,
@@ -256,6 +283,9 @@ const CreateModel: React.FC = () => {
         printerType: printerType || undefined,
         thumbnailKey,
         showInPlanner,
+        isPresupported,
+        displayRawKey,
+        displayFilename: previewFile?.name,
         parts: parts.length ? parts : undefined,
         // Names the primary file's component — only meaningful once the listing is
         // split into several named models.
@@ -576,6 +606,60 @@ const CreateModel: React.FC = () => {
             Reusing your own files is fine — list a piece on its own <em>and</em> inside a set. Only a
             file matching <strong>another artist’s</strong> model is rejected.
           </p>
+        </div>
+
+        <div className="rounded-lg border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={isPresupported}
+              onChange={(e) => {
+                setIsPresupported(e.target.checked)
+                if (!e.target.checked) setPreviewFile(null)
+              }}
+              disabled={busy}
+            />
+            <span>
+              <span className="font-medium block">This model's print file already has supports</span>
+              <span className="text-xs text-muted-foreground">
+                If your main file is pre-supported (common for resin models), the marketplace
+                and 3D planner preview would otherwise be built from all those support struts.
+                Tick this and upload a separate, support-free version below — it's used only to
+                render the preview. Buyers still download your actual print file, supports
+                included.
+              </span>
+            </span>
+          </label>
+
+          {isPresupported && (
+            <div className="mt-3 border-t border-border/70 pt-3">
+              <label className="block text-sm font-medium mb-1">
+                Preview model (no supports) <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-muted-foreground mb-2">
+                A clean version of the finished model — ideally the whole thing assembled in one
+                file, even if the print files are split into separate parts. Only used to build
+                the preview; never given to buyers.
+              </p>
+              <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                <Upload size={16} />
+                {previewFile ? 'Change file…' : 'Choose file…'}
+                <input
+                  type="file"
+                  accept=".stl,.obj,.3mf"
+                  className="hidden"
+                  disabled={busy}
+                  onChange={(e) => setPreviewFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {previewFile && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  {previewFile.name} · {(previewFile.size / 1_048_576).toFixed(1)} MB
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div>

@@ -645,6 +645,44 @@ individual model out of it with one click, leaving the order's other items untou
   real login** — same `DB_MOCK=true` local-dev limitation as the contact inbox and promo codes
   above. Verify on the first deploy after the migration runs, ideally with a real test refund.
 
+## Pre-supported preview upload (built 2026-09-02, migration 053)
+Some print files (resin especially) already have supports built into the STL. Rendering the
+marketplace card / planner GLB straight from that file shows a strut forest instead of the model.
+`CreateModel.tsx` now has a checkbox — **"This model's print file already has supports"** — that,
+when ticked, reveals a required second upload: a support-free STL used **only** to build the
+preview. It's a **whole-listing** option (not per-part/per-component): it swaps the source for the
+model's own `glb_file_path`/`full_glb_path` (primary asset), not each `model_parts` row. The framing
+doubles as a nudge toward uploading one clean, fully-assembled preview even when the actual print
+files are split into several parts for the printer.
+- **Schema:** `models.is_presupported` (bool) + `models.display_stl_path` (canonical STL of the
+  preview file, same "raw STL upload keeps its `raw/` key, OBJ/3MF gets canonicalized into
+  `models/`" convention as the primary file). Never referenced by any download/watermark path —
+  only `stl_file_path` is ever served to a buyer.
+- **Both GLB tiers switch, per this session's decision:** the public preview proxy AND the
+  buyer's owner-tier full-fidelity GLB (migration 041) are built from the display file when one
+  is provided — nobody, owner included, sees the support structures in the planner; only the STL
+  download shows them. `processUploadedModel` (`routes/models.ts`) resolves one `previewSourceKey`
+  /`previewSourceFormat`/`previewSourceLocalPath` up front (display file if present, else the print
+  file exactly as before) and both the pure-Node `generateGLB` fallback and the bake-worker /
+  full-GLB queue enqueues read from it — no new job/table shape needed, since a job is already
+  keyed by `(modelId, partId=null)` and simply gets a different `sourceKey`.
+- **Dims, mesh QA, print-time estimate, and the file-hash/geometry-fingerprint dedup used to
+  reject/publish the LISTING** all still read the **print file** (`stlTmp`), never the display
+  file — those describe what a buyer actually prints. The display file gets its **own** file-hash +
+  geometry-fingerprint dedup pass (foreign match rejects the whole upload, self-match rolls into the
+  existing `model.duplicate_allowed` notice) — it's still someone's geometry and worth the same
+  theft check, even though nobody downloads it.
+- **Known v1 scope limits, not built:** replacing the print file later via **"Upload new
+  version"** (`processModelVersionUpdate`) does NOT re-derive from an existing `display_stl_path` —
+  it regenerates the preview straight from the new print file, same as a model that was never
+  presupported, so a version bump can silently bring supports back into view. Per-part/per-component
+  clean previews aren't built (each part still renders from its own print file). Editing/attaching a
+  preview file after the initial upload isn't built either (`EditModel.tsx` untouched). All three are
+  reasonable follow-ups if they turn out to matter.
+- Both projects typecheck clean. **Untested against a real Postgres** — same `DB_MOCK=true`
+  local-dev limitation as everything else in this list; verify on the first deploy after the
+  migration runs, ideally with a real pre-supported upload.
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,
