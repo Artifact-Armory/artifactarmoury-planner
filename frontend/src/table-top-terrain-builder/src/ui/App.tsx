@@ -482,6 +482,29 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     )
   }, [filtered])
 
+  // Multi-part "set" models, as browsable group tiles in the Catalogue tab —
+  // not just under "My items". Sets are excluded from the flat per-model grid
+  // above (a set is one purchase covering several placeable parts), so without
+  // this they were never discoverable by anyone who didn't already own one:
+  // if every currently-published model happens to be a set, the Catalogue tab
+  // reads as completely empty. `sets` here only ever holds *published* sets
+  // that have at least one ready part (see loadSetsFromAPI), so no ownership
+  // filter is needed — same visibility rule the flat catalogue already uses.
+  const catalogueSetGroups = React.useMemo(
+    () =>
+      sets.map((s) => ({
+        key: `set:${s.id}`,
+        kind: 'set' as const,
+        id: s.id,
+        name: s.name,
+        thumbnail: s.thumbnail,
+        price: s.price,
+        owned: ownedModelIds.has(s.id),
+        memberIds: s.partAssetIds,
+      })),
+    [sets, ownedModelIds],
+  )
+
   // Part assets (from "set" models) are resolvable for tiles but kept OFF the
   // flat catalogue — merge them here only for lookups.
   const assetsById = React.useMemo(
@@ -560,6 +583,39 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           <span>{owned ? 'Owned' : 'In basket'}</span>
         </div>
       </button>
+    )
+  }
+
+  // An expandable group tile (a bundle or a multi-part set) — click to reveal its
+  // member models/parts, each individually placeable via renderModelTile. Shared
+  // by the Catalogue tab (every published set, browsable by anyone) and "My
+  // items" (owned/basket/own bundles + sets).
+  const renderGroupTile = (g: {
+    key: string; kind: 'set' | 'bundle'; id: string; name: string
+    thumbnail?: string; price: number; owned: boolean; memberIds: string[]
+  }) => {
+    const expanded = expandedBundles.has(g.key)
+    return (
+      <div key={g.key} className="tb-bundle">
+        <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(g.key)}>
+          <div className="tb-thumb sm">
+            {g.thumbnail ? <img src={g.thumbnail} alt="" /> : <Box size={16} />}
+          </div>
+          <div className="tb-bundle-info">
+            <div className="tb-tile-name">{g.name}</div>
+            <div className="tb-tile-meta">
+              <span className="tb-pill bundle">{g.kind === 'set' ? 'SET' : 'BUNDLE'} · {g.memberIds.length}</span>
+              <span>{g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`}</span>
+            </div>
+          </div>
+          <ChevronDown size={16} className={`tb-chev ${expanded ? 'is-open' : ''}`} />
+        </button>
+        {expanded && (
+          <div className="tb-palette-grid" style={{ marginTop: 8 }}>
+            {g.memberIds.map((id) => renderModelTile(id, g.owned))}
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -1122,7 +1178,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('catalogue')}
               >
-                Catalogue <span className="tb-small">{filtered.length}</span>
+                Catalogue <span className="tb-small">{filtered.length + catalogueSetGroups.length}</span>
               </button>
               <button
                 className={`tb-tab ${paletteTab === 'mine' ? 'is-active' : ''}`}
@@ -1233,6 +1289,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 )}
 
                 <div className="tb-palette-scroll">
+                  {catalogueSetGroups.length > 0 && (
+                    <div className="tb-palette-section">
+                      <div className="tb-palette-cat">Sets</div>
+                      {catalogueSetGroups.map(renderGroupTile)}
+                    </div>
+                  )}
                   {paletteGroups.map(([cat, items]) => (
                     <div key={cat} className="tb-palette-section">
                       <div className="tb-palette-cat">
@@ -1259,7 +1321,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                       </div>
                     </div>
                   ))}
-                  {filtered.length === 0 && (
+                  {filtered.length === 0 && catalogueSetGroups.length === 0 && (
                     <div className="tb-small" style={{ padding: 8 }}>
                       {catalogueLoading ? 'Loading…' : 'No models match your filters.'}
                     </div>
@@ -1274,31 +1336,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   </div>
                 )}
 
-                {myItems.groups.map((g) => {
-                  const expanded = expandedBundles.has(g.key)
-                  return (
-                    <div key={g.key} className="tb-bundle">
-                      <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(g.key)}>
-                        <div className="tb-thumb sm">
-                          {g.thumbnail ? <img src={g.thumbnail} alt="" /> : <Box size={16} />}
-                        </div>
-                        <div className="tb-bundle-info">
-                          <div className="tb-tile-name">{g.name}</div>
-                          <div className="tb-tile-meta">
-                            <span className="tb-pill bundle">{g.kind === 'set' ? 'SET' : 'BUNDLE'} · {g.memberIds.length}</span>
-                            <span>{g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`}</span>
-                          </div>
-                        </div>
-                        <ChevronDown size={16} className={`tb-chev ${expanded ? 'is-open' : ''}`} />
-                      </button>
-                      {expanded && (
-                        <div className="tb-palette-grid" style={{ marginTop: 8 }}>
-                          {g.memberIds.map((id) => renderModelTile(id, g.owned))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                {myItems.groups.map(renderGroupTile)}
 
                 {myItems.displayModels.length > 0 && (
                   <div className="tb-palette-section">
