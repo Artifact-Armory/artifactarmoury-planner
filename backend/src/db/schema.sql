@@ -288,6 +288,12 @@ CREATE TABLE model_parts (
     -- the component that owns the model's own primary STL (migration 038).
     group_index INTEGER NOT NULL DEFAULT 0,
     group_name VARCHAR(255),
+    -- Optional "clean preview" companion file, per-component (migration 054 —
+    -- extends 053's models.is_presupported/display_stl_path to model_parts).
+    -- Only meaningful on a component's first/primary part; every other part in
+    -- that component still renders from its own print file.
+    is_presupported BOOLEAN NOT NULL DEFAULT false,
+    display_stl_path VARCHAR(500),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -370,6 +370,7 @@ router.post('/from-upload',
     // files together and separate from the Tavern's two (migration 038).
     const extraParts: Array<{
       rawKey: string; filename?: string; name?: string; groupIndex: number; groupName: string | null;
+      isPresupported: boolean; displayRawKey: string | null;
     }> = [];
     if (parts != null) {
       if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
@@ -400,7 +401,35 @@ router.post('/from-upload',
             `A part file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB per file — please reduce it and upload again.`,
           );
         }
-        extraParts.push({ rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName });
+        // Per-component "clean preview" (migration 054) — only meaningful when
+        // this part is a component's first/primary file, but that's a frontend
+        // convention (which part it attaches the field to), not something
+        // enforced here.
+        const partPresupported = p.isPresupported === true || p.isPresupported === 'true';
+        let partDisplayRawKey: string | null = null;
+        if (partPresupported) {
+          if (!p.displayRawKey || typeof p.displayRawKey !== 'string' || !p.displayRawKey.startsWith('raw/')) {
+            throw new ValidationError('Upload a support-free preview model for each pre-supported part, or untick it');
+          }
+          if (!meshFormatFromName(p.displayRawKey)) {
+            throw new ValidationError('A part’s preview model file must be an STL, OBJ or 3MF file');
+          }
+          const displayBytes = await objectSize(p.displayRawKey);
+          if (displayBytes == null) {
+            throw new ValidationError('A part’s preview model file was not found in storage — retry the upload');
+          }
+          if (displayBytes > MAX_MODEL_FILE_BYTES) {
+            await safeDeleteObject(p.displayRawKey);
+            throw new ValidationError(
+              `A part's preview model file is too large (${(displayBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`,
+            );
+          }
+          partDisplayRawKey = p.displayRawKey;
+        }
+        extraParts.push({
+          rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName,
+          isPresupported: partPresupported, displayRawKey: partDisplayRawKey,
+        });
       }
     }
     const partCount = 1 + extraParts.length;
@@ -471,9 +500,12 @@ router.post('/from-upload',
       const nth = (seenInGroup.get(p.groupIndex) ?? (p.groupIndex === 0 ? 1 : 0)) + 1;
       seenInGroup.set(p.groupIndex, nth);
       await db.query(
-        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, processing_status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'processing')`,
-        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName]
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, is_presupported, display_stl_path, processing_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'processing')`,
+        // display_stl_path starts as the raw uploaded key — same "starts raw,
+        // finalized in place" convention stl_file_path uses — and is turned
+        // into a canonical path by processModelParts, same as the print file.
+        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey]
       );
     }
 
@@ -2286,7 +2318,7 @@ async function processModelParts(
   selfMatches?: string[],
 ): Promise<void> {
   const { rows: parts } = await db.query(
-    `SELECT id, name, stl_file_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
     [modelId]
   );
 
@@ -2317,12 +2349,63 @@ async function processModelParts(
         selfMatches.push(geoDup.own.name);
       }
 
+      // Per-component "clean preview" (migration 054) — display_stl_path still
+      // holds the RAW uploaded key at this point (see the from-upload INSERT).
+      // Mirrors processUploadedModel's handling of the whole-listing case:
+      // dims/dedup/mesh-QA read the print file above; only the preview/owner
+      // GLB source swaps to this file when present.
+      let previewSourceKey: string;
+      let previewSourceFormat: 'stl' | 'obj' = format === 'obj' ? 'obj' : 'stl';
+      let previewSourceLocalPath = stlTmp;
+      let displayStlPathForDb: string | null = null;
+      if (part.is_presupported && part.display_stl_path) {
+        const displayRawKey: string = part.display_stl_path;
+        const displayFormat: MeshFormat = meshFormatFromName(displayRawKey) ?? 'stl';
+        const displayStlTmp = path.join(tmpDir, 'display.stl');
+        const displayRawBuffer = await downloadObject(displayRawKey);
+        const displayStlBuffer = convertToStl(displayRawBuffer, displayFormat);
+        await fsp.writeFile(displayStlTmp, displayStlBuffer);
+
+        const displayFileHash = computeFileHash(displayStlBuffer);
+        const displayHashDup = await db.query(
+          'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
+          [displayFileHash, modelId],
+        );
+        const foreignDisplayHashDup = displayHashDup.rows.find((r: any) => r.artist_id !== uploaderId);
+        const displayFingerprint = await computeGeometryFingerprint(displayStlTmp);
+        const displayGeoDup = foreignDisplayHashDup
+          ? null
+          : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
+        if (foreignDisplayHashDup || displayGeoDup?.foreign) {
+          const reason = duplicateMessage(foreignDisplayHashDup ? 'file' : 'geometry', `${part.name} preview`);
+          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+          await markModelFailed(modelId, reason);
+          await safeDeleteObject(part.stl_file_path);
+          await safeDeleteObject(displayRawKey);
+          throw new Error(reason);
+        }
+        const displaySelfName = displayHashDup.rows[0]?.name ?? displayGeoDup?.own?.name;
+        if (displaySelfName && selfMatches && !selfMatches.includes(displaySelfName)) {
+          selfMatches.push(displaySelfName);
+        }
+
+        displayStlPathForDb = displayRawKey;
+        if (displayFormat !== 'stl') {
+          const displayCanonTmp = path.join(tmpDir, 'display-canonical.stl');
+          await fsp.writeFile(displayCanonTmp, displayStlBuffer);
+          displayStlPathForDb = await uploadToStorage(displayCanonTmp, 'models');
+        }
+
+        previewSourceLocalPath = displayStlTmp;
+        previewSourceFormat = 'stl';
+      }
+
       const stlData = await processSTL(stlTmp);
       // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
       const bakeEnabled = isBakeWorkerEnabled();
       let glbStoragePath: string | null = null;
       if (!bakeEnabled) {
-        const glbPath = await generateGLB(stlTmp);
+        const glbPath = await generateGLB(previewSourceLocalPath);
         glbStoragePath = await uploadToStorage(glbPath, 'previews');
       }
 
@@ -2335,6 +2418,13 @@ async function processModelParts(
         canonicalStlPath = await uploadToStorage(canonTmp, 'models');
         sourceFilePath = part.stl_file_path;
       }
+      // No display file → preview/owner GLBs source from the print file itself,
+      // same as before this feature existed.
+      if (!displayStlPathForDb) {
+        previewSourceKey = format === 'obj' ? part.stl_file_path : (canonicalStlPath ?? part.stl_file_path);
+      } else {
+        previewSourceKey = displayStlPathForDb;
+      }
 
       await db.query(
         `UPDATE model_parts SET
@@ -2342,25 +2432,23 @@ async function processModelParts(
            file_hash = $5, geometry_fingerprint = $6,
            source_format = $7, source_file_path = $8,
            stl_file_path = COALESCE($9, stl_file_path),
+           display_stl_path = $12,
            processing_status = $11, processing_error = NULL
          WHERE id = $10`,
-        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id, bakeEnabled ? 'processing' : 'ready']
+        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id, bakeEnabled ? 'processing' : 'ready', displayStlPathForDb]
       );
 
-      // Worker mode: enqueue a bake for this part (from the original OBJ when we
-      // have one, else the canonical STL). The worker fills in its glb + status.
+      // Worker mode: enqueue a bake for this part (sourced from the clean
+      // preview file when present, else the original OBJ when we have one,
+      // else the canonical STL). The worker fills in its glb + status.
       if (bakeEnabled) {
-        const partSourceKey = format === 'obj' ? part.stl_file_path : (canonicalStlPath ?? part.stl_file_path);
-        const partSourceFormat = format === 'obj' ? 'obj' : 'stl';
-        await enqueueBakeJob({ modelId, partId: part.id, sourceKey: partSourceKey, sourceFormat: partSourceFormat });
+        await enqueueBakeJob({ modelId, partId: part.id, sourceKey: previewSourceKey, sourceFormat: previewSourceFormat });
       }
 
       // Owner full-fidelity GLB for this part. Each part of a set is placed
       // individually in the planner, so each needs its own full mesh — one
       // purchase, N owner GLBs. Off the critical path, same as the primary.
-      await enqueueFullGlbJob({
-        modelId, partId: part.id, sourceKey: canonicalStlPath ?? part.stl_file_path,
-      });
+      await enqueueFullGlbJob({ modelId, partId: part.id, sourceKey: previewSourceKey });
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }

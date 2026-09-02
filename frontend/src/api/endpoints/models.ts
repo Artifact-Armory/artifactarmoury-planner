@@ -73,6 +73,13 @@ export const modelsApi = {
       name?: string
       groupIndex?: number
       groupName?: string
+      /**
+       * Per-component clean preview (only meaningful on a component's first/
+       * primary part — see isPresupported above, same idea one level down).
+       */
+      isPresupported?: boolean
+      /** The clean preview file's raw/ key — required when isPresupported is true. */
+      displayRawKey?: string
     }>
     /** Taxonomy tags as `facetSlug:termPath` tokens. */
     terms?: string[]

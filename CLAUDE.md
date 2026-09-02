@@ -645,15 +645,42 @@ individual model out of it with one click, leaving the order's other items untou
   real login** — same `DB_MOCK=true` local-dev limitation as the contact inbox and promo codes
   above. Verify on the first deploy after the migration runs, ideally with a real test refund.
 
-## Pre-supported preview upload (built 2026-09-02, migration 053)
+## Pre-supported preview upload (built 2026-09-02, migrations 053 + 054)
 Some print files (resin especially) already have supports built into the STL. Rendering the
 marketplace card / planner GLB straight from that file shows a strut forest instead of the model.
-`CreateModel.tsx` now has a checkbox — **"This model's print file already has supports"** — that,
-when ticked, reveals a required second upload: a support-free STL used **only** to build the
-preview. It's a **whole-listing** option (not per-part/per-component): it swaps the source for the
-model's own `glb_file_path`/`full_glb_path` (primary asset), not each `model_parts` row. The framing
-doubles as a nudge toward uploading one clean, fully-assembled preview even when the actual print
-files are split into several parts for the printer.
+`CreateModel.tsx` has a checkbox per named model — **"This model's print file already has
+supports"** — that, when ticked, reveals a required second upload: a support-free STL used
+**only** to build that model's preview. The framing doubles as a nudge toward uploading one clean,
+fully-assembled preview even when the actual print files are split into several parts for the
+printer.
+- **Per-component, not per-listing (054, same day as 053) — a scope change made after 053
+  shipped.** 053's first cut was whole-listing-only: one checkbox, applying only to the model's own
+  primary asset. That breaks down for a **grouped** listing ("Small Village" — several independently
+  named models under one product, migration 038): only one of several models could ever get a clean
+  preview, and there was no way to say *which* — "it'll just be a heap of separate models with no
+  names to preview" (the actual bug report). 054 moves the checkbox+upload into each component block
+  in `CreateModel.tsx` (the `Component` type gained `isPresupported`/`previewFile`) and adds
+  `model_parts.is_presupported`/`display_stl_path`, mirroring 053's columns on `models`. Component 0
+  (the listing's own primary file) still routes through the original top-level
+  `isPresupported`/`displayRawKey` fields on `POST /from-upload`; every component after it attaches
+  the same two fields to the **first part pushed for that component** (`isComponentPrimary = ci > 0
+  && fi === 0` in `CreateModel.tsx` — that part's `display_order` is the lowest in its `group_index`,
+  same "first file = primary" convention the rest of the grouped-listing feature already uses).
+  `processModelParts` (`routes/models.ts`) mirrors `processUploadedModel`'s display-file handling
+  almost line-for-line: dedup the display file (foreign match fails that part and the whole model,
+  self-match rolls into the existing roll-up notice), canonicalize if non-STL, and resolve that
+  part's own `previewSourceKey`/`previewSourceFormat`/`previewSourceLocalPath` for its GLB/bake/
+  full-GLB job — same mechanism as 053, just keyed per-part instead of per-model. **Still one clean
+  preview per NAMED MODEL, not per file** — a component with several of its own part files (a
+  multi-part "Village Tower") still only swaps its first/primary part; the rest of that component's
+  files keep rendering from their own print files, the same v1 limit 053 already had, just moved one
+  level down instead of removed.
+- Both projects typecheck clean. **Untested against a real Postgres or a real grouped upload** —
+  same `DB_MOCK=true` limitation as 053; verify on the first deploy, ideally with a real multi-
+  component pre-supported listing.
+
+The rest of this section (053's original notes) still applies to the whole-listing / component-0
+case unchanged:
 - **Schema:** `models.is_presupported` (bool) + `models.display_stl_path` (canonical STL of the
   preview file, same "raw STL upload keeps its `raw/` key, OBJ/3MF gets canonicalized into
   `models/`" convention as the primary file). Never referenced by any download/watermark path —
@@ -675,10 +702,10 @@ files are split into several parts for the printer.
 - **Known v1 scope limits, not built:** replacing the print file later via **"Upload new
   version"** (`processModelVersionUpdate`) does NOT re-derive from an existing `display_stl_path` —
   it regenerates the preview straight from the new print file, same as a model that was never
-  presupported, so a version bump can silently bring supports back into view. Per-part/per-component
-  clean previews aren't built (each part still renders from its own print file). Editing/attaching a
-  preview file after the initial upload isn't built either (`EditModel.tsx` untouched). All three are
-  reasonable follow-ups if they turn out to matter.
+  presupported, so a version bump can silently bring supports back into view (this applies to
+  `model_parts` too — there's no per-part re-upload endpoint at all yet, so it's moot there for now).
+  Editing/attaching a preview file after the initial upload isn't built either (`EditModel.tsx`
+  untouched). Both are reasonable follow-ups if they turn out to matter.
 - Both projects typecheck clean. **Untested against a real Postgres** — same `DB_MOCK=true`
   local-dev limitation as everything else in this list; verify on the first deploy after the
   migration runs, ideally with a real pre-supported upload.
