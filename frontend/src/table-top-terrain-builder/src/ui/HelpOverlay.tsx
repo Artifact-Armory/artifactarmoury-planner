@@ -74,6 +74,8 @@ const GROUPS: Group[] = [
       ['Tilt upright / lay flat', 'T'],
       ['Tilt the other way', 'Shift + T'],
       ['Duplicate', 'Ctrl + D'],
+      ['Fuse selection into one piece', 'Ctrl + G'],
+      ['Unfuse back into separate pieces', 'Ctrl + Shift + G'],
       ['Delete', 'Delete / Backspace'],
     ],
   },

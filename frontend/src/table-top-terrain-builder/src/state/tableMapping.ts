@@ -33,6 +33,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
         rotationDeg: i.rotationDeg,
         pitchDeg: i.pitchDeg ?? 0,
         level: i.level ?? 0,
+        groupId: i.groupId ?? null,
       })),
       // Sculpted surface (null/omitted when the table is flat).
       heightmap: serializeHeightmap(heightmap ?? null),
@@ -64,6 +65,7 @@ export function deserializeLayout(
       rotationDeg: Number(m.rotationDeg ?? m.rotation ?? 0),
       pitchDeg: Number(m.pitchDeg ?? 0),
       level: Number(m.level ?? 0),
+      groupId: m.groupId ?? undefined,
     }))
     .filter((i: Instance) => i.assetId)
 

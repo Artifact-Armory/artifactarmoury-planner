@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { useAppStore } from '@state/store'
+import { useAppStore, groupMembersOf } from '@state/store'
 import { GridHelper } from './helpers'
 import { getAssetById, type Asset } from '@core/assets'
 import { BuilderCamera } from './BuilderCamera'
@@ -590,11 +590,16 @@ export function ThreeStage() {
       if (pieceId) {
         const additive = e.shiftKey
         const sel = new Set(s.selectedInstanceIds)
+        // A fused piece always selects/toggles as its whole group, not just the
+        // one clicked — that's what makes a stack move as one unit.
+        const groupIds = groupMembersOf(s.instances, pieceId)
         if (additive) {
-          sel.has(pieceId) ? sel.delete(pieceId) : sel.add(pieceId)
+          const alreadyIn = groupIds.every(id => sel.has(id))
+          if (alreadyIn) groupIds.forEach(id => sel.delete(id))
+          else groupIds.forEach(id => sel.add(id))
           useAppStore.getState().setSelectedInstances([...sel])
         } else if (!sel.has(pieceId)) {
-          useAppStore.getState().setSelectedInstances([pieceId])
+          useAppStore.getState().setSelectedInstances(groupIds)
         }
         inst.setSelection(new Set(useAppStore.getState().selectedInstanceIds))
         eng.drag = { kind: 'maybe', mode: 'piece', x: e.clientX, y: e.clientY, pieceId, ground: gp, additive, touch }
@@ -966,6 +971,20 @@ export function ThreeStage() {
           e.preventDefault()
           const ids = s.actions.duplicateInstances(s.selectedInstanceIds)
           inst.markPopped(ids)
+          afterStateChange()
+          return
+        }
+        // Fuse / un-fuse the selection into a stack that moves as one piece
+        // (Ctrl+G / Ctrl+Shift+G — the standard group/ungroup shortcut).
+        if (k === 'g' && !e.shiftKey && s.selectedInstanceIds.length >= 2) {
+          e.preventDefault()
+          s.actions.fuseSelected()
+          afterStateChange()
+          return
+        }
+        if (k === 'g' && e.shiftKey && s.selectedInstanceIds.length) {
+          e.preventDefault()
+          s.actions.unfuseSelected()
           afterStateChange()
           return
         }

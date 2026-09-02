@@ -5,7 +5,7 @@ import {
   MousePointer2, Undo2, Redo2, Grid3x3, Maximize2, Save, ShoppingCart,
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
-  Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight,
+  Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -89,6 +89,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const instances = useAppStore((s) => s.instances)
   const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
   const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
+  const fuseSelected = useAppStore((s) => s.actions.fuseSelected)
+  const unfuseSelected = useAppStore((s) => s.actions.unfuseSelected)
   const removeInstances = useAppStore((s) => s.actions.removeInstances)
   const selectedAssetId = useAppStore((s) => s.selectedAssetId)
   const setSelectedAsset = useAppStore((s) => s.setSelectedAsset)
@@ -699,6 +701,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     return assetsById.get(inst.assetId) ?? getAssetById(inst.assetId) ?? null
   }, [selectedInstanceIds, instances, assetsById])
 
+  // Whether the current selection already includes a fused group (drives
+  // showing "Unfuse" instead of/alongside "Fuse" in the toolbar).
+  const selectionHasFusedGroup = React.useMemo(() => {
+    if (!selectedInstanceIds.length) return false
+    const selected = new Set(selectedInstanceIds)
+    return instances.some((i) => selected.has(i.id) && i.groupId)
+  }, [selectedInstanceIds, instances])
+
   const selectedModel = React.useMemo(() => {
     if (!readOnly) return null
     const instId = selectedInstanceIds[selectedInstanceIds.length - 1]
@@ -939,6 +949,24 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 >
                   <RotateCcw size={18} />
                 </button>
+                {selectedInstanceIds.length > 1 && (
+                  <button
+                    className="tb-icon"
+                    title="Fuse selection into one piece (Ctrl+G) — move, rotate, delete as a unit"
+                    onClick={() => fuseSelected()}
+                  >
+                    <Combine size={18} />
+                  </button>
+                )}
+                {selectionHasFusedGroup && (
+                  <button
+                    className="tb-icon"
+                    title="Unfuse selection back into separate pieces (Ctrl+Shift+G)"
+                    onClick={() => unfuseSelected()}
+                  >
+                    <Ungroup size={18} />
+                  </button>
+                )}
               </>
             )}
             <div className="tb-sep" />

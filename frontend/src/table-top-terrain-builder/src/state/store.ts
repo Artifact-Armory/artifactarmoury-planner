@@ -83,6 +83,33 @@ export type Instance = {
   rotationDeg: number  // yaw about the vertical (Y) axis
   pitchDeg?: number    // tilt about the X axis (stand a model up / lay it flat); 0 = default
   level: number        // discrete elevation level of the piece's base (0 = table)
+  /** Shared id linking pieces "fused" together (e.g. a stack) so they select,
+   *  drag, and rotate as one unit. undefined = not fused to anything. */
+  groupId?: string
+}
+
+/** All ids that move together with `id` — its whole fused group, or just itself. */
+export function groupMembersOf(instances: Instance[], id: string): string[] {
+  const inst = instances.find(i => i.id === id)
+  if (!inst?.groupId) return [id]
+  return instances.filter(i => i.groupId === inst.groupId).map(i => i.id)
+}
+
+/** Expand a set of ids so every fused group any of them belongs to is included whole. */
+function expandGroups(instances: Instance[], ids: string[]): string[] {
+  if (!ids.length) return ids
+  const byId = new Map(instances.map(i => [i.id, i]))
+  const groupIds = new Set<string>()
+  const result = new Set<string>()
+  for (const id of ids) {
+    result.add(id)
+    const g = byId.get(id)?.groupId
+    if (g) groupIds.add(g)
+  }
+  if (groupIds.size) {
+    for (const i of instances) if (i.groupId && groupIds.has(i.groupId)) result.add(i.id)
+  }
+  return [...result]
 }
 
 export type SavedLayout = {
@@ -264,6 +291,12 @@ interface AppState {
     updateInstances: (patches: Array<{ id: string; patch: Partial<Omit<Instance,'id'|'assetId'>> }>) => void
     /** Tilt the current selection by deltaDeg about X (e.g. ±90 to stand up / lay flat). */
     tiltSelected: (deltaDeg: number) => void
+    /** Fuse the current selection (2+ pieces, e.g. a stack) into one group that
+     *  selects, drags and rotates as a single piece. Merges any already-fused
+     *  groups touched by the selection into one. */
+    fuseSelected: () => void
+    /** Un-fuse every group touched by the current selection back into loose pieces. */
+    unfuseSelected: () => void
     removeInstance: (id: string) => void
     removeInstances: (ids: string[]) => void
     clearInstances: () => void
@@ -402,9 +435,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   // place leaves sculpt mode.
   setSelectedAsset: (id) => set(s => ({ selectedAssetId: id, terrainTool: id ? 'none' : s.terrainTool })),
   setSelectedInstance: (id) =>
-    set({ selectedInstanceId: id, selectedInstanceIds: id ? [id] : [] }),
+    set(s => {
+      const ids = id ? expandGroups(s.instances, [id]) : []
+      return { selectedInstanceId: ids.length ? ids[ids.length - 1] : null, selectedInstanceIds: ids }
+    }),
   setSelectedInstances: (ids) =>
-    set({ selectedInstanceIds: ids, selectedInstanceId: ids.length ? ids[ids.length - 1] : null }),
+    set(s => {
+      const expanded = expandGroups(s.instances, ids)
+      return { selectedInstanceIds: expanded, selectedInstanceId: expanded.length ? expanded[expanded.length - 1] : null }
+    }),
   setCameraMode: (mode) => set({ cameraMode: mode }),
   setCameraApi: (api) => set({ cameraApi: api }),
   setStageApi: (api) => set({ stageApi: api }),
@@ -668,6 +707,45 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.updateInstances(patches)
     },
 
+    fuseSelected: () => {
+      const s = get()
+      const ids = s.selectedInstanceIds
+      if (ids.length < 2) return
+      const byId = new Map(s.instances.map(i => [i.id, i]))
+      // Any group already touched by the selection gets absorbed too, so fusing
+      // a loose piece onto an existing stack (or two stacks together) merges
+      // them into one group rather than leaving the old one behind.
+      const touchedGroupIds = new Set(
+        ids.map(id => byId.get(id)?.groupId).filter((g): g is string => !!g),
+      )
+      const memberIds = new Set(ids)
+      if (touchedGroupIds.size) {
+        for (const i of s.instances) if (i.groupId && touchedGroupIds.has(i.groupId)) memberIds.add(i.id)
+      }
+      const groupId = `g_${Math.random().toString(36).slice(2, 10)}`
+      set(st => {
+        const instances = st.instances.map(i => memberIds.has(i.id) ? { ...i, groupId } : i)
+        const selectedInstanceIds = [...memberIds]
+        const selectedInstanceId = selectedInstanceIds[selectedInstanceIds.length - 1] ?? null
+        return {
+          instances,
+          selectedInstanceIds,
+          selectedInstanceId,
+          ...saveHistory({ ...st, instances, selectedInstanceId }),
+        }
+      })
+    },
+
+    unfuseSelected: () => {
+      const ids = get().selectedInstanceIds
+      if (!ids.length) return
+      const remove = new Set(ids)
+      set(st => {
+        const instances = st.instances.map(i => remove.has(i.id) ? { ...i, groupId: undefined } : i)
+        return { instances, ...saveHistory({ ...st, instances }) }
+      })
+    },
+
     removeInstance: (id) => {
       set(s => {
         const instances = s.instances.filter(i => i.id !== id)
@@ -716,6 +794,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const instances = [...s.instances, {
           ...instance,
           id: newId,
+          // A lone duplicate shouldn't silently rejoin the source's fused group.
+          groupId: undefined,
           position: { x: instance.position.x + offset, z: instance.position.z + offset }
         }]
         return { instances, selectedInstanceId: newId, selectedInstanceIds: [newId], ...saveHistory({ ...s, instances, selectedInstanceId: newId }) }
@@ -729,12 +809,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!source.length) return []
       const offset = get().table.gridSize
       const newIds: string[] = []
+      // Duplicating a fused group must keep the copies fused to each other, but
+      // under a fresh groupId — never rejoining the originals.
+      const groupIdMap = new Map<string, string>()
       const copies: Instance[] = source.map(inst => {
         const newId = `i_${Math.random().toString(36).slice(2, 10)}`
         newIds.push(newId)
+        let groupId = inst.groupId
+        if (groupId) {
+          if (!groupIdMap.has(groupId)) groupIdMap.set(groupId, `g_${Math.random().toString(36).slice(2, 10)}`)
+          groupId = groupIdMap.get(groupId)
+        }
         return {
           ...inst,
           id: newId,
+          groupId,
           position: { x: inst.position.x + offset, z: inst.position.z + offset },
         }
       })
