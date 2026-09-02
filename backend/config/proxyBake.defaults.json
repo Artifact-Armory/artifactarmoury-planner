@@ -75,6 +75,8 @@
   "remeshStrategy": "decimate",
   "joinLooseParts": true,
   "poisonPillsEnabled": true,
+  "interiorFaceMaxDeleteFrac": 0.5,
+  "minSurvivingTriangleFrac": 0.2,
   "debrisCleanupEnabled": true,
   "debrisIslandMinDiagFrac": 0.03,
   "debrisIslandMinFaces": 30,

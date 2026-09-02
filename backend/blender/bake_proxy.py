@@ -3416,10 +3416,46 @@ def poison_pills(proxy):
         bpy.ops.mesh.delete(type="FACE")
 
     # 2) Interior faces (enclosed pockets a slicer would need but a viewer never sees).
+    #
+    # CONFIRMED PRODUCTION BUG (2026-09-02, "Gothic Church" corner-2-bottom-C):
+    # Blender's select_interior_faces() is a heuristic (its own docs call it
+    # approximate) and on a richly-detailed, deeply-recessed mesh — Gothic
+    # tracery, nested arches, mullions — it can flag the overwhelming majority
+    # of genuinely VISIBLE exterior stonework as "interior", because so much of
+    # it is geometrically surrounded by other nearby faces even though none of
+    # it is enclosed from a viewer's perspective. On that model it selected
+    # effectively the whole mesh: ~300k triangles went in, 610 came out, and
+    # NOTHING caught it — deletedBaseFaces (step 1, tracked) was a normal-looking
+    # 1017, this step's own count was never recorded anywhere, and the only
+    # safety check below ("boundary > 0") is satisfied by a single stray face,
+    # let alone 610 of them. The bake reported success throughout.
+    #
+    # Fix: measure the selection BEFORE deleting anything. Step 1 (base faces)
+    # already broke watertightness in the failing case (1017 > 0), which is all
+    # the "must not be printable" requirement actually needs — so if this
+    # heuristic wants to remove an outsized fraction of the mesh, that's a
+    # misfire, not real interior geometry, and we skip the delete rather than
+    # ship a ruined preview that still reports "success".
     bpy.ops.mesh.select_all(action="DESELECT")
+    deleted_interior = 0
+    interior_skipped = False
     try:
         bpy.ops.mesh.select_interior_faces()
-        bpy.ops.mesh.delete(type="FACE")
+        bm = bmesh.from_edit_mesh(me)
+        bm.faces.ensure_lookup_table()
+        total_faces = len(bm.faces)
+        selected = sum(1 for f in bm.faces if f.select)
+        max_frac = float(CFG.get("interiorFaceMaxDeleteFrac", 0.5))
+        if total_faces > 0 and selected > total_faces * max_frac:
+            interior_skipped = True
+            bpy.ops.mesh.select_all(action="DESELECT")
+            warn("select_interior_faces wanted to delete %d/%d faces (>%.0f%%) — "
+                 "looks like a heuristic misfire on this geometry, not real "
+                 "interior; skipping this step and relying on the base-face "
+                 "deletion for non-printability" % (selected, total_faces, max_frac * 100))
+        else:
+            bpy.ops.mesh.delete(type="FACE")
+            deleted_interior = selected
     except Exception as e:
         warn("select_interior_faces failed (continuing): " + str(e))
 
@@ -3429,6 +3465,8 @@ def poison_pills(proxy):
     bpy.ops.object.mode_set(mode="OBJECT")
 
     REPORT["deletedBaseFaces"] = deleted_base
+    REPORT["deletedInteriorFaces"] = deleted_interior
+    REPORT["interiorFaceHeuristicSkipped"] = interior_skipped
     REPORT["boundaryEdgeCount"] = boundary
     if boundary <= 0:
         fail("Poison-pill assertion failed: proxy is still watertight (0 boundary edges)")
@@ -3710,6 +3748,30 @@ def main():
 
     with Stage("poison_pills"):
         poison_pills(proxy)
+
+    # Blanket safety net (2026-09-02) — catches ANY cleanup step (this one, or a
+    # future one) that guts the mesh, not just the specific interior-faces
+    # heuristic guarded above. The "Gothic Church" corner-2-bottom-C incident
+    # slipped through because every individual step's own bookkeeping looked
+    # reasonable in isolation (a modest, correctly-attributed debris removal; a
+    # normal-looking base-face count) while the combined effect — measured here,
+    # against the triangle count recorded right after decimation — was a ~99.8%
+    # loss that nothing compared end-to-end. Legitimate debris/poison-pill
+    # cleanup on every other part of this same model kept the overwhelming
+    # majority of the mesh, so losing more than minSurvivingTriangleFrac is
+    # treated as a pipeline defect, not real cleanup, and fails the bake loudly
+    # (→ the artist is notified, same as any other bake failure) instead of
+    # silently shipping a ruined preview that reports "success".
+    proxy_tris_before_cleanup = REPORT.get("proxyTriangles", 0)
+    final_tris = triangle_count(proxy)
+    min_frac = float(CFG.get("minSurvivingTriangleFrac", 0.2))
+    if proxy_tris_before_cleanup > 0 and final_tris < proxy_tris_before_cleanup * min_frac:
+        fail(
+            "Post-cleanup mesh lost %.1f%% of its triangles (%d -> %d) during "
+            "debris-cleanup/poison-pill steps — looks like a heuristic misfire, "
+            "not legitimate simplification; refusing to export a ruined preview"
+            % ((1 - final_tris / proxy_tris_before_cleanup) * 100, proxy_tris_before_cleanup, final_tris)
+        )
 
     strip_metadata(proxy)
     with Stage("export"):
