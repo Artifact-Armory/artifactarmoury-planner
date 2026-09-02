@@ -731,6 +731,17 @@ async function servePreviewGlb(
   // absorbs reload bursts — which matters, because previewRateLimit counts every
   // request that isn't served from cache and a planner load is dozens of them.
   res.set('Cache-Control', 'private, max-age=300');
+  // Entitlement — and therefore which variant this response is — is decided
+  // entirely off the Authorization header (see optionalAuth), but the browser's
+  // HTTP cache only ever keys on (method, URL) unless a response's Vary header
+  // says otherwise. Without this, one identical URL fetched signed-in (say, an
+  // admin, who is entitled to EVERY model) gets cached and then handed straight
+  // back — no network round-trip at all — to the same browser after signing out
+  // or switching accounts, for as long as max-age allows: an admin viewing the
+  // unwatermarked owner GLB, then logging out, would keep seeing that exact same
+  // response instead of the public proxy. Vary makes the cache key on the header
+  // too, so a logged-out (or different-account) request always revalidates.
+  res.set('Vary', 'Authorization');
   res.set('X-Preview-Variant', variant);
   if (req.headers['if-none-match'] === etag) {
     res.status(304).end();
