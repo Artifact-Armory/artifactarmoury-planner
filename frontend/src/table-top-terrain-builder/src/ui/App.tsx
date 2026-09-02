@@ -30,6 +30,7 @@ import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
 import { useOnboardingStore } from '@/store/onboardingStore'
 import { useTaxStore, grossFromNet, grossFromLines } from '@/store/taxStore'
+import { useUnitsStore, unitLabel, metresToDisplay, displayToMetres, formatPieceDims } from '@/store/unitsStore'
 import Logo from '@/components/common/Logo'
 import FacetRail from '@/components/taxonomy/FacetRail'
 import { facetAppliesTo, MODEL_CLASSES, MODEL_CLASS_SLUG } from '@/api/endpoints/taxonomy'
@@ -60,10 +61,20 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [isOwner, setIsOwner] = React.useState<boolean>(!shareToken)
   const [saving, setSaving] = React.useState(false)
 
+  // Imperial ⇄ metric is purely a display preference (persisted across visits);
+  // every real measurement stays in metres underneath — see store/unitsStore.
+  const unitSystem = useUnitsStore((s) => s.system)
+  const setUnitSystem = useUnitsStore((s) => s.setSystem)
+  const uLabel = unitLabel(unitSystem)
+
   const assets = useAppStore((s) => s.assets)
   const catalogueClass = useAppStore((s) => s.catalogueClass)
   const catalogueTerms = useAppStore((s) => s.catalogueTerms)
   const catalogueFacets = useAppStore((s) => s.catalogueFacets)
+  const catalogueSearch = useAppStore((s) => s.catalogueSearch)
+  const catalogueSort = useAppStore((s) => s.catalogueSort)
+  const catalogueMinPrice = useAppStore((s) => s.catalogueMinPrice)
+  const catalogueMaxPrice = useAppStore((s) => s.catalogueMaxPrice)
   const catalogueLoading = useAppStore((s) => s.catalogueLoading)
   const setCatalogueFilter = useAppStore((s) => s.actions.setCatalogueFilter)
   const bundles = useAppStore((s) => s.bundles)
@@ -198,7 +209,28 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }
 
+  // Search box + price bounds are debounced into the store, which re-queries the
+  // backend browse endpoint — the same one the marketplace uses. That's what keeps
+  // the palette in sync with the market: it used to filter only whatever ~200
+  // "recent" models had loaded at mount, so a search for anything outside that
+  // page (or published afterwards) turned up nothing.
   const [query, setQuery] = React.useState('')
+  const [minPriceInput, setMinPriceInput] = React.useState('')
+  const [maxPriceInput, setMaxPriceInput] = React.useState('')
+  React.useEffect(() => {
+    if (query === catalogueSearch) return
+    const id = setTimeout(() => setCatalogueFilter({ search: query }), 300)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query])
+  React.useEffect(() => {
+    const min = minPriceInput.trim() ? Number(minPriceInput) : null
+    const max = maxPriceInput.trim() ? Number(maxPriceInput) : null
+    if (min === catalogueMinPrice && max === catalogueMaxPrice) return
+    const id = setTimeout(() => setCatalogueFilter({ minPrice: min, maxPrice: max }), 300)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minPriceInput, maxPriceInput])
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
   // Right panel while editing: "table" is what's placed (a planning BOM — placing
   // a model does NOT add it to the basket, see store.ts addInstance); "basket" is
@@ -257,6 +289,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       ? catalogueTerms.filter((t) => t !== token)
       : [...catalogueTerms, token]
     setCatalogueFilter({ terms: next })
+  }
+  const activeFilterCount =
+    catalogueTerms.length + (catalogueMinPrice != null ? 1 : 0) + (catalogueMaxPrice != null ? 1 : 0)
+  const clearCatalogueFilters = () => {
+    setQuery('')
+    setMinPriceInput('')
+    setMaxPriceInput('')
+    setCatalogueFilter({ terms: [], search: '', minPrice: null, maxPrice: null })
   }
 
   // First-visit onboarding lives in a single effect further down (once the scene
@@ -424,13 +464,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
   const effSnap = snapBaseline === 'snap' ? !altMomentary : altMomentary
 
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return assets
-    return assets.filter(
-      (a) => a.name.toLowerCase().includes(q) || a.tags.some((t) => t.toLowerCase().includes(q)),
-    )
-  }, [assets, query])
+  // `assets` is already the server-filtered result (search/class/facets/price all
+  // re-query the backend — see the debounced effects above and setCatalogueFilter),
+  // so no further client-side text filtering is needed here.
+  const filtered = assets
 
   // Group the palette by category ("Terrain" first, then the rest alphabetically).
   const paletteGroups = React.useMemo(() => {
@@ -483,7 +520,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const setModelIds = new Set(sets.map((s) => s.id)) // a set's parent model is its tile
     const modelIds = new Set<string>([...ownedModelIds, ...cartModelIds])
     const displayModels = [...modelIds].filter(
-      (id) => !memberIds.has(id) && !setModelIds.has(id) && assetsById.has(id),
+      (id) => !memberIds.has(id) && !setModelIds.has(id) && (assetsById.has(id) || !!getAssetById(id)),
     )
     // The artist's own models (incl. unpublished drafts). Shown even without a
     // purchase so a creator can lay out their pieces before release.
@@ -514,7 +551,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         key={id}
         className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
         onClick={() => { pickAsset(a.id); }}
-        title={`Place ${a.name}`}
+        title={`Place ${a.name}${a.aabb ? ` — ${formatPieceDims(a.aabb, unitSystem)}` : ''}`}
       >
         <div className="tb-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}</div>
         <div className="tb-tile-name">{a.name}</div>
@@ -536,13 +573,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // A tile for one of the artist's OWN models (incl. unpublished drafts), with a
   // status pill instead of owned/basket. Registered assets resolve via getAssetById.
   const renderOwnModelTile = (m: { id: string; name: string; thumbnail?: string; status: string }) => {
-    if (!getAssetById(m.id)) return null
+    const ownAsset = getAssetById(m.id)
+    if (!ownAsset) return null
     return (
       <button
         key={m.id}
         className={`tb-tile ${selectedAssetId === m.id ? 'is-active' : ''}`}
         onClick={() => pickAsset(m.id)}
-        title={`Place ${m.name}`}
+        title={`Place ${m.name}${ownAsset.aabb ? ` — ${formatPieceDims(ownAsset.aabb, unitSystem)}` : ''}`}
       >
         <div className="tb-thumb">{m.thumbnail ? <img src={m.thumbnail} alt="" /> : <Box size={22} />}</div>
         <div className="tb-tile-name">{m.name}</div>
@@ -564,9 +602,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     for (const i of instances) counts.set(i.assetId, (counts.get(i.assetId) ?? 0) + 1)
     // Set parts live in setPartAssets (off the flat catalogue) — include them so
     // placed set pieces show in the build and their (primary-only) price counts.
+    // Fall back to the global registry (getAssetById) for anything a piece was
+    // placed from that's since scrolled out of `assets` — e.g. the catalogue was
+    // re-queried by a search/filter/sort change after the piece went on the table.
+    // Without the fallback, a placed model would silently vanish from the build
+    // the moment the palette filter no longer includes it.
     const byId = new Map([...assets, ...setPartAssets].map((a) => [a.id, a]))
     const rows = [...counts.entries()]
-      .map(([id, qty]) => ({ asset: byId.get(id), qty }))
+      .map(([id, qty]) => ({ asset: byId.get(id) ?? getAssetById(id), qty }))
       .filter((r) => r.asset)
     const total = rows.reduce((sum, r) => sum + (r.asset!.price ?? 0), 0)
     const pieceCount = instances.length
@@ -591,6 +634,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
   // View-only: the placed model the shopper has tapped, resolved to its
   // purchasable unit (a set part is bought as its parent model) with buy state.
+  // Edit-mode "what did I just select" readout — the piece's real-world size in
+  // the current display unit, shown in the mode badge below.
+  const singleSelectedAsset = React.useMemo(() => {
+    if (selectedInstanceIds.length !== 1) return null
+    const inst = instances.find((i) => i.id === selectedInstanceIds[0])
+    if (!inst) return null
+    return assetsById.get(inst.assetId) ?? getAssetById(inst.assetId) ?? null
+  }, [selectedInstanceIds, instances, assetsById])
+
   const selectedModel = React.useMemo(() => {
     if (!readOnly) return null
     const instId = selectedInstanceIds[selectedInstanceIds.length - 1]
@@ -611,6 +663,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       artistName: asset?.artistName ?? 'Artifact Armoury',
       owned: ownedModelIds.has(id),
       inCart: cartItems.some((it) => it.kind === 'model' && it.id === id),
+      // The placed piece's own real-world size (a set part shows its own size,
+      // not the whole set's) — lets a shopper double-check the scale in person.
+      aabb: asset?.aabb,
     }
   }, [readOnly, selectedInstanceIds, instances, assetsById, sets, ownedModelIds, cartItems])
 
@@ -692,13 +747,34 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     await handleSave()
   }
 
-  // Current board size in feet (rounded for display / preset matching).
+  // Current board size in feet (rounded for preset matching — presets are
+  // authored as real-world feet, e.g. "a 6x4 table", regardless of the unit
+  // the user has chosen to view sizes in).
   const wFt = Math.round((table.width / M_PER_FT) * 10) / 10
   const hFt = Math.round((table.height / M_PER_FT) * 10) / 10
+  // The same size, shown in whichever unit is currently selected.
+  const wDisplay = metresToDisplay(table.width, unitSystem)
+  const hDisplay = metresToDisplay(table.height, unitSystem)
+
+  // Bounds stay a fixed 1–12ft of real table regardless of display unit.
+  const MIN_TABLE_M = 1 * M_PER_FT
+  const MAX_TABLE_M = 12 * M_PER_FT
+  const minDisplay = metresToDisplay(MIN_TABLE_M, unitSystem)
+  const maxDisplay = metresToDisplay(MAX_TABLE_M, unitSystem)
+  const displayStep = unitSystem === 'imperial' ? 0.5 : 0.1
 
   function applyTableFt(nextW: number, nextH: number, refit = false) {
     const w = Math.min(12, Math.max(1, nextW)) * M_PER_FT
     const h = Math.min(12, Math.max(1, nextH)) * M_PER_FT
+    setTable({ width: w, height: h })
+    if (refit) window.setTimeout(() => fitView(), 60)
+  }
+
+  // Same as applyTableFt, but the two numbers are in whatever unit the table
+  // size inputs are currently showing (feet or metres).
+  function applyTableSize(nextWDisplay: number, nextHDisplay: number, refit = false) {
+    const w = Math.min(MAX_TABLE_M, Math.max(MIN_TABLE_M, displayToMetres(nextWDisplay, unitSystem)))
+    const h = Math.min(MAX_TABLE_M, Math.max(MIN_TABLE_M, displayToMetres(nextHDisplay, unitSystem)))
     setTable({ width: w, height: h })
     if (refit) window.setTimeout(() => fitView(), 60)
   }
@@ -735,6 +811,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               <span className="tb-small">
                 · {placementManual ? (coarse ? 'manual' : 'manual (PgUp/PgDn)') : 'on surface'}
               </span>
+            </span>
+          )}
+          {!selectedAssetId && singleSelectedAsset?.aabb && (
+            <span className="tb-level">
+              {singleSelectedAsset.name}
+              <span className="tb-small"> · {formatPieceDims(singleSelectedAsset.aabb, unitSystem)}</span>
             </span>
           )}
         </div>
@@ -1060,6 +1142,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
+                  {query && (
+                    <button className="tb-searchbar-clear" onClick={() => setQuery('')} title="Clear search">
+                      <X size={13} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Model class — the primary axis. Switching re-queries the palette. */}
@@ -1079,30 +1166,69 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   })}
                 </div>
 
-                {filterRailFacets.length > 0 && (
-                  <div className="tb-filter">
-                    <button className="tb-filter-toggle" onClick={() => setShowFilters((v) => !v)}>
-                      <SlidersHorizontal size={13} />
-                      Filters
-                      {catalogueTerms.length > 0 && <span className="tb-filter-count">{catalogueTerms.length}</span>}
-                      <ChevronDown size={13} className={`tb-chev ${showFilters ? 'is-open' : ''}`} />
+                <div className="tb-filter">
+                  <button className="tb-filter-toggle" onClick={() => setShowFilters((v) => !v)}>
+                    <SlidersHorizontal size={13} />
+                    Filters
+                    {activeFilterCount > 0 && <span className="tb-filter-count">{activeFilterCount}</span>}
+                    <ChevronDown size={13} className={`tb-chev ${showFilters ? 'is-open' : ''}`} />
+                  </button>
+                  {activeFilterCount > 0 && (
+                    <button className="tb-filter-clear" onClick={clearCatalogueFilters}>
+                      Clear
                     </button>
-                    {catalogueTerms.length > 0 && (
-                      <button className="tb-filter-clear" onClick={() => setCatalogueFilter({ terms: [] })}>
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {showFilters && filterRailFacets.length > 0 && (
+                {showFilters && (
                   <div className="tb-filter-rail">
-                    <FacetRail
-                      facets={filterRailFacets}
-                      selected={selectedFilterTokens}
-                      onToggle={onToggleFilterTerm}
-                      loading={catalogueLoading}
-                    />
+                    <div className="tb-filter-group">
+                      <label className="tb-filter-label" htmlFor="tb-sort-select">Sort by</label>
+                      <select
+                        id="tb-sort-select"
+                        className="tb-filter-select"
+                        value={catalogueSort}
+                        onChange={(e) => setCatalogueFilter({ sortBy: e.target.value as typeof catalogueSort })}
+                      >
+                        <option value="recent">Newest</option>
+                        <option value="popular">Most popular</option>
+                        <option value="sales">Best sellers</option>
+                        <option value="rating">Top rated</option>
+                        <option value="price_low">Price: Low to high</option>
+                        <option value="price_high">Price: High to low</option>
+                        <option value="name">Alphabetical</option>
+                      </select>
+                    </div>
+
+                    <div className="tb-filter-group">
+                      <label className="tb-filter-label">Price (£)</label>
+                      <div className="tb-filter-price-row">
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="Min"
+                          value={minPriceInput}
+                          onChange={(e) => setMinPriceInput(e.target.value)}
+                        />
+                        <span>–</span>
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="Max"
+                          value={maxPriceInput}
+                          onChange={(e) => setMaxPriceInput(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {filterRailFacets.length > 0 && (
+                      <FacetRail
+                        facets={filterRailFacets}
+                        selected={selectedFilterTokens}
+                        onToggle={onToggleFilterTerm}
+                        loading={catalogueLoading}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -1118,7 +1244,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                             key={a.id}
                             className={`tb-tile ${selectedAssetId === a.id ? 'is-active' : ''}`}
                             onClick={() => pickAsset(a.id)}
-                            title={`Place ${a.name}`}
+                            title={`Place ${a.name}${a.aabb ? ` — ${formatPieceDims(a.aabb, unitSystem)}` : ''}`}
                           >
                             <div className="tb-thumb">
                               {a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}
@@ -1299,32 +1425,54 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             )}
           </aside>
 
-          {/* Table size (presets + custom, in feet) */}
+          {/* Table size (presets + custom). The real size is always stored in
+              metres — this unit toggle only changes how it's displayed. */}
           <div className="tb-tablesize">
-            <span className="tb-small">Table size (ft)</span>
-            <div className="tb-preset-row">
-              {TABLE_PRESETS.map((p) => (
+            <div className="tb-tablesize-head">
+              <span className="tb-small">Table size ({uLabel})</span>
+              <div className="tb-unit-toggle" title="Display units — doesn't change any real size">
                 <button
-                  key={p.label}
-                  className={`tb-preset ${wFt === p.w && hFt === p.h ? 'is-active' : ''}`}
-                  onClick={() => applyTableFt(p.w, p.h, true)}
-                  title={`${p.w}ft × ${p.h}ft`}
+                  className={`tb-unit-btn ${unitSystem === 'imperial' ? 'is-active' : ''}`}
+                  onClick={() => setUnitSystem('imperial')}
                 >
-                  {p.label}
+                  ft
                 </button>
-              ))}
+                <button
+                  className={`tb-unit-btn ${unitSystem === 'metric' ? 'is-active' : ''}`}
+                  onClick={() => setUnitSystem('metric')}
+                >
+                  m
+                </button>
+              </div>
+            </div>
+            <div className="tb-preset-row">
+              {TABLE_PRESETS.map((p) => {
+                const label = unitSystem === 'imperial'
+                  ? p.label
+                  : `${metresToDisplay(p.w * M_PER_FT, 'metric')}×${metresToDisplay(p.h * M_PER_FT, 'metric')}`
+                return (
+                  <button
+                    key={p.label}
+                    className={`tb-preset ${wFt === p.w && hFt === p.h ? 'is-active' : ''}`}
+                    onClick={() => applyTableFt(p.w, p.h, true)}
+                    title={`${p.w}ft × ${p.h}ft (${metresToDisplay(p.w * M_PER_FT, 'metric')}m × ${metresToDisplay(p.h * M_PER_FT, 'metric')}m)`}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
             </div>
             <div className="tb-dim-row">
               <input
-                type="number" min={1} max={12} step={0.5} value={wFt}
-                onChange={(e) => applyTableFt(Number(e.target.value) || wFt, hFt)}
-                aria-label="Table width (feet)"
+                type="number" min={minDisplay} max={maxDisplay} step={displayStep} value={wDisplay}
+                onChange={(e) => applyTableSize(Number(e.target.value) || wDisplay, hDisplay)}
+                aria-label={`Table width (${uLabel})`}
               />
               <span className="tb-small">×</span>
               <input
-                type="number" min={1} max={12} step={0.5} value={hFt}
-                onChange={(e) => applyTableFt(wFt, Number(e.target.value) || hFt)}
-                aria-label="Table depth (feet)"
+                type="number" min={minDisplay} max={maxDisplay} step={displayStep} value={hDisplay}
+                onChange={(e) => applyTableSize(wDisplay, Number(e.target.value) || hDisplay)}
+                aria-label={`Table depth (${uLabel})`}
               />
               <button className="tb-preset" title="Fit view (F)" onClick={() => fitView()}>Fit</button>
             </div>
@@ -1462,7 +1610,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 </div>
                 <div className="tb-view-selected-info">
                   <strong>{selectedModel.name}</strong>
-                  <span className="tb-small">{selectedModel.artistName} · £{selectedModel.price.toFixed(2)}</span>
+                  <span className="tb-small">
+                    {selectedModel.artistName} · £{selectedModel.price.toFixed(2)}
+                    {selectedModel.aabb && ` · ${formatPieceDims(selectedModel.aabb, unitSystem)}`}
+                  </span>
                   <span className="tb-view-selected-link">
                     <ExternalLink size={12} /> View full details, description &amp; reviews
                   </span>

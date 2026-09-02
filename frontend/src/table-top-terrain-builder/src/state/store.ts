@@ -16,6 +16,7 @@ import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
 import { analyticsApi } from '@/api/endpoints/analytics'
 import { taxonomyApi, MODEL_CLASS_SLUG, type TaxFacet } from '@/api/endpoints/taxonomy'
+import type { SearchFilters } from '@/api/types'
 
 /** Build the browse `terms` string from a class + facet-token selection. */
 function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
@@ -133,6 +134,10 @@ interface AppState {
   catalogueClass: string | null      // selected model class (null = all)
   catalogueTerms: string[]           // selected facet tokens (excl. model-class)
   catalogueFacets: TaxFacet[]        // facet tree w/ counts for the palette filter rail
+  catalogueSearch: string            // free-text query, sent to the backend (not just the loaded page)
+  catalogueSort: NonNullable<SearchFilters['sortBy']>
+  catalogueMinPrice: number | null
+  catalogueMaxPrice: number | null
   catalogueLoading: boolean          // true while re-querying the catalogue
   bundles: PlannerBundle[]           // published bundles (palette grouping)
   sets: PlannerSetData[]             // published multi-part "set" models (grouping)
@@ -238,8 +243,21 @@ interface AppState {
     ensureInitialHistory: () => void
     fitView: () => void
     loadAssetCatalogue: () => Promise<void>
-    /** Re-query the palette catalogue for a class / facet-term selection. */
-    setCatalogueFilter: (next: { modelClass?: string | null; terms?: string[] }) => Promise<void>
+    /**
+     * Re-query the palette catalogue against the backend for a class / facet-term /
+     * search / price / sort selection. This is what keeps the palette in sync with
+     * the marketplace: unlike the old purely client-side text filter (which only
+     * ever searched whatever ~200 "recent" models happened to be loaded at mount),
+     * every change here re-hits the same browse endpoint the marketplace uses.
+     */
+    setCatalogueFilter: (next: {
+      modelClass?: string | null
+      terms?: string[]
+      search?: string
+      sortBy?: SearchFilters['sortBy']
+      minPrice?: number | null
+      maxPrice?: number | null
+    }) => Promise<void>
     loadStarterLayout: () => void
     addInstance: (i: Omit<Instance,'id'>) => string
     updateInstance: (id: string, patch: Partial<Omit<Instance,'id'|'assetId'>>) => void
@@ -313,6 +331,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   assets: [],
   catalogueClass: null,
+  catalogueSearch: '',
+  catalogueSort: 'recent',
+  catalogueMinPrice: null,
+  catalogueMaxPrice: null,
   catalogueTerms: [],
   catalogueFacets: [],
   catalogueLoading: false,
@@ -511,17 +533,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ catalogueFacets: await loadCatalogueFacets(undefined) })
     },
 
-    // Re-query the catalogue for a class / facet selection. Only the catalogue
-    // assets + facet counts change here (bundles/sets/ownership are class-agnostic).
-    setCatalogueFilter: async ({ modelClass, terms }) => {
+    // Re-query the catalogue for a class / facet / search / price / sort selection.
+    // Only the catalogue assets + facet counts change here (bundles/sets/ownership
+    // are class-agnostic).
+    setCatalogueFilter: async ({ modelClass, terms, search, sortBy, minPrice, maxPrice }) => {
       const s = get()
       const nextClass = modelClass !== undefined ? modelClass : s.catalogueClass
       const nextTerms = terms !== undefined ? terms : s.catalogueTerms
-      set({ catalogueClass: nextClass, catalogueTerms: nextTerms, catalogueLoading: true })
+      const nextSearch = search !== undefined ? search : s.catalogueSearch
+      const nextSort = sortBy !== undefined ? sortBy : s.catalogueSort
+      const nextMinPrice = minPrice !== undefined ? minPrice : s.catalogueMinPrice
+      const nextMaxPrice = maxPrice !== undefined ? maxPrice : s.catalogueMaxPrice
+      set({
+        catalogueClass: nextClass,
+        catalogueTerms: nextTerms,
+        catalogueSearch: nextSearch,
+        catalogueSort: nextSort,
+        catalogueMinPrice: nextMinPrice,
+        catalogueMaxPrice: nextMaxPrice,
+        catalogueLoading: true,
+      })
 
       const termsStr = buildCatalogueTerms(nextClass, nextTerms)
       try {
-        const assets = await loadAssetsFromAPI({ terms: termsStr })
+        const assets = await loadAssetsFromAPI({
+          terms: termsStr,
+          search: nextSearch || undefined,
+          sortBy: nextSort,
+          minPrice: nextMinPrice ?? undefined,
+          maxPrice: nextMaxPrice ?? undefined,
+        })
         set({ assets })
       } catch {
         /* keep the previous catalogue on error */
@@ -721,7 +762,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const cart = useCartStore.getState()
       let added = 0
       uniqueAssetIds.forEach(assetId => {
-        const asset = assetsById.get(assetId)
+        // Fall back to the global registry for a piece placed under a catalogue
+        // selection (search/filter/sort) that has since moved on — `assets` here
+        // is only the *current* palette view, not everything ever placed.
+        const asset = assetsById.get(assetId) ?? getAssetById(assetId)
         if (!asset) return
         if (cart.hasItem('model', assetId)) return // already in cart
         cart.addItem({

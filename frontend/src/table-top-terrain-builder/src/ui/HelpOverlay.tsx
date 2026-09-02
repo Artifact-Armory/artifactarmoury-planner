@@ -32,6 +32,7 @@ const TOUCH_GROUPS: Group[] = [
     rows: [
       ['Select piece', 'Tap it'],
       ['Move', 'Drag it'],
+      ['Rotate freely (any angle)', 'Drag an orange arrow at its base'],
       ['Tilt upright / lay flat', 'Tilt buttons (top bar)'],
       ['Delete', 'Bin button (bottom bar)'],
       ['Undo / Redo', 'Top bar buttons'],
@@ -69,6 +70,7 @@ const GROUPS: Group[] = [
       ['Add / remove from selection', 'Shift + click'],
       ['Box-select', 'Left-drag empty table'],
       ['Move', 'Left-drag a piece'],
+      ['Rotate freely (any angle)', 'Drag an orange arrow at its base'],
       ['Tilt upright / lay flat', 'T'],
       ['Tilt the other way', 'Shift + T'],
       ['Duplicate', 'Ctrl + D'],

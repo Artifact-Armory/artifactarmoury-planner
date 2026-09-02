@@ -155,15 +155,26 @@ export const DEFAULT_GRID_SIZE = 0.3048
  * Maps TerrainModel records to the Asset type the planner expects.
  * Falls back to local manifest if the API is unreachable.
  */
-export async function loadAssetsFromAPI(filter?: { terms?: string }): Promise<Asset[]> {
-  // A comma-separated `facetSlug:termPath` selection (model class + facet filters),
-  // forwarded to the same browse endpoint the marketplace uses.
-  const hasFilter = Boolean(filter?.terms)
+export async function loadAssetsFromAPI(filter?: {
+  terms?: string
+  search?: string
+  sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
+  minPrice?: number
+  maxPrice?: number
+}): Promise<Asset[]> {
+  // A comma-separated `facetSlug:termPath` selection (model class + facet filters)
+  // plus free-text search / price bounds, forwarded to the same browse endpoint the
+  // marketplace uses — this is what makes the palette reach the *whole* published
+  // catalogue instead of only whatever page happened to load at mount.
+  const hasFilter = Boolean(filter?.terms) || Boolean(filter?.search) || filter?.minPrice != null || filter?.maxPrice != null
   try {
     const response = await browseApi.searchModels({
       limit: 200,
-      sortBy: 'recent',
+      sortBy: filter?.sortBy ?? 'recent',
       terms: filter?.terms,
+      search: filter?.search,
+      minPrice: filter?.minPrice,
+      maxPrice: filter?.maxPrice,
     })
     const models = response.models
 

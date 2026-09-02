@@ -6,6 +6,7 @@ import { getAssetById, type Asset } from '@core/assets'
 import { BuilderCamera } from './BuilderCamera'
 import { InstancedScene } from './InstancedScene'
 import { Ghost } from './ghost'
+import { RotateHandle } from './rotateHandle'
 import { ensureTemplate } from './loaders'
 import { subscribeLoading } from './loadManager'
 import {
@@ -32,6 +33,7 @@ type LeftDrag =
   | { kind: 'move'; startGround: THREE.Vector3; ids: string[]; orig: Map<string, { x: number; z: number }> }
   | { kind: 'box'; x: number; y: number; base: Set<string> }
   | { kind: 'pan'; x: number; y: number }
+  | { kind: 'rotate'; ids: string[]; center: { x: number; z: number }; initialAngleDeg: number; orig: Map<string, number> }
 
 export function ThreeStage() {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -156,6 +158,11 @@ export function ThreeStage() {
     // ---- ghost ----
     const ghost = new Ghost(requestRender)
     scene.add(ghost.group)
+
+    // ---- free-rotate gizmo (two draggable arrows at the base of a single
+    // selected piece) — hidden until syncRotateHandle() below shows it. ----
+    const rotateHandle = new RotateHandle()
+    scene.add(rotateHandle.group)
 
     // ---- table + grid + cell highlight ----
     const tableGroup = new THREE.Group()
@@ -505,6 +512,7 @@ export function ThreeStage() {
     function cancelDrag() {
       const eng = engine.current!
       if (eng.drag.kind === 'move') inst.clearLive()
+      if (eng.drag.kind === 'rotate') { inst.clearLive(); rotateHandle.setActive(false) }
       if (eng.drag.kind === 'box') setBoxRect(null)
       eng.drag = { kind: 'none' }
       // A second finger also ends a terrain stroke — pointerup is swallowed while
@@ -550,6 +558,27 @@ export function ThreeStage() {
         eng.strokeChanged = false
         sculptAt(e)
         return
+      }
+
+      // Grabbing a free-rotate arrow takes priority over selecting/moving a piece.
+      // The angle from the pivot to wherever was actually grabbed is the reference
+      // the whole drag tracks — no need for the click to land exactly on the handle.
+      if (rotateHandle.visible) {
+        raycaster.setFromCamera(ndc(e, ndcTmp), camera)
+        if (raycaster.intersectObjects(rotateHandle.pickables, false).length) {
+          const ids = [...s.selectedInstanceIds]
+          const gp = groundPoint(e)
+          if (ids.length && gp) {
+            const center = rotateHandle.center
+            const initialAngleDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - center.z, gp.x - center.x))
+            const orig = new Map(ids.map((id) => [id, store().instances.find((i) => i.id === id)?.rotationDeg ?? 0]))
+            eng.drag = { kind: 'rotate', ids, center, initialAngleDeg, orig }
+            rotateHandle.setActive(true)
+            setCursor('grabbing')
+            requestRender()
+            return
+          }
+        }
       }
 
       if (s.selectedAssetId) {
@@ -653,6 +682,24 @@ export function ThreeStage() {
         }
         setCursor('grabbing')
         requestRender()
+      } else if (eng.drag.kind === 'rotate') {
+        const gp = groundPoint(e)
+        if (gp) {
+          const { center, initialAngleDeg, orig } = eng.drag
+          const angleNowDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - center.z, gp.x - center.x))
+          // The grabbed point tracks the cursor exactly: as the world angle to the
+          // pivot increases by δ, the piece's yaw must decrease by δ to keep that
+          // point under the cursor (rotationDeg follows the standard +Y-axis
+          // right-hand convention, which runs the other way from atan2(z, x)).
+          const delta = -(angleNowDeg - initialAngleDeg)
+          for (const id of eng.drag.ids) {
+            const rotDeg = normDeg((orig.get(id) ?? 0) + delta)
+            const i = store().instances.find(ii => ii.id === id)
+            if (i) inst.setLiveTransform(id, { x: i.position.x, z: i.position.z, rotDeg })
+          }
+        }
+        setCursor('grabbing')
+        requestRender()
       } else if (eng.drag.kind === 'box') {
         const l = Math.min(eng.drag.x, e.clientX)
         const t = Math.min(eng.drag.y, e.clientY)
@@ -678,6 +725,14 @@ export function ThreeStage() {
       } else if (overCanvas && !store().selectedAssetId && e.buttons === 0) {
         // hover highlight when idle — skip while any button is held (e.g. orbiting
         // the camera), since raycasting a high-poly mesh every move is expensive.
+        if (rotateHandle.visible) {
+          raycaster.setFromCamera(ndc(e, ndcTmp), camera)
+          if (raycaster.intersectObjects(rotateHandle.pickables, false).length) {
+            if (eng.hovered !== null) { eng.hovered = null; inst.setHover(null) }
+            setCursor('grab')
+            return
+          }
+        }
         const pid = pickPiece(e)
         if (pid !== eng.hovered) {
           eng.hovered = pid
@@ -742,6 +797,24 @@ export function ThreeStage() {
         useAppStore.getState().actions.updateInstances(patches)
         inst.clearLive()
         setCursor('grab')
+        requestRender()
+        return
+      }
+      if (d.kind === 'rotate') {
+        const gp = lastGround
+        const patches = d.ids.map((id) => {
+          let rotDeg = d.orig.get(id) ?? 0
+          if (gp) {
+            const angleNowDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - d.center.z, gp.x - d.center.x))
+            rotDeg = normDeg(rotDeg - (angleNowDeg - d.initialAngleDeg))
+          }
+          return { id, patch: { rotationDeg: rotDeg } }
+        })
+        useAppStore.getState().actions.updateInstances(patches)
+        inst.clearLive()
+        rotateHandle.setActive(false)
+        setCursor('grab')
+        syncRotateHandle()
         requestRender()
         return
       }
@@ -838,6 +911,25 @@ export function ThreeStage() {
       useAppStore.getState().actions.updateInstances(patches)
       inst.setSelection(new Set(ids))
       requestRender()
+    }
+
+    // Show/hide/reposition the free-rotate gizmo for the current selection. A
+    // single selected piece gets it (multi-select has no single pivot that reads
+    // clearly); it's hidden while placing, sculpting, read-only, or mid-drag.
+    function syncRotateHandle() {
+      const s = store()
+      const ids = s.selectedInstanceIds
+      if (s.readOnly || s.terrainTool !== 'none' || s.selectedAssetId || ids.length !== 1 || engine.current!.drag.kind !== 'none') {
+        rotateHandle.hide()
+        return
+      }
+      const i = s.instances.find((ii) => ii.id === ids[0])
+      const asset = i && assetMap().get(i.assetId)
+      if (!i || !asset) { rotateHandle.hide(); return }
+      const a = asset.aabb ?? { x: 0.2, y: 0.2, z: 0.2 }
+      const radius = Math.max((Math.max(a.x, a.z) / 2) * 1.3, 0.05)
+      const y = levelToY(i.level ?? 0) + terrainHeightAt(i.position.x, i.position.z) + 0.006
+      rotateHandle.setTransform(i.position.x, y, i.position.z, radius)
     }
 
     // ---- keyboard ----
@@ -940,6 +1032,7 @@ export function ThreeStage() {
       const s = store()
       inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
       inst.setSelection(new Set(s.selectedInstanceIds))
+      syncRotateHandle()
       requestRender()
     }
 
@@ -984,6 +1077,9 @@ export function ThreeStage() {
       if (s.snapBaseline !== prev.snapBaseline || s.altMomentary !== prev.altMomentary) {
         applySnapVisual()
       }
+      // Cheap enough to just re-derive every tick rather than enumerate every
+      // condition (selection/instances/tool/asset) that should show or hide it.
+      syncRotateHandle()
     })
 
     // Textures/models load asynchronously after their material/template is built;
@@ -1026,6 +1122,7 @@ export function ThreeStage() {
       useAppStore.getState().setCameraApi(null)
       cam.dispose()
       inst.dispose()
+      rotateHandle.dispose()
       renderer.dispose()
       mount.removeChild(renderer.domElement)
     }
