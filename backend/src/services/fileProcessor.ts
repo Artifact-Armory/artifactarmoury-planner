@@ -74,16 +74,21 @@ interface ParsedSTL {
  * The original 1M default used that pipeline's evidenced ~1.1GB-at-1M-tris
  * figure as a conservative anchor rather than inventing an unverified number.
  *
- * Raised to 3M on 2026-09-03 at the user's request (source models came in
- * over the old 1M cap from MyMiniFactory, whose own limit is file size, not
- * triangle count, so it doesn't bound this). UNPROFILED: this pipeline is
- * known to cost MORE per triangle than the 1.1KB/tri fullGlb figure above, so
- * 3M tris could peak well past the naive 3.3GB extrapolation — and unlike
- * fullGlb (which the bake worker can drain), this parse runs inline in the
- * API server process itself (processUploadedModel/processModelParts in
- * routes/models.ts), so an OOM here takes out the web dyno, not a worker.
- * Watch Railway memory on the first real upload near this ceiling; lower it
- * back or split this parse out to a worker if it spikes.
+ * Raised 1M → 3M → 5M, all on 2026-09-03. The 1M→3M jump (MyMiniFactory source
+ * models exceeding it — MMF's own limit is file size, not triangle count, so it
+ * doesn't bound this) was UNPROFILED and genuinely risky at the time: this
+ * pipeline costs more per triangle than the 1.1KB/tri fullGlb figure above, and
+ * back then this parse still ran inline in the API server itself, so an OOM
+ * here took out the web dyno. **That's no longer true** — as of the same day,
+ * this parse runs in the separate worker service (services/modelIngest/,
+ * migration 057, MODEL_INGEST_WORKER_ENABLED), with a cluster-wide single-
+ * flight lock (queue.ts's LARGE_JOB_BYTES) stopping more than one heavy parse
+ * from running anywhere at once. The 3M→5M bump (a real 4,084,184-triangle
+ * upload — "Japan houses" — hit the 3M ceiling) leans on that: a spike here
+ * now costs a worker restart, not a site outage, and can't stack with another
+ * large upload's memory. Still an UNPROFILED number, still worth watching
+ * Railway worker memory on the first real upload near this new ceiling — the
+ * failure mode just changed from "site down" to "one upload retries slower".
  *
  * For binary STL (fixed 50 bytes/triangle) this ceiling — not
  * MAX_MODEL_FILE_BYTES — ends up the binding constraint well under that byte
@@ -91,7 +96,7 @@ interface ParsedSTL {
  * rejected here. The higher byte cap mainly helps less triangle-dense uploads
  * (ASCII STL, OBJ, 3MF) and genuinely low-poly-but-physically-large terrain.
  */
-export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 3_000_000)
+export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 5_000_000)
 
 /**
  * Triangle count from a binary STL *without* parsing it — the format states it

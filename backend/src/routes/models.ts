@@ -64,6 +64,10 @@ const VALID_PRINTER_TYPES = ['fdm', 'resin', 'both'];
 // extra file is a separate background conversion + preview bake.
 const MAX_EXTRA_PARTS = 60;
 const MAX_COMPONENTS = 20;
+// Store-page gallery photos (beyond the required thumbnail) — shared by the
+// initial upload (below) and the standalone add-more-photos route (ADD GALLERY
+// IMAGES, further down) so a model can't exceed the cap via either path.
+const MAX_GALLERY_IMAGES = 10;
 
 // The type facet a model must be tagged with, per model class. A model's headline
 // classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).
@@ -288,7 +292,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -325,6 +329,22 @@ router.post('/from-upload',
     // so we never create a draft that can't be listed.
     if (!thumbnailKey || typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/')) {
       throw new ValidationError('A thumbnail image is required');
+    }
+    // Optional extra store-page photos, uploaded the same presign-then-send-the-key
+    // way as the thumbnail — same convention/cap as the standalone ADD GALLERY
+    // IMAGES route below, just attached at creation instead of afterward.
+    let validGalleryKeys: string[] = [];
+    if (galleryKeys != null) {
+      if (!Array.isArray(galleryKeys)) {
+        throw new ValidationError('galleryKeys must be an array');
+      }
+      if (galleryKeys.some((k: unknown) => typeof k !== 'string' || !k.startsWith('images/'))) {
+        throw new ValidationError('Each galleryKeys entry must be an images/ object from /api/uploads/presign');
+      }
+      if (galleryKeys.length > MAX_GALLERY_IMAGES) {
+        throw new ValidationError(`A model can have at most ${MAX_GALLERY_IMAGES} gallery images`);
+      }
+      validGalleryKeys = galleryKeys;
     }
     if (!name || !category || basePrice == null) {
       throw new ValidationError('Name, category, and base price are required');
@@ -487,6 +507,15 @@ router.post('/from-upload',
     // Seed price history (backs the anti-inflation guard on sales).
     recordPrice('model', model.id, price);
 
+    // Gallery photos picked at upload time — same rows the standalone ADD
+    // GALLERY IMAGES route creates, just written here instead of a follow-up call.
+    for (let i = 0; i < validGalleryKeys.length; i++) {
+      await db.query(
+        `INSERT INTO model_images (model_id, image_path, display_order) VALUES ($1, $2, $3)`,
+        [model.id, validGalleryKeys[i], i]
+      );
+    }
+
     // Insert a row per extra part (processed in the background job). Default part
     // names count within their own component — group 0 continues from the primary
     // (which is that component's part 1), later components start at part 1.
@@ -525,6 +554,7 @@ router.post('/from-upload',
       filename,
       displayRawKey: cleanDisplayRawKey ?? undefined,
       displayFilename,
+      rawBytes,
     });
 
     logger.info('Model upload accepted for processing', { userId, modelId: model.id });
@@ -592,7 +622,7 @@ router.post('/:id/new-version',
       `UPDATE models SET processing_status = 'processing', processing_error = NULL, updated_at = NOW() WHERE id = $1`,
       [id],
     );
-    await dispatchIngestVersionUpdate({ modelId: id, rawKey, filename, notes: cleanNotes });
+    await dispatchIngestVersionUpdate({ modelId: id, rawKey, filename, notes: cleanNotes, rawBytes });
 
     logger.info('New model version accepted for processing', { userId: (req as any).userId, modelId: id });
     res.status(202).json({ message: 'New version received — processing', modelId: id, processingStatus: 'processing' });
@@ -1488,8 +1518,6 @@ router.delete('/:id',
 // the Railway dyno. (Replaces an earlier multer-based version of this route
 // that was never wired up on the frontend — model_images had zero rows.)
 // ============================================================================
-
-const MAX_GALLERY_IMAGES = 10;
 
 router.post('/:id/images',
   authenticate,
