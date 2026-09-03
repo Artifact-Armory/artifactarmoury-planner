@@ -250,8 +250,32 @@ export async function failJob(job: BakeJobRow, error: string): Promise<void> {
 /**
  * Flip the model to 'ready' when it has no open bake jobs left and none failed.
  * Called after each successful job. Leaves 'processing' while any remain.
+ *
+ * Two guards added 2026-09-03 after a real incident (a 10-model grouped
+ * upload where only 5 models ever got processed — see modelIngest/process.ts
+ * / isolatedRunner.ts for the root cause):
+ *
+ *   1. A multi-part listing's bake jobs are enqueued INCREMENTALLY as the
+ *      ingest job (modelIngest/process.ts) works through each part in turn —
+ *      it can take minutes for a large listing. "No open jobs in
+ *      proxy_bake_jobs right now" can therefore just mean the ingest job
+ *      hasn't reached the rest of the parts yet, not that the listing is
+ *      actually finished. This cross-checks against `model_parts`, the
+ *      authoritative list of what the listing needs, before declaring it
+ *      done — every known part must be 'ready' or 'failed', not merely
+ *      "no bake job currently outstanding for it".
+ *   2. Never resurrect a model the ingest side has already given up on. If
+ *      ingest hit an unprocessable part and called markModelFailed (leaving
+ *      processing_status='failed'), a late-arriving completion for an
+ *      EARLIER part's bake job must not flip that back to 'ready' — the
+ *      listing is genuinely incomplete.
  */
 async function rollUpModelStatus(modelId: string): Promise<void> {
+  const modelRow = (
+    await db.query(`SELECT processing_status FROM models WHERE id = $1`, [modelId])
+  ).rows[0]
+  if (!modelRow || modelRow.processing_status === 'failed') return
+
   const { rows } = await db.query(
     `SELECT
         COUNT(*) FILTER (WHERE status IN ('queued','running')) AS open,
@@ -264,6 +288,14 @@ async function rollUpModelStatus(modelId: string): Promise<void> {
   const failed = Number(rows[0]?.failed ?? 0)
   const succeeded = Number(rows[0]?.succeeded ?? 0)
   if (open > 0) return // still baking
+
+  const { rows: partRows } = await db.query(
+    `SELECT COUNT(*) FILTER (WHERE processing_status NOT IN ('ready', 'failed')) AS pending
+       FROM model_parts WHERE model_id = $1`,
+    [modelId],
+  )
+  const pendingParts = Number(partRows[0]?.pending ?? 0)
+  if (pendingParts > 0) return // ingest still has parts of this listing left to reach
 
   if (failed === 0 && succeeded > 0) {
     await db.query(

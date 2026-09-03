@@ -20,17 +20,16 @@
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
-import { processSTL, generateGLB, computeFileHash } from '../fileProcessor';
+import { generateGLB, computeFileHash } from '../fileProcessor';
 import { enqueueFullGlbJob } from '../fullGlb/queue';
 import { downloadObject, deleteObject } from '../r2';
 import {
-  computeGeometryFingerprint,
   isLikelyDuplicate,
   fingerprintDistance,
   MATCH_THRESHOLD,
   type GeometryFingerprint,
 } from '../fingerprint';
-import { analyzeMeshQuality } from '../meshQA';
+import { isolatedFingerprint, isolatedStlAnalysis, isIsolatedFailure } from './isolatedRunner';
 import { meshFormatFromName, convertToStl, type MeshFormat } from '../meshConvert';
 import { isBakeWorkerEnabled, enqueueBakeJob } from '../proxyBake/queue';
 import { createNotification, notifyOwnersOfModelUpdate } from '../notifications';
@@ -100,7 +99,15 @@ export async function processUploadedModel(
 
     // 3. Geometry fingerprint — catches re-uploads even if the file was
     //    re-exported/rotated/rescaled/converted to dodge the exact-hash check above.
-    const fingerprint = await computeGeometryFingerprint(stlTmp);
+    //    Runs in an isolated child process — see isolatedRunner.ts — because
+    //    a large enough file can OOM-crash the parser outright.
+    const fpResult = await isolatedFingerprint(stlTmp);
+    if (isIsolatedFailure(fpResult)) {
+      await markModelFailed(modelId, fpResult.reason);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+    const fingerprint = fpResult.fingerprint;
     const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
     if (geoDup.foreign) {
       await markModelFailed(modelId, duplicateMessage('geometry'));
@@ -144,7 +151,14 @@ export async function processUploadedModel(
         return;
       }
 
-      const displayFingerprint = await computeGeometryFingerprint(displayStlTmp);
+      const displayFpResult = await isolatedFingerprint(displayStlTmp);
+      if (isIsolatedFailure(displayFpResult)) {
+        await markModelFailed(modelId, displayFpResult.reason);
+        await safeDeleteObject(rawKey);
+        await safeDeleteObject(displayRawKey);
+        return;
+      }
+      const displayFingerprint = displayFpResult.fingerprint;
       const displayGeoDup = await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
       if (displayGeoDup.foreign) {
         await markModelFailed(modelId, duplicateMessage('geometry', 'preview model'));
@@ -176,16 +190,23 @@ export async function processUploadedModel(
     //    bake worker is enabled the GLB is produced out-of-process (normal/AO-baked
     //    proxy) and glb_file_path is filled in later by the worker; otherwise we
     //    fall back to the in-process pure-Node decimator exactly as before.
-    const stlData = await processSTL(stlTmp);
+    // Dims/volume + mesh QA together, in one isolated child process (same
+    // reasoning as the fingerprint above — parseSTL is the actual OOM site).
+    const analysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: true });
+    if (isIsolatedFailure(analysis)) {
+      await markModelFailed(modelId, analysis.reason);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+    const stlData = analysis.stlData;
+    // Advisory mesh QA (watertight/manifold). Never blocks the upload.
+    const meshQA = analysis.meshQA!;
     const bakeEnabled = isBakeWorkerEnabled();
     let glbStoragePath: string | null = null;
     if (!bakeEnabled) {
       const glbPath = await generateGLB(previewSourceLocalPath);
       glbStoragePath = await uploadToStorage(glbPath, 'previews');
     }
-
-    // Advisory mesh QA (watertight/manifold). Never blocks the upload.
-    const meshQA = await analyzeMeshQuality(stlTmp);
 
     // For a non-STL upload, store the converted canonical STL in R2 (it becomes
     // stl_file_path) and keep the artist's original as source_file_path, so the
@@ -363,7 +384,13 @@ export async function processModelVersionUpdate(
       return;
     }
 
-    const fingerprint = await computeGeometryFingerprint(stlTmp);
+    const fpResult = await isolatedFingerprint(stlTmp);
+    if (isIsolatedFailure(fpResult)) {
+      await failVersionUpdate(modelId, fpResult.reason);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+    const fingerprint = fpResult.fingerprint;
     const geoDup = await findGeometryDuplicate(fingerprint, modelId, ownerId);
     if (geoDup.foreign) {
       await failVersionUpdate(modelId, 'That file looks like a copy of a model already on the marketplace — not applied');
@@ -371,7 +398,14 @@ export async function processModelVersionUpdate(
       return;
     }
 
-    const stlData = await processSTL(stlTmp);
+    const analysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: true });
+    if (isIsolatedFailure(analysis)) {
+      await failVersionUpdate(modelId, analysis.reason);
+      await safeDeleteObject(rawKey);
+      return;
+    }
+    const stlData = analysis.stlData;
+    const meshQA = analysis.meshQA!;
     const bakeEnabled = isBakeWorkerEnabled();
     // Preview GLB: baked out-of-process by the worker, or the pure-Node fallback.
     // When baking we keep the OLD preview via COALESCE until the new bake lands.
@@ -380,7 +414,6 @@ export async function processModelVersionUpdate(
       const glbPath = await generateGLB(stlTmp);
       glbStoragePath = await uploadToStorage(glbPath, 'previews');
     }
-    const meshQA = await analyzeMeshQuality(stlTmp);
 
     // Where the buyer-facing STL lives: the raw key for STL uploads, or a stored
     // canonical STL for OBJ/3MF (with the original kept as the source file).
@@ -512,8 +545,18 @@ async function processModelParts(
       await fsp.writeFile(stlTmp, stlBuffer);
 
       // Dedup each part against every other model + part (not this model's own).
+      // Isolated child process — see isolatedRunner.ts — because a single
+      // oversized part (this is exactly what happened to a real 10-model
+      // upload on 2026-09-03) can OOM-crash the whole worker mid-parse.
       const fileHash = computeFileHash(stlBuffer);
-      const fingerprint = await computeGeometryFingerprint(stlTmp);
+      const fpResult = await isolatedFingerprint(stlTmp);
+      if (isIsolatedFailure(fpResult)) {
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [fpResult.reason, part.id]);
+        await markModelFailed(modelId, `${part.name}: ${fpResult.reason}`);
+        await safeDeleteObject(part.stl_file_path);
+        throw new Error(fpResult.reason);
+      }
+      const fingerprint = fpResult.fingerprint;
       const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
       if (geoDup.foreign) {
         const reason = duplicateMessage('geometry', part.name);
@@ -551,7 +594,15 @@ async function processModelParts(
           [displayFileHash, modelId],
         );
         const foreignDisplayHashDup = displayHashDup.rows.find((r: any) => r.artist_id !== uploaderId);
-        const displayFingerprint = await computeGeometryFingerprint(displayStlTmp);
+        const displayFpResult = await isolatedFingerprint(displayStlTmp);
+        if (isIsolatedFailure(displayFpResult)) {
+          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [displayFpResult.reason, part.id]);
+          await markModelFailed(modelId, `${part.name} preview: ${displayFpResult.reason}`);
+          await safeDeleteObject(part.stl_file_path);
+          await safeDeleteObject(displayRawKey);
+          throw new Error(displayFpResult.reason);
+        }
+        const displayFingerprint = displayFpResult.fingerprint;
         const displayGeoDup = foreignDisplayHashDup
           ? null
           : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
@@ -579,7 +630,14 @@ async function processModelParts(
         previewSourceFormat = 'stl';
       }
 
-      const stlData = await processSTL(stlTmp);
+      const partAnalysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: false });
+      if (isIsolatedFailure(partAnalysis)) {
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [partAnalysis.reason, part.id]);
+        await markModelFailed(modelId, `${part.name}: ${partAnalysis.reason}`);
+        await safeDeleteObject(part.stl_file_path);
+        throw new Error(partAnalysis.reason);
+      }
+      const stlData = partAnalysis.stlData;
       // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
       const bakeEnabled = isBakeWorkerEnabled();
       let glbStoragePath: string | null = null;
