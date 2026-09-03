@@ -103,6 +103,11 @@ const ModelDetails: React.FC = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const currentUser = useAuthStore((state) => state.user)
   const [reportOpen, setReportOpen] = React.useState(false)
+  // Which photo the hero image shows — null means "the thumbnail" (the default).
+  // Clicking a gallery strip thumbnail below swaps it; reset on model change so a
+  // stale selection from the previous product page doesn't carry over.
+  const [activeImage, setActiveImage] = React.useState<string | null>(null)
+  React.useEffect(() => { setActiveImage(null) }, [id])
 
   const modelQuery = useQuery({
     queryKey: ['model', id],
@@ -285,22 +290,42 @@ const ModelDetails: React.FC = () => {
         <div className="space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
             <div className="relative h-80 w-full bg-muted">
-              {model.thumbnailUrl ? (
-                <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
+              {activeImage || model.thumbnailUrl ? (
+                <img src={activeImage || model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-muted-foreground">No thumbnail available</div>
               )}
             </div>
             {model.images && model.images.length > 0 && (
               <div className="flex gap-3 overflow-x-auto p-4">
-                {model.images.map((image) => (
-                  <img
-                    key={image.id}
-                    src={image.imageUrl ?? image.imagePath}
-                    alt={image.caption ?? model.name}
-                    className="h-20 w-20 shrink-0 rounded-lg object-cover"
-                  />
-                ))}
+                {/* The thumbnail itself is the first "photo" in the strip, so it's
+                    easy to get back to after clicking into the gallery. */}
+                {model.thumbnailUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveImage(null)}
+                    className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 ${
+                      !activeImage ? 'border-primary' : 'border-transparent'
+                    }`}
+                  >
+                    <img src={model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
+                  </button>
+                )}
+                {model.images.map((image) => {
+                  const src = image.imageUrl ?? image.imagePath
+                  return (
+                    <button
+                      key={image.id}
+                      type="button"
+                      onClick={() => src && setActiveImage(src)}
+                      className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 ${
+                        activeImage === src ? 'border-primary' : 'border-transparent'
+                      }`}
+                    >
+                      <img src={src} alt={image.caption ?? model.name} className="h-full w-full object-cover" />
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>

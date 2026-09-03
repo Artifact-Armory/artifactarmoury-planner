@@ -48,11 +48,22 @@ const NotificationBell: React.FC = () => {
     }
   }
 
+  // Marking a notification read here only ever refreshed the bell's own badge —
+  // a report-related type (moderation_decision/report_reply) also has its own
+  // badge on the artist "Reports" nav link (queryKey 'artist-reports-unread'),
+  // which never got the memo: it stayed stuck until the artist's next full visit
+  // to that page. Invalidating it here too (harmless no-op if it isn't mounted)
+  // clears it immediately, same as clicking straight into the Reports page would.
+  const REPORT_TYPES = new Set(['moderation_decision', 'report_reply'])
+
   const handleClick = async (n: AppNotification) => {
     if (!n.isRead) {
       await notificationsApi.markRead(n.id).catch(() => {})
       setItems((list) => list.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)))
       queryClient.invalidateQueries({ queryKey: ['notifications-unread'] })
+      if (REPORT_TYPES.has(n.type)) {
+        queryClient.invalidateQueries({ queryKey: ['artist-reports-unread'] })
+      }
     }
     setOpen(false)
     if (n.link) navigate(n.link)
@@ -62,6 +73,7 @@ const NotificationBell: React.FC = () => {
     await notificationsApi.markAllRead().catch(() => {})
     setItems((list) => list.map((x) => ({ ...x, isRead: true })))
     queryClient.invalidateQueries({ queryKey: ['notifications-unread'] })
+    queryClient.invalidateQueries({ queryKey: ['artist-reports-unread'] })
   }
 
   return (

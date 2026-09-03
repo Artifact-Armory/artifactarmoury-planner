@@ -25,6 +25,10 @@ const CATEGORIES = [
   { value: 'other', label: 'Other' },
 ]
 
+// Must match backend MAX_GALLERY_IMAGES (routes/models.ts) — fast client-side
+// fail before wasting an upload, same convention as the model-file size cap.
+const MAX_GALLERY_IMAGES = 10
+
 function errMessage(err: unknown, fallback: string): string {
   const anyErr = err as any
   return anyErr?.response?.data?.message || anyErr?.message || fallback
@@ -77,6 +81,14 @@ const EditModel: React.FC = () => {
   const [versionBusy, setVersionBusy] = React.useState(false)
   const [versionMsg, setVersionMsg] = React.useState<string | null>(null)
   const [versionErr, setVersionErr] = React.useState<string | null>(null)
+
+  // Gallery photos: unlike the thumbnail, these upload-and-attach immediately
+  // (no staged/pending state) — there's no single "save" moment for a batch of
+  // files, so each pick presigns + attaches straight away, same immediacy as
+  // the file-version upload below.
+  const [galleryBusy, setGalleryBusy] = React.useState(false)
+  const [galleryErr, setGalleryErr] = React.useState<string | null>(null)
+  const [deletingImageId, setDeletingImageId] = React.useState<string | null>(null)
 
   // Serious mesh warning (real open edges/holes) override.
   const [meshAckChecked, setMeshAckChecked] = React.useState(false)
@@ -135,6 +147,48 @@ const EditModel: React.FC = () => {
     if (!thumbFile) return undefined
     const { key } = await uploadsApi.uploadDirect(thumbFile, 'thumbnails')
     return key
+  }
+
+  /** Presign + upload each picked file, then attach them all as gallery photos. */
+  async function handleAddGalleryImages(files: FileList | null) {
+    if (!id || !files || files.length === 0) return
+    setGalleryErr(null)
+    const picked = Array.from(files)
+    const existing = model?.images?.length ?? 0
+    if (existing + picked.length > MAX_GALLERY_IMAGES) {
+      setGalleryErr(
+        `A model can have at most ${MAX_GALLERY_IMAGES} gallery photos (${existing} already added, ${picked.length} more selected).`
+      )
+      return
+    }
+    setGalleryBusy(true)
+    try {
+      const keys: string[] = []
+      for (const file of picked) {
+        const { key } = await uploadsApi.uploadDirect(file, 'images')
+        keys.push(key)
+      }
+      await modelsApi.addGalleryImages(id, keys)
+      await load()
+    } catch (err) {
+      setGalleryErr(errMessage(err, 'Could not upload one or more photos'))
+    } finally {
+      setGalleryBusy(false)
+    }
+  }
+
+  async function handleDeleteGalleryImage(imageId: string) {
+    if (!id) return
+    setDeletingImageId(imageId)
+    setGalleryErr(null)
+    try {
+      await modelsApi.deleteGalleryImage(id, imageId)
+      await load()
+    } catch (err) {
+      setGalleryErr(errMessage(err, 'Could not delete this photo'))
+    } finally {
+      setDeletingImageId(null)
+    }
   }
 
   /**
@@ -559,6 +613,58 @@ const EditModel: React.FC = () => {
           )}
         </div>
       </form>
+
+      {/* Gallery photos — extra store-page images beyond the thumbnail (angles,
+          close-ups, painted examples). Uploads attach immediately, no "save" step. */}
+      <div className="mt-8 rounded-lg border border-border p-4">
+        <h2 className="text-base font-semibold text-foreground">Gallery photos</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Extra photos shown on the store page alongside the thumbnail. Up to {MAX_GALLERY_IMAGES}.
+        </p>
+
+        {(model?.images?.length ?? 0) > 0 && (
+          <div className="mt-4 flex flex-wrap gap-3">
+            {model!.images!.map((img) => (
+              <div key={img.id} className="relative h-24 w-24">
+                <img src={img.imageUrl} alt="" className="h-24 w-24 rounded-sm border object-cover" />
+                <button
+                  type="button"
+                  onClick={() => handleDeleteGalleryImage(img.id)}
+                  disabled={deletingImageId === img.id}
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs text-white disabled:opacity-50"
+                  title="Remove this photo"
+                >
+                  {deletingImageId === img.id ? '…' : '×'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <label
+          className={`mt-4 flex w-fit cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent ${
+            galleryBusy || (model?.images?.length ?? 0) >= MAX_GALLERY_IMAGES ? 'pointer-events-none opacity-50' : ''
+          }`}
+        >
+          <Upload size={16} />
+          {galleryBusy ? 'Uploading…' : 'Add photos…'}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            disabled={galleryBusy || (model?.images?.length ?? 0) >= MAX_GALLERY_IMAGES}
+            onChange={(e) => {
+              handleAddGalleryImages(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </label>
+        {(model?.images?.length ?? 0) >= MAX_GALLERY_IMAGES && (
+          <p className="mt-1 text-xs text-muted-foreground">Maximum reached — remove one to add another.</p>
+        )}
+        {galleryErr && <p className="mt-2 text-sm text-red-600">{galleryErr}</p>}
+      </div>
 
       {/* Upload a new file version — replaces the main model file. Buyers keep
           access and re-download the new version for free; they're notified. */}

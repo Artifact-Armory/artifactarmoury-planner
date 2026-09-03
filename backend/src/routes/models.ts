@@ -12,9 +12,8 @@ import {
   requireModelOwnership,
   optionalAuth
 } from '../middleware/auth';
-import { 
-  uploadModelWithThumbnail, 
-  uploadImages,
+import {
+  uploadModelWithThumbnail,
   handleUploadError,
   cleanupOnError,
   deleteUploadedFile,
@@ -1481,58 +1480,70 @@ router.delete('/:id',
 );
 
 // ============================================================================
-// UPLOAD ADDITIONAL IMAGES
+// ADD GALLERY IMAGES — attach photos already uploaded direct-to-R2 (via
+// POST /api/uploads/presign, prefix 'images') to a model's store page. Same
+// presign-then-send-the-key convention as the thumbnail (EditModel.tsx) rather
+// than a multipart upload through the API, so a batch of photos never ties up
+// the Railway dyno. (Replaces an earlier multer-based version of this route
+// that was never wired up on the frontend — model_images had zero rows.)
 // ============================================================================
+
+const MAX_GALLERY_IMAGES = 10;
 
 router.post('/:id/images',
   authenticate,
   requireArtist,
   requireModelOwnership,
   uploadRateLimit,
-  uploadImages,
-  handleUploadError,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const files = req.files as Express.Multer.File[];
+    const { keys } = req.body ?? {};
 
-    if (!files || files.length === 0) {
-      throw new ValidationError('No images provided');
+    if (!Array.isArray(keys) || keys.length === 0) {
+      throw new ValidationError('keys (an array of uploaded images/ objects) is required');
+    }
+    if (keys.some((k) => typeof k !== 'string' || !k.startsWith('images/'))) {
+      throw new ValidationError('Each key must be an images/ object from /api/uploads/presign');
     }
 
-    try {
-      const uploadedImages = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const storagePath = await uploadToStorage(file.path, 'images');
-
-        const result = await db.query(
-          `INSERT INTO model_images (model_id, image_path, display_order)
-           VALUES ($1, $2, $3)
-           RETURNING id, image_path, display_order`,
-          [id, storagePath, i]
-        );
-
-        uploadedImages.push(result.rows[0]);
-      }
-
-      logger.info('Model images uploaded', { 
-        userId: (req as any).userId, 
-        modelId: id, 
-        count: files.length 
-      });
-
-      res.status(201).json({
-        message: 'Images uploaded successfully',
-        images: uploadedImages
-      });
-
-    } catch (error) {
-      logger.error('Failed to upload model images', { error, userId: (req as any).userId });
-      throw error;
+    const countResult = await db.query('SELECT COUNT(*) AS c FROM model_images WHERE model_id = $1', [id]);
+    const existingCount = parseInt(countResult.rows[0].c, 10);
+    if (existingCount + keys.length > MAX_GALLERY_IMAGES) {
+      throw new ValidationError(
+        `A model can have at most ${MAX_GALLERY_IMAGES} gallery images (${existingCount} already uploaded, ${keys.length} more requested)`
+      );
     }
-  }),
-  cleanupOnError
+
+    // Continue the existing order rather than restarting at 0 each call, which
+    // would interleave/collide with images added in an earlier batch.
+    const orderResult = await db.query(
+      'SELECT COALESCE(MAX(display_order), -1) AS max_order FROM model_images WHERE model_id = $1', [id]
+    );
+    let nextOrder = parseInt(orderResult.rows[0].max_order, 10) + 1;
+
+    const uploadedImages = [];
+    for (const key of keys) {
+      const result = await db.query(
+        `INSERT INTO model_images (model_id, image_path, display_order)
+         VALUES ($1, $2, $3)
+         RETURNING id, image_path, display_order`,
+        [id, key, nextOrder]
+      );
+      uploadedImages.push(result.rows[0]);
+      nextOrder++;
+    }
+
+    logger.info('Model gallery images added', {
+      userId: (req as any).userId,
+      modelId: id,
+      count: keys.length
+    });
+
+    res.status(201).json({
+      message: 'Images added successfully',
+      images: uploadedImages
+    });
+  })
 );
 
 // ============================================================================
@@ -1544,12 +1555,15 @@ router.delete('/:id/images/:imageId',
   requireArtist,
   requireModelOwnership,
   asyncHandler(async (req, res) => {
-    const { imageId } = req.params;
+    const { id, imageId } = req.params;
 
-    // Get image path for cleanup
+    // Scoped to model_id = :id (already ownership-checked above) as well as
+    // imageId — without it, an artist could delete ANY model's gallery image by
+    // passing their own model's id (to pass requireModelOwnership) alongside a
+    // stranger's imageId, since imageId alone doesn't prove which model it's on.
     const result = await db.query(
-      'SELECT image_path FROM model_images WHERE id = $1',
-      [imageId]
+      'SELECT image_path FROM model_images WHERE id = $1 AND model_id = $2',
+      [imageId, id]
     );
 
     if (result.rows.length === 0) {
@@ -1559,7 +1573,7 @@ router.delete('/:id/images/:imageId',
     const imagePath = result.rows[0].image_path;
 
     // Delete from database
-    await db.query('DELETE FROM model_images WHERE id = $1', [imageId]);
+    await db.query('DELETE FROM model_images WHERE id = $1 AND model_id = $2', [imageId, id]);
 
     // Delete from storage (async)
     deleteFromStorage(imagePath).catch(err => 

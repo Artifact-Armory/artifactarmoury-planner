@@ -138,7 +138,11 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   images: model.images?.map((image: any) => ({
     id: image.id,
     imagePath: image.image_path ?? image.imagePath,
-    imageUrl: image.image_url ?? image.imageUrl ?? image.image_path,
+    // Same treatment as thumbnailUrl above: the API only ever stores a raw
+    // storage key (image_path), never a ready-to-render URL — assetUrl() is
+    // what turns that into a CDN/uploads URL. Falling back to the bare key
+    // (as this used to) rendered a broken <img> for every gallery photo.
+    imageUrl: image.image_url ?? image.imageUrl ?? assetUrl(image.image_path ?? image.imagePath),
     caption: image.caption,
     displayOrder: image.display_order ?? image.displayOrder,
   })),

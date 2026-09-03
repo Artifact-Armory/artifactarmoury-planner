@@ -221,6 +221,10 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
       toast.success(`Done${res.notes?.length ? ` — ${res.notes.join('; ')}` : ''}`)
       qc.invalidateQueries({ queryKey: ['admin-reports'] })
       qc.invalidateQueries({ queryKey: ['admin-report', reportId] })
+      // The sidebar "Moderation" badge (open-queue size) never refreshed after
+      // resolving a report — it only caught up on its own 60s poll. Resolving
+      // changes the queue size directly, so refresh it immediately too.
+      qc.invalidateQueries({ queryKey: ['admin-moderation-counts'] })
       onClose()
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Action failed'),

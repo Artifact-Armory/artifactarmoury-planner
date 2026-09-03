@@ -1,6 +1,6 @@
 import apiClient from '../client'
 import { ApiResponse, TerrainModel, ModelUploadRequest, Review, CreateReviewRequest, Pagination } from '../types'
-import { mapModelRecord } from '../transformers'
+import { mapModelRecord, assetUrl } from '../transformers'
 
 const BASE_URL = '/api/models'
 
@@ -287,6 +287,32 @@ export const modelsApi = {
   acknowledgeMeshWarning: async (id: string): Promise<{ modelId: string }> => {
     const response = await apiClient.post(`${BASE_URL}/${id}/acknowledge-mesh-warning`);
     return response.data;
+  },
+
+  /**
+   * Attach extra store-page photos to a model. `keys` are object keys already
+   * uploaded direct-to-R2 via uploadsApi.uploadDirect(file, 'images') — this call
+   * just creates the model_images rows, mirroring the thumbnail's presign-then-
+   * send-the-key flow. The API caps a model at 10 gallery images total (across
+   * every call) and 400s if this batch would exceed that.
+   */
+  addGalleryImages: async (
+    id: string,
+    keys: string[],
+  ): Promise<Array<{ id: string; imagePath: string; imageUrl?: string; displayOrder: number }>> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/images`, { keys });
+    const images = response.data?.images ?? [];
+    return images.map((img: any) => ({
+      id: img.id,
+      imagePath: img.image_path,
+      imageUrl: assetUrl(img.image_path),
+      displayOrder: img.display_order,
+    }));
+  },
+
+  /** Remove one store-page photo. */
+  deleteGalleryImage: async (id: string, imageId: string): Promise<void> => {
+    await apiClient.delete(`${BASE_URL}/${id}/images/${imageId}`);
   },
 
   /**

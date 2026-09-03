@@ -29,12 +29,25 @@ const ArtistReports: React.FC = () => {
   const [tab, setTab] = useState<Tab>('current')
   const { data, isLoading } = useQuery({ queryKey: ['artist-reports'], queryFn: () => reportsApi.getAgainstMe() })
 
+  // Same query the sidebar nav badge reads (queryKey shared with DashboardLayout) —
+  // observing it here too means this effect reacts to the count, not just to mount.
+  const { data: unreadReportsCount } = useQuery({
+    queryKey: ['artist-reports-unread'],
+    queryFn: () => notificationsApi.unreadReportsCount(),
+    refetchInterval: 60_000,
+  })
+
   // Visiting this page is "reviewing" the new decisions/replies — clear the nav badge.
+  // Keyed off the count (not just mount-once): if the artist already has this page
+  // open and a new decision/reply lands while they're on it, the count ticks up on
+  // its next poll and this re-fires to clear it — a mount-only effect would miss
+  // that case entirely and leave the badge stuck until the next full page visit.
   useEffect(() => {
+    if (!unreadReportsCount) return
     notificationsApi.markReportsRead().then(() => {
       qc.invalidateQueries({ queryKey: ['artist-reports-unread'] })
     }).catch(() => {})
-  }, [qc])
+  }, [unreadReportsCount, qc])
 
   if (isLoading) return <div className="flex justify-center py-24"><Spinner size="lg" /></div>
   const reports = data ?? []
