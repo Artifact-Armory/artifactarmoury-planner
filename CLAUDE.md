@@ -738,6 +738,65 @@ client-side fail before wasting an upload — must match) updated to match.
   large upload** — same `DB_MOCK=true` local-dev limitation as everything else in this list; the
   `MAX_INGEST_TRIANGLES` default is a reasoned estimate, not a profiled number, so watch Railway
   memory on the first real upload near the new ceiling.
+- **`MAX_INGEST_TRIANGLES` raised 1M → 3M (same day),** at the user's request — real MyMiniFactory
+  source models were tripping the 1M cap (MMF's own limit is file **size**, not triangle count, so
+  passing there proves nothing about this cap). **Explicitly flagged as unprofiled and higher-risk**
+  when raised: this parser is *known* to cost more per triangle than the 1.1KB/tri fullGlb figure the
+  original 1M default anchored to, so 3M could peak well past a naive 3.3GB extrapolation — on
+  whatever plan tier the API service is on. See "Model ingest moved to the worker queue" below, which
+  is the actual fix for this (moves the risk off the web dyno entirely); until
+  `MODEL_INGEST_WORKER_ENABLED` is turned on in production, this parse still runs in the API server
+  and 3M is a real OOM risk there under concurrent large uploads.
+
+## Model ingest moved to the worker queue (built 2026-09-03, migration 057)
+Upload processing — download from R2, file-hash + geometry-fingerprint dedup, `parseSTL`
+(the triangle-capped parse above), mesh QA, dims, the pure-Node preview-GLB fallback — ran
+entirely **in the API server process**, "background" only in the sense of not being awaited
+by the HTTP response (`processUploadedModel`/`processModelVersionUpdate` in `routes/models.ts`,
+fired with `.catch()` and never awaited). A memory spike from a dense mesh could OOM-kill that
+same process, taking the live storefront/checkout down with it — this is what motivated raising
+`MAX_INGEST_TRIANGLES` cautiously above rather than just cranking it. This was already flagged as
+a known gap in the old code's own comment ("For higher volume, move this to a real job queue").
+- **Copies the pattern the preview-bake pipeline already proved** (`proxy_bake_jobs`,
+  `services/proxyBake/queue.ts`): a DB-backed queue table, `SELECT ... FOR UPDATE SKIP LOCKED`
+  claiming, a heartbeat while a job runs, stale-lock reclaim if a worker dies mid-job, and
+  release-back-to-queue on SIGTERM so a Railway redeploy doesn't strand a job. New table
+  `model_ingest_jobs` (migration 057): `job_type` (`'upload'|'version'`) + a small JSONB
+  `payload` (raw R2 keys/filenames/notes — never the file itself).
+- **The actual processing code moved unchanged** to `services/modelIngest/process.ts`
+  (`processUploadedModel`, `processModelVersionUpdate`, `processModelParts`,
+  `findGeometryDuplicate`, `markModelFailed`, `safeDeleteObject`) — cut-and-pasted with only
+  import paths touched, specifically to minimize the chance of introducing a behavioural bug in
+  this business-critical, anti-theft-load-bearing path. `findGeometryDuplicate` and
+  `safeDeleteObject` are still used directly in `routes/models.ts` too (the legacy synchronous
+  multipart create route's pre-flight checks), so they're exported and imported back rather than
+  duplicated.
+- **New `services/modelIngest/queue.ts` + `runner.ts`.** `dispatchIngestUpload` /
+  `dispatchIngestVersionUpdate` are what `routes/models.ts` now calls from the two upload routes;
+  internally they either enqueue a row (worker mode) or call the processing function directly
+  in-process exactly as before (today's default) — the route file itself has no branching logic.
+  `runner.ts`'s `runOneIngestJob` is what the worker calls to claim + run one job.
+- **`worker/proxyBakeWorker.ts` now drains three queues, ingest at the HIGHEST priority** —
+  ingest, then preview bake, then owner full-GLB. Ingest goes first because a bake/full-GLB job
+  for a model literally can't exist until that model's ingest job has run and enqueued it, so
+  anything else would just mean idling while ingest backs up. Same worker service, no new Railway
+  service or cost — it already runs continuously for preview baking.
+- **Off by default, deliberately, unlike the byte/triangle-cap changes above.** New env var
+  `MODEL_INGEST_WORKER_ENABLED` (unset/false = today's exact in-process behaviour, zero risk on
+  deploy). **To actually get the safety benefit in production: set
+  `MODEL_INGEST_WORKER_ENABLED=true` on the backend Railway service, AND confirm the worker
+  service (`npm run worker`) is deployed and running** — check whether it already is (it should
+  be, for preview baking) before assuming. There is **deliberately no in-process inline fallback**
+  for this queue (unlike `full_glb_jobs`'s `inline.ts`): the point of the flag is "this must never
+  run in the API server again", so a silent fallback there would defeat it. **Consequence: turning
+  the flag on without the worker actually running leaves every future upload stuck at
+  `processing_status='processing'` forever** — nothing drains the queue. Don't flip this without
+  confirming the worker is live.
+- Both projects typecheck clean (`npx tsc --noEmit` in `backend`, and the full `npm run build`).
+  **Untested against a real Postgres or a real worker deploy** — same `DB_MOCK=true` local-dev
+  limitation as most of this file. Verify by setting the flag on staging/prod after the migration
+  runs, uploading a model, and confirming (a) the model still reaches `ready`/`failed` correctly
+  and (b) `railway logs` on the worker service shows it claiming ingest jobs.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as

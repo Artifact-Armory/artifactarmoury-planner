@@ -331,6 +331,29 @@ CREATE UNIQUE INDEX idx_full_glb_jobs_one_open
     ON full_glb_jobs (model_id, (COALESCE(part_id, '00000000-0000-0000-0000-000000000000'::uuid)))
     WHERE status IN ('queued', 'running');
 
+-- Queue for moving the heavy upload-processing step (dedup, mesh QA, dims, the
+-- pure-Node preview fallback) off the API server and onto the same worker that
+-- bakes previews (migration 057). Off by default (MODEL_INGEST_WORKER_ENABLED
+-- unset/false) — see that migration's comment for the full rationale.
+CREATE TABLE model_ingest_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    job_type VARCHAR(20) NOT NULL, -- 'upload' | 'version'
+    payload JSONB NOT NULL,        -- raw R2 keys/filenames/notes, never the file itself
+    status VARCHAR(20) NOT NULL DEFAULT 'queued',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    error TEXT,
+    locked_at TIMESTAMP,
+    locked_by VARCHAR(120),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_model_ingest_jobs_open ON model_ingest_jobs (created_at)
+    WHERE status IN ('queued', 'running');
+CREATE INDEX idx_model_ingest_jobs_model ON model_ingest_jobs (model_id);
+
 -- ============================================================================
 -- BUNDLES (Several models grouped under one name + one price)
 -- ============================================================================

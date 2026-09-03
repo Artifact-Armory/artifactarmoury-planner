@@ -70,10 +70,20 @@ interface ParsedSTL {
  * fullGlb/build.ts's typed-array pipeline (which the same 1.1KB/source-triangle
  * measurement and MAX_TRIS pattern comes from), parseBinarySTL/parseASCIISTL
  * below build a full JS object graph — a Triangle object plus 4 nested Vector3
- * objects PER triangle — which is materially heavier per triangle than that. So
- * this uses the same evidenced-safe ceiling (1M tris, ~1.1GB there) as a
- * conservative anchor for a pipeline we know costs more per triangle, rather
- * than inventing an unverified higher number.
+ * objects PER triangle — which is materially heavier per triangle than that.
+ * The original 1M default used that pipeline's evidenced ~1.1GB-at-1M-tris
+ * figure as a conservative anchor rather than inventing an unverified number.
+ *
+ * Raised to 3M on 2026-09-03 at the user's request (source models came in
+ * over the old 1M cap from MyMiniFactory, whose own limit is file size, not
+ * triangle count, so it doesn't bound this). UNPROFILED: this pipeline is
+ * known to cost MORE per triangle than the 1.1KB/tri fullGlb figure above, so
+ * 3M tris could peak well past the naive 3.3GB extrapolation — and unlike
+ * fullGlb (which the bake worker can drain), this parse runs inline in the
+ * API server process itself (processUploadedModel/processModelParts in
+ * routes/models.ts), so an OOM here takes out the web dyno, not a worker.
+ * Watch Railway memory on the first real upload near this ceiling; lower it
+ * back or split this parse out to a worker if it spikes.
  *
  * For binary STL (fixed 50 bytes/triangle) this ceiling — not
  * MAX_MODEL_FILE_BYTES — ends up the binding constraint well under that byte
@@ -81,7 +91,7 @@ interface ParsedSTL {
  * rejected here. The higher byte cap mainly helps less triangle-dense uploads
  * (ASCII STL, OBJ, 3MF) and genuinely low-poly-but-physically-large terrain.
  */
-export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 1_000_000)
+export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 3_000_000)
 
 /**
  * Triangle count from a binary STL *without* parsing it — the format states it

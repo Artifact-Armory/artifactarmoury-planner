@@ -16,6 +16,13 @@
 // a backlog of owner GLBs can never delay the preview an artist is waiting on.
 // That build is pure Node (no Blender), it just lives here to keep its CPU off the
 // web service.
+//
+// And, at the HIGHEST priority of the three, it drains the MODEL INGEST queue
+// (migration 057, MODEL_INGEST_WORKER_ENABLED) — the upload-time dedup/mesh-QA/
+// preview step that used to run in the API server itself. It goes first because
+// a bake or full-GLB job for a model literally cannot exist until that model's
+// ingest job has run and enqueued it, so prioritizing anything else would just
+// mean idling while ingest jobs pile up.
 
 import 'dotenv/config'
 import os from 'os'
@@ -32,6 +39,7 @@ import {
 } from '../services/proxyBake/queue'
 import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb/runner'
 import { isFullGlbEnabled } from '../services/fullGlb/queue'
+import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
 import { closeDatabase } from '../db'
 
 const POLL_INTERVAL_MS = Number(process.env.PROXY_BAKE_POLL_MS ?? 5000)
@@ -107,9 +115,13 @@ async function main(): Promise<void> {
   while (!stopping) {
     let didWork = false
     try {
-      didWork = await processOne()
-      // Preview bakes always win. Only reach for an owner full-GLB build when the
-      // bake queue is empty, so an artist's preview is never stuck behind one.
+      // Ingest jobs first — see the file header for why.
+      didWork = await runOneIngestJob(WORKER_ID)
+      // Preview bakes win next. Only reach for an owner full-GLB build when both
+      // queues above are empty, so an artist's preview is never stuck behind one.
+      if (!didWork && !stopping) {
+        didWork = await processOne()
+      }
       if (!didWork && !stopping && isFullGlbEnabled()) {
         didWork = await runOneFullGlbJob(WORKER_ID)
       }
@@ -136,6 +148,15 @@ async function shutdown(signal: string): Promise<void> {
   // exception, so failJob never ran, and the row stayed 'running' until the
   // stale-lock window expired. Releasing takes milliseconds and lets another
   // worker restart it immediately.
+  // An ingest job may be the thing in flight instead — checked first since it's
+  // the highest-priority queue. Same reasoning: exit NOW if we released one,
+  // since the loop is still awaiting that call and would otherwise write a
+  // result for a job someone else now owns.
+  const releasedIngest = await releaseInFlightIngestJob(WORKER_ID).catch(() => false)
+  if (releasedIngest) {
+    await closeDatabase().catch(() => {})
+    process.exit(0)
+  }
   // An owner full-GLB build may be the thing in flight instead of a bake; hand it
   // back for the same reason (it is minutes of CPU, the drain window is seconds).
   // If we released one we must exit NOW — the loop is still awaiting that build,
