@@ -710,6 +710,35 @@ case unchanged:
   local-dev limitation as everything else in this list; verify on the first deploy after the
   migration runs, ideally with a real pre-supported upload.
 
+## Upload size limit raised, informed by MyMiniFactory (built 2026-09-03)
+`MAX_MODEL_FILE_BYTES` (`services/meshConvert.ts`) went **150MB → 250MB** — a deliberate middle
+ground between MyMiniFactory's two tiers (100MB regular-designer, 500MB Store Manager —
+[creator.myminifactory.com/whats-the-max-file-size](https://creator.myminifactory.com/whats-the-max-file-size)), chosen over matching their top tier
+outright given the real memory risk below. Frontend's duplicate constant in `CreateModel.tsx` (fast
+client-side fail before wasting an upload — must match) updated to match.
+- **Added alongside it, not optional:** the byte cap alone never bounded memory for a *dense* mesh
+  — the initial ingest parse (`fileProcessor.ts`'s `parseSTL`) had no triangle-count ceiling at all,
+  unlike the owner-GLB pipeline's `FULL_GLB_MAX_TRIS`. New `MAX_INGEST_TRIANGLES` (default 1M,
+  reusing that pipeline's evidenced-safe number as a conservative anchor — this parse is actually
+  *heavier* per-triangle, since it builds a full JS object graph rather than typed arrays) rejects
+  an over-dense STL from its binary header (or a cheap `facet normal` scan for ASCII) **before** the
+  parse loop runs, same "check before, not after" reasoning as `fullGlb/build.ts`.
+- **For binary STL (the common case) the triangle ceiling, not the byte cap, ends up binding.**
+  Binary STL is exactly 50 bytes/triangle, so 1M triangles ≈ 48MB — well under 250MB. A dense binary
+  STL anywhere near the new byte cap will still be rejected. The higher byte cap mainly helps
+  less triangle-dense uploads (ASCII STL, OBJ, 3MF) and low-poly-but-physically-large terrain.
+  Raising `MAX_INGEST_TRIANGLES` further would need real profiling of this parser's actual
+  RSS/triangle first — the 1M default is a deliberately conservative placeholder, not a measurement.
+- `fullGlb/build.ts`'s own `MAX_SOURCE_BYTES` (400MB, separate cap on the owner-tier GLB build, not
+  the upload itself) is untouched and no longer reachable by any upload — the new 250MB ingest cap
+  is comfortably under it.
+- Both projects typecheck clean. The new ingest guard's logic (byte math, binary-header parsing, the
+  ASCII `facet normal` scan not double-counting via `endfacet`) was verified standalone — instant
+  rejection at 2M declared triangles, correct counts at both ends. **Not load-tested against a real
+  large upload** — same `DB_MOCK=true` local-dev limitation as everything else in this list; the
+  `MAX_INGEST_TRIANGLES` default is a reasoned estimate, not a profiled number, so watch Railway
+  memory on the first real upload near the new ceiling.
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,

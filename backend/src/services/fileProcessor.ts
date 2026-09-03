@@ -66,21 +66,81 @@ interface ParsedSTL {
 }
 
 /**
+ * Meshes above this are rejected before the parse loop below runs. Unlike
+ * fullGlb/build.ts's typed-array pipeline (which the same 1.1KB/source-triangle
+ * measurement and MAX_TRIS pattern comes from), parseBinarySTL/parseASCIISTL
+ * below build a full JS object graph — a Triangle object plus 4 nested Vector3
+ * objects PER triangle — which is materially heavier per triangle than that. So
+ * this uses the same evidenced-safe ceiling (1M tris, ~1.1GB there) as a
+ * conservative anchor for a pipeline we know costs more per triangle, rather
+ * than inventing an unverified higher number.
+ *
+ * For binary STL (fixed 50 bytes/triangle) this ceiling — not
+ * MAX_MODEL_FILE_BYTES — ends up the binding constraint well under that byte
+ * cap (250MB); a dense binary STL anywhere near the byte cap will still be
+ * rejected here. The higher byte cap mainly helps less triangle-dense uploads
+ * (ASCII STL, OBJ, 3MF) and genuinely low-poly-but-physically-large terrain.
+ */
+export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 1_000_000)
+
+/**
+ * Triangle count from a binary STL *without* parsing it — the format states it
+ * in 4 bytes at offset 80. Must run BEFORE the parse loop: checking the count
+ * afterwards guards nothing, since the memory is already spent building the
+ * object graph the check was meant to prevent. Returns null when the header
+ * count doesn't agree with the file's actual length (not a well-formed binary
+ * STL — parseBinarySTL will surface that as its own error).
+ */
+function binaryStlDeclaredTriangleCount(buffer: Buffer): number | null {
+  if (buffer.length < 84) return null
+  const n = buffer.readUInt32LE(80)
+  return 84 + n * 50 === buffer.length ? n : null
+}
+
+/**
+ * Cheap upper-bound triangle count for an ASCII STL, without allocating any
+ * triangle objects: counts the "facet normal" marker each triangle starts
+ * with (searched directly over the raw bytes, so this doesn't even pay for a
+ * utf8 decode of the whole file). "facet" alone would double-count, since
+ * "endfacet" also contains it.
+ */
+function countAsciiFacets(buffer: Buffer): number {
+  const needle = 'facet normal'
+  let count = 0
+  let idx = buffer.indexOf(needle)
+  while (idx !== -1) {
+    count++
+    idx = buffer.indexOf(needle, idx + needle.length)
+  }
+  return count
+}
+
+/**
  * Parse STL file (supports both ASCII and binary formats)
  */
 export async function parseSTL(filePath: string): Promise<ParsedSTL> {
+  let buffer: Buffer
   try {
-    const buffer = await readFile(filePath)
-    
-    // Check if binary or ASCII
-    const header = buffer.toString('ascii', 0, 5)
-    const isBinary = header !== 'solid'
-    
-    if (isBinary) {
-      return parseBinarySTL(buffer)
-    } else {
-      return parseASCIISTL(buffer.toString('utf8'))
-    }
+    buffer = await readFile(filePath)
+  } catch (error) {
+    logger.error('Failed to read STL', { error, filePath })
+    throw new Error('Failed to parse STL file')
+  }
+
+  // Check if binary or ASCII
+  const header = buffer.toString('ascii', 0, 5)
+  const isBinary = header !== 'solid'
+
+  const declaredTriangles = isBinary ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
+  if (declaredTriangles !== null && declaredTriangles > MAX_INGEST_TRIANGLES) {
+    throw new Error(
+      `Mesh has ${declaredTriangles.toLocaleString()} triangles — the maximum is ` +
+      `${MAX_INGEST_TRIANGLES.toLocaleString()}. Please decimate the model and upload again.`,
+    )
+  }
+
+  try {
+    return isBinary ? parseBinarySTL(buffer) : parseASCIISTL(buffer.toString('utf8'))
   } catch (error) {
     logger.error('Failed to parse STL', { error, filePath })
     throw new Error('Failed to parse STL file')
