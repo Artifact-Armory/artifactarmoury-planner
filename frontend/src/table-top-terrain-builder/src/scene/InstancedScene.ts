@@ -4,10 +4,11 @@
 // call per sub-mesh, not N. Geometry/materials are shared from the template cache,
 // so a unique GLB is only uploaded to the GPU once.
 //
-// Also owns a selection/hover ground glow, a placement "pop" animation, and
-// instance picking. Selected pieces stay exactly where they rest (no lift) with
-// a soft warm-blue glow disc under them — cheap, since only a few are ever
-// selected, and it never occludes or reshapes the piece itself.
+// Also owns a selection/hover glow, a placement "pop" animation, and instance
+// picking. Selected pieces stay exactly where they rest (no lift): a soft
+// warm-blue glow disc pools under them, plus a thin rim of light hugging their
+// actual silhouette (a scaled-up backface shell) — cheap, since only a few are
+// ever selected, and neither occludes or reshapes the piece itself.
 
 import * as THREE from 'three'
 import type { Asset } from '@core/assets'
@@ -18,9 +19,13 @@ import { levelToY } from '@core/elevation'
 const POP_MS = 180
 const SELECT_GLOW = new THREE.Color(0x5b9dff) // warm-leaning blue (vs. an icy cyan)
 const HOVER_GLOW = new THREE.Color(0x8aa0b8)
-const SELECT_GLOW_OPACITY = 0.45
+// Ground disc + rim shell together read stronger than either alone, so each is
+// tuned down a little from what it'd use solo.
+const SELECT_GLOW_OPACITY = 0.35
 const HOVER_GLOW_OPACITY = 0.22
 const GLOW_LIFT = 0.003 // metres above the resting surface, just enough to avoid z-fighting
+const RIM_GLOW_OPACITY = 0.6
+const RIM_GLOW_SCALE = 1.05 // how far the rim shell puffs out past the piece's own surface
 
 const tmpQuat = new THREE.Quaternion()
 const tmpQuatPitch = new THREE.Quaternion()
@@ -87,6 +92,14 @@ export class InstancedScene {
   private hoverGlowMat = new THREE.MeshBasicMaterial({
     map: getGlowTexture(), color: HOVER_GLOW, transparent: true,
     blending: THREE.AdditiveBlending, depthWrite: false, opacity: HOVER_GLOW_OPACITY,
+  })
+  // Rim shells: one mesh per template part per selected instance, reusing that
+  // part's real geometry (so the halo follows the piece's actual silhouette,
+  // not a generic box) scaled up slightly and drawn back-face-only.
+  private rimGlows = new Map<string, THREE.Mesh[]>()
+  private rimMat = new THREE.MeshBasicMaterial({
+    color: SELECT_GLOW, transparent: true, opacity: RIM_GLOW_OPACITY,
+    blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
   })
 
   private onNeedsTemplate: () => void
@@ -206,7 +219,10 @@ export class InstancedScene {
     this.disposeMeshes()
     this.selectGlowMat.dispose()
     this.hoverGlowMat.dispose()
-    // The glow texture/geometry are shared app-wide singletons — not disposed here.
+    this.rimMat.dispose()
+    // The glow texture/geometry, and every part geometry a rim shell reuses,
+    // are owned elsewhere (shared singletons / the template cache) — not
+    // disposed here.
   }
 
   // ---- internals ----------------------------------------------------------
@@ -254,17 +270,17 @@ export class InstancedScene {
     this.rebuildSelectGlows()
   }
 
-  private composeMatrix(inst: Instance, partMatrix: THREE.Matrix4, out: THREE.Matrix4, aabb?: { x: number; y: number; z: number }) {
+  private composeMatrix(inst: Instance, partMatrix: THREE.Matrix4, out: THREE.Matrix4, aabb?: { x: number; y: number; z: number }, extraScale = 1) {
     const t = this.liveOverride.get(inst.id)
     const x = t ? t.x : inst.position.x
     const z = t ? t.z : inst.position.z
     const rotDeg = t ? t.rotDeg : inst.rotationDeg
 
-    let scale = 1
+    let scale = extraScale
     const pop = this.popStart.get(inst.id)
     if (pop != null) {
       const k = Math.min(1, (performance.now() - pop) / POP_MS)
-      scale = 0.6 + 0.4 * easeOutBack(k)
+      scale *= 0.6 + 0.4 * easeOutBack(k)
     }
 
     // yaw about Y, then tilt (pitch) about the model's local X so a piece can be
@@ -335,25 +351,61 @@ export class InstancedScene {
   }
 
   private rebuildSelectGlows() {
-    // remove stale
+    // remove stale ground discs
     for (const [id, mesh] of this.selectGlows) {
       if (!this.selected.has(id)) {
         this.glowGroup.remove(mesh)
         this.selectGlows.delete(id)
       }
     }
+    // remove stale rim shells
+    for (const [id, meshes] of this.rimGlows) {
+      if (!this.selected.has(id)) {
+        for (const m of meshes) this.glowGroup.remove(m)
+        this.rimGlows.delete(id)
+      }
+    }
     const instById = new Map(this.instances.map((i) => [i.id, i]))
     for (const id of this.selected) {
       const inst = instById.get(id)
       if (!inst) continue
-      let mesh = this.selectGlows.get(id)
-      if (!mesh) {
-        mesh = this.makeGlow(this.selectGlowMat)
-        this.selectGlows.set(id, mesh)
-        this.glowGroup.add(mesh)
+
+      let disc = this.selectGlows.get(id)
+      if (!disc) {
+        disc = this.makeGlow(this.selectGlowMat)
+        this.selectGlows.set(id, disc)
+        this.glowGroup.add(disc)
       }
-      this.positionGlow(mesh, inst)
+      this.positionGlow(disc, inst)
+
+      this.updateRimShell(id, inst)
     }
+  }
+
+  /** Build/update the rim shell for one selected instance: one backface-only
+   *  mesh per template part, reusing that part's real geometry so the halo
+   *  traces the piece's actual silhouette instead of a generic box. */
+  private updateRimShell(id: string, inst: Instance) {
+    const asset = this.assetsById.get(inst.assetId)
+    const template = asset ? getResolvedTemplate(asset) : null
+    if (!template) return // not loaded yet — the piece itself isn't visible either
+
+    let shells = this.rimGlows.get(id)
+    if (!shells || shells.length !== template.parts.length) {
+      if (shells) for (const m of shells) this.glowGroup.remove(m)
+      shells = template.parts.map((part) => {
+        const m = new THREE.Mesh(part.geometry, this.rimMat)
+        m.matrixAutoUpdate = false
+        m.renderOrder = 998
+        this.glowGroup.add(m)
+        return m
+      })
+      this.rimGlows.set(id, shells)
+    }
+    template.parts.forEach((part, i) => {
+      this.composeMatrix(inst, part.matrix, tmpMat, template.aabb, RIM_GLOW_SCALE)
+      shells![i].matrix.copy(tmpMat)
+    })
   }
 
   private updateHoverGlow() {
