@@ -50,6 +50,7 @@ const MAX_MODEL_FILE_BYTES = MAX_MODEL_FILE_MB * 1024 * 1024
 // Caps mirrored from the backend (routes/models.ts).
 const MAX_EXTRA_FILES = 60
 const MAX_COMPONENTS = 20
+const MAX_GALLERY_IMAGES = 10
 
 const MESH_FILE_RE = /\.(stl|obj|3mf)$/i
 const baseName = (filename: string) => filename.replace(MESH_FILE_RE, '')
@@ -146,6 +147,9 @@ const CreateModel: React.FC = () => {
   // brush holder, a display base, a tool) that isn't meant to go on a battlefield table.
   const [showInPlanner, setShowInPlanner] = React.useState(true)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
+  // Extra store-page photos (beyond the required thumbnail) — optional, uploaded
+  // alongside everything else in the same batch so this is all done from one page.
+  const [galleryFiles, setGalleryFiles] = React.useState<File[]>([])
   // The listing's files, grouped into named models (see Component above). The very
   // first file of the first component is the primary — the model row's own STL.
   const [components, setComponents] = React.useState<Component[]>([newComponent()])
@@ -170,6 +174,19 @@ const CreateModel: React.FC = () => {
       list.map((c, idx) => (idx === i ? { ...c, files: c.files.filter((_, f) => f !== fileIndex) } : c)))
   const addComponent = () => setComponents((list) => [...list, newComponent()])
   const removeComponent = (i: number) => setComponents((list) => list.filter((_, idx) => idx !== i))
+
+  const addGalleryFiles = (files: File[]) =>
+    setGalleryFiles((list) => [...list, ...files].slice(0, MAX_GALLERY_IMAGES))
+  const removeGalleryFile = (i: number) =>
+    setGalleryFiles((list) => list.filter((_, idx) => idx !== i))
+
+  // Object-URL previews for the picked gallery files — revoked whenever the
+  // picked set changes (add/remove) or the page unmounts.
+  const galleryPreviews = React.useMemo(
+    () => galleryFiles.map((f) => URL.createObjectURL(f)),
+    [galleryFiles],
+  )
+  React.useEffect(() => () => { galleryPreviews.forEach((u) => URL.revokeObjectURL(u)) }, [galleryPreviews])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -234,11 +251,11 @@ const CreateModel: React.FC = () => {
       setPhase('uploading')
       setProgress(0)
 
-      // Every file (all components + the thumbnail + every component's optional
-      // preview model) contributes to one bar, so a 12-file village doesn't look
-      // stuck at 100% after the first upload.
+      // Every file (all components + the thumbnail + gallery photos + every
+      // component's optional preview model) contributes to one bar, so a 12-file
+      // village doesn't look stuck at 100% after the first upload.
       const previewFileCount = components.filter((c) => c.isPresupported && c.previewFile).length
-      const totalUploads = allFiles.length + 1 + previewFileCount
+      const totalUploads = allFiles.length + 1 + galleryFiles.length + previewFileCount
       let uploadsDone = 0
       const bump = (pct: number) =>
         setProgress(Math.round(((uploadsDone + pct / 100) / totalUploads) * 100))
@@ -300,6 +317,15 @@ const CreateModel: React.FC = () => {
       const thumbnailKey = (await uploadsApi.uploadDirect(thumbFile, 'thumbnails', bump)).key
       uploadsDone++
 
+      // 3b. Optional extra store-page photos — same direct-to-R2 upload, just to
+      //     the 'images' prefix instead of 'thumbnails'.
+      const galleryKeys: string[] = []
+      for (const f of galleryFiles) {
+        startFile(f.name)
+        galleryKeys.push((await uploadsApi.uploadDirect(f, 'images', bump)).key)
+        uploadsDone++
+      }
+
       // 4. Create the model row; the API processes it (+ all parts) in the background.
       const created = await modelsApi.createFromUpload({
         rawKey,
@@ -313,6 +339,7 @@ const CreateModel: React.FC = () => {
         license,
         printerType: printerType || undefined,
         thumbnailKey,
+        galleryKeys: galleryKeys.length ? galleryKeys : undefined,
         showInPlanner,
         isPresupported: primaryComp.isPresupported,
         displayRawKey,
@@ -705,6 +732,59 @@ const CreateModel: React.FC = () => {
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
           </label>
           {thumbFile && <p className="text-sm text-muted-foreground mt-1">{thumbFile.name}</p>}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            Gallery photos <span className="font-normal text-muted-foreground">(optional)</span>
+          </label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Extra photos shown on the store page alongside the thumbnail — angles, close-ups, painted
+            examples. Up to {MAX_GALLERY_IMAGES}.
+          </p>
+
+          {galleryFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-3">
+              {galleryFiles.map((f, i) => (
+                <div key={`${f.name}-${i}`} className="relative h-20 w-20">
+                  <img src={galleryPreviews[i]} alt="" className="h-20 w-20 rounded-sm border object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeGalleryFile(i)}
+                    disabled={busy}
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs text-white disabled:opacity-50"
+                    title="Remove this photo"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <label
+            className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${
+              busy || galleryFiles.length >= MAX_GALLERY_IMAGES ? 'pointer-events-none opacity-50' : ''
+            }`}
+          >
+            <Upload size={16} />
+            Add photos…
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              disabled={busy || galleryFiles.length >= MAX_GALLERY_IMAGES}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? [])
+                if (files.length) addGalleryFiles(files)
+                e.target.value = ''
+              }}
+            />
+          </label>
+          {galleryFiles.length >= MAX_GALLERY_IMAGES && (
+            <p className="mt-1 text-xs text-muted-foreground">Maximum reached — remove one to add another.</p>
+          )}
         </div>
 
         {phase === 'uploading' && (

@@ -83,6 +83,12 @@ export const modelsApi = {
     }>
     /** Taxonomy tags as `facetSlug:termPath` tokens. */
     terms?: string[]
+    /**
+     * Extra store-page photos, already uploaded direct-to-R2 via
+     * uploadsApi.uploadDirect(file, 'images') — same convention as thumbnailKey.
+     * Capped at 10 (matches addGalleryImages' MAX_GALLERY_IMAGES).
+     */
+    galleryKeys?: string[]
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
     const response = await apiClient.post(`${BASE_URL}/from-upload`, data, { timeout: 60_000 });
     return response.data.model;
