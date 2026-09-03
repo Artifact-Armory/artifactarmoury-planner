@@ -20,6 +20,26 @@
 // defeat it. Turning the flag on without the worker actually deployed leaves
 // uploads stuck 'processing' forever — see this migration's SQL comment and the
 // CLAUDE.md entry for this change before flipping it in production.
+//
+// LARGE-JOB SINGLE-FLIGHT (built 2026-09-03, no migration needed): the worker
+// loop already runs one job at a time within a single process, but with more
+// than one worker replica, two genuinely heavy jobs could still land on two
+// different replicas at once — the exact "10 uploads at once" scenario this
+// whole queue exists to defuse, just moved from "in the API server" to "across
+// worker replicas". So a job over MODEL_INGEST_LARGE_BYTES needs a cluster-wide
+// Postgres advisory lock (tryAcquireLargeJobLock) before it's allowed to run;
+// only one large job runs anywhere in the cluster at a time, while any number
+// of small/normal jobs keep running freely in parallel across replicas. The
+// lock is session-scoped (pg_advisory_lock, not the _xact_ variant) because it
+// must stay held for the whole job — which can run minutes — not just the
+// instant of claiming, so it's taken on a dedicated client held open for the
+// job's duration rather than the shared query pool. Size is measured from the
+// RAW FILE BYTES (known cheaply in the route handler before any processing,
+// via the same objectSize() call that already enforces MAX_MODEL_FILE_BYTES),
+// not triangle count (only knowable after the file's already been downloaded
+// and partially parsed) — a conservative proxy assuming worst-case 50
+// bytes/triangle binary-STL density, so it only ever over-flags a file as
+// "large", never under-flags one.
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
@@ -38,6 +58,19 @@ export function isIngestWorkerEnabled(): boolean {
   return process.env.MODEL_INGEST_WORKER_ENABLED === 'true';
 }
 
+/**
+ * Raw-byte threshold above which a job must win the cluster-wide large-job lock
+ * before it's allowed to run. Default 150MB ≈ 3.1M triangles at binary STL's 50
+ * bytes/triangle (~63% of fileProcessor.ts's MAX_INGEST_TRIANGLES, currently
+ * 5M). Raised from an initial 75MB on 2026-09-03 — real uploads on this
+ * marketplace routinely run well above 75MB, which made the lock trigger on
+ * ordinary-sized files instead of just the genuinely heavy ones it exists for.
+ */
+const LARGE_JOB_BYTES = Number(process.env.MODEL_INGEST_LARGE_BYTES ?? 150 * 1024 * 1024);
+
+/** Fixed arbitrary key for the cluster-wide "one large ingest job at a time" lock. */
+const LARGE_JOB_LOCK_KEY = 834127001;
+
 export type IngestJobType = 'upload' | 'version';
 
 export interface UploadPayload {
@@ -45,12 +78,15 @@ export interface UploadPayload {
   filename?: string | null;
   displayRawKey?: string | null;
   displayFilename?: string | null;
+  /** Raw file byte size, known up-front by the route handler — see LARGE_JOB_BYTES above. */
+  rawBytes?: number | null;
 }
 
 export interface VersionPayload {
   rawKey: string;
   filename?: string | null;
   notes?: string | null;
+  rawBytes?: number | null;
 }
 
 export interface IngestJobRow {
@@ -61,6 +97,39 @@ export interface IngestJobRow {
   status: string;
   attempts: number;
   max_attempts: number;
+}
+
+/** Is this job's raw file over the large-job threshold? See LARGE_JOB_BYTES above. */
+export function isLargeIngestJob(job: IngestJobRow): boolean {
+  return (job.payload?.rawBytes ?? 0) >= LARGE_JOB_BYTES;
+}
+
+/**
+ * Try to take the cluster-wide "one large ingest job at a time" lock. Returns
+ * the client holding it (keep it checked out and pass it to
+ * releaseLargeJobLock when the job finishes) or null if another replica
+ * already holds it right now — that's the normal, expected case under a burst
+ * of large uploads, not an error.
+ */
+export async function tryAcquireLargeJobLock(): Promise<any | null> {
+  const client = await db.connect();
+  const { rows } = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [LARGE_JOB_LOCK_KEY]);
+  if (!rows[0]?.locked) {
+    client.release();
+    return null;
+  }
+  return client;
+}
+
+/** Release a lock taken by tryAcquireLargeJobLock and hand the client back to the pool. */
+export async function releaseLargeJobLock(client: any): Promise<void> {
+  try {
+    await client.query('SELECT pg_advisory_unlock($1)', [LARGE_JOB_LOCK_KEY]);
+  } catch (err) {
+    log.warn('Failed to release large-job advisory lock (will clear when the connection closes)', { error: err });
+  } finally {
+    client.release();
+  }
 }
 
 /** Insert one queued ingest job. */
@@ -91,6 +160,7 @@ export async function dispatchIngestUpload(input: {
   filename?: string;
   displayRawKey?: string;
   displayFilename?: string;
+  rawBytes?: number | null;
 }): Promise<void> {
   if (isIngestWorkerEnabled()) {
     await enqueueIngestJob({
@@ -101,6 +171,7 @@ export async function dispatchIngestUpload(input: {
         filename: input.filename ?? null,
         displayRawKey: input.displayRawKey ?? null,
         displayFilename: input.displayFilename ?? null,
+        rawBytes: input.rawBytes ?? null,
       },
     });
     return;
@@ -116,12 +187,13 @@ export async function dispatchIngestVersionUpdate(input: {
   rawKey: string;
   filename?: string;
   notes: string | null;
+  rawBytes?: number | null;
 }): Promise<void> {
   if (isIngestWorkerEnabled()) {
     await enqueueIngestJob({
       modelId: input.modelId,
       jobType: 'version',
-      payload: { rawKey: input.rawKey, filename: input.filename ?? null, notes: input.notes },
+      payload: { rawKey: input.rawKey, filename: input.filename ?? null, notes: input.notes, rawBytes: input.rawBytes ?? null },
     });
     return;
   }

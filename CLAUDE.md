@@ -738,15 +738,18 @@ client-side fail before wasting an upload — must match) updated to match.
   large upload** — same `DB_MOCK=true` local-dev limitation as everything else in this list; the
   `MAX_INGEST_TRIANGLES` default is a reasoned estimate, not a profiled number, so watch Railway
   memory on the first real upload near the new ceiling.
-- **`MAX_INGEST_TRIANGLES` raised 1M → 3M (same day),** at the user's request — real MyMiniFactory
-  source models were tripping the 1M cap (MMF's own limit is file **size**, not triangle count, so
-  passing there proves nothing about this cap). **Explicitly flagged as unprofiled and higher-risk**
-  when raised: this parser is *known* to cost more per triangle than the 1.1KB/tri fullGlb figure the
-  original 1M default anchored to, so 3M could peak well past a naive 3.3GB extrapolation — on
-  whatever plan tier the API service is on. See "Model ingest moved to the worker queue" below, which
-  is the actual fix for this (moves the risk off the web dyno entirely); until
-  `MODEL_INGEST_WORKER_ENABLED` is turned on in production, this parse still runs in the API server
-  and 3M is a real OOM risk there under concurrent large uploads.
+- **`MAX_INGEST_TRIANGLES` raised 1M → 3M → 5M, all the same day,** at the user's request. The 1M→3M
+  jump was for real MyMiniFactory source models tripping the 1M cap (MMF's own limit is file
+  **size**, not triangle count, so passing there proves nothing about this cap) and was **explicitly
+  flagged as unprofiled and higher-risk** at the time: this parser is *known* to cost more per
+  triangle than the 1.1KB/tri fullGlb figure the original 1M default anchored to, and it still ran
+  **inline in the API server**, so an OOM there risked the live site. See "Model ingest moved to the
+  worker queue" below — built later the same day — which is the actual fix: this parse now runs in
+  the separate worker, with a cluster-wide single-flight lock on large jobs (see that section). The
+  3M→5M bump leans on that fix being live: a real 4,084,184-triangle upload ("Japan houses") hit the
+  3M ceiling, and with the worker isolation + single-flight lock in place, a spike now costs a
+  worker restart, not a site outage. Still unprofiled — watch worker memory on the first real upload
+  near 5M.
 
 ## Model ingest moved to the worker queue (built 2026-09-03, migration 057)
 Upload processing — download from R2, file-hash + geometry-fingerprint dedup, `parseSTL`
@@ -797,6 +800,45 @@ a known gap in the old code's own comment ("For higher volume, move this to a re
   limitation as most of this file. Verify by setting the flag on staging/prod after the migration
   runs, uploading a model, and confirming (a) the model still reaches `ready`/`failed` correctly
   and (b) `railway logs` on the worker service shows it claiming ingest jobs.
+- **LIVE in production as of 2026-09-03**: `MODEL_INGEST_WORKER_ENABLED=true` set on the
+  `confident-purpose` (backend API) service; the worker service was already deployed and running
+  for preview baking, so no new Railway service was needed. First real-world upload against it
+  ("Japan houses", 4,084,184 triangles) correctly hit the `MAX_INGEST_TRIANGLES` rejection — proof
+  the ingest pipeline is genuinely running end-to-end through the worker now, not just deployed.
+
+### Large-job single-flight lock (built 2026-09-03, same day)
+The worker's poll loop already runs one job at a time *within a single process*, but with more
+than one worker replica, two genuinely heavy uploads could still land on two different replicas
+simultaneously — the "several large uploads at once" scenario the whole queue exists to defuse,
+just relocated from "in the API server" to "across worker replicas" rather than eliminated.
+- A job whose raw file is ≥ `MODEL_INGEST_LARGE_BYTES` (default **150MB**, raised from an initial
+  75MB the same day — real uploads here routinely run well above 75MB, so that default was
+  triggering the lock on ordinary files instead of just the heavy ones; 150MB ≈ 3.1M triangles at
+  binary STL's 50 bytes/triangle, ~63% of `MAX_INGEST_TRIANGLES`, currently 5M) must win a
+  cluster-wide Postgres advisory lock (`services/modelIngest/queue.ts`'s `tryAcquireLargeJobLock`)
+  before it's allowed to run. Only one large job runs anywhere in the cluster at a time; any number
+  of small/normal jobs keep running freely in parallel across replicas — this only gates the
+  genuinely heavy ones.
+  **No migration needed** — size comes from the raw byte count the route handler already knows via
+  `objectSize()` (the same call that enforces `MAX_MODEL_FILE_BYTES`), threaded through the job's
+  existing JSONB `payload` as `rawBytes`, not a new column.
+- **Session-scoped lock, not transactional** (`pg_advisory_lock`/`pg_advisory_unlock`, not
+  `_xact_`): it has to stay held for the job's whole duration — potentially minutes — not just the
+  instant of claiming, so it's taken on a dedicated client held open for the job (`runner.ts`), not
+  the shared query pool. If a large job can't get the lock (another replica holds it), the claimed
+  row is handed straight back to the queue via the existing `releaseIngestJob` (not a failure, not
+  penalized) and retried on a later poll.
+- **Known v1 limitation:** "large" is judged only from the PRIMARY file's byte size. A grouped/
+  multi-part listing (migration 038) whose primary file is small but whose extra parts are
+  individually huge won't be flagged, even though `processModelParts` inside that one job will
+  still process every part sequentially and could still spike memory. Summing all parts' sizes at
+  enqueue time would fix this; not built, since the primary-file heuristic already catches the
+  reported case and every plain single-file upload (the common case).
+- Both projects typecheck clean. **Untested against a real Postgres / multiple real worker
+  replicas** — same `DB_MOCK=true` limitation as everything else in this list, and this specific
+  feature additionally can't be proven correct without at least two worker replicas actually racing
+  for the lock. Verify by scaling the worker to 2+ replicas and uploading two large files at once,
+  watching `railway logs` for one "Large ingest job deferred" line.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
