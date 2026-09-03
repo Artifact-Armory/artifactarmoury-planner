@@ -97,6 +97,55 @@ export async function notifyOwnersOfModelUpdate(
   }
 }
 
+/**
+ * Fan out an in-app notification to every admin user. Used for things an admin
+ * should be aware of but that don't belong in a single user's inbox — e.g. an
+ * artist overriding a serious mesh-QA warning to publish anyway.
+ */
+async function notifyAdmins(input: Omit<NotificationInput, 'userId'>): Promise<void> {
+  try {
+    const result = await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, link, actor_id, model_id)
+       SELECT id, $1, $2, $3, $4, $5, $6
+       FROM users WHERE role = 'admin'`,
+      [input.type, input.title, input.body ?? null, input.link ?? null, input.actorId ?? null, input.modelId ?? null],
+    );
+    log.info('Admin notification fanned out', { type: input.type, recipients: result.rowCount });
+  } catch (err) {
+    log.error('notifyAdmins failed', { error: err, type: input.type });
+  }
+}
+
+/**
+ * An artist chose to publish (or keep published) a model despite a serious mesh
+ * QA warning (real open edges/holes) — let admins know so a pattern of ignored
+ * warnings across a listing or an artist is visible, not silent.
+ */
+export async function notifyAdminsOfMeshOverride(
+  modelId: string,
+  artistId: string,
+  openEdges: number,
+): Promise<void> {
+  try {
+    const [artist, model] = await Promise.all([
+      db.query(`SELECT COALESCE(NULLIF(artist_name, ''), display_name) AS name FROM users WHERE id = $1`, [artistId]),
+      db.query('SELECT name FROM models WHERE id = $1', [modelId]),
+    ]);
+    const artistName = artist.rows[0]?.name ?? 'An artist';
+    const modelName = model.rows[0]?.name ?? 'a model';
+    await notifyAdmins({
+      type: 'mesh_warning_overridden',
+      title: `${artistName} overrode a mesh warning on "${modelName}"`,
+      body: `${openEdges.toLocaleString()} open edge${openEdges === 1 ? '' : 's'} detected. The artist acknowledged the warning and chose to publish anyway.`,
+      link: `/models/${modelId}`,
+      actorId: artistId,
+      modelId,
+    });
+  } catch (err) {
+    log.error('notifyAdminsOfMeshOverride failed', { error: err, modelId, artistId });
+  }
+}
+
 /** Notify an artist that a user followed them. Best-effort. */
 export async function notifyNewFollower(artistId: string, followerId: string): Promise<void> {
   try {

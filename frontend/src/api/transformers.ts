@@ -70,6 +70,8 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     (model.mesh_open_edges ?? model.meshOpenEdges) != null
       ? Number(model.mesh_open_edges ?? model.meshOpenEdges)
       : undefined,
+  meshWarningAcknowledged: model.mesh_warning_acknowledged ?? model.meshWarningAcknowledged ?? false,
+  meshWarningAcknowledgedAt: model.mesh_warning_acknowledged_at ?? model.meshWarningAcknowledgedAt ?? null,
   fileVersion:
     (model.file_version ?? model.fileVersion) != null
       ? Number(model.file_version ?? model.fileVersion)

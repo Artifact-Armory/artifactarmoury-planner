@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "backend", "run", "dev"],
       "port": 3001
+    },
+    {
+      "name": "planner-lab",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "planner-lab", "run", "dev"],
+      "port": 3100
     }
   ]
 }

@@ -205,6 +205,11 @@ CREATE TABLE models (
     mesh_triangle_count INTEGER,
     mesh_open_edges INTEGER,
     mesh_report JSONB,
+    -- Artist override of a SERIOUS mesh warning (open edges > 0), migration 056.
+    -- Reset to false whenever the file changes (new upload / new version).
+    mesh_warning_acknowledged BOOLEAN NOT NULL DEFAULT false,
+    mesh_warning_acknowledged_at TIMESTAMP,
+    mesh_warning_acknowledged_by UUID REFERENCES users(id),
 
     -- Duplicate prevention
     -- SHA-256 of the canonical STL bytes. NOT unique: an artist may list the same

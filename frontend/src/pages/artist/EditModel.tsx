@@ -7,7 +7,7 @@ import TermPicker from '../../components/taxonomy/TermPicker'
 import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET } from '../../utils/derivedTerms'
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
-import { PRINTER_TYPE_OPTIONS, meshQualitySummary } from '../../utils/printability'
+import { PRINTER_TYPE_OPTIONS, meshSeriousWarning } from '../../utils/printability'
 import { Upload } from 'lucide-react'
 
 // Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
@@ -78,6 +78,11 @@ const EditModel: React.FC = () => {
   const [versionMsg, setVersionMsg] = React.useState<string | null>(null)
   const [versionErr, setVersionErr] = React.useState<string | null>(null)
 
+  // Serious mesh warning (real open edges/holes) override.
+  const [meshAckChecked, setMeshAckChecked] = React.useState(false)
+  const [meshAckBusy, setMeshAckBusy] = React.useState(false)
+  const [meshAckErr, setMeshAckErr] = React.useState<string | null>(null)
+
   const load = React.useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -130,6 +135,26 @@ const EditModel: React.FC = () => {
     if (!thumbFile) return undefined
     const { key } = await uploadsApi.uploadDirect(thumbFile, 'thumbnails')
     return key
+  }
+
+  /**
+   * Override a serious mesh warning (real open edges/holes) so the model can
+   * publish despite it. Requires the checkbox above the button — enforced here
+   * too, not just via `disabled`, in case of a stale render.
+   */
+  async function handleAcknowledgeMeshWarning() {
+    if (!id || !meshAckChecked) return
+    setMeshAckBusy(true)
+    setMeshAckErr(null)
+    try {
+      await modelsApi.acknowledgeMeshWarning(id)
+      await load()
+      setMeshAckChecked(false)
+    } catch (err) {
+      setMeshAckErr(errMessage(err, 'Could not acknowledge the warning'))
+    } finally {
+      setMeshAckBusy(false)
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -318,15 +343,51 @@ const EditModel: React.FC = () => {
         <div className="rounded-lg border border-border p-3 space-y-3">
           <p className="text-sm font-medium">Printability</p>
 
-          {/* Mesh QA result (read-only, from processing). */}
+          {/* Serious mesh QA warning (real open edges/holes) — artist-only. Minor
+              findings (non-manifold-only, degenerate-only) aren't surfaced anywhere;
+              see utils/printability.ts. Blocks publish until acknowledged. */}
           {model && (() => {
-            const mq = meshQualitySummary(model)
-            if (!mq) return null
+            const warning = meshSeriousWarning(model)
+            if (!warning) return null
+            if (warning.acknowledged) {
+              return (
+                <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <p>
+                    <span className="font-medium">⚠ Mesh warning acknowledged.</span> {warning.detail}
+                  </p>
+                  {warning.acknowledgedAt && (
+                    <p className="mt-1 text-amber-700">
+                      Acknowledged {new Date(warning.acknowledgedAt).toLocaleDateString()} — you can publish.
+                    </p>
+                  )}
+                </div>
+              )
+            }
             return (
-              <p className={`text-xs ${mq.tone === 'good' ? 'text-green-700' : 'text-amber-700'}`}>
-                {mq.tone === 'good' ? '✓ ' : '⚠ '}
-                <span className="font-medium">{mq.label}.</span> {mq.detail}
-              </p>
+              <div className="rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-2">
+                <p>
+                  <span className="font-medium">⚠ This model can't publish yet.</span> {warning.detail}
+                </p>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={meshAckChecked}
+                    onChange={(e) => setMeshAckChecked(e.target.checked)}
+                    disabled={meshAckBusy}
+                  />
+                  <span>I understand this may affect printability. Publish anyway (this notifies our team).</span>
+                </label>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-sm border border-red-300 text-red-800 text-xs font-medium disabled:opacity-50"
+                  onClick={handleAcknowledgeMeshWarning}
+                  disabled={!meshAckChecked || meshAckBusy}
+                >
+                  {meshAckBusy ? 'Acknowledging…' : 'Acknowledge & allow publishing'}
+                </button>
+                {meshAckErr && <p className="text-red-700">{meshAckErr}</p>}
+              </div>
             )
           })()}
 

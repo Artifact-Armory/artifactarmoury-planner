@@ -105,6 +105,10 @@ export interface TerrainModel {
   meshIsManifold?: boolean | null
   meshTriangleCount?: number
   meshOpenEdges?: number
+  // Artist override of a SERIOUS mesh warning (open edges > 0) — see migration 056.
+  // Resets to false whenever the file changes (new upload / new version).
+  meshWarningAcknowledged?: boolean
+  meshWarningAcknowledgedAt?: string | null
   // File versioning (see migration 033). fileVersion starts at 1; versionNotes is
   // the latest changelog; versions is the full history (most recent first).
   fileVersion?: number

@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { modelsApi } from '../../api/endpoints/models'
 import { TerrainModel } from '../../api/types'
 import { FEATURES } from '../../config/features'
+import { meshSeriousWarning } from '../../utils/printability'
 
 /** Pull a human-readable message out of an axios-style error. */
 function errMessage(err: unknown, fallback: string): string {
@@ -45,6 +46,8 @@ function publishBlocker(m: TerrainModel): string | null {
     return m.processingError || 'Processing failed'
   }
   if (!m.thumbnailUrl) return 'Add a thumbnail before publishing'
+  const warning = meshSeriousWarning(m)
+  if (warning && !warning.acknowledged) return 'Acknowledge the mesh warning (Edit) before publishing'
   return null
 }
 
@@ -363,6 +366,20 @@ const ArtistModels: React.FC = () => {
                         Not in planner
                       </span>
                     )}
+                    {(() => {
+                      const warning = meshSeriousWarning(m)
+                      if (!warning) return null
+                      return (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            warning.acknowledged ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                          }`}
+                          title={warning.detail}
+                        >
+                          {warning.acknowledged ? 'Mesh warning acknowledged' : 'Mesh warning — review in Edit'}
+                        </span>
+                      )
+                    })()}
                   </div>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     £{m.basePrice.toFixed(2)}

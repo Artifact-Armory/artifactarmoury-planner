@@ -41,7 +41,7 @@ import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_OR
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
 import { isBakeWorkerEnabled, enqueueBakeJob } from '../services/proxyBake/queue';
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
-import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate, createNotification } from '../services/notifications';
+import { notifyFollowersOfRelease, notifyOwnersOfModelUpdate, createNotification, notifyAdminsOfMeshOverride } from '../services/notifications';
 import { maybeStartIntroOffer } from '../services/introCommission';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import type { Archiver } from 'archiver';
@@ -636,6 +636,8 @@ router.get('/my-models',
         m.width, m.height, m.depth,
         m.print_provider_cost, m.print_price, m.print_provider, m.print_quoted_at,
         m.print_consent,
+        m.mesh_analyzed, m.mesh_is_watertight, m.mesh_is_manifold, m.mesh_open_edges,
+        m.mesh_warning_acknowledged, m.mesh_warning_acknowledged_at,
         m.created_at, m.updated_at, m.published_at,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating
@@ -1293,7 +1295,8 @@ router.post('/:id/publish',
 
     // Verify model is complete enough to publish
     const modelResult = await db.query(
-      `SELECT artist_id, name, description, thumbnail_path, base_price, status, published_at
+      `SELECT artist_id, name, description, thumbnail_path, base_price, status, published_at,
+              mesh_analyzed, mesh_open_edges, mesh_warning_acknowledged
        FROM models WHERE id = $1`,
       [id]
     );
@@ -1306,6 +1309,16 @@ router.post('/:id/publish',
 
     if (!model.thumbnail_path) {
       throw new ValidationError('Model must have a thumbnail before publishing');
+    }
+
+    // A SERIOUS mesh warning (real open edges/holes — the shell isn't closed) has
+    // to be acknowledged before it can go live. Non-manifold-only / degenerate-only
+    // issues never block publish — see meshQA.ts / notifications.ts for the reasoning.
+    if (model.mesh_analyzed && (model.mesh_open_edges ?? 0) > 0 && !model.mesh_warning_acknowledged) {
+      throw new ValidationError(
+        'This model has open edges detected in the mesh, which can cause real print failures. ' +
+        'Review it on the Edit page and acknowledge the warning before publishing.'
+      );
     }
 
     // Required-facet guardrail: can't publish until the mandatory facets are tagged.
@@ -1342,6 +1355,50 @@ router.post('/:id/publish',
       message: 'Model published successfully',
       modelId: id
     });
+  })
+);
+
+// ============================================================================
+// ACKNOWLEDGE MESH WARNING — artist override of a SERIOUS mesh QA issue (real
+// open edges/holes). Required before such a model can publish (see the gate
+// above); notifies admins so an ignored-warning pattern is visible, not silent.
+// ============================================================================
+
+router.post('/:id/acknowledge-mesh-warning',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+
+    const result = await db.query(
+      `SELECT artist_id, mesh_analyzed, mesh_open_edges, mesh_warning_acknowledged
+       FROM models WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Model');
+    const model = result.rows[0];
+
+    if (!model.mesh_analyzed || (model.mesh_open_edges ?? 0) <= 0) {
+      throw new ValidationError('This model has no outstanding mesh warning to acknowledge');
+    }
+
+    await db.query(
+      `UPDATE models
+       SET mesh_warning_acknowledged = true,
+           mesh_warning_acknowledged_at = CURRENT_TIMESTAMP,
+           mesh_warning_acknowledged_by = $2
+       WHERE id = $1`,
+      [id, userId]
+    );
+
+    logger.info('Mesh warning acknowledged', { userId, modelId: id, openEdges: model.mesh_open_edges });
+    notifyAdminsOfMeshOverride(id, model.artist_id, model.mesh_open_edges).catch(err =>
+      logger.error('notifyAdminsOfMeshOverride failed', { error: err, modelId: id })
+    );
+
+    res.json({ message: 'Mesh warning acknowledged', modelId: id });
   })
 );
 
@@ -2061,6 +2118,7 @@ async function processUploadedModel(
          mesh_triangle_count = $16,
          mesh_open_edges = $17,
          mesh_report = $18,
+         mesh_warning_acknowledged = false, mesh_warning_acknowledged_at = NULL, mesh_warning_acknowledged_by = NULL,
          display_stl_path = $21,
          processing_status = $19, processing_error = NULL,
          updated_at = NOW()
@@ -2236,6 +2294,7 @@ async function processModelVersionUpdate(
          stl_file_path = $12,
          mesh_analyzed = $13, mesh_is_watertight = $14, mesh_is_manifold = $15,
          mesh_triangle_count = $16, mesh_open_edges = $17, mesh_report = $18,
+         mesh_warning_acknowledged = false, mesh_warning_acknowledged_at = NULL, mesh_warning_acknowledged_by = NULL,
          file_version = file_version + 1,
          version_notes = $19,
          files_updated_at = NOW(),

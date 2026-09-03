@@ -280,6 +280,16 @@ export const modelsApi = {
   },
 
   /**
+   * Acknowledge a SERIOUS mesh QA warning (real open edges/holes) so the model
+   * can publish despite it. Notifies admins server-side. 400s if the model has
+   * no outstanding warning to acknowledge.
+   */
+  acknowledgeMeshWarning: async (id: string): Promise<{ modelId: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${id}/acknowledge-mesh-warning`);
+    return response.data;
+  },
+
+  /**
    * Delete a terrain model (requires ownership or admin role)
    */
   deleteModel: async (id: string): Promise<ApiResponse<null>> => {
