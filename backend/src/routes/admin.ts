@@ -557,7 +557,7 @@ router.get('/models/:id',
     if (modelResult.rows.length === 0) throw new NotFoundError('Model');
 
     const reportsResult = await db.query(
-      `SELECT r.id, r.reason, r.status, r.detail, r.resolution_action, r.resolution_summary,
+      `SELECT r.id, r.report_number, r.reason, r.status, r.detail, r.resolution_action, r.resolution_summary,
               r.created_at, r.resolved_at, ru.display_name AS reporter_name, resu.display_name AS resolved_by_name
        FROM model_reports r
        LEFT JOIN users ru ON r.reporter_id = ru.id
@@ -748,34 +748,60 @@ router.get('/reports/counts',
 );
 
 // The moderation queue: report tiles, newest first, filterable by status.
+// `q` is a free-text lookup (report number, model name, artist, or reporter) —
+// searching an accurate record only works if you can actually find a report
+// again later, including ones already resolved, so a search overrides the
+// default "open queue only" view rather than being limited by it.
 router.get('/reports',
   asyncHandler(async (req, res) => {
-    const { status, page = 1, limit = 50 } = req.query;
+    const { status, q, page = 1, limit = 50 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     const conditions: string[] = [];
     const params: any[] = [];
     if (status) { conditions.push(`r.status = $${params.length + 1}`); params.push(status); }
-    // Default view hides resolved reports unless explicitly asked for.
-    else conditions.push(`r.status IN ('open', 'under_review', 'awaiting_info')`);
+    // Default view hides resolved reports unless explicitly asked for — a
+    // search, though, looks across every status, resolved included.
+    else if (!q) conditions.push(`r.status IN ('open', 'under_review', 'awaiting_info')`);
+
+    const term = typeof q === 'string' ? q.trim() : '';
+    if (term) {
+      const searchConds: string[] = [];
+      const asNumber = term.replace(/^#/, '');
+      if (/^\d+$/.test(asNumber)) {
+        params.push(Number(asNumber));
+        searchConds.push(`r.report_number = $${params.length}`);
+      }
+      params.push(`%${term}%`);
+      const likeIdx = params.length;
+      searchConds.push(`m.name ILIKE $${likeIdx}`);
+      searchConds.push(`au.artist_name ILIKE $${likeIdx}`);
+      searchConds.push(`au.display_name ILIKE $${likeIdx}`);
+      searchConds.push(`au.email ILIKE $${likeIdx}`);
+      searchConds.push(`ru.display_name ILIKE $${likeIdx}`);
+      searchConds.push(`ru.email ILIKE $${likeIdx}`);
+      conditions.push(`(${searchConds.join(' OR ')})`);
+    }
+
+    const fromClause = `FROM model_reports r
+       LEFT JOIN models m ON r.model_id = m.id
+       LEFT JOIN users au ON r.artist_id = au.id
+       LEFT JOIN users ru ON r.reporter_id = ru.id`;
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const countResult = await db.query(`SELECT COUNT(*) FROM model_reports r ${whereClause}`, params);
+    const countResult = await db.query(`SELECT COUNT(*) ${fromClause} ${whereClause}`, params);
     const totalCount = parseInt(countResult.rows[0].count);
 
     const result = await db.query(
-      `SELECT r.id, r.reason, r.status, r.created_at, r.detail,
+      `SELECT r.id, r.report_number, r.reason, r.status, r.created_at, r.detail,
               r.model_id, m.name AS model_name, m.thumbnail_path, m.status AS model_status,
               r.artist_id, au.artist_name, au.display_name AS artist_display_name,
               r.reporter_id, ru.display_name AS reporter_name,
               (SELECT COUNT(*) FROM model_report_attachments a WHERE a.report_id = r.id) AS attachment_count
-       FROM model_reports r
-       LEFT JOIN models m ON r.model_id = m.id
-       LEFT JOIN users au ON r.artist_id = au.id
-       LEFT JOIN users ru ON r.reporter_id = ru.id
+       ${fromClause}
        ${whereClause}
        ORDER BY
-         CASE r.status WHEN 'open' THEN 0 WHEN 'under_review' THEN 1 WHEN 'awaiting_info' THEN 2 ELSE 3 END,
+         ${term ? '' : `CASE r.status WHEN 'open' THEN 0 WHEN 'under_review' THEN 1 WHEN 'awaiting_info' THEN 2 ELSE 3 END,`}
          r.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, Number(limit), offset],
@@ -793,10 +819,15 @@ router.get('/reports',
   }),
 );
 
-// Full report detail for the moderation drill-down.
+// Full report detail for the moderation drill-down. `id` is normally the
+// report's UUID, but also accepts its short report_number (e.g. a plain
+// "482" typed into a lookup box, or "#482") so a report can be looked up by
+// the number an admin/artist would actually reference in a conversation.
 router.get('/reports/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const asNumber = id.replace(/^#/, '');
+    const byNumber = /^\d+$/.test(asNumber);
 
     const reportResult = await db.query(
       `SELECT r.*,
@@ -812,16 +843,17 @@ router.get('/reports/:id',
        LEFT JOIN users au ON r.artist_id = au.id
        LEFT JOIN users ru ON r.reporter_id = ru.id
        LEFT JOIN users resu ON r.resolved_by = resu.id
-       WHERE r.id = $1`,
-      [id],
+       WHERE ${byNumber ? 'r.report_number = $1' : 'r.id = $1'}`,
+      [byNumber ? Number(asNumber) : id],
     );
     if (reportResult.rows.length === 0) throw new NotFoundError('Report');
     const report = reportResult.rows[0];
+    const reportId = report.id; // always the UUID from here on, regardless of how it was looked up
 
     const attachmentsResult = await db.query(
       `SELECT id, file_path, file_name, content_type, created_at
        FROM model_report_attachments WHERE report_id = $1 ORDER BY created_at ASC`,
-      [id],
+      [reportId],
     );
 
     // Context: how many other reports on this model / against this artist.
@@ -830,12 +862,12 @@ router.get('/reports/:id',
         (SELECT COUNT(*) FROM model_reports x WHERE x.model_id = $1 AND x.id <> $3) AS other_reports_on_model,
         (SELECT COUNT(*) FROM model_reports x WHERE x.artist_id = $2 AND x.id <> $3) AS other_reports_on_artist,
         (SELECT COUNT(*) FROM models WHERE artist_id = $2) AS artist_model_count`,
-      [report.model_id, report.artist_id, id],
+      [report.model_id, report.artist_id, reportId],
     );
 
     // Mark an untouched report as under_review the moment an admin opens it.
     if (report.status === 'open') {
-      await db.query(`UPDATE model_reports SET status = 'under_review', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      await db.query(`UPDATE model_reports SET status = 'under_review', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [reportId]);
       report.status = 'under_review';
     }
 
@@ -845,7 +877,7 @@ router.get('/reports/:id',
        LEFT JOIN users u ON rr.sender_id = u.id
        WHERE rr.report_id = $1
        ORDER BY rr.created_at ASC`,
-      [id],
+      [reportId],
     );
 
     res.json({
@@ -871,7 +903,7 @@ router.post('/reports/:id/reply',
     const trimmed = message.trim().slice(0, 5000);
 
     const reportResult = await db.query(
-      `SELECT r.id, r.artist_id, m.name AS model_name FROM model_reports r
+      `SELECT r.id, r.report_number, r.artist_id, m.name AS model_name FROM model_reports r
        LEFT JOIN models m ON r.model_id = m.id WHERE r.id = $1`,
       [id],
     );
@@ -889,7 +921,7 @@ router.post('/reports/:id/reply',
       createNotification({
         userId: report.artist_id,
         type: 'report_reply',
-        title: `New reply on "${report.model_name || 'your model'}"`,
+        title: `New reply on report #${report.report_number} ("${report.model_name || 'your model'}")`,
         body: trimmed,
         link: '/artist/reports',
       });
@@ -1062,7 +1094,9 @@ async function resolveReport(id: string, action: string, summary: string, adminI
       createNotification({
         userId: report.reporter_id,
         type: 'report_resolved',
-        title: action === 'request_info' ? 'We need more information about your report' : `Update on your report of "${report.model_name || 'a model'}"`,
+        title: action === 'request_info'
+          ? `We need more information about report #${report.report_number}`
+          : `Update on report #${report.report_number} ("${report.model_name || 'a model'}")`,
         body: summary,
         link: '/dashboard',
       });
@@ -1071,13 +1105,13 @@ async function resolveReport(id: string, action: string, summary: string, adminI
       createNotification({
         userId: artistId,
         type: 'moderation_decision',
-        title: `Moderation decision on "${report.model_name || 'your model'}"`,
+        title: `Moderation decision on report #${report.report_number} ("${report.model_name || 'your model'}")`,
         body: summary,
         link: '/artist/reports',
       });
     }
 
-    logger.warn('Report resolved by admin', { adminId, reportId: id, action, notes });
+    logger.warn('Report resolved by admin', { adminId, reportId: id, reportNumber: report.report_number, action, notes });
     return { action, status: newStatus, notes };
 }
 

@@ -7,6 +7,7 @@ export type ReportStatus =
 
 export interface ReportTile {
   id: string
+  report_number: number
   reason: string
   reason_label: string
   status: ReportStatus
@@ -72,8 +73,16 @@ export interface ReportCounts {
 }
 
 export const adminModerationApi = {
-  async listReports(status?: string): Promise<{ reports: ReportTile[]; pagination: any } & ReportCounts> {
-    const res = await apiClient.get(`${BASE_URL}/reports`, { params: status ? { status } : {} })
+  /**
+   * `q` is a free-text lookup (report number — "482" or "#482" — model name,
+   * artist, or reporter) and searches across every status, resolved reports
+   * included, so a past decision can always be found again.
+   */
+  async listReports(status?: string, q?: string): Promise<{ reports: ReportTile[]; pagination: any } & ReportCounts> {
+    const params: Record<string, string> = {}
+    if (status) params.status = status
+    if (q) params.q = q
+    const res = await apiClient.get(`${BASE_URL}/reports`, { params })
     return res.data
   },
 

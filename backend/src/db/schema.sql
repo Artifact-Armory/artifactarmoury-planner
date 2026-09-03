@@ -705,6 +705,7 @@ ALTER TABLE artist_earnings
 
 CREATE TABLE model_reports (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_number SERIAL UNIQUE NOT NULL, -- short ticket number for lookup/reference (migration 055)
     model_id    UUID REFERENCES models(id) ON DELETE SET NULL,
     artist_id   UUID REFERENCES users(id) ON DELETE SET NULL,
     reporter_id UUID REFERENCES users(id) ON DELETE SET NULL,

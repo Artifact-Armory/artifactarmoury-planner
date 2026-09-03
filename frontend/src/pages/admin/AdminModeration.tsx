@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Paperclip, ExternalLink, ShieldAlert, Loader2, Send } from 'lucide-react'
+import { X, Paperclip, ExternalLink, ShieldAlert, Loader2, Send, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminModerationApi, ModerationAction, ReportTile } from '../../api/endpoints/adminModeration'
 import { assetUrl } from '../../api/transformers'
@@ -37,12 +38,51 @@ const ACTIONS: Array<{ action: ModerationAction; label: string; cls: string; con
 
 const AdminModeration: React.FC = () => {
   const [filter, setFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
   const [openId, setOpenId] = useState<string | null>(null)
 
+  // Deep link from a notification ("New reply on report #482 …") or a bookmarked/shared
+  // URL: /admin/moderation?report=<id or #number> opens that report's detail straight away.
+  useEffect(() => {
+    const target = searchParams.get('report')
+    if (target) setOpenId(target)
+  }, [searchParams])
+
+  // Keeps the URL in sync with whichever report is open, so the detail panel is always
+  // shareable/bookmarkable — not just when it was reached via a deep link.
+  const openReport = (id: string) => {
+    setOpenId(id)
+    const next = new URLSearchParams(searchParams)
+    next.set('report', id)
+    setSearchParams(next, { replace: true })
+  }
+
+  const closePanel = () => {
+    setOpenId(null)
+    if (searchParams.has('report')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('report')
+      setSearchParams(next, { replace: true })
+    }
+  }
+
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-reports', filter],
-    queryFn: () => adminModerationApi.listReports(filter || undefined),
+    queryKey: ['admin-reports', filter, search],
+    // A search looks up every report regardless of status, so it overrides the tab filter.
+    queryFn: () => adminModerationApi.listReports(search ? undefined : filter || undefined, search || undefined),
   })
+
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    setSearch(searchInput.trim())
+  }
+
+  const clearSearch = () => {
+    setSearchInput('')
+    setSearch('')
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -54,40 +94,70 @@ const AdminModeration: React.FC = () => {
         )}
       </div>
 
-      <div className="mt-5 flex gap-2">
-        {FILTERS.map((f) => {
-          const count = data?.[f.countKey] ?? 0
-          const active = filter === f.key
-          return (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${active ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground border border-border hover:bg-accent'}`}
-            >
-              {f.label}
-              {count > 0 && (
-                <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${active ? 'bg-primary-foreground/20' : f.countKey === 'openCount' ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'}`}>
-                  {count}
-                </span>
-              )}
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">
+          {FILTERS.map((f) => {
+            const count = data?.[f.countKey] ?? 0
+            const active = !search && filter === f.key
+            return (
+              <button
+                key={f.key}
+                onClick={() => { clearSearch(); setFilter(f.key) }}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${active ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground border border-border hover:bg-accent'}`}
+              >
+                {f.label}
+                {count > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${active ? 'bg-primary-foreground/20' : f.countKey === 'openCount' ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        <form onSubmit={submitSearch} className="flex items-center gap-2">
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Look up a report — #number, model, artist…"
+              className="w-72 rounded-lg border border-border bg-background py-1.5 pl-8 pr-3 text-sm focus:border-primary/50 focus:outline-hidden focus:ring-1 focus:ring-primary/50"
+            />
+          </div>
+          {search ? (
+            <button type="button" onClick={clearSearch} className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent">
+              Clear
             </button>
-          )
-        })}
+          ) : (
+            <button type="submit" disabled={!searchInput.trim()} className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
+              Search
+            </button>
+          )}
+        </form>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-24"><Spinner size="lg" /></div>
       ) : (data?.reports.length ?? 0) === 0 ? (
         <div className="mt-8 rounded-xl border border-dashed border-border bg-card p-12 text-center text-muted-foreground">
-          Nothing here. {filter ? 'No reports with this status.' : 'The queue is clear.'}
+          {search ? `No reports match "${search}".` : filter ? 'Nothing here. No reports with this status.' : 'Nothing here. The queue is clear.'}
         </div>
       ) : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data!.reports.map((r) => <Tile key={r.id} report={r} onOpen={() => setOpenId(r.id)} />)}
-        </div>
+        <>
+          {search && (
+            <p className="mt-4 text-xs text-muted-foreground">
+              {data!.reports.length} result{data!.reports.length === 1 ? '' : 's'} for "{search}" — across every status.
+            </p>
+          )}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {data!.reports.map((r) => <Tile key={r.id} report={r} onOpen={() => openReport(r.id)} />)}
+          </div>
+        </>
       )}
 
-      {openId && <DetailPanel reportId={openId} onClose={() => setOpenId(null)} />}
+      {openId && <DetailPanel reportId={openId} onClose={closePanel} />}
     </div>
   )
 }
@@ -101,6 +171,7 @@ const Tile: React.FC<{ report: ReportTile; onOpen: () => void }> = ({ report: r,
           {r.thumbnail_path && <img src={assetUrl(r.thumbnail_path)} alt="" className="h-full w-full object-cover" />}
         </div>
         <div className="min-w-0 flex-1">
+          <p className="text-xs font-mono text-muted-foreground">#{r.report_number}</p>
           <p className="truncate font-medium text-foreground">{r.model_name ?? 'Deleted model'}</p>
           <p className="truncate text-xs text-muted-foreground">by {r.artist_name || r.artist_display_name || '—'}</p>
           <span className={`mt-1 inline-block rounded-sm px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>{meta.label}</span>
@@ -168,7 +239,9 @@ const DetailPanel: React.FC<{ reportId: string; onClose: () => void }> = ({ repo
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 flex items-center justify-between border-b border-border bg-card px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">Report detail</h2>
+          <h2 className="text-lg font-semibold text-foreground">
+            Report detail{report && <span className="ml-2 font-mono text-base font-normal text-muted-foreground">#{report.report_number}</span>}
+          </h2>
           <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-accent"><X size={20} /></button>
         </div>
 

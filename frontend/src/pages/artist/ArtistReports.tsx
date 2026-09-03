@@ -17,8 +17,16 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   resolved_dismissed: { label: 'Resolved — dismissed', cls: 'bg-green-100 text-green-700' },
 }
 
+// A report stays "current" until admin reaches a final decision. `awaiting_info` is a
+// further request from admin (not a resolution) so it stays put here, not in Previous —
+// it only moves once the admin actually resolves it (dismiss / upheld action).
+const RESOLVED_STATUSES = new Set(['resolved_upheld', 'resolved_dismissed'])
+
+type Tab = 'current' | 'previous'
+
 const ArtistReports: React.FC = () => {
   const qc = useQueryClient()
+  const [tab, setTab] = useState<Tab>('current')
   const { data, isLoading } = useQuery({ queryKey: ['artist-reports'], queryFn: () => reportsApi.getAgainstMe() })
 
   // Visiting this page is "reviewing" the new decisions/replies — clear the nav badge.
@@ -30,6 +38,9 @@ const ArtistReports: React.FC = () => {
 
   if (isLoading) return <div className="flex justify-center py-24"><Spinner size="lg" /></div>
   const reports = data ?? []
+  const current = reports.filter((r) => !RESOLVED_STATUSES.has(r.status))
+  const previous = reports.filter((r) => RESOLVED_STATUSES.has(r.status))
+  const shown = tab === 'current' ? current : previous
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -38,15 +49,45 @@ const ArtistReports: React.FC = () => {
         Reports filed against your models and their outcome. You'll be notified when a decision is made, and you can reply if you have something to add.
       </p>
 
-      {reports.length === 0 ? (
-        <div className="mt-10 rounded-xl border border-dashed border-border bg-card p-12 text-center">
+      <div className="mt-6 flex gap-1 border-b border-border">
+        <button
+          type="button"
+          onClick={() => setTab('current')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'current' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Current reports{current.length > 0 ? ` (${current.length})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('previous')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'previous' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Previous reports{previous.length > 0 ? ` (${previous.length})` : ''}
+        </button>
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-dashed border-border bg-card p-12 text-center">
           <ShieldAlert className="mx-auto text-muted-foreground" size={40} />
-          <p className="mt-3 font-medium text-foreground">No reports against your models</p>
-          <p className="text-sm text-muted-foreground">Keep it up — nothing needs your attention.</p>
+          {tab === 'current' ? (
+            <>
+              <p className="mt-3 font-medium text-foreground">No open reports against your models</p>
+              <p className="text-sm text-muted-foreground">Keep it up — nothing needs your attention.</p>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 font-medium text-foreground">No resolved reports yet</p>
+              <p className="text-sm text-muted-foreground">Reports move here once an admin reaches a final decision.</p>
+            </>
+          )}
         </div>
       ) : (
         <ul className="mt-6 space-y-4">
-          {reports.map((r) => <ReportCard key={r.id} report={r} />)}
+          {shown.map((r) => <ReportCard key={r.id} report={r} />)}
         </ul>
       )}
     </div>
@@ -81,6 +122,7 @@ const ReportCard: React.FC<{ report: MyReport }> = ({ report: r }) => {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono text-muted-foreground">#{r.report_number}</span>
             <span className="font-medium text-foreground">{r.model_name ?? 'Model'}</span>
             <span className="rounded-sm bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{REASON_LABEL[r.reason] ?? r.reason}</span>
             <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>

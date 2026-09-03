@@ -118,7 +118,7 @@ router.post(
         const r = await client.query(
           `INSERT INTO model_reports (model_id, artist_id, reporter_id, reason, detail)
            VALUES ($1, $2, $3, $4, $5)
-           RETURNING id`,
+           RETURNING id, report_number`,
           [modelId, model.artist_id, userId, reason, detail || null],
         )
         report = r.rows[0]
@@ -142,16 +142,17 @@ router.post(
       await client.query('COMMIT')
 
       // Confirm receipt to the reporter (the artist is only told once it's resolved).
+      // Include the report number so it's something they can reference in a follow-up.
       createNotification({
         userId,
         type: 'report_received',
-        title: 'Report received',
+        title: `Report #${report.report_number} received`,
         body: `Thanks — we've received your report about "${model.name}" and will review it.`,
         link: '/dashboard',
       })
 
-      logger.info('Model report submitted', { reportId: report.id, modelId, reporterId: userId, reason })
-      res.status(201).json({ message: 'Report submitted', reportId: report.id })
+      logger.info('Model report submitted', { reportId: report.id, reportNumber: report.report_number, modelId, reporterId: userId, reason })
+      res.status(201).json({ message: 'Report submitted', reportId: report.id, reportNumber: report.report_number })
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {})
       throw err
@@ -172,7 +173,7 @@ router.get(
   asyncHandler(async (req: AuthRequest, res) => {
     const artistId = req.userId!
     const result = await db.query(
-      `SELECT r.id, r.reason, r.status, r.created_at, r.resolved_at,
+      `SELECT r.id, r.report_number, r.reason, r.status, r.created_at, r.resolved_at,
               r.resolution_action, r.resolution_summary,
               r.model_id, m.name AS model_name, m.thumbnail_path
        FROM model_reports r
@@ -220,7 +221,7 @@ router.post(
     const trimmed = message.trim().slice(0, 5000)
 
     const reportResult = await db.query(
-      `SELECT r.id, r.artist_id, r.resolved_by, m.name AS model_name
+      `SELECT r.id, r.report_number, r.artist_id, r.resolved_by, m.name AS model_name
        FROM model_reports r LEFT JOIN models m ON r.model_id = m.id
        WHERE r.id = $1`,
       [id],
@@ -241,9 +242,9 @@ router.post(
       createNotification({
         userId: report.resolved_by,
         type: 'report_reply',
-        title: `${req.user?.artist_name || req.user?.display_name || 'An artist'} replied about "${report.model_name || 'a model'}"`,
+        title: `${req.user?.artist_name || req.user?.display_name || 'An artist'} replied about report #${report.report_number} ("${report.model_name || 'a model'}")`,
         body: trimmed,
-        link: '/admin/moderation',
+        link: `/admin/moderation?report=${id}`,
       })
     }
 

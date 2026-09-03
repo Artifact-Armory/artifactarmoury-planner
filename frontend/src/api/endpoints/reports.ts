@@ -40,6 +40,7 @@ export interface ReportReply {
 
 export interface MyReport {
   id: string
+  report_number: number
   reason: ReportReason
   status: string
   created_at: string
