@@ -23,6 +23,14 @@ import { paintFitsTable, isBlank as paintIsBlank } from '@core/paintmap'
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
+// Alt+Arrow fine-nudge directions, in table world axes (X = width, Z = depth).
+const ARROW_NUDGE: Record<string, { dx: number; dz: number }> = {
+  ArrowUp: { dx: 0, dz: -1 },
+  ArrowDown: { dx: 0, dz: 1 },
+  ArrowLeft: { dx: -1, dz: 0 },
+  ArrowRight: { dx: 1, dz: 0 },
+}
+
 // `touch` marks a press made with a finger. A finger has no second button and no
 // wheel, so on touch a drag that would box-select on desktop pans the camera
 // instead — tap still places/selects, via the same movement threshold.
@@ -918,6 +926,48 @@ export function ThreeStage() {
       requestRender()
     }
 
+    // Alt+Arrow: nudge the selection by a fraction of the grid, unsnapped and
+    // with no collision check — fine enough to tuck one piece inside another
+    // (e.g. seating a barrel inside a ruined wall) when the grid step is too
+    // coarse to land there. World-axis, not camera-relative, matching every
+    // other piece-manipulation key (rotate/tilt/level are all table-relative).
+    function nudgeSelection(dirX: number, dirZ: number) {
+      const ids = useAppStore.getState().selectedInstanceIds
+      if (!ids.length) return
+      const t = store().table
+      const step = Math.max(0.0005, t.gridSize / 8)
+      const hw = t.width / 2, hh = t.height / 2
+      const patches = ids.map(id => {
+        const i = store().instances.find(ii => ii.id === id)!
+        const x = THREE.MathUtils.clamp(i.position.x + dirX * step, -hw, hw)
+        const z = THREE.MathUtils.clamp(i.position.z + dirZ * step, -hh, hh)
+        return { id, patch: { position: { x, z } } }
+      })
+      useAppStore.getState().actions.updateInstances(patches)
+      inst.setSelection(new Set(ids))
+      requestRender()
+    }
+
+    // Alt+PageUp/PageDown: the vertical counterpart of nudgeSelection — fine-steps
+    // `level` (a fractional "levels" unit, LEVEL_HEIGHT metres each) instead of the
+    // whole-level jump PageUp/PageDown makes while placing, so a piece can be eased
+    // down inside/through another one instead of only ever resting on its surface.
+    // Same no-collision-check free movement as the horizontal nudge; clamped at 0
+    // so a piece can't be nudged beneath the table itself.
+    function nudgeSelectionLevel(dir: 1 | -1) {
+      const ids = useAppStore.getState().selectedInstanceIds
+      if (!ids.length) return
+      const FINE_LEVEL_STEP = 0.125 // ~1.6mm at the default 12.7mm/level — matches nudgeSelection's XZ step
+      const patches = ids.map(id => {
+        const i = store().instances.find(ii => ii.id === id)!
+        const level = Math.max(0, (i.level ?? 0) + dir * FINE_LEVEL_STEP)
+        return { id, patch: { level } }
+      })
+      useAppStore.getState().actions.updateInstances(patches)
+      inst.setSelection(new Set(ids))
+      requestRender()
+    }
+
     // Show/hide/reposition the free-rotate gizmo for the current selection. A
     // single selected piece gets it (multi-select has no single pivot that reads
     // clearly); it's hidden while placing, sculpting, read-only, or mid-drag.
@@ -1004,6 +1054,25 @@ export function ThreeStage() {
       if ((e.key === 'PageUp' || e.key === 'PageDown') && s.selectedAssetId) {
         e.preventDefault()
         nudgeLevel(e.key === 'PageUp' ? 1 : -1)
+        return
+      }
+
+      // Alt+Arrow: fine-nudge the selected piece(s) so they can be tucked inside
+      // another model. BuilderCamera's own arrow-key pan already bails out on
+      // e.altKey, so there's no conflict.
+      if (e.altKey && s.selectedInstanceIds.length && ARROW_NUDGE[e.key]) {
+        e.preventDefault()
+        const { dx, dz } = ARROW_NUDGE[e.key]
+        nudgeSelection(dx, dz)
+        return
+      }
+
+      // Alt+PageUp/PageDown: the vertical counterpart — fine-nudge the selection's
+      // own height instead of the ghost's placement level (that's the plain
+      // PageUp/PageDown case just below, for a not-yet-placed asset).
+      if (e.altKey && s.selectedInstanceIds.length && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault()
+        nudgeSelectionLevel(e.key === 'PageUp' ? 1 : -1)
         return
       }
 

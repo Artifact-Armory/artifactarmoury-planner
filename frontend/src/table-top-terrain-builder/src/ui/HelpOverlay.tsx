@@ -73,6 +73,8 @@ const GROUPS: Group[] = [
       ['Rotate freely (any angle)', 'Drag an orange arrow at its base'],
       ['Tilt upright / lay flat', 'T'],
       ['Tilt the other way', 'Shift + T'],
+      ['Fine-nudge (fits pieces inside each other)', 'Alt + Arrow keys'],
+      ['Fine-nudge up / down', 'Alt + PgUp / PgDn'],
       ['Duplicate', 'Ctrl + D'],
       ['Fuse selection into one piece', 'Ctrl + G'],
       ['Unfuse back into separate pieces', 'Ctrl + Shift + G'],
