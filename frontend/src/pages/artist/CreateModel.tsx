@@ -72,11 +72,16 @@ type Component = {
   // has no way to say which of its several models needs this.
   isPresupported: boolean
   previewFile: File | null
+  // Optional thumbnail shown in the planner palette so a buyer can tell this
+  // named model apart from the rest of the set — only offered for components
+  // after the first (component 0 already has the listing's own required
+  // Thumbnail field above, which doubles as its planner thumbnail).
+  thumbnailFile: File | null
 }
 
 let componentKeySeq = 0
 const newComponent = (): Component => ({
-  key: `c${componentKeySeq++}`, name: '', files: [], isPresupported: false, previewFile: null,
+  key: `c${componentKeySeq++}`, name: '', files: [], isPresupported: false, previewFile: null, thumbnailFile: null,
 })
 
 const CreateModel: React.FC = () => {
@@ -188,6 +193,15 @@ const CreateModel: React.FC = () => {
   )
   React.useEffect(() => () => { galleryPreviews.forEach((u) => URL.revokeObjectURL(u)) }, [galleryPreviews])
 
+  // Same treatment for each component's optional planner thumbnail, keyed by
+  // component so picking/clearing one doesn't touch the others' URLs.
+  const componentThumbPreviews = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of components) if (c.thumbnailFile) map.set(c.key, URL.createObjectURL(c.thumbnailFile))
+    return map
+  }, [components])
+  React.useEffect(() => () => { componentThumbPreviews.forEach((u) => URL.revokeObjectURL(u)) }, [componentThumbPreviews])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -255,7 +269,8 @@ const CreateModel: React.FC = () => {
       // component's optional preview model) contributes to one bar, so a 12-file
       // village doesn't look stuck at 100% after the first upload.
       const previewFileCount = components.filter((c) => c.isPresupported && c.previewFile).length
-      const totalUploads = allFiles.length + 1 + galleryFiles.length + previewFileCount
+      const componentThumbCount = components.filter((c) => c.thumbnailFile).length
+      const totalUploads = allFiles.length + 1 + galleryFiles.length + previewFileCount + componentThumbCount
       let uploadsDone = 0
       const bump = (pct: number) =>
         setProgress(Math.round(((uploadsDone + pct / 100) / totalUploads) * 100))
@@ -284,7 +299,7 @@ const CreateModel: React.FC = () => {
       //    that's the component's primary file, same idea as component 0 above.
       const parts: Array<{
         rawKey: string; filename: string; name: string; groupIndex: number; groupName?: string
-        isPresupported?: boolean; displayRawKey?: string
+        isPresupported?: boolean; displayRawKey?: string; thumbnailKey?: string
       }> = []
       for (let ci = 0; ci < components.length; ci++) {
         const comp = components[ci]
@@ -294,10 +309,19 @@ const CreateModel: React.FC = () => {
           const p = await uploadsApi.uploadDirect(f, 'raw', bump)
           uploadsDone++
           let partDisplayRawKey: string | undefined
+          let partThumbnailKey: string | undefined
           const isComponentPrimary = ci > 0 && fi === 0
           if (isComponentPrimary && comp.isPresupported && comp.previewFile) {
             startFile(comp.previewFile.name)
             partDisplayRawKey = (await uploadsApi.uploadDirect(comp.previewFile, 'raw', bump)).key
+            uploadsDone++
+          }
+          // Component's own planner thumbnail (migration 058) — same "rides
+          // along on the component's first/primary part" convention as the
+          // clean-preview file above.
+          if (isComponentPrimary && comp.thumbnailFile) {
+            startFile(comp.thumbnailFile.name)
+            partThumbnailKey = (await uploadsApi.uploadDirect(comp.thumbnailFile, 'thumbnails', bump)).key
             uploadsDone++
           }
           parts.push({
@@ -308,6 +332,7 @@ const CreateModel: React.FC = () => {
             groupName: comp.name.trim() || undefined,
             isPresupported: isComponentPrimary && comp.isPresupported ? true : undefined,
             displayRawKey: partDisplayRawKey,
+            thumbnailKey: partThumbnailKey,
           })
         }
       }
@@ -693,6 +718,45 @@ const CreateModel: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Optional per-model planner thumbnail — component 0 already has the
+                    listing's own required Thumbnail field further down, which doubles
+                    as its planner thumbnail, so this only applies to models after it. */}
+                {ci > 0 && (
+                  <div className="mt-3 border-t border-border/70 pt-3">
+                    <label className="block text-sm font-medium mb-1">
+                      Thumbnail for {componentLabel(ci)} <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Shown in the planner palette so buyers can tell this model apart from the
+                      rest of the set. Without one it just shows a generic icon there.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      {comp.thumbnailFile ? (
+                        <img
+                          src={componentThumbPreviews.get(comp.key)}
+                          alt=""
+                          className="h-14 w-14 rounded-sm border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-sm border border-dashed text-[10px] text-muted-foreground text-center">
+                          No image
+                        </div>
+                      )}
+                      <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                        <Upload size={14} />
+                        {comp.thumbnailFile ? 'Change…' : 'Choose image…'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={busy}
+                          onChange={(e) => patchComponent(ci, { thumbnailFile: e.target.files?.[0] ?? null })}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

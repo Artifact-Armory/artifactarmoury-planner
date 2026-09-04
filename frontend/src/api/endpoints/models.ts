@@ -80,6 +80,8 @@ export const modelsApi = {
       isPresupported?: boolean
       /** The clean preview file's raw/ key — required when isPresupported is true. */
       displayRawKey?: string
+      /** Per-component planner thumbnail (only meaningful on a component's first/primary part). */
+      thumbnailKey?: string
     }>
     /** Taxonomy tags as `facetSlug:termPath` tokens. */
     terms?: string[]
@@ -108,6 +110,44 @@ export const modelsApi = {
   },
 
   /**
+   * Attach (or replace) a 'no_preview' part's decimated preview companion.
+   * The part's own sellable STL is never touched — this only changes what the
+   * planner preview is built from.
+   */
+  attachPartPreview: async (
+    modelId: string,
+    partId: string,
+    data: { rawKey: string; filename: string },
+  ): Promise<{ partId: string; processingStatus: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${modelId}/parts/${partId}/preview`, data, { timeout: 60_000 })
+    return response.data
+  },
+
+  /** Add a new named model (one or more files) to an already-published listing. */
+  addComponent: async (
+    modelId: string,
+    data: { groupName?: string; parts: Array<{ rawKey: string; filename: string; name?: string }> },
+  ): Promise<{ groupIndex: number; partIds: string[] }> => {
+    const response = await apiClient.post(`${BASE_URL}/${modelId}/parts`, data, { timeout: 60_000 })
+    return response.data
+  },
+
+  /** Remove one named model (every file sharing its group_index) from a listing. */
+  removeComponent: async (modelId: string, groupIndex: number): Promise<{ partsRemoved: number }> => {
+    const response = await apiClient.delete(`${BASE_URL}/${modelId}/components/${groupIndex}`)
+    return response.data
+  },
+
+  /** Set/replace one named model's planner thumbnail (groupIndex 0 = the listing's own thumbnail). */
+  setComponentThumbnail: async (
+    modelId: string,
+    groupIndex: number,
+    thumbnailKey: string,
+  ): Promise<void> => {
+    await apiClient.patch(`${BASE_URL}/${modelId}/components/${groupIndex}/thumbnail`, { thumbnailKey })
+  },
+
+  /**
    * Published multi-part ("set") models with their parts — for the planner, where
    * each part is an individually placeable asset grouped under the set.
    */
@@ -122,7 +162,7 @@ export const modelsApi = {
     parts: Array<{
       id: string; name: string; isPrimary: boolean; hasGlb: boolean
       width: number | null; depth: number | null; height: number | null
-      groupIndex: number; groupName: string | null
+      groupIndex: number; groupName: string | null; thumbnailUrl: string | null
     }>
   }>> => {
     const response = await apiClient.get(`${BASE_URL}/sets`)
@@ -144,6 +184,11 @@ export const modelsApi = {
         width: p.width != null ? Number(p.width) : null,
         depth: p.depth != null ? Number(p.depth) : null,
         height: p.height != null ? Number(p.height) : null,
+        // Per-component planner thumbnail (migration 058) — falls back to the
+        // primary part's own thumbnailPath (the listing's main image) so a
+        // component with no thumbnail of its own still shows something
+        // recognizable instead of a bare generic icon.
+        thumbnailUrl: p.thumbnail_path ? assetUrl(p.thumbnail_path) : (s.thumbnail_path ? assetUrl(s.thumbnail_path) : null),
       })),
     }))
   },

@@ -164,6 +164,8 @@ export interface TerrainModel {
     depth?: number
     height?: number
     processingStatus?: string
+    /** Set only when processingStatus is 'no_preview' or 'failed' — human-readable reason. */
+    processingError?: string
     /** Component ("included model") this part belongs to — 0 is the primary's. */
     groupIndex?: number
     groupName?: string | null

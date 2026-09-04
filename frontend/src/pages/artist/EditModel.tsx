@@ -8,7 +8,7 @@ import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshSeriousWarning } from '../../utils/printability'
-import { Upload } from 'lucide-react'
+import { Upload, AlertTriangle, Trash2, Plus, X } from 'lucide-react'
 
 // Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
 // EditModel is statically imported by app.tsx (every page is), so a static import here
@@ -94,6 +94,20 @@ const EditModel: React.FC = () => {
   const [meshAckChecked, setMeshAckChecked] = React.useState(false)
   const [meshAckBusy, setMeshAckBusy] = React.useState(false)
   const [meshAckErr, setMeshAckErr] = React.useState<string | null>(null)
+
+  // Models within a grouped/multi-part listing: attach a decimated preview to
+  // a 'no_preview' part, add a new named model, remove one, or set a
+  // component's own planner thumbnail. See EditModel's "Models in this
+  // listing" section below.
+  const [attachingPartId, setAttachingPartId] = React.useState<string | null>(null)
+  const [attachErr, setAttachErr] = React.useState<string | null>(null)
+  const [thumbBusyGroup, setThumbBusyGroup] = React.useState<number | null>(null)
+  const [removingGroup, setRemovingGroup] = React.useState<number | null>(null)
+  const [componentsErr, setComponentsErr] = React.useState<string | null>(null)
+  const [addingComponent, setAddingComponent] = React.useState(false)
+  const [showAddComponent, setShowAddComponent] = React.useState(false)
+  const [newComponentName, setNewComponentName] = React.useState('')
+  const [newComponentFiles, setNewComponentFiles] = React.useState<File[]>([])
 
   const load = React.useCallback(async () => {
     if (!id) return
@@ -188,6 +202,112 @@ const EditModel: React.FC = () => {
       setGalleryErr(errMessage(err, 'Could not delete this photo'))
     } finally {
       setDeletingImageId(null)
+    }
+  }
+
+  /**
+   * Named models ("components") within this grouped listing, group 0 first —
+   * the listing's own primary model, synthesized from top-level model fields
+   * since it has no model_parts row of its own, followed by every group
+   * found in model.parts. Mirrors ModelDetails.tsx's partComponents().
+   */
+  const components = React.useMemo(() => {
+    type Row = { id: string; name: string; processingStatus?: string; processingError?: string }
+    type Group = { index: number; name: string | null; thumbnailUrl?: string; rows: Row[] }
+    const groups = new Map<number, Group>()
+    groups.set(0, {
+      index: 0,
+      name: model?.primaryGroupName ?? null,
+      thumbnailUrl: model?.thumbnailUrl,
+      rows: [{ id: 'primary', name: 'Part 1', processingStatus: model?.processingStatus }],
+    })
+    for (const p of model?.parts ?? []) {
+      const gi = p.groupIndex ?? 0
+      let g = groups.get(gi)
+      if (!g) { g = { index: gi, name: p.groupName ?? null, rows: [] }; groups.set(gi, g) }
+      if (!g.name && p.groupName) g.name = p.groupName
+      if (!g.thumbnailUrl && p.thumbnailUrl) g.thumbnailUrl = p.thumbnailUrl
+      g.rows.push({ id: p.id, name: p.name || `Part ${g.rows.length + 1}`, processingStatus: p.processingStatus, processingError: p.processingError })
+    }
+    return [...groups.values()].sort((a, b) => a.index - b.index)
+  }, [model])
+
+  async function handleAttachPreview(partId: string, file: File) {
+    if (!id) return
+    setAttachErr(null)
+    setAttachingPartId(partId)
+    try {
+      const { key } = await uploadsApi.uploadDirect(file, 'raw')
+      await modelsApi.attachPartPreview(id, partId, { rawKey: key, filename: file.name })
+      // Poll for THIS part specifically — pollProcessing watches the model's
+      // own processingStatus, which the whole listing may already be 'ready'
+      // regardless of this one part's reprocessing still running. Applies
+      // whatever it last fetched even on timeout, so a slow worker still
+      // leaves the UI showing real (if not yet final) state, not stale data.
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2000))
+        const m = await modelsApi.getModelById(id)
+        setModel(m)
+        const part = m.parts?.find((p) => p.id === partId)
+        if (!part || part.processingStatus !== 'processing') break
+      }
+    } catch (err) {
+      setAttachErr(errMessage(err, 'Could not attach the preview file'))
+    } finally {
+      setAttachingPartId(null)
+    }
+  }
+
+  async function handleSetComponentThumbnail(groupIndex: number, file: File) {
+    if (!id) return
+    setComponentsErr(null)
+    setThumbBusyGroup(groupIndex)
+    try {
+      const { key } = await uploadsApi.uploadDirect(file, 'thumbnails')
+      await modelsApi.setComponentThumbnail(id, groupIndex, key)
+      await load()
+    } catch (err) {
+      setComponentsErr(errMessage(err, 'Could not update the thumbnail'))
+    } finally {
+      setThumbBusyGroup(null)
+    }
+  }
+
+  async function handleRemoveComponent(groupIndex: number, name: string) {
+    if (!id) return
+    if (!window.confirm(`Remove "${name}" from this listing? Its files will be deleted — this can't be undone.`)) return
+    setComponentsErr(null)
+    setRemovingGroup(groupIndex)
+    try {
+      await modelsApi.removeComponent(id, groupIndex)
+      await load()
+    } catch (err) {
+      setComponentsErr(errMessage(err, 'Could not remove this model'))
+    } finally {
+      setRemovingGroup(null)
+    }
+  }
+
+  async function handleAddComponent(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || newComponentFiles.length === 0) return
+    setComponentsErr(null)
+    setAddingComponent(true)
+    try {
+      const parts = []
+      for (const file of newComponentFiles) {
+        const { key } = await uploadsApi.uploadDirect(file, 'raw')
+        parts.push({ rawKey: key, filename: file.name })
+      }
+      await modelsApi.addComponent(id, { groupName: newComponentName.trim() || undefined, parts })
+      setNewComponentName('')
+      setNewComponentFiles([])
+      setShowAddComponent(false)
+      await load()
+    } catch (err) {
+      setComponentsErr(errMessage(err, 'Could not add this model'))
+    } finally {
+      setAddingComponent(false)
     }
   }
 
@@ -665,6 +785,172 @@ const EditModel: React.FC = () => {
         )}
         {galleryErr && <p className="mt-2 text-sm text-red-600">{galleryErr}</p>}
       </div>
+
+      {/* Models within this listing ("Small Village" — several named models
+          under one product). Every listing can grow into one via "Add a
+          model" below, even a plain single-file one today. Each named model
+          can get its own planner thumbnail, and if a file was too dense to
+          preview, it stays fully sellable but shows a warning here with a
+          control to attach a lighter stand-in. */}
+      {model && (
+        <div className="mt-8 rounded-lg border border-border p-4">
+          <h2 className="text-base font-semibold text-foreground">Models in this listing</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {(model.partCount ?? 1) > 1
+              ? <>Buy once, {model.partCount} files — every model below is individually placeable in the planner once it has a preview.</>
+              : 'Add more named models to sell them together as one buy-once set — each placeable separately in the planner.'}
+          </p>
+
+          {(model.partCount ?? 1) > 1 && (
+          <div className="mt-4 space-y-4">
+            {components.map((g) => (
+              <div key={g.index} className="rounded-lg border border-border p-3">
+                <div className="flex items-start gap-3">
+                  {g.thumbnailUrl ? (
+                    <img src={g.thumbnailUrl} alt="" className="h-14 w-14 shrink-0 rounded-sm border object-cover" />
+                  ) : (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border border-dashed text-[10px] text-muted-foreground text-center">
+                      No image
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {g.name || (g.index === 0 ? 'Model 1 (primary)' : `Model ${g.index + 1}`)}
+                      </p>
+                      {g.index === 0 && <span className="shrink-0 text-xs text-muted-foreground">primary</span>}
+                    </div>
+                    <label className={`mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-primary hover:underline ${thumbBusyGroup === g.index ? 'pointer-events-none opacity-50' : ''}`}>
+                      {thumbBusyGroup === g.index ? 'Uploading…' : (g.thumbnailUrl ? 'Change thumbnail' : 'Add a thumbnail')}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={thumbBusyGroup === g.index}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) handleSetComponentThumbnail(g.index, f)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {g.index > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveComponent(g.index, g.name || `Model ${g.index + 1}`)}
+                      disabled={removingGroup === g.index}
+                      className="shrink-0 rounded-sm border border-red-200 p-1.5 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      title="Remove this model from the listing"
+                    >
+                      {removingGroup === g.index ? '…' : <Trash2 size={14} />}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-2 border-t border-border pt-3">
+                  {g.rows.map((r) => (
+                    <div key={r.id} className="text-xs">
+                      {r.processingStatus === 'no_preview' ? (
+                        <div className="rounded-sm border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-800">
+                          <p className="flex items-center gap-1.5 font-medium">
+                            <AlertTriangle size={13} className="shrink-0" />
+                            {r.name}: no planner preview
+                          </p>
+                          <p className="mt-1 text-amber-700">{r.processingError || 'This file is too dense to safely preview.'}</p>
+                          <p className="mt-0.5 text-amber-700">It's still for sale as-is — only the planner preview is missing.</p>
+                          <label className={`mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-sm border border-amber-300 bg-white px-2 py-1 font-medium text-amber-900 hover:bg-amber-100 ${attachingPartId === r.id ? 'pointer-events-none opacity-50' : ''}`}>
+                            <Upload size={12} />
+                            {attachingPartId === r.id ? 'Uploading…' : 'Attach a decimated preview file…'}
+                            <input
+                              type="file"
+                              accept=".stl,.obj,.3mf"
+                              className="hidden"
+                              disabled={attachingPartId === r.id}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) handleAttachPreview(r.id, f)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ) : r.processingStatus === 'failed' ? (
+                        <p className="text-red-700">✕ {r.name}: {r.processingError || 'Failed'}</p>
+                      ) : r.processingStatus === 'processing' ? (
+                        <p className="text-muted-foreground">⋯ {r.name}: processing…</p>
+                      ) : (
+                        <p className="text-green-700">✓ {r.name}: ready</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          )}
+
+          {attachErr && <p className="mt-3 text-sm text-red-600">{attachErr}</p>}
+          {componentsErr && <p className="mt-3 text-sm text-red-600">{componentsErr}</p>}
+
+          {/* Add a new named model to this listing (works from a plain single-file listing too). */}
+          <div className="mt-4 border-t border-border pt-4">
+            {!showAddComponent ? (
+              <button
+                type="button"
+                onClick={() => setShowAddComponent(true)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+              >
+                <Plus size={15} /> Add a model to this listing
+              </button>
+            ) : (
+              <form onSubmit={handleAddComponent} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Add a model</p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddComponent(false); setNewComponentFiles([]); setNewComponentName('') }}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Name</label>
+                  <input
+                    className="w-full border rounded-sm px-3 py-2 text-sm"
+                    value={newComponentName}
+                    onChange={(e) => setNewComponentName(e.target.value)}
+                    placeholder="e.g. Watchtower"
+                    disabled={addingComponent}
+                  />
+                </div>
+                <div>
+                  <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${addingComponent ? 'pointer-events-none opacity-50' : ''}`}>
+                    <Upload size={16} />
+                    {newComponentFiles.length > 0 ? `${newComponentFiles.length} file${newComponentFiles.length === 1 ? '' : 's'} selected` : 'Choose file(s)…'}
+                    <input
+                      type="file"
+                      accept=".stl,.obj,.3mf"
+                      multiple
+                      className="hidden"
+                      disabled={addingComponent}
+                      onChange={(e) => setNewComponentFiles(Array.from(e.target.files ?? []))}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-sm bg-primary text-primary-foreground text-sm disabled:opacity-50"
+                  disabled={addingComponent || newComponentFiles.length === 0}
+                >
+                  {addingComponent ? 'Uploading…' : 'Add model'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Upload a new file version — replaces the main model file. Buyers keep
           access and re-download the new version for free; they're notified. */}

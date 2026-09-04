@@ -334,7 +334,12 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           fulfillment: 'stl',
           artistId: s.artistId,
           model: part.isPrimary ? previewGlbUrl(s.id) : previewPartGlbUrl(part.id),
-          thumbnail: assetUrl(s.thumbnailPath ?? undefined),
+          // Per-component thumbnail (migration 058) when the artist set one for
+          // THIS named model — already a full URL from getSets(), unlike
+          // thumbnailPath below, which is a raw key. Falls back to the
+          // listing's own thumbnail so a component without one still shows
+          // something recognizable rather than a blank tile.
+          thumbnail: part.thumbnailUrl ?? assetUrl(s.thumbnailPath ?? undefined),
           scaleToFit: true,
           defaultPitchDeg: s.defaultPitchDeg || undefined,
         } satisfies Asset)
