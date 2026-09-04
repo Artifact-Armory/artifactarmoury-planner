@@ -99,6 +99,19 @@ interface ParsedSTL {
 export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 5_000_000)
 
 /**
+ * Stricter cap applied ONLY to an extra part of a grouped/multi-part listing
+ * (modelIngest/process.ts's processModelParts) — a part over this is excluded
+ * from the listing rather than attempted, rather than risking the isolated
+ * child OOMing on it. Deliberately separate from, and smaller than,
+ * MAX_INGEST_TRIANGLES: this bounds what's safe to fully parse for dims/QA/a
+ * preview; it does NOT bound what an artist can sell — the listing's own
+ * undecimated primary STL (and the raw file behind ANY part, previewable or
+ * not) is untouched either way, since storing it is a plain R2 upload with no
+ * parsing involved. Built 2026-09-04 after the "Japanese houses" incident.
+ */
+export const MAX_PREVIEW_PART_TRIANGLES = Number(process.env.MAX_PREVIEW_PART_TRIANGLES ?? 3_500_000)
+
+/**
  * Triangle count from a binary STL *without* parsing it — the format states it
  * in 4 bytes at offset 80. Must run BEFORE the parse loop: checking the count
  * afterwards guards nothing, since the memory is already spent building the
@@ -128,6 +141,22 @@ function countAsciiFacets(buffer: Buffer): number {
     idx = buffer.indexOf(needle, idx + needle.length)
   }
   return count
+}
+
+/**
+ * Cheap upper-bound triangle count for an already-downloaded STL file, read
+ * from its header/facet markers — no parsing, no triangle objects allocated
+ * (same technique parseSTL's own MAX_INGEST_TRIANGLES guard uses below).
+ * Returns null when it can't be determined cheaply (a malformed/non-STL file
+ * surfaces its own error at the real parse instead). Exported so a caller can
+ * apply a STRICTER limit than parseSTL's own before even attempting a parse —
+ * see MAX_PREVIEW_PART_TRIANGLES / modelIngest/process.ts.
+ */
+export async function declaredTriangleCount(filePath: string): Promise<number | null> {
+  const buffer = await readFile(filePath)
+  const header = buffer.toString('ascii', 0, 5)
+  const isBinary = header !== 'solid'
+  return isBinary ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
 }
 
 /**

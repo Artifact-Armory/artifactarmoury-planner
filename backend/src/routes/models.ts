@@ -1927,9 +1927,13 @@ router.get('/:id/download',
 
     if ((model.part_count ?? 1) > 1) {
       // Multi-part "set": every part's STL (+ original) as one watermarked ZIP.
+      // Excludes 'failed' parts (e.g. a component excluded at ingest for being
+      // too heavy to preview) — their file was deleted from R2 when excluded,
+      // so including them here would break the ZIP for every buyer.
       const parts = (await db.query(
         `SELECT name, stl_file_path, source_format, source_file_path, group_index, group_name
-         FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
+         FROM model_parts WHERE model_id = $1 AND processing_status <> 'failed'
+         ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;
       // When the listing is split into named components ("Small Village" → Village

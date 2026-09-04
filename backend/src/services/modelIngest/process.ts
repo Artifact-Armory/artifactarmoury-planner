@@ -20,7 +20,7 @@
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
-import { generateGLB, computeFileHash } from '../fileProcessor';
+import { generateGLB, computeFileHash, declaredTriangleCount, MAX_PREVIEW_PART_TRIANGLES } from '../fileProcessor';
 import { enqueueFullGlbJob } from '../fullGlb/queue';
 import { downloadObject, deleteObject } from '../r2';
 import {
@@ -530,11 +530,35 @@ async function processModelParts(
   selfMatches?: string[],
 ): Promise<void> {
   const { rows: parts } = await db.query(
-    `SELECT id, name, stl_file_path, is_presupported, display_stl_path FROM model_parts WHERE model_id = $1 ORDER BY display_order ASC`,
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+       FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
     [modelId]
   );
 
+  // A part that's too heavy to safely preview (over MAX_PREVIEW_PART_TRIANGLES,
+  // caught up-front) or whose isolated parse genuinely OOMs no longer fails the
+  // WHOLE listing — it excludes just its own named component (group_index),
+  // and the rest of the listing keeps going. Built 2026-09-04, at the artist's
+  // request, after the "Japanese houses" incident: losing 9 good models
+  // because the 10th was too dense is worse than shipping 9 and letting the
+  // artist decimate + re-add the 10th as a new part later. Dedup/theft-match
+  // failures are NOT included in this — those still fail the whole listing
+  // (see the geoDup.foreign / duplicate-hash branches below), since a flagged
+  // file deserves the artist's full attention, not a silent partial publish.
+  const excludedGroups = new Map<number, { name: string | null; reason: string }>();
+
   for (const part of parts) {
+    const already = excludedGroups.get(part.group_index);
+    if (already) {
+      // A sibling file in this same named component already excluded it —
+      // this file is moot. Mark it failed too (so it never sits in
+      // 'processing' forever) and skip it without spending any work.
+      const reason = `Excluded — another file in "${already.name ?? 'this component'}" was excluded: ${already.reason}`;
+      await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+      await safeDeleteObject(part.stl_file_path);
+      continue;
+    }
+
     const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-part-'));
     const stlTmp = path.join(tmpDir, 'part.stl');
     // A part's format is taken from its raw upload key's extension.
@@ -544,6 +568,25 @@ async function processModelParts(
       const stlBuffer = convertToStl(rawBuffer, format);
       await fsp.writeFile(stlTmp, stlBuffer);
 
+      // Cheap pre-flight triangle check (header only, no parsing) — catches
+      // the exact "Japanese houses" case (an oversized part comfortably under
+      // MAX_INGEST_TRIANGLES that still OOMs the actual parse) before even
+      // attempting the risky work. Does NOT apply to the listing's own
+      // undecimated primary file (that's processUploadedModel, a separate
+      // function) — only extra parts, and only whether THIS part gets full
+      // ingest + a preview; the raw file itself is already safely stored in
+      // R2 regardless (a plain byte upload, no parsing involved).
+      const declared = await declaredTriangleCount(stlTmp);
+      if (declared !== null && declared > MAX_PREVIEW_PART_TRIANGLES) {
+        const reason =
+          `${declared.toLocaleString()} triangles — over the ${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle ` +
+          `limit for a previewable part. Decimate "${part.name}" and upload it again as a new part to add it back.`;
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+        await safeDeleteObject(part.stl_file_path);
+        excludedGroups.set(part.group_index, { name: part.group_name, reason });
+        continue;
+      }
+
       // Dedup each part against every other model + part (not this model's own).
       // Isolated child process — see isolatedRunner.ts — because a single
       // oversized part (this is exactly what happened to a real 10-model
@@ -552,13 +595,15 @@ async function processModelParts(
       const fpResult = await isolatedFingerprint(stlTmp);
       if (isIsolatedFailure(fpResult)) {
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [fpResult.reason, part.id]);
-        await markModelFailed(modelId, `${part.name}: ${fpResult.reason}`);
         await safeDeleteObject(part.stl_file_path);
-        throw new Error(fpResult.reason);
+        excludedGroups.set(part.group_index, { name: part.group_name, reason: fpResult.reason });
+        continue;
       }
       const fingerprint = fpResult.fingerprint;
       const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
       if (geoDup.foreign) {
+        // Theft match — unlike the two exclusion cases above, this still
+        // fails the WHOLE listing rather than quietly dropping one part.
         const reason = duplicateMessage('geometry', part.name);
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
         await markModelFailed(modelId, reason);
@@ -588,6 +633,20 @@ async function processModelParts(
         const displayStlBuffer = convertToStl(displayRawBuffer, displayFormat);
         await fsp.writeFile(displayStlTmp, displayStlBuffer);
 
+        // Same pre-flight triangle check as the print file above — this file
+        // exists purely to build a preview, so it's held to the same limit.
+        const displayDeclared = await declaredTriangleCount(displayStlTmp);
+        if (displayDeclared !== null && displayDeclared > MAX_PREVIEW_PART_TRIANGLES) {
+          const reason =
+            `Preview file has ${displayDeclared.toLocaleString()} triangles — over the ` +
+            `${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle limit. Decimate it and upload "${part.name}" again as a new part to add it back.`;
+          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+          await safeDeleteObject(part.stl_file_path);
+          await safeDeleteObject(displayRawKey);
+          excludedGroups.set(part.group_index, { name: part.group_name, reason });
+          continue;
+        }
+
         const displayFileHash = computeFileHash(displayStlBuffer);
         const displayHashDup = await db.query(
           'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
@@ -597,10 +656,10 @@ async function processModelParts(
         const displayFpResult = await isolatedFingerprint(displayStlTmp);
         if (isIsolatedFailure(displayFpResult)) {
           await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [displayFpResult.reason, part.id]);
-          await markModelFailed(modelId, `${part.name} preview: ${displayFpResult.reason}`);
           await safeDeleteObject(part.stl_file_path);
           await safeDeleteObject(displayRawKey);
-          throw new Error(displayFpResult.reason);
+          excludedGroups.set(part.group_index, { name: part.group_name, reason: displayFpResult.reason });
+          continue;
         }
         const displayFingerprint = displayFpResult.fingerprint;
         const displayGeoDup = foreignDisplayHashDup
@@ -633,9 +692,9 @@ async function processModelParts(
       const partAnalysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: false });
       if (isIsolatedFailure(partAnalysis)) {
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [partAnalysis.reason, part.id]);
-        await markModelFailed(modelId, `${part.name}: ${partAnalysis.reason}`);
         await safeDeleteObject(part.stl_file_path);
-        throw new Error(partAnalysis.reason);
+        excludedGroups.set(part.group_index, { name: part.group_name, reason: partAnalysis.reason });
+        continue;
       }
       const stlData = partAnalysis.stlData;
       // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
@@ -689,6 +748,40 @@ async function processModelParts(
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
+  }
+
+  if (excludedGroups.size > 0) {
+    // Reflect the ACTUAL sellable file count (part_count drives the "SET · N
+    // parts" / "GROUP · N models" UI and the ZIP download's part list — see
+    // routes/models.ts). Every part in an excluded group is 'failed' at this
+    // point and nothing else in a normal run sets that status, so counting
+    // them directly is accurate (a dedup/theft match would have thrown out of
+    // this function already, never reaching here).
+    const { rows: failedCountRows } = await db.query(
+      `SELECT COUNT(*) AS n FROM model_parts WHERE model_id = $1 AND processing_status = 'failed'`,
+      [modelId],
+    );
+    const excludedPartCount = Number(failedCountRows[0]?.n ?? 0);
+    await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [modelId, excludedPartCount]);
+
+    const names = [...excludedGroups.values()].map((g) => `"${g.name ?? 'an unnamed model'}"`);
+    const plural = excludedGroups.size > 1;
+    if (uploaderId) {
+      await createNotification({
+        userId: uploaderId,
+        type: 'model.part_excluded',
+        title: `Published with ${excludedGroups.size} model${plural ? 's' : ''} excluded`,
+        body:
+          `${names.join(', ')} ${plural ? 'were' : 'was'} excluded from this listing — ${plural ? 'their files were' : 'its file was'} ` +
+          `too large to safely preview. The rest of the listing published normally. Decimate ${plural ? 'them' : 'it'} and upload ` +
+          `${plural ? 'them' : 'it'} again as new part${plural ? 's' : ''} to add ${plural ? 'them' : 'it'} back.`,
+        link: '/artist/models',
+        modelId,
+      });
+    }
+    logger.info('Excluded oversized component(s) from grouped listing — rest published', {
+      modelId, excludedGroups: [...excludedGroups.keys()], excludedPartCount,
+    });
   }
 }
 

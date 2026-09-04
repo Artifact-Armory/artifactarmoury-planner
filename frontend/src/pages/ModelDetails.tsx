@@ -52,7 +52,10 @@ function partComponents(model: TerrainModel): Array<{ index: number; name: strin
     name: model.primaryGroupName ?? null,
     parts: [{ id: 'primary', name: 'Part 1' }],
   })
-  ;(model.parts ?? []).forEach((p, i) => {
+  // A part that failed ingest (e.g. too heavy to preview) was excluded from
+  // the listing server-side — its file is gone, so it must never appear here
+  // as if it were a real, buyable component.
+  ;(model.parts ?? []).filter((p) => p.processingStatus !== 'failed').forEach((p, i) => {
     const gi = p.groupIndex ?? 0
     let g = groups.get(gi)
     if (!g) { g = { index: gi, name: p.groupName ?? null, parts: [] }; groups.set(gi, g) }
