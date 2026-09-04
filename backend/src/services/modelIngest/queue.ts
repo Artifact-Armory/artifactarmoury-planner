@@ -39,7 +39,20 @@
 // not triangle count (only knowable after the file's already been downloaded
 // and partially parsed) — a conservative proxy assuming worst-case 50
 // bytes/triangle binary-STL density, so it only ever over-flags a file as
-// "large", never under-flags one.
+// "large", never under-flags one. `rawBytes` is the SUM across every file the
+// job will process (primary + every part + every display/preview companion —
+// see routes/models.ts's totalRawBytes), not just the primary file: a real
+// 10-model grouped upload with a small primary file but individually huge
+// extra parts slipped past this lock entirely under the original primary-
+// only accounting (fixed 2026-09-04).
+//
+// isLargeJobLockHeld (added 2026-09-04) lets the worker's poll loop PAUSE
+// bake/full-GLB claiming — not just other large ingest jobs — while a large
+// ingest job is in flight anywhere in the cluster. The same incident showed
+// why: while one replica was deep in parsing an oversized part, four others
+// were simultaneously baking/full-GLB-building that SAME listing's other
+// (already-ingested) parts, each independently adding a GB-scale memory
+// footprint at the same moment. See worker/proxyBakeWorker.ts's poll loop.
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
@@ -78,7 +91,7 @@ export interface UploadPayload {
   filename?: string | null;
   displayRawKey?: string | null;
   displayFilename?: string | null;
-  /** Raw file byte size, known up-front by the route handler — see LARGE_JOB_BYTES above. */
+  /** Total bytes across every file this job processes (primary + parts + display companions), known up-front by the route handler — see LARGE_JOB_BYTES above. */
   rawBytes?: number | null;
 }
 
@@ -127,6 +140,33 @@ export async function releaseLargeJobLock(client: any): Promise<void> {
     await client.query('SELECT pg_advisory_unlock($1)', [LARGE_JOB_LOCK_KEY]);
   } catch (err) {
     log.warn('Failed to release large-job advisory lock (will clear when the connection closes)', { error: err });
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Peek whether a large ingest job is CURRENTLY running somewhere in the
+ * cluster, without taking the lock — used by the worker's poll loop to defer
+ * bake/full-GLB claims while one is in flight (built 2026-09-04, after a real
+ * incident: while one replica was deep in parsing an oversized part, four
+ * others were simultaneously baking/full-GLB-building that SAME listing's
+ * other parts, each adding its own GB-scale memory footprint on top). Only
+ * pauses bake/full-GLB claiming — ingest claiming for OTHER, unrelated (and
+ * presumably normal-sized) models keeps flowing, so one heavy upload doesn't
+ * stall every other artist's uploads too.
+ *
+ * Implemented as try-lock-then-immediately-unlock on the SAME key: if we
+ * acquire it, nobody else was holding it (release it straight back — this
+ * call must never actually hold the lock); if we can't, someone else has it.
+ */
+export async function isLargeJobLockHeld(): Promise<boolean> {
+  const client = await db.connect();
+  try {
+    const { rows } = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [LARGE_JOB_LOCK_KEY]);
+    if (!rows[0]?.locked) return true; // someone else holds it
+    await client.query('SELECT pg_advisory_unlock($1)', [LARGE_JOB_LOCK_KEY]);
+    return false;
   } finally {
     client.release();
   }

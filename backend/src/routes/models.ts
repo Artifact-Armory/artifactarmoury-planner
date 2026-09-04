@@ -301,6 +301,15 @@ router.post('/from-upload',
       throw new ValidationError('The model file must be an STL, OBJ or 3MF file');
     }
 
+    // Sum of every file this upload will hand to the ingest worker (primary +
+    // every part + every display/preview companion) — NOT just the primary
+    // file's size. Feeds the large-job single-flight lock (queue.ts's
+    // isLargeIngestJob): a grouped listing whose primary file is small but
+    // whose extra parts are individually huge (exactly what happened with a
+    // real 10-model "Japanese houses" upload on 2026-09-03) used to slip past
+    // that lock entirely, since it only ever looked at the primary file.
+    let totalRawBytes = 0;
+
     // Pre-supported print file → optional support-free "clean preview" companion
     // (see migration 053). The checkbox and the file travel together: ticking it
     // without attaching a file is rejected rather than silently ignored.
@@ -324,6 +333,7 @@ router.post('/from-upload',
         );
       }
       cleanDisplayRawKey = displayRawKey;
+      totalRawBytes += displayBytes;
     }
     // A thumbnail is required up-front (it's also a hard requirement to publish),
     // so we never create a draft that can't be listed.
@@ -378,6 +388,7 @@ router.post('/from-upload',
         `Model file is too large (${(rawBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB — please reduce the model's detail (e.g. decimate it in Blender) and upload again.`,
       );
     }
+    totalRawBytes += rawBytes;
 
     // Optional extra STL parts (multi-part "set" models). Each must be its own
     // raw/ upload; they're processed alongside the primary in the background.
@@ -417,6 +428,7 @@ router.post('/from-upload',
             `A part file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB per file — please reduce it and upload again.`,
           );
         }
+        totalRawBytes += partBytes;
         // Per-component "clean preview" (migration 054) — only meaningful when
         // this part is a component's first/primary file, but that's a frontend
         // convention (which part it attaches the field to), not something
@@ -440,6 +452,7 @@ router.post('/from-upload',
               `A part's preview model file is too large (${(displayBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`,
             );
           }
+          totalRawBytes += displayBytes;
           partDisplayRawKey = p.displayRawKey;
         }
         extraParts.push({
@@ -554,7 +567,10 @@ router.post('/from-upload',
       filename,
       displayRawKey: cleanDisplayRawKey ?? undefined,
       displayFilename,
-      rawBytes,
+      // Total across every file this job will process (see totalRawBytes'
+      // definition above) — not just the primary file — so the large-job lock
+      // actually sees a heavy multi-part listing as heavy.
+      rawBytes: totalRawBytes,
     });
 
     logger.info('Model upload accepted for processing', { userId, modelId: model.id });

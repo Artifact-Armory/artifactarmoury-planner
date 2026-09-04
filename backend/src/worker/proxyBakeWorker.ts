@@ -40,6 +40,7 @@ import {
 import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb/runner'
 import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
+import { isLargeJobLockHeld } from '../services/modelIngest/queue'
 import { closeDatabase } from '../db'
 
 const POLL_INTERVAL_MS = Number(process.env.PROXY_BAKE_POLL_MS ?? 5000)
@@ -117,12 +118,28 @@ async function main(): Promise<void> {
     try {
       // Ingest jobs first — see the file header for why.
       didWork = await runOneIngestJob(WORKER_ID)
+
+      // While a large ingest job is running anywhere in the cluster, hold off
+      // on bake/full-GLB claims. A real incident (2026-09-04) showed why: one
+      // replica deep in parsing an oversized part while four others were
+      // simultaneously baking/full-GLB-building that SAME listing's other
+      // parts, each adding its own GB-scale memory footprint at the same
+      // time. Only bake/full-GLB claiming pauses — ingest claiming for OTHER,
+      // presumably normal-sized models keeps flowing on other replicas, so
+      // one heavy upload doesn't stall the rest of the marketplace's uploads.
+      // Re-checked every poll (POLL_INTERVAL_MS), so work resumes within one
+      // cycle of the large job finishing (success or failure) either way.
+      const largeJobInProgress = !didWork && !stopping ? await isLargeJobLockHeld() : false
+      if (largeJobInProgress) {
+        logger.info('Large ingest job in progress elsewhere — deferring bake/full-GLB claims this cycle')
+      }
+
       // Preview bakes win next. Only reach for an owner full-GLB build when both
       // queues above are empty, so an artist's preview is never stuck behind one.
-      if (!didWork && !stopping) {
+      if (!didWork && !stopping && !largeJobInProgress) {
         didWork = await processOne()
       }
-      if (!didWork && !stopping && isFullGlbEnabled()) {
+      if (!didWork && !stopping && !largeJobInProgress && isFullGlbEnabled()) {
         didWork = await runOneFullGlbJob(WORKER_ID)
       }
     } catch (err) {
