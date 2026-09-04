@@ -43,6 +43,15 @@ function putToR2(
 const MULTIPART_THRESHOLD = 64 * 1024 * 1024 // 64 MB
 const PART_SIZE = 16 * 1024 * 1024 // 16 MB per chunk
 const PART_RETRIES = 3
+// Chunks in flight at once. Parts used to go strictly one at a time — on a
+// fast connection that leaves most of the available bandwidth idle between
+// chunks, since only one small HTTP transfer is ever active (a real,
+// measured contributor to a 10-model upload taking over an hour on a
+// connection independently confirmed to be fine — 2026-09-04). 4 is a
+// conservative, standard choice for parallel multipart uploads: enough to
+// actually use real bandwidth without saturating the browser's per-host
+// connection limit (6 in most browsers) or the R2 endpoint.
+const PART_CONCURRENCY = 4
 
 /**
  * PUT one chunk to its presigned part URL and resolve with the part's ETag
@@ -99,7 +108,11 @@ async function uploadMultipart(
   }
 
   try {
-    // 2. Upload each chunk (retry a few times per chunk), tracking total progress.
+    // 2. Upload chunks PART_CONCURRENCY at a time (retry a few times per
+    //    chunk), tracking total progress. A small pool of "workers" pulls
+    //    from a shared queue rather than firing all parts at once, so a
+    //    1000-part file doesn't open 1000 connections simultaneously.
+    const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber)
     const loadedPerPart = new Array<number>(partCount).fill(0)
     const emitProgress = () => {
       if (!onProgress) return
@@ -107,8 +120,8 @@ async function uploadMultipart(
       onProgress(Math.min(100, Math.round((loaded / file.size) * 100)))
     }
 
-    const completed: Array<{ partNumber: number; etag: string }> = []
-    for (const part of parts.sort((a, b) => a.partNumber - b.partNumber)) {
+    const etagByPartNumber = new Map<number, string>()
+    async function uploadOnePart(part: { partNumber: number; url: string }): Promise<void> {
       const start = (part.partNumber - 1) * PART_SIZE
       const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size))
 
@@ -130,8 +143,30 @@ async function uploadMultipart(
 
       loadedPerPart[part.partNumber - 1] = chunk.size
       emitProgress()
-      completed.push({ partNumber: part.partNumber, etag })
+      etagByPartNumber.set(part.partNumber, etag)
     }
+
+    // If any part permanently fails (all retries exhausted), Promise.all
+    // rejects as soon as that happens — the other workers' in-flight PUTs
+    // keep running in the background since XHR isn't wired for cancellation
+    // here, but their results are simply never read; the catch block below
+    // aborts the whole multipart upload regardless.
+    let nextIndex = 0
+    async function worker(): Promise<void> {
+      while (nextIndex < sortedParts.length) {
+        const part = sortedParts[nextIndex++]
+        await uploadOnePart(part)
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(PART_CONCURRENCY, sortedParts.length) }, () => worker()),
+    )
+
+    // CompleteMultipartUpload requires parts listed in ascending part-number
+    // order — sortedParts is already in that order, so mapping straight
+    // through (rather than the completion order, which is unordered now
+    // that parts upload concurrently) keeps that guarantee.
+    const completed = sortedParts.map((p) => ({ partNumber: p.partNumber, etag: etagByPartNumber.get(p.partNumber)! }))
 
     // 3. Stitch the parts together into the final object.
     const res = await apiClient.post(
