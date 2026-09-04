@@ -56,7 +56,7 @@
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
-import { processUploadedModel, processModelVersionUpdate } from './process';
+import { processUploadedModel, processModelVersionUpdate, processPartPreviewAttach, processNewComponent } from './process';
 
 const log = logger.child('MODEL_INGEST');
 
@@ -84,7 +84,7 @@ const LARGE_JOB_BYTES = Number(process.env.MODEL_INGEST_LARGE_BYTES ?? 150 * 102
 /** Fixed arbitrary key for the cluster-wide "one large ingest job at a time" lock. */
 const LARGE_JOB_LOCK_KEY = 834127001;
 
-export type IngestJobType = 'upload' | 'version';
+export type IngestJobType = 'upload' | 'version' | 'part_preview' | 'new_component';
 
 export interface UploadPayload {
   rawKey: string;
@@ -102,11 +102,23 @@ export interface VersionPayload {
   rawBytes?: number | null;
 }
 
+/** An artist attaching a decimated preview to an existing 'no_preview' part (2026-09-04). */
+export interface PartPreviewPayload {
+  partId: string;
+  rawBytes?: number | null;
+}
+
+/** An artist adding a new named component to an already-published listing (2026-09-04). */
+export interface NewComponentPayload {
+  partIds: string[];
+  rawBytes?: number | null;
+}
+
 export interface IngestJobRow {
   id: string;
   model_id: string;
   job_type: IngestJobType;
-  payload: UploadPayload | VersionPayload;
+  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload;
   status: string;
   attempts: number;
   max_attempts: number;
@@ -176,7 +188,7 @@ export async function isLargeJobLockHeld(): Promise<boolean> {
 async function enqueueIngestJob(input: {
   modelId: string;
   jobType: IngestJobType;
-  payload: UploadPayload | VersionPayload;
+  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload;
 }): Promise<string | null> {
   const { rows } = await db.query(
     `INSERT INTO model_ingest_jobs (model_id, job_type, payload, status)
@@ -239,6 +251,52 @@ export async function dispatchIngestVersionUpdate(input: {
   }
   processModelVersionUpdate(input.modelId, input.rawKey, input.filename, input.notes).catch((err) =>
     logger.error('processModelVersionUpdate crashed', { error: err, modelId: input.modelId }),
+  );
+}
+
+/**
+ * Called from the attach-preview route (an artist attaching a decimated
+ * preview to an existing 'no_preview' part). Same worker/in-process split as
+ * above — a heavy attached file is exactly as risky as a fresh upload, so it
+ * never runs inline in the API server either.
+ */
+export async function dispatchPartPreviewAttach(input: {
+  modelId: string;
+  partId: string;
+  rawBytes?: number | null;
+}): Promise<void> {
+  if (isIngestWorkerEnabled()) {
+    await enqueueIngestJob({
+      modelId: input.modelId,
+      jobType: 'part_preview',
+      payload: { partId: input.partId, rawBytes: input.rawBytes ?? null },
+    });
+    return;
+  }
+  processPartPreviewAttach(input.modelId, input.partId).catch((err) =>
+    logger.error('processPartPreviewAttach crashed', { error: err, modelId: input.modelId, partId: input.partId }),
+  );
+}
+
+/**
+ * Called from the add-component route (an artist adding a new named model to
+ * an already-published listing). Same worker/in-process split as above.
+ */
+export async function dispatchNewComponentIngest(input: {
+  modelId: string;
+  partIds: string[];
+  rawBytes?: number | null;
+}): Promise<void> {
+  if (isIngestWorkerEnabled()) {
+    await enqueueIngestJob({
+      modelId: input.modelId,
+      jobType: 'new_component',
+      payload: { partIds: input.partIds, rawBytes: input.rawBytes ?? null },
+    });
+    return;
+  }
+  processNewComponent(input.modelId, input.partIds).catch((err) =>
+    logger.error('processNewComponent crashed', { error: err, modelId: input.modelId, partIds: input.partIds }),
   );
 }
 

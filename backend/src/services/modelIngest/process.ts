@@ -524,6 +524,221 @@ async function failVersionUpdate(modelId: string, reason: string): Promise<void>
  * preview, dimensions + fingerprint. Throws (after marking the model failed) if any
  * part can't be processed, so the caller leaves the model in 'failed'.
  */
+interface PartRow {
+  id: string; name: string; stl_file_path: string;
+  is_presupported: boolean; display_stl_path: string | null;
+  group_index: number; group_name: string | null;
+}
+type PartOutcome = { outcome: 'ready' } | { outcome: 'no_preview'; reason: string };
+
+/**
+ * Process ONE part: dedup, then either build its preview (from an attached
+ * clean/decimated companion file when there is one, else the print file
+ * itself) or — if that source is too heavy to safely parse — leave the part
+ * fully SELLABLE with no preview, rather than failing it. Shared by
+ * processModelParts (the initial ingest loop) and processPartPreviewAttach
+ * (an artist attaching a decimated preview to an existing 'no_preview' part
+ * later, from My Models). Built 2026-09-04, at the artist's request, after
+ * the "Japanese houses" incident: losing a good model because its preview
+ * couldn't be built is worse than selling it without one and letting the
+ * artist attach a lighter stand-in whenever they get to it.
+ *
+ * Dedup/theft-match failures are the one thing this does NOT downgrade —
+ * those still fail the WHOLE listing (throw, caught by the caller's outer
+ * handler), since a flagged file deserves the artist's full attention rather
+ * than a silent partial publish.
+ */
+async function processOnePart(
+  modelId: string,
+  part: PartRow,
+  uploaderId: string | null | undefined,
+  selfMatches: string[] | undefined,
+): Promise<PartOutcome> {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-part-'));
+  const stlTmp = path.join(tmpDir, 'part.stl');
+  // A part's format is taken from its raw upload key's extension.
+  const format: MeshFormat = meshFormatFromName(part.stl_file_path) ?? 'stl';
+  try {
+    const rawBuffer = await downloadObject(part.stl_file_path);
+    const stlBuffer = convertToStl(rawBuffer, format);
+    await fsp.writeFile(stlTmp, stlBuffer);
+    const fileHash = computeFileHash(stlBuffer);
+
+    // Dedup the print file's OWN geometry against every other model + part
+    // (not this model's own) — mandatory anti-theft, attempted regardless of
+    // size. Isolated child process (isolatedRunner.ts) because a large file
+    // can OOM the parse; if it does, dedup for THIS file degrades to
+    // exact-hash-only (still checked, just not rotation/rescale-proof)
+    // rather than blocking the upload outright.
+    const fpResult = await isolatedFingerprint(stlTmp);
+    let fingerprint: GeometryFingerprint | null = null;
+    if (isIsolatedFailure(fpResult)) {
+      logger.warn('Part geometry fingerprint failed (likely too large) — dedup limited to exact-hash for this file', {
+        modelId, partId: part.id, reason: fpResult.reason,
+      });
+    } else {
+      fingerprint = fpResult.fingerprint;
+      const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
+      if (geoDup.foreign) {
+        const reason = duplicateMessage('geometry', part.name);
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+        await markModelFailed(modelId, reason);
+        await safeDeleteObject(part.stl_file_path);
+        throw new Error(reason);
+      }
+      // The artist's own model — allowed (that's the point of selling a piece
+      // both ways); recorded so the roll-up notice can mention it.
+      if (geoDup.own && selfMatches && !selfMatches.includes(geoDup.own.name)) {
+        selfMatches.push(geoDup.own.name);
+      }
+    }
+
+    const noPreview = async (reason: string): Promise<PartOutcome> => {
+      await db.query(
+        `UPDATE model_parts SET processing_status='no_preview', processing_error=$1, file_hash=$2, geometry_fingerprint=$3 WHERE id=$4`,
+        [reason, fileHash, fingerprint ? JSON.stringify(fingerprint) : null, part.id],
+      );
+      return { outcome: 'no_preview', reason };
+    };
+
+    // What drives the PREVIEW: an attached clean/decimated companion file
+    // when there is one (migration 054, or attached later via
+    // processPartPreviewAttach after a 'no_preview' warning) — otherwise the
+    // print file itself. Either way, whatever's driving the preview must
+    // itself respect MAX_PREVIEW_PART_TRIANGLES; the print file never does
+    // (it's what gets sold, and storing it is a plain R2 upload regardless).
+    let previewSourceLocalPath = stlTmp;
+    let previewSourceFormat: 'stl' | 'obj' = format === 'obj' ? 'obj' : 'stl';
+    let displayStlPathForDb: string | null = null;
+
+    if (part.is_presupported && part.display_stl_path) {
+      const displayRawKey: string = part.display_stl_path;
+      const displayFormat: MeshFormat = meshFormatFromName(displayRawKey) ?? 'stl';
+      const displayStlTmp = path.join(tmpDir, 'display.stl');
+      const displayRawBuffer = await downloadObject(displayRawKey);
+      const displayStlBuffer = convertToStl(displayRawBuffer, displayFormat);
+      await fsp.writeFile(displayStlTmp, displayStlBuffer);
+
+      const displayDeclared = await declaredTriangleCount(displayStlTmp);
+      if (displayDeclared !== null && displayDeclared > MAX_PREVIEW_PART_TRIANGLES) {
+        const reason =
+          `Preview file has ${displayDeclared.toLocaleString()} triangles — still over the ` +
+          `${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle limit. Attach a more decimated file to add a preview.`;
+        await safeDeleteObject(displayRawKey);
+        return noPreview(reason);
+      }
+
+      const displayFileHash = computeFileHash(displayStlBuffer);
+      const displayHashDup = await db.query(
+        'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
+        [displayFileHash, modelId],
+      );
+      const foreignDisplayHashDup = displayHashDup.rows.find((r: any) => r.artist_id !== uploaderId);
+      const displayFpResult = await isolatedFingerprint(displayStlTmp);
+      if (isIsolatedFailure(displayFpResult)) {
+        await safeDeleteObject(displayRawKey);
+        return noPreview(`Preview file: ${displayFpResult.reason}`);
+      }
+      const displayFingerprint = displayFpResult.fingerprint;
+      const displayGeoDup = foreignDisplayHashDup
+        ? null
+        : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
+      if (foreignDisplayHashDup || displayGeoDup?.foreign) {
+        const reason = duplicateMessage(foreignDisplayHashDup ? 'file' : 'geometry', `${part.name} preview`);
+        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
+        await markModelFailed(modelId, reason);
+        await safeDeleteObject(part.stl_file_path);
+        await safeDeleteObject(displayRawKey);
+        throw new Error(reason);
+      }
+      const displaySelfName = displayHashDup.rows[0]?.name ?? displayGeoDup?.own?.name;
+      if (displaySelfName && selfMatches && !selfMatches.includes(displaySelfName)) {
+        selfMatches.push(displaySelfName);
+      }
+
+      displayStlPathForDb = displayRawKey;
+      if (displayFormat !== 'stl') {
+        const displayCanonTmp = path.join(tmpDir, 'display-canonical.stl');
+        await fsp.writeFile(displayCanonTmp, displayStlBuffer);
+        displayStlPathForDb = await uploadToStorage(displayCanonTmp, 'models');
+      }
+      previewSourceLocalPath = displayStlTmp;
+      previewSourceFormat = 'stl';
+    } else {
+      // No clean/decimated companion attached — the print file itself has to
+      // be light enough to preview directly. This is the cheap, up-front
+      // check that catches the "Japanese houses" case (an oversized part
+      // comfortably under MAX_INGEST_TRIANGLES that still OOMs the actual
+      // parse) before even attempting the risky work.
+      const declared = await declaredTriangleCount(stlTmp);
+      if (declared !== null && declared > MAX_PREVIEW_PART_TRIANGLES) {
+        const reason =
+          `${declared.toLocaleString()} triangles — over the ${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle ` +
+          `limit for a preview. Attach a decimated preview file for "${part.name}" to add a preview on the planner.`;
+        return noPreview(reason);
+      }
+    }
+
+    const partAnalysis = await isolatedStlAnalysis(previewSourceLocalPath, { includeMeshQA: false });
+    if (isIsolatedFailure(partAnalysis)) {
+      return noPreview(displayStlPathForDb ? `Preview file: ${partAnalysis.reason}` : partAnalysis.reason);
+    }
+    const stlData = partAnalysis.stlData;
+
+    // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
+    const bakeEnabled = isBakeWorkerEnabled();
+    let glbStoragePath: string | null = null;
+    if (!bakeEnabled) {
+      const glbPath = await generateGLB(previewSourceLocalPath);
+      glbStoragePath = await uploadToStorage(glbPath, 'previews');
+    }
+
+    // Non-STL part: store the converted STL and keep the original as the source.
+    let canonicalStlPath: string | null = null;
+    let sourceFilePath: string | null = null;
+    if (format !== 'stl') {
+      const canonTmp = path.join(tmpDir, 'canonical.stl');
+      await fsp.writeFile(canonTmp, stlBuffer);
+      canonicalStlPath = await uploadToStorage(canonTmp, 'models');
+      sourceFilePath = part.stl_file_path;
+    }
+    // No display file → preview/owner GLBs source from the print file itself,
+    // same as before this feature existed.
+    const previewSourceKey = !displayStlPathForDb
+      ? (format === 'obj' ? part.stl_file_path : (canonicalStlPath ?? part.stl_file_path))
+      : displayStlPathForDb;
+
+    await db.query(
+      `UPDATE model_parts SET
+         glb_file_path = COALESCE($1, glb_file_path), width = $2, depth = $3, height = $4,
+         file_hash = $5, geometry_fingerprint = $6,
+         source_format = $7, source_file_path = $8,
+         stl_file_path = COALESCE($9, stl_file_path),
+         display_stl_path = $12, is_presupported = $13,
+         processing_status = $11, processing_error = NULL
+       WHERE id = $10`,
+      [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash,
+       fingerprint ? JSON.stringify(fingerprint) : null, format, sourceFilePath, canonicalStlPath, part.id,
+       bakeEnabled ? 'processing' : 'ready', displayStlPathForDb, !!displayStlPathForDb]
+    );
+
+    // Worker mode: enqueue a bake for this part (sourced from the clean
+    // preview file when present, else the original OBJ when we have one,
+    // else the canonical STL). The worker fills in its glb + status.
+    if (bakeEnabled) {
+      await enqueueBakeJob({ modelId, partId: part.id, sourceKey: previewSourceKey, sourceFormat: previewSourceFormat });
+    }
+    // Owner full-fidelity GLB for this part. Each part of a set is placed
+    // individually in the planner, so each needs its own full mesh — one
+    // purchase, N owner GLBs. Off the critical path, same as the primary.
+    await enqueueFullGlbJob({ modelId, partId: part.id, sourceKey: previewSourceKey });
+
+    return { outcome: 'ready' };
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function processModelParts(
   modelId: string,
   uploaderId?: string | null,
@@ -535,252 +750,145 @@ async function processModelParts(
     [modelId]
   );
 
-  // A part that's too heavy to safely preview (over MAX_PREVIEW_PART_TRIANGLES,
-  // caught up-front) or whose isolated parse genuinely OOMs no longer fails the
-  // WHOLE listing — it excludes just its own named component (group_index),
-  // and the rest of the listing keeps going. Built 2026-09-04, at the artist's
-  // request, after the "Japanese houses" incident: losing 9 good models
-  // because the 10th was too dense is worse than shipping 9 and letting the
-  // artist decimate + re-add the 10th as a new part later. Dedup/theft-match
-  // failures are NOT included in this — those still fail the whole listing
-  // (see the geoDup.foreign / duplicate-hash branches below), since a flagged
-  // file deserves the artist's full attention, not a silent partial publish.
-  const excludedGroups = new Map<number, { name: string | null; reason: string }>();
-
-  for (const part of parts) {
-    const already = excludedGroups.get(part.group_index);
-    if (already) {
-      // A sibling file in this same named component already excluded it —
-      // this file is moot. Mark it failed too (so it never sits in
-      // 'processing' forever) and skip it without spending any work.
-      const reason = `Excluded — another file in "${already.name ?? 'this component'}" was excluded: ${already.reason}`;
-      await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
-      await safeDeleteObject(part.stl_file_path);
-      continue;
-    }
-
-    const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-part-'));
-    const stlTmp = path.join(tmpDir, 'part.stl');
-    // A part's format is taken from its raw upload key's extension.
-    const format: MeshFormat = meshFormatFromName(part.stl_file_path) ?? 'stl';
-    try {
-      const rawBuffer = await downloadObject(part.stl_file_path);
-      const stlBuffer = convertToStl(rawBuffer, format);
-      await fsp.writeFile(stlTmp, stlBuffer);
-
-      // Cheap pre-flight triangle check (header only, no parsing) — catches
-      // the exact "Japanese houses" case (an oversized part comfortably under
-      // MAX_INGEST_TRIANGLES that still OOMs the actual parse) before even
-      // attempting the risky work. Does NOT apply to the listing's own
-      // undecimated primary file (that's processUploadedModel, a separate
-      // function) — only extra parts, and only whether THIS part gets full
-      // ingest + a preview; the raw file itself is already safely stored in
-      // R2 regardless (a plain byte upload, no parsing involved).
-      const declared = await declaredTriangleCount(stlTmp);
-      if (declared !== null && declared > MAX_PREVIEW_PART_TRIANGLES) {
-        const reason =
-          `${declared.toLocaleString()} triangles — over the ${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle ` +
-          `limit for a previewable part. Decimate "${part.name}" and upload it again as a new part to add it back.`;
-        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
-        await safeDeleteObject(part.stl_file_path);
-        excludedGroups.set(part.group_index, { name: part.group_name, reason });
-        continue;
-      }
-
-      // Dedup each part against every other model + part (not this model's own).
-      // Isolated child process — see isolatedRunner.ts — because a single
-      // oversized part (this is exactly what happened to a real 10-model
-      // upload on 2026-09-03) can OOM-crash the whole worker mid-parse.
-      const fileHash = computeFileHash(stlBuffer);
-      const fpResult = await isolatedFingerprint(stlTmp);
-      if (isIsolatedFailure(fpResult)) {
-        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [fpResult.reason, part.id]);
-        await safeDeleteObject(part.stl_file_path);
-        excludedGroups.set(part.group_index, { name: part.group_name, reason: fpResult.reason });
-        continue;
-      }
-      const fingerprint = fpResult.fingerprint;
-      const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
-      if (geoDup.foreign) {
-        // Theft match — unlike the two exclusion cases above, this still
-        // fails the WHOLE listing rather than quietly dropping one part.
-        const reason = duplicateMessage('geometry', part.name);
-        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
-        await markModelFailed(modelId, reason);
-        await safeDeleteObject(part.stl_file_path);
-        throw new Error(reason);
-      }
-      // The artist's own model — allowed (that's the point of selling a piece both
-      // ways); recorded so the roll-up notice can mention it.
-      if (geoDup.own && selfMatches && !selfMatches.includes(geoDup.own.name)) {
-        selfMatches.push(geoDup.own.name);
-      }
-
-      // Per-component "clean preview" (migration 054) — display_stl_path still
-      // holds the RAW uploaded key at this point (see the from-upload INSERT).
-      // Mirrors processUploadedModel's handling of the whole-listing case:
-      // dims/dedup/mesh-QA read the print file above; only the preview/owner
-      // GLB source swaps to this file when present.
-      let previewSourceKey: string;
-      let previewSourceFormat: 'stl' | 'obj' = format === 'obj' ? 'obj' : 'stl';
-      let previewSourceLocalPath = stlTmp;
-      let displayStlPathForDb: string | null = null;
-      if (part.is_presupported && part.display_stl_path) {
-        const displayRawKey: string = part.display_stl_path;
-        const displayFormat: MeshFormat = meshFormatFromName(displayRawKey) ?? 'stl';
-        const displayStlTmp = path.join(tmpDir, 'display.stl');
-        const displayRawBuffer = await downloadObject(displayRawKey);
-        const displayStlBuffer = convertToStl(displayRawBuffer, displayFormat);
-        await fsp.writeFile(displayStlTmp, displayStlBuffer);
-
-        // Same pre-flight triangle check as the print file above — this file
-        // exists purely to build a preview, so it's held to the same limit.
-        const displayDeclared = await declaredTriangleCount(displayStlTmp);
-        if (displayDeclared !== null && displayDeclared > MAX_PREVIEW_PART_TRIANGLES) {
-          const reason =
-            `Preview file has ${displayDeclared.toLocaleString()} triangles — over the ` +
-            `${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle limit. Decimate it and upload "${part.name}" again as a new part to add it back.`;
-          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
-          await safeDeleteObject(part.stl_file_path);
-          await safeDeleteObject(displayRawKey);
-          excludedGroups.set(part.group_index, { name: part.group_name, reason });
-          continue;
-        }
-
-        const displayFileHash = computeFileHash(displayStlBuffer);
-        const displayHashDup = await db.query(
-          'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
-          [displayFileHash, modelId],
-        );
-        const foreignDisplayHashDup = displayHashDup.rows.find((r: any) => r.artist_id !== uploaderId);
-        const displayFpResult = await isolatedFingerprint(displayStlTmp);
-        if (isIsolatedFailure(displayFpResult)) {
-          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [displayFpResult.reason, part.id]);
-          await safeDeleteObject(part.stl_file_path);
-          await safeDeleteObject(displayRawKey);
-          excludedGroups.set(part.group_index, { name: part.group_name, reason: displayFpResult.reason });
-          continue;
-        }
-        const displayFingerprint = displayFpResult.fingerprint;
-        const displayGeoDup = foreignDisplayHashDup
-          ? null
-          : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
-        if (foreignDisplayHashDup || displayGeoDup?.foreign) {
-          const reason = duplicateMessage(foreignDisplayHashDup ? 'file' : 'geometry', `${part.name} preview`);
-          await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
-          await markModelFailed(modelId, reason);
-          await safeDeleteObject(part.stl_file_path);
-          await safeDeleteObject(displayRawKey);
-          throw new Error(reason);
-        }
-        const displaySelfName = displayHashDup.rows[0]?.name ?? displayGeoDup?.own?.name;
-        if (displaySelfName && selfMatches && !selfMatches.includes(displaySelfName)) {
-          selfMatches.push(displaySelfName);
-        }
-
-        displayStlPathForDb = displayRawKey;
-        if (displayFormat !== 'stl') {
-          const displayCanonTmp = path.join(tmpDir, 'display-canonical.stl');
-          await fsp.writeFile(displayCanonTmp, displayStlBuffer);
-          displayStlPathForDb = await uploadToStorage(displayCanonTmp, 'models');
-        }
-
-        previewSourceLocalPath = displayStlTmp;
-        previewSourceFormat = 'stl';
-      }
-
-      const partAnalysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: false });
-      if (isIsolatedFailure(partAnalysis)) {
-        await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [partAnalysis.reason, part.id]);
-        await safeDeleteObject(part.stl_file_path);
-        excludedGroups.set(part.group_index, { name: part.group_name, reason: partAnalysis.reason });
-        continue;
-      }
-      const stlData = partAnalysis.stlData;
-      // Preview GLB: baked out-of-process (worker) or the pure-Node fallback.
-      const bakeEnabled = isBakeWorkerEnabled();
-      let glbStoragePath: string | null = null;
-      if (!bakeEnabled) {
-        const glbPath = await generateGLB(previewSourceLocalPath);
-        glbStoragePath = await uploadToStorage(glbPath, 'previews');
-      }
-
-      // Non-STL part: store the converted STL and keep the original as the source.
-      let canonicalStlPath: string | null = null;
-      let sourceFilePath: string | null = null;
-      if (format !== 'stl') {
-        const canonTmp = path.join(tmpDir, 'canonical.stl');
-        await fsp.writeFile(canonTmp, stlBuffer);
-        canonicalStlPath = await uploadToStorage(canonTmp, 'models');
-        sourceFilePath = part.stl_file_path;
-      }
-      // No display file → preview/owner GLBs source from the print file itself,
-      // same as before this feature existed.
-      if (!displayStlPathForDb) {
-        previewSourceKey = format === 'obj' ? part.stl_file_path : (canonicalStlPath ?? part.stl_file_path);
-      } else {
-        previewSourceKey = displayStlPathForDb;
-      }
-
-      await db.query(
-        `UPDATE model_parts SET
-           glb_file_path = COALESCE($1, glb_file_path), width = $2, depth = $3, height = $4,
-           file_hash = $5, geometry_fingerprint = $6,
-           source_format = $7, source_file_path = $8,
-           stl_file_path = COALESCE($9, stl_file_path),
-           display_stl_path = $12,
-           processing_status = $11, processing_error = NULL
-         WHERE id = $10`,
-        [glbStoragePath, stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z, fileHash, JSON.stringify(fingerprint), format, sourceFilePath, canonicalStlPath, part.id, bakeEnabled ? 'processing' : 'ready', displayStlPathForDb]
-      );
-
-      // Worker mode: enqueue a bake for this part (sourced from the clean
-      // preview file when present, else the original OBJ when we have one,
-      // else the canonical STL). The worker fills in its glb + status.
-      if (bakeEnabled) {
-        await enqueueBakeJob({ modelId, partId: part.id, sourceKey: previewSourceKey, sourceFormat: previewSourceFormat });
-      }
-
-      // Owner full-fidelity GLB for this part. Each part of a set is placed
-      // individually in the planner, so each needs its own full mesh — one
-      // purchase, N owner GLBs. Off the critical path, same as the primary.
-      await enqueueFullGlbJob({ modelId, partId: part.id, sourceKey: previewSourceKey });
-    } finally {
-      await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  const needsPreview: Array<{ name: string; groupName: string | null; reason: string }> = [];
+  for (const part of parts as PartRow[]) {
+    const result = await processOnePart(modelId, part, uploaderId, selfMatches);
+    if (result.outcome === 'no_preview') {
+      needsPreview.push({ name: part.name, groupName: part.group_name, reason: result.reason });
     }
   }
 
-  if (excludedGroups.size > 0) {
-    // Reflect the ACTUAL sellable file count (part_count drives the "SET · N
-    // parts" / "GROUP · N models" UI and the ZIP download's part list — see
-    // routes/models.ts). Every part in an excluded group is 'failed' at this
-    // point and nothing else in a normal run sets that status, so counting
-    // them directly is accurate (a dedup/theft match would have thrown out of
-    // this function already, never reaching here).
-    const { rows: failedCountRows } = await db.query(
-      `SELECT COUNT(*) AS n FROM model_parts WHERE model_id = $1 AND processing_status = 'failed'`,
-      [modelId],
-    );
-    const excludedPartCount = Number(failedCountRows[0]?.n ?? 0);
-    await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [modelId, excludedPartCount]);
+  if (needsPreview.length > 0 && uploaderId) {
+    const plural = needsPreview.length > 1;
+    const names = needsPreview.map((p) => `"${p.name}"`).join(', ');
+    await createNotification({
+      userId: uploaderId,
+      type: 'model.part_needs_preview',
+      title: `Published — ${needsPreview.length} model${plural ? 's need' : ' needs'} a preview`,
+      body:
+        `${names} ${plural ? 'are' : 'is'} on sale as part of this listing, but too dense to safely preview on the planner. ` +
+        `Attach a decimated version from My Models to add ${plural ? 'their' : 'its'} planner preview.`,
+      link: '/artist/models',
+      modelId,
+    });
+  }
+}
 
-    const names = [...excludedGroups.values()].map((g) => `"${g.name ?? 'an unnamed model'}"`);
-    const plural = excludedGroups.size > 1;
-    if (uploaderId) {
+/**
+ * Re-run ingest for ONE existing part after the artist attaches a decimated
+ * preview file to a 'no_preview' part (routes/models.ts's attach-preview
+ * endpoint already set is_presupported=true/display_stl_path/processing
+ * before enqueueing this). Runs in the worker via a dedicated job type
+ * (queue.ts) — never inline in the API server, same reasoning as every other
+ * ingest entry point in this file.
+ */
+export async function processPartPreviewAttach(modelId: string, partId: string): Promise<void> {
+  const { rows } = await db.query(
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+       FROM model_parts WHERE id = $1 AND model_id = $2`,
+    [partId, modelId],
+  );
+  const part = rows[0] as PartRow | undefined;
+  if (!part) {
+    logger.error('processPartPreviewAttach: part not found', { modelId, partId });
+    return;
+  }
+  const uploaderId: string | null =
+    (await db.query('SELECT artist_id FROM models WHERE id = $1', [modelId])).rows[0]?.artist_id ?? null;
+  try {
+    const result = await processOnePart(modelId, part, uploaderId, []);
+    if (result.outcome === 'no_preview' && uploaderId) {
       await createNotification({
         userId: uploaderId,
-        type: 'model.part_excluded',
-        title: `Published with ${excludedGroups.size} model${plural ? 's' : ''} excluded`,
-        body:
-          `${names.join(', ')} ${plural ? 'were' : 'was'} excluded from this listing — ${plural ? 'their files were' : 'its file was'} ` +
-          `too large to safely preview. The rest of the listing published normally. Decimate ${plural ? 'them' : 'it'} and upload ` +
-          `${plural ? 'them' : 'it'} again as new part${plural ? 's' : ''} to add ${plural ? 'them' : 'it'} back.`,
+        type: 'model.part_needs_preview',
+        title: `Preview still not possible: ${part.name}`,
+        body: result.reason,
+        link: '/artist/models',
+        modelId,
+      });
+    } else if (result.outcome === 'ready' && uploaderId) {
+      await createNotification({
+        userId: uploaderId,
+        type: 'model.part_preview_attached',
+        title: `Preview added: ${part.name}`,
+        body: `"${part.name}" now has a planner preview.`,
         link: '/artist/models',
         modelId,
       });
     }
-    logger.info('Excluded oversized component(s) from grouped listing — rest published', {
-      modelId, excludedGroups: [...excludedGroups.keys()], excludedPartCount,
+  } catch (err) {
+    // A dedup/theft match on the newly-attached preview file throws (see
+    // processOnePart) — it already marked the part failed and notified via
+    // markModelFailed; nothing more to do here.
+    logger.warn('processPartPreviewAttach: part processing threw', { modelId, partId, error: err });
+  }
+}
+
+/**
+ * Process a brand-new named component (a fresh set of model_parts rows) an
+ * artist added to an already-published listing via routes/models.ts's
+ * POST /:id/parts. A dedup/theft match on any of its files fails just that
+ * component (deletes its rows + files) rather than the rest of the listing —
+ * unlike the initial-upload path, there's no "whole listing" to protect here;
+ * everything else this model sells is untouched either way.
+ */
+export async function processNewComponent(modelId: string, partIds: string[]): Promise<void> {
+  const { rows } = await db.query(
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+       FROM model_parts WHERE id = ANY($1) AND model_id = $2`,
+    [partIds, modelId],
+  );
+  const uploaderId: string | null =
+    (await db.query('SELECT artist_id FROM models WHERE id = $1', [modelId])).rows[0]?.artist_id ?? null;
+  const selfMatches: string[] = [];
+  const needsPreview: Array<{ name: string; reason: string }> = [];
+  const groupName = rows[0]?.group_name ?? null;
+
+  try {
+    for (const part of rows as PartRow[]) {
+      const result = await processOnePart(modelId, part, uploaderId, selfMatches);
+      if (result.outcome === 'no_preview') needsPreview.push({ name: part.name, reason: result.reason });
+    }
+  } catch (err) {
+    // A dedup/theft match threw (processOnePart already marked that one part
+    // failed + notified) — clean up the REST of this component's rows/files
+    // too, since a half-added named model with some files missing is worse
+    // than none.
+    const remainingIds = partIds;
+    const { rows: remaining } = await db.query(
+      `SELECT id, stl_file_path, display_stl_path FROM model_parts WHERE id = ANY($1) AND model_id = $2 AND processing_status <> 'failed'`,
+      [remainingIds, modelId],
+    );
+    for (const p of remaining) {
+      await safeDeleteObject(p.stl_file_path);
+      if (p.display_stl_path) await safeDeleteObject(p.display_stl_path);
+    }
+    await db.query(`DELETE FROM model_parts WHERE id = ANY($1) AND model_id = $2`, [partIds, modelId]);
+    await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [modelId, partIds.length]);
+    logger.warn('processNewComponent: rejected, component removed', { modelId, partIds, error: err });
+    return;
+  }
+
+  if (needsPreview.length > 0 && uploaderId) {
+    const plural = needsPreview.length > 1;
+    await createNotification({
+      userId: uploaderId,
+      type: 'model.part_needs_preview',
+      title: `Added "${groupName ?? 'new model'}" — needs a preview`,
+      body:
+        `${needsPreview.map((p) => `"${p.name}"`).join(', ')} ${plural ? 'are' : 'is'} too dense to safely preview on the planner. ` +
+        `Attach a decimated version from My Models to add ${plural ? 'their' : 'its'} planner preview.`,
+      link: '/artist/models',
+      modelId,
+    });
+  } else if (uploaderId) {
+    await createNotification({
+      userId: uploaderId,
+      type: 'model.part_preview_attached',
+      title: `Added "${groupName ?? 'new model'}" to your listing`,
+      body: `The new model is live and placeable in the planner.`,
+      link: '/artist/models',
+      modelId,
     });
   }
 }

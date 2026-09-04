@@ -299,6 +299,9 @@ CREATE TABLE model_parts (
     -- that component still renders from its own print file.
     is_presupported BOOLEAN NOT NULL DEFAULT false,
     display_stl_path VARCHAR(500),
+    -- Per-component planner thumbnail (migration 058). Only meaningful on a
+    -- component's first/primary part — see that migration's comment.
+    thumbnail_path VARCHAR(500),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

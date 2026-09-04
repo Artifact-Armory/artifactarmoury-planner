@@ -39,7 +39,7 @@ import { notifyFollowersOfRelease, notifyAdminsOfMeshOverride } from '../service
 import { maybeStartIntroOffer } from '../services/introCommission';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import { findGeometryDuplicate, safeDeleteObject } from '../services/modelIngest/process';
-import { dispatchIngestUpload, dispatchIngestVersionUpdate } from '../services/modelIngest/queue';
+import { dispatchIngestUpload, dispatchIngestVersionUpdate, dispatchPartPreviewAttach, dispatchNewComponentIngest } from '../services/modelIngest/queue';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
 
@@ -397,7 +397,7 @@ router.post('/from-upload',
     // files together and separate from the Tavern's two (migration 038).
     const extraParts: Array<{
       rawKey: string; filename?: string; name?: string; groupIndex: number; groupName: string | null;
-      isPresupported: boolean; displayRawKey: string | null;
+      isPresupported: boolean; displayRawKey: string | null; thumbnailKey: string | null;
     }> = [];
     if (parts != null) {
       if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
@@ -455,9 +455,19 @@ router.post('/from-upload',
           totalRawBytes += displayBytes;
           partDisplayRawKey = p.displayRawKey;
         }
+        // Per-component planner thumbnail (migration 058) — only meaningful
+        // when this part is a component's first/primary file, same frontend
+        // convention as isPresupported/displayRawKey above.
+        let partThumbnailKey: string | null = null;
+        if (p.thumbnailKey != null) {
+          if (typeof p.thumbnailKey !== 'string' || !p.thumbnailKey.startsWith('thumbnails/')) {
+            throw new ValidationError('A part thumbnailKey must be an uploaded thumbnails/ object');
+          }
+          partThumbnailKey = p.thumbnailKey;
+        }
         extraParts.push({
           rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName,
-          isPresupported: partPresupported, displayRawKey: partDisplayRawKey,
+          isPresupported: partPresupported, displayRawKey: partDisplayRawKey, thumbnailKey: partThumbnailKey,
         });
       }
     }
@@ -538,12 +548,12 @@ router.post('/from-upload',
       const nth = (seenInGroup.get(p.groupIndex) ?? (p.groupIndex === 0 ? 1 : 0)) + 1;
       seenInGroup.set(p.groupIndex, nth);
       await db.query(
-        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, is_presupported, display_stl_path, processing_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'processing')`,
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, is_presupported, display_stl_path, thumbnail_path, processing_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'processing')`,
         // display_stl_path starts as the raw uploaded key — same "starts raw,
         // finalized in place" convention stl_file_path uses — and is turned
         // into a canonical path by processModelParts, same as the print file.
-        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey]
+        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey, p.thumbnailKey]
       );
     }
 
@@ -642,6 +652,200 @@ router.post('/:id/new-version',
 
     logger.info('New model version accepted for processing', { userId: (req as any).userId, modelId: id });
     res.status(202).json({ message: 'New version received — processing', modelId: id, processingStatus: 'processing' });
+  })
+);
+
+// ============================================================================
+// PART MANAGEMENT (2026-09-04) — attach a decimated preview to a
+// 'no_preview' part, add a new named component, or remove one. See
+// modelIngest/process.ts's processOnePart for the ingest side of this.
+// ============================================================================
+
+// Attach (or replace) a part's decimated "preview only" companion file. The
+// part's own print STL — what buyers actually download — is never touched;
+// this only ever changes what the planner preview is built from.
+router.post('/:id/parts/:partId/preview',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+    const { id, partId } = req.params;
+    const { rawKey, filename } = req.body ?? {};
+
+    if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
+      throw new ValidationError('rawKey (an uploaded raw/ object) is required');
+    }
+    if (!meshFormatFromName(filename || rawKey)) {
+      throw new ValidationError('The preview file must be an STL, OBJ or 3MF file');
+    }
+
+    const rawBytes = await objectSize(rawKey);
+    if (rawBytes == null) {
+      throw new ValidationError('Uploaded file not found in storage — retry the upload');
+    }
+    if (rawBytes > MAX_MODEL_FILE_BYTES) {
+      await safeDeleteObject(rawKey);
+      throw new ValidationError(`Preview file is too large (${(rawBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`);
+    }
+
+    const part = (await db.query(
+      `SELECT id, display_stl_path FROM model_parts WHERE id = $1 AND model_id = $2`,
+      [partId, id],
+    )).rows[0];
+    if (!part) throw new NotFoundError('Part');
+
+    // Replacing an existing companion — the old one is now orphaned.
+    if (part.display_stl_path) {
+      await safeDeleteObject(part.display_stl_path);
+    }
+
+    await db.query(
+      `UPDATE model_parts SET is_presupported = true, display_stl_path = $1,
+         processing_status = 'processing', processing_error = NULL
+       WHERE id = $2`,
+      [rawKey, partId],
+    );
+    await dispatchPartPreviewAttach({ modelId: id, partId, rawBytes });
+
+    logger.info('Preview attach accepted for processing', { userId: (req as any).userId, modelId: id, partId });
+    res.status(202).json({ message: 'Preview file received — processing', partId, processingStatus: 'processing' });
+  })
+);
+
+// Add a new named component to an existing listing — same shape as a
+// component in POST /from-upload's `parts`, just appended after the fact.
+router.post('/:id/parts',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+    const { id } = req.params;
+    const { groupName, parts } = req.body ?? {};
+    if (!Array.isArray(parts) || parts.length === 0) {
+      throw new ValidationError('At least one file is required');
+    }
+    if (parts.length > MAX_EXTRA_PARTS) {
+      throw new ValidationError(`A component can have at most ${MAX_EXTRA_PARTS} files`);
+    }
+
+    const { rows: existing } = await db.query(
+      `SELECT COALESCE(MAX(group_index), 0) AS max_group, COALESCE(MAX(display_order), 0) AS max_order
+         FROM model_parts WHERE model_id = $1`,
+      [id],
+    );
+    const newGroupIndex = Number(existing[0]?.max_group ?? 0) + 1;
+    let displayOrder = Number(existing[0]?.max_order ?? 0);
+    const cleanGroupName = typeof groupName === 'string' && groupName.trim() ? groupName.trim().slice(0, 255) : null;
+
+    const insertedIds: string[] = [];
+    for (const p of parts) {
+      if (!p?.rawKey || typeof p.rawKey !== 'string' || !p.rawKey.startsWith('raw/')) {
+        throw new ValidationError('Each file needs an uploaded raw/ object');
+      }
+      if (!meshFormatFromName(p.filename || p.rawKey)) {
+        throw new ValidationError('Each file must be an STL, OBJ or 3MF file');
+      }
+      const partBytes = await objectSize(p.rawKey);
+      if (partBytes == null) {
+        throw new ValidationError('A file was not found in storage — retry the upload');
+      }
+      if (partBytes > MAX_MODEL_FILE_BYTES) {
+        await safeDeleteObject(p.rawKey);
+        throw new ValidationError(`A file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`);
+      }
+      displayOrder += 1;
+      const row = (await db.query(
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, processing_status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'processing') RETURNING id`,
+        [id, p.name || `Part ${insertedIds.length + 1}`, p.rawKey, displayOrder, newGroupIndex, cleanGroupName],
+      )).rows[0];
+      insertedIds.push(row.id);
+    }
+
+    await db.query(`UPDATE models SET part_count = part_count + $2 WHERE id = $1`, [id, insertedIds.length]);
+    await dispatchNewComponentIngest({ modelId: id, partIds: insertedIds });
+
+    logger.info('New component accepted for processing', { userId: (req as any).userId, modelId: id, groupIndex: newGroupIndex, partIds: insertedIds });
+    res.status(202).json({ message: 'New model received — processing', groupIndex: newGroupIndex, partIds: insertedIds });
+  })
+);
+
+// Set/replace a component's planner thumbnail — shown in the planner palette
+// so a buyer can tell this named component apart from the rest of the set.
+// Same presign-then-send-the-key convention as the listing's own thumbnail
+// (PATCH /:id) — only meaningful set on a component's first/primary part
+// (migration 058), so this always writes to that one row regardless of
+// which partId in the component is given.
+router.patch('/:id/components/:groupIndex/thumbnail',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id, groupIndex } = req.params;
+    const gi = Number(groupIndex);
+    const { thumbnailKey } = req.body ?? {};
+    if (thumbnailKey !== null && (typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/'))) {
+      throw new ValidationError('thumbnailKey must be an uploaded thumbnails/ object');
+    }
+    if (gi === 0) {
+      // The listing's primary component has no model_parts row of its own —
+      // its thumbnail IS the listing's main thumbnail.
+      await db.query(`UPDATE models SET thumbnail_path = $1 WHERE id = $2`, [thumbnailKey || null, id]);
+      res.json({ message: 'Thumbnail updated', groupIndex: 0 });
+      return;
+    }
+    const first = (await db.query(
+      `SELECT id, thumbnail_path FROM model_parts WHERE model_id = $1 AND group_index = $2 ORDER BY display_order ASC LIMIT 1`,
+      [id, gi],
+    )).rows[0];
+    if (!first) throw new NotFoundError('Component');
+    await db.query(`UPDATE model_parts SET thumbnail_path = $1 WHERE id = $2`, [thumbnailKey || null, first.id]);
+    res.json({ message: 'Thumbnail updated', groupIndex: gi, partId: first.id });
+  })
+);
+
+// Remove one named component (every part sharing its group_index) from an
+// existing listing. group_index 0 is the listing's own primary component —
+// not removable here (that's the whole listing; use DELETE /:id instead).
+router.delete('/:id/components/:groupIndex',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id, groupIndex } = req.params;
+    const gi = Number(groupIndex);
+    if (!Number.isInteger(gi) || gi <= 0) {
+      throw new ValidationError('group_index 0 (the listing\'s own primary model) can\'t be removed here');
+    }
+    const { rows: toDelete } = await db.query(
+      `SELECT id, stl_file_path, display_stl_path FROM model_parts WHERE model_id = $1 AND group_index = $2`,
+      [id, gi],
+    );
+    if (toDelete.length === 0) throw new NotFoundError('Component');
+
+    for (const p of toDelete) {
+      await safeDeleteObject(p.stl_file_path);
+      if (p.display_stl_path) await safeDeleteObject(p.display_stl_path);
+    }
+    await db.query(`DELETE FROM model_parts WHERE model_id = $1 AND group_index = $2`, [id, gi]);
+    await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [id, toDelete.length]);
+
+    logger.info('Component removed from listing', { userId: (req as any).userId, modelId: id, groupIndex: gi, partsRemoved: toDelete.length });
+    res.json({ message: 'Component removed', groupIndex: gi, partsRemoved: toDelete.length });
   })
 );
 
@@ -890,7 +1094,7 @@ router.get('/sets',
 
     const sets = await Promise.all(models.map(async (m: any) => {
       const extra = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name
+        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name, thumbnail_path
          FROM model_parts
          WHERE model_id = $1 AND processing_status = 'ready'
          ORDER BY group_index ASC, display_order ASC`,
@@ -899,17 +1103,21 @@ router.get('/sets',
       // NB: never expose the raw glb_file_path (public CDN key). The planner fetches
       // each part's preview through the signed endpoint, keyed by id (primary part's
       // id IS the model id; extras are model_parts ids). `is_primary` tells the
-      // frontend which signed route to use.
+      // frontend which signed route to use. thumbnail_path (migration 058) is a
+      // public R2 key already (same convention as the listing's own thumbnail) —
+      // safe to expose directly, unlike glb_file_path.
       const parts = [
         {
           id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
           width: m.width, depth: m.depth, height: m.height,
           group_index: 0, group_name: m.primary_group_name ?? null,
+          thumbnail_path: m.thumbnail_path ?? null,
         },
         ...extra.map((p: any) => ({
           id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path,
           width: p.width, depth: p.depth, height: p.height,
           group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
+          thumbnail_path: p.thumbnail_path ?? null,
         })),
       ].filter((p) => p.has_glb);
       return {
@@ -1068,8 +1276,8 @@ router.get('/:id',
     let parts: any[] = [];
     if ((model.part_count ?? 1) > 1) {
       parts = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height, processing_status, display_order,
-                group_index, group_name
+        `SELECT id, name, glb_file_path, width, depth, height, processing_status, processing_error, display_order,
+                group_index, group_name, thumbnail_path
          FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;

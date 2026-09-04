@@ -289,8 +289,12 @@ async function rollUpModelStatus(modelId: string): Promise<void> {
   const succeeded = Number(rows[0]?.succeeded ?? 0)
   if (open > 0) return // still baking
 
+  // 'no_preview' (2026-09-04) is a SETTLED state, same as 'ready'/'failed' —
+  // a part that's too heavy to preview never gets a bake job enqueued for it
+  // at all, so treating it as "pending" here would block this model from
+  // ever reaching 'ready'.
   const { rows: partRows } = await db.query(
-    `SELECT COUNT(*) FILTER (WHERE processing_status NOT IN ('ready', 'failed')) AS pending
+    `SELECT COUNT(*) FILTER (WHERE processing_status NOT IN ('ready', 'failed', 'no_preview')) AS pending
        FROM model_parts WHERE model_id = $1`,
     [modelId],
   )
