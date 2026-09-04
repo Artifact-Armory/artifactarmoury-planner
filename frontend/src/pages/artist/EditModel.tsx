@@ -218,7 +218,10 @@ const EditModel: React.FC = () => {
     groups.set(0, {
       index: 0,
       name: model?.primaryGroupName ?? null,
-      thumbnailUrl: model?.thumbnailUrl,
+      // Model 1's OWN thumbnail (migration 059) — falls back to the listing's
+      // main store image only if it has none of its own; the store image is
+      // often a group shot of every model together, not model 1 specifically.
+      thumbnailUrl: model?.primaryThumbnailUrl ?? model?.thumbnailUrl,
       rows: [{ id: 'primary', name: 'Part 1', processingStatus: model?.processingStatus }],
     })
     for (const p of model?.parts ?? []) {

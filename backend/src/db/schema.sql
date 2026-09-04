@@ -128,6 +128,11 @@ CREATE TABLE models (
     is_presupported BOOLEAN NOT NULL DEFAULT false,
     display_stl_path VARCHAR(500),
     thumbnail_path VARCHAR(500),
+    -- Planner thumbnail for THIS model specifically (migration 059) — separate
+    -- from thumbnail_path above, which is the store page's main image and is
+    -- often a group shot of every model in the listing together. Falls back
+    -- to thumbnail_path when unset.
+    primary_thumbnail_path VARCHAR(500),
     -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
     -- is the artist's original file (delivered to the buyer alongside the STL).
     source_format VARCHAR(10) NOT NULL DEFAULT 'stl',

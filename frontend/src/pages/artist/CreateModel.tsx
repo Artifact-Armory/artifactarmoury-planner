@@ -287,6 +287,16 @@ const CreateModel: React.FC = () => {
       //     to the whole listing when it isn't grouped into several models.
       let displayRawKey: string | undefined
       const primaryComp = components[0]
+
+      // 1c. Component 0's own planner thumbnail — separate from the listing's
+      //     required store Thumbnail (uploaded in step 3 below), which is
+      //     often a group shot of every model together.
+      let primaryThumbnailKey: string | undefined
+      if (primaryComp.thumbnailFile) {
+        startFile(primaryComp.thumbnailFile.name)
+        primaryThumbnailKey = (await uploadsApi.uploadDirect(primaryComp.thumbnailFile, 'thumbnails', bump)).key
+        uploadsDone++
+      }
       if (primaryComp.isPresupported && primaryComp.previewFile) {
         startFile(primaryComp.previewFile.name)
         displayRawKey = (await uploadsApi.uploadDirect(primaryComp.previewFile, 'raw', bump)).key
@@ -364,6 +374,7 @@ const CreateModel: React.FC = () => {
         license,
         printerType: printerType || undefined,
         thumbnailKey,
+        primaryThumbnailKey,
         galleryKeys: galleryKeys.length ? galleryKeys : undefined,
         showInPlanner,
         isPresupported: primaryComp.isPresupported,
@@ -722,14 +733,15 @@ const CreateModel: React.FC = () => {
                 {/* Optional per-model planner thumbnail — component 0 already has the
                     listing's own required Thumbnail field further down, which doubles
                     as its planner thumbnail, so this only applies to models after it. */}
-                {ci > 0 && (
+                {components.length > 1 && (
                   <div className="mt-3 border-t border-border/70 pt-3">
                     <label className="block text-sm font-medium mb-1">
                       Thumbnail for {componentLabel(ci)} <span className="text-xs font-normal text-muted-foreground">(optional)</span>
                     </label>
                     <p className="text-xs text-muted-foreground mb-2">
-                      Shown in the planner palette so buyers can tell this model apart from the
-                      rest of the set. Without one it just shows a generic icon there.
+                      {ci === 0
+                        ? "Shown in the planner palette when a buyer places just this model. Your listing's main Thumbnail below is often a group shot of everything together, which isn't the same thing — add one here so this model shows correctly on its own. Without one it falls back to the main Thumbnail."
+                        : "Shown in the planner palette so buyers can tell this model apart from the rest of the set. Without one it just shows a generic icon there."}
                     </p>
                     <div className="flex items-center gap-3">
                       {comp.thumbnailFile ? (

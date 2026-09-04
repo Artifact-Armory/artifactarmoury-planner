@@ -292,7 +292,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, primaryThumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -339,6 +339,17 @@ router.post('/from-upload',
     // so we never create a draft that can't be listed.
     if (!thumbnailKey || typeof thumbnailKey !== 'string' || !thumbnailKey.startsWith('thumbnails/')) {
       throw new ValidationError('A thumbnail image is required');
+    }
+    // Optional SEPARATE planner thumbnail for the listing's own primary model
+    // (migration 059) — the store thumbnail above is often a group shot of
+    // every model together, which isn't what should show when model 1 alone
+    // is placed in the planner.
+    let cleanPrimaryThumbnailKey: string | null = null;
+    if (primaryThumbnailKey != null) {
+      if (typeof primaryThumbnailKey !== 'string' || !primaryThumbnailKey.startsWith('thumbnails/')) {
+        throw new ValidationError('primaryThumbnailKey must be an uploaded thumbnails/ object');
+      }
+      cleanPrimaryThumbnailKey = primaryThumbnailKey;
     }
     // Optional extra store-page photos, uploaded the same presign-then-send-the-key
     // way as the thumbnail — same convention/cap as the standalone ADD GALLERY
@@ -521,10 +532,10 @@ router.post('/from-upload',
     const result = await db.query(
       `INSERT INTO models (
         artist_id, name, description, category, tags,
-        stl_file_path, thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, status, processing_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'stl', $9, $10, $11, $12, $13, $14, 'draft', 'processing')
+        stl_file_path, thumbnail_path, primary_thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, status, processing_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'stl', $10, $11, $12, $13, $14, $15, 'draft', 'processing')
       RETURNING id, name, created_at`,
-      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported]
+      [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, cleanPrimaryThumbnailKey, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported]
     );
     const model = result.rows[0];
     // Seed price history (backs the anti-inflation guard on sales).
@@ -801,8 +812,10 @@ router.patch('/:id/components/:groupIndex/thumbnail',
     }
     if (gi === 0) {
       // The listing's primary component has no model_parts row of its own —
-      // its thumbnail IS the listing's main thumbnail.
-      await db.query(`UPDATE models SET thumbnail_path = $1 WHERE id = $2`, [thumbnailKey || null, id]);
+      // its OWN planner thumbnail (migration 059), separate from the
+      // listing's main store thumbnail (which is often a group shot of every
+      // model together, not a picture of model 1 specifically).
+      await db.query(`UPDATE models SET primary_thumbnail_path = $1 WHERE id = $2`, [thumbnailKey || null, id]);
       res.json({ message: 'Thumbnail updated', groupIndex: 0 });
       return;
     }
@@ -1083,7 +1096,7 @@ router.get('/sets',
   optionalAuth,
   asyncHandler(async (_req, res) => {
     const models = (await db.query(
-      `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.artist_id,
+      `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.primary_thumbnail_path, m.artist_id,
               m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg,
               m.primary_group_name
        FROM models m
@@ -1111,7 +1124,9 @@ router.get('/sets',
           id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
           width: m.width, depth: m.depth, height: m.height,
           group_index: 0, group_name: m.primary_group_name ?? null,
-          thumbnail_path: m.thumbnail_path ?? null,
+          // Model 1's OWN thumbnail (migration 059) — falls back to the
+          // listing's main store image only if it has none of its own.
+          thumbnail_path: m.primary_thumbnail_path ?? m.thumbnail_path ?? null,
         },
         ...extra.map((p: any) => ({
           id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path,

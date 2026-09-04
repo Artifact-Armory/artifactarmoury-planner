@@ -116,6 +116,8 @@ export interface TerrainModel {
   filesUpdatedAt?: string | null
   versions?: Array<{ version: number; notes?: string | null; createdAt: string }>
   thumbnailUrl?: string
+  /** Planner thumbnail for this listing's own primary model, separate from thumbnailUrl (the store page's main image, often a group shot of every model together). */
+  primaryThumbnailUrl?: string
   glbUrl?: string
   previewImages?: string[]
   artistName: string

@@ -40,6 +40,13 @@ export const modelsApi = {
     printerType?: 'fdm' | 'resin' | 'both'
     thumbnailKey?: string
     /**
+     * Separate planner thumbnail for the listing's own primary model (migration
+     * 059) — thumbnailKey above is the store page's main image, often a group
+     * shot of every model together; this is what shows when model 1 alone is
+     * placed in the planner.
+     */
+    primaryThumbnailKey?: string
+    /**
      * Name of the component the primary file belongs to, when the listing groups
      * its files into several named models (e.g. "Small Village" → "Village Tower").
      * Omit for an ungrouped model/set.

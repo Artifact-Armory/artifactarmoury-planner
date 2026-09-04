@@ -86,6 +86,10 @@ export const mapModelRecord = (model: any): TerrainModel => ({
       }))
     : undefined,
   thumbnailUrl: model.thumbnail_url || model.thumbnailUrl || assetUrl(model.thumbnail_path),
+  // Separate planner thumbnail for THIS listing's own primary model (migration
+  // 059) — the store thumbnail above is often a group shot of every model in
+  // the listing together, not a picture of the primary model specifically.
+  primaryThumbnailUrl: assetUrl(model.primary_thumbnail_path ?? model.primaryThumbnailPath ?? undefined),
   // GLB is fetched via the signed preview endpoint (raw key is never exposed). We
   // only get a `has_glb` boolean now; older direct fields are a dev/legacy fallback.
   glbUrl:
