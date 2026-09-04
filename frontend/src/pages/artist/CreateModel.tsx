@@ -180,8 +180,14 @@ const CreateModel: React.FC = () => {
   const addComponent = () => setComponents((list) => [...list, newComponent()])
   const removeComponent = (i: number) => setComponents((list) => list.filter((_, idx) => idx !== i))
 
+  // A model's thumbnail doubles as a gallery photo (see handleSubmit's
+  // derivedGalleryKeys) rather than making the artist upload the same
+  // picture twice — so it also counts against the shared gallery cap here.
+  const componentThumbCount = components.filter((c) => c.thumbnailFile).length
+  const gallerySlotsAvailable = Math.max(0, MAX_GALLERY_IMAGES - componentThumbCount)
+
   const addGalleryFiles = (files: File[]) =>
-    setGalleryFiles((list) => [...list, ...files].slice(0, MAX_GALLERY_IMAGES))
+    setGalleryFiles((list) => [...list, ...files].slice(0, gallerySlotsAvailable))
   const removeGalleryFile = (i: number) =>
     setGalleryFiles((list) => list.filter((_, idx) => idx !== i))
 
@@ -267,10 +273,13 @@ const CreateModel: React.FC = () => {
 
       // Every file (all components + the thumbnail + gallery photos + every
       // component's optional preview model) contributes to one bar, so a 12-file
-      // village doesn't look stuck at 100% after the first upload.
+      // village doesn't look stuck at 100% after the first upload. A model
+      // thumbnail also fills a gallery-photo slot (see derivedGalleryKeys
+      // below) rather than being uploaded twice, so only whatever's left of
+      // the gallery cap after those actually gets uploaded here.
       const previewFileCount = components.filter((c) => c.isPresupported && c.previewFile).length
-      const componentThumbCount = components.filter((c) => c.thumbnailFile).length
-      const totalUploads = allFiles.length + 1 + galleryFiles.length + previewFileCount + componentThumbCount
+      const galleryUploadCount = Math.min(galleryFiles.length, gallerySlotsAvailable)
+      const totalUploads = allFiles.length + 1 + galleryUploadCount + previewFileCount + componentThumbCount
       let uploadsDone = 0
       const bump = (pct: number) =>
         setProgress(Math.round(((uploadsDone + pct / 100) / totalUploads) * 100))
@@ -290,12 +299,18 @@ const CreateModel: React.FC = () => {
 
       // 1c. Component 0's own planner thumbnail — separate from the listing's
       //     required store Thumbnail (uploaded in step 3 below), which is
-      //     often a group shot of every model together.
+      //     often a group shot of every model together. Also doubles as a
+      //     store-page gallery photo (see derivedGalleryKeys below) — a model
+      //     thumbnail is usually the exact photo an artist would've picked
+      //     for the gallery too, so reusing it here means never uploading
+      //     the same picture twice.
+      const derivedGalleryKeys: string[] = []
       let primaryThumbnailKey: string | undefined
       if (primaryComp.thumbnailFile) {
         startFile(primaryComp.thumbnailFile.name)
         primaryThumbnailKey = (await uploadsApi.uploadDirect(primaryComp.thumbnailFile, 'thumbnails', bump)).key
         uploadsDone++
+        derivedGalleryKeys.push(primaryThumbnailKey)
       }
       if (primaryComp.isPresupported && primaryComp.previewFile) {
         startFile(primaryComp.previewFile.name)
@@ -333,6 +348,7 @@ const CreateModel: React.FC = () => {
             startFile(comp.thumbnailFile.name)
             partThumbnailKey = (await uploadsApi.uploadDirect(comp.thumbnailFile, 'thumbnails', bump)).key
             uploadsDone++
+            derivedGalleryKeys.push(partThumbnailKey)
           }
           parts.push({
             rawKey: p.key,
@@ -353,9 +369,14 @@ const CreateModel: React.FC = () => {
       uploadsDone++
 
       // 3b. Optional extra store-page photos — same direct-to-R2 upload, just to
-      //     the 'images' prefix instead of 'thumbnails'.
-      const galleryKeys: string[] = []
-      for (const f of galleryFiles) {
+      //     the 'images' prefix instead of 'thumbnails'. Model thumbnails
+      //     already claimed slots in derivedGalleryKeys above (uploaded once,
+      //     used for both jobs) — only upload NEW files for whatever's left
+      //     of the cap, rather than re-uploading a picture that's already on
+      //     R2 as a model thumbnail.
+      const galleryKeys: string[] = [...derivedGalleryKeys]
+      const remainingGallerySlots = Math.max(0, MAX_GALLERY_IMAGES - galleryKeys.length)
+      for (const f of galleryFiles.slice(0, remainingGallerySlots)) {
         startFile(f.name)
         galleryKeys.push((await uploadsApi.uploadDirect(f, 'images', bump)).key)
         uploadsDone++
@@ -817,6 +838,10 @@ const CreateModel: React.FC = () => {
           <p className="text-xs text-muted-foreground mb-2">
             Extra photos shown on the store page alongside the thumbnail — angles, close-ups, painted
             examples. Up to {MAX_GALLERY_IMAGES}.
+            {componentThumbCount > 0 && (
+              <> Each model's own thumbnail above already counts as one of these — no need to upload
+              the same picture twice ({componentThumbCount} used, {gallerySlotsAvailable} slot{gallerySlotsAvailable === 1 ? '' : 's'} left).</>
+            )}
           </p>
 
           {galleryFiles.length > 0 && (
@@ -840,7 +865,7 @@ const CreateModel: React.FC = () => {
 
           <label
             className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${
-              busy || galleryFiles.length >= MAX_GALLERY_IMAGES ? 'pointer-events-none opacity-50' : ''
+              busy || galleryFiles.length >= gallerySlotsAvailable ? 'pointer-events-none opacity-50' : ''
             }`}
           >
             <Upload size={16} />
@@ -850,7 +875,7 @@ const CreateModel: React.FC = () => {
               accept="image/*"
               multiple
               className="hidden"
-              disabled={busy || galleryFiles.length >= MAX_GALLERY_IMAGES}
+              disabled={busy || galleryFiles.length >= gallerySlotsAvailable}
               onChange={(e) => {
                 const files = Array.from(e.target.files ?? [])
                 if (files.length) addGalleryFiles(files)
@@ -858,8 +883,12 @@ const CreateModel: React.FC = () => {
               }}
             />
           </label>
-          {galleryFiles.length >= MAX_GALLERY_IMAGES && (
-            <p className="mt-1 text-xs text-muted-foreground">Maximum reached — remove one to add another.</p>
+          {galleryFiles.length >= gallerySlotsAvailable && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {gallerySlotsAvailable === 0
+                ? 'No slots left — every gallery slot is already used by a model thumbnail. Remove one of those, or one of these, to add another.'
+                : 'Maximum reached — remove one to add another.'}
+            </p>
           )}
         </div>
 

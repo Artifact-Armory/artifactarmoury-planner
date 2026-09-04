@@ -1843,10 +1843,24 @@ router.delete('/:id/images/:imageId',
     // Delete from database
     await db.query('DELETE FROM model_images WHERE id = $1 AND model_id = $2', [imageId, id]);
 
-    // Delete from storage (async)
-    deleteFromStorage(imagePath).catch(err => 
-      logger.error('Failed to delete image file', { error: err })
+    // A model's thumbnail (main or per-component, migration 059/058) can be
+    // the SAME R2 key as a gallery photo — CreateModel.tsx uploads it once
+    // and uses it for both, rather than making the artist upload the same
+    // picture twice. Deleting the R2 object here would silently break
+    // whichever thumbnail still points at it, so check first.
+    const stillReferenced = await db.query(
+      `SELECT 1 FROM models WHERE id = $1 AND (thumbnail_path = $2 OR primary_thumbnail_path = $2)
+       UNION ALL
+       SELECT 1 FROM model_parts WHERE model_id = $1 AND thumbnail_path = $2
+       LIMIT 1`,
+      [id, imagePath],
     );
+    if (stillReferenced.rows.length === 0) {
+      // Delete from storage (async)
+      deleteFromStorage(imagePath).catch(err =>
+        logger.error('Failed to delete image file', { error: err })
+      );
+    }
 
     res.json({
       message: 'Image deleted successfully',
