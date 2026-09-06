@@ -354,14 +354,14 @@ const ModelDetails: React.FC = () => {
                     : `This piece comes as ${model.partCount} STL files — buy once and download them all as a ZIP. Each part can be placed separately in the planner.`}
                 </p>
                 {isGroup ? (
-                  <ul className="mt-4 space-y-3">
+                  <ul className="mt-4 grid gap-3 sm:grid-cols-2">
                     {components.map((c) => (
                       <li key={c.index} className="rounded-sm border border-border/70 p-3">
-                        <div className="flex items-baseline justify-between gap-2">
+                        <div className="flex items-baseline gap-2">
                           <span className="text-sm font-medium text-foreground">
                             {c.name || `Model ${c.index + 1}`}
                           </span>
-                          <span className="text-xs text-muted-foreground">
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">
                             {c.parts.length} part{c.parts.length === 1 ? '' : 's'}
                           </span>
                         </div>
