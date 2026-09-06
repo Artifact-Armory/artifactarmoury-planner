@@ -290,7 +290,7 @@ const ModelDetails: React.FC = () => {
         image={model.thumbnailUrl}
       />
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
             <div className="relative h-80 w-full bg-muted">
               {activeImage || model.thumbnailUrl ? (
@@ -495,7 +495,7 @@ const ModelDetails: React.FC = () => {
           )}
         </div>
 
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <section className="rounded-2xl bg-card p-6 shadow-md">
             <h1 className="text-2xl font-semibold text-foreground">{model.name}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
