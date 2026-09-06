@@ -354,13 +354,18 @@ router.post('/from-upload',
     // Optional extra store-page photos, uploaded the same presign-then-send-the-key
     // way as the thumbnail — same convention/cap as the standalone ADD GALLERY
     // IMAGES route below, just attached at creation instead of afterward.
+    // Accepts 'images/' (freshly-picked gallery files) AND 'thumbnails/' — the
+    // frontend reuses a component's planner thumbnail as a gallery photo
+    // (CreateModel.tsx's derivedGalleryKeys) rather than uploading the same
+    // picture twice, and both prefixes come from the same trusted
+    // /api/uploads/presign flow, so either is a legitimate gallery source.
     let validGalleryKeys: string[] = [];
     if (galleryKeys != null) {
       if (!Array.isArray(galleryKeys)) {
         throw new ValidationError('galleryKeys must be an array');
       }
-      if (galleryKeys.some((k: unknown) => typeof k !== 'string' || !k.startsWith('images/'))) {
-        throw new ValidationError('Each galleryKeys entry must be an images/ object from /api/uploads/presign');
+      if (galleryKeys.some((k: unknown) => typeof k !== 'string' || !(k.startsWith('images/') || k.startsWith('thumbnails/')))) {
+        throw new ValidationError('Each galleryKeys entry must be an images/ or thumbnails/ object from /api/uploads/presign');
       }
       if (galleryKeys.length > MAX_GALLERY_IMAGES) {
         throw new ValidationError(`A model can have at most ${MAX_GALLERY_IMAGES} gallery images`);
