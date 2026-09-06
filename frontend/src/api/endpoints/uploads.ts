@@ -9,6 +9,35 @@ export interface PresignResponse {
   expiresIn: number
 }
 
+// A PUT gets no fixed total timeout (xhr.timeout stays 0 below) — a large model
+// (hundreds of MB) can legitimately take minutes on a home connection, and the
+// presigned URL's own expiry is the real time limit. But with no timeout at all,
+// a single TCP connection that stalls mid-transfer (packet loss, a bad R2 edge
+// hop) just hangs silently forever instead of failing — it never errors, so the
+// retry logic below never even sees it. This traced a real incident: a 10-model
+// upload where every part-level retry looked fine but one part sat stalled for
+// 8+ minutes (2026-09-06 log investigation). STALL_TIMEOUT_MS instead watches
+// for *progress*: if no upload.onprogress fires for this long, treat it as dead
+// and abort, so the caller's retry loop gets a fresh connection instead of an
+// indefinite hang.
+const STALL_TIMEOUT_MS = 45_000
+const STALL_CHECK_INTERVAL_MS = 5_000
+
+/** Wires a stall watchdog onto an XHR PUT: aborts (→ reject) if no upload progress for STALL_TIMEOUT_MS. */
+function withStallGuard(xhr: XMLHttpRequest, reject: (err: unknown) => void): void {
+  xhr.timeout = 0
+  let lastProgressAt = Date.now()
+  xhr.upload.addEventListener('progress', () => { lastProgressAt = Date.now() })
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+      clearInterval(watchdog)
+      xhr.abort()
+    }
+  }, STALL_CHECK_INTERVAL_MS)
+  xhr.addEventListener('loadend', () => clearInterval(watchdog))
+  xhr.addEventListener('abort', () => reject(new Error('Upload stalled (no progress) and was retried')))
+}
+
 /** PUT a file straight to R2 using a presigned URL (bytes never touch our API). */
 function putToR2(
   uploadUrl: string,
@@ -19,10 +48,7 @@ function putToR2(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', uploadUrl)
-    // No client-side timeout: a large model (hundreds of MB) can take minutes to
-    // upload on a home connection. The presigned URL's own expiry is the only
-    // time limit (see backend presign TTL).
-    xhr.timeout = 0
+    withStallGuard(xhr, reject)
     // Must match exactly the Content-Type that was signed, or R2 returns 403.
     xhr.setRequestHeader('Content-Type', contentType)
     xhr.upload.onprogress = (e) => {
@@ -35,6 +61,31 @@ function putToR2(
     xhr.onerror = () => reject(new Error('Upload network error (check R2 CORS allows PUT from this origin)'))
     xhr.send(file)
   })
+}
+
+const DIRECT_RETRIES = 3
+
+/**
+ * putToR2 with a few retries — the single-shot (<64MB) path had none at all
+ * until now, so any transient blip (or the stall above) killed the whole
+ * upload outright instead of getting a second try like multipart parts do.
+ */
+async function putToR2WithRetry(
+  uploadUrl: string,
+  file: File,
+  contentType: string,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt < DIRECT_RETRIES; attempt++) {
+    try {
+      await putToR2(uploadUrl, file, contentType, onProgress)
+      return
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw lastErr ?? new Error('Upload failed')
 }
 
 // Files at/above this size are uploaded in chunks (multipart) so a dropped
@@ -66,7 +117,7 @@ function putPartToR2(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url)
-    xhr.timeout = 0
+    withStallGuard(xhr, reject)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onPartProgress) onPartProgress(e.loaded)
     }
@@ -205,7 +256,7 @@ export const uploadsApi = {
       return uploadMultipart(file, prefix, onProgress)
     }
     const presigned = await uploadsApi.presign(file.name, prefix)
-    await putToR2(presigned.uploadUrl, file, presigned.contentType, onProgress)
+    await putToR2WithRetry(presigned.uploadUrl, file, presigned.contentType, onProgress)
     return { key: presigned.key, publicUrl: presigned.publicUrl }
   },
 }
