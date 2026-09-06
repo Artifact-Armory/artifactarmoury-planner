@@ -191,10 +191,13 @@ export const modelsApi = {
         width: p.width != null ? Number(p.width) : null,
         depth: p.depth != null ? Number(p.depth) : null,
         height: p.height != null ? Number(p.height) : null,
-        // Per-component planner thumbnail (migration 058) — falls back to the
-        // primary part's own thumbnailPath (the listing's main image) so a
-        // component with no thumbnail of its own still shows something
-        // recognizable instead of a bare generic icon.
+        // Per-component planner thumbnail (migration 058). The backend already
+        // resolves p.thumbnail_path to this NAMED MODEL's own photo when this
+        // exact file has none of its own (a component's photo is only ever
+        // uploaded on its primary/first file — see /sets's groupThumbnail,
+        // 2026-09-04 fix for parts showing the wrong model's photo) — so this
+        // final fallback to the listing's overall image only fires when the
+        // whole named model has no photo at all.
         thumbnailUrl: p.thumbnail_path ? assetUrl(p.thumbnail_path) : (s.thumbnail_path ? assetUrl(s.thumbnail_path) : null),
       })),
     }))

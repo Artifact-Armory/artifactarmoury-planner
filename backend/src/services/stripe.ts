@@ -406,8 +406,16 @@ export async function createPaymentIntent(
   if (STRIPE_MOCK) {
     const amount = Math.round((params.amount || 0) * 100) / 100
     const suffix = params.preferredMethod === 'paypal' ? '_paypal' : ''
+    // Encode the order id into the mock intent id itself (mirroring how the method
+    // is already encoded via the `_paypal` suffix) so getPaymentIntent's mock branch
+    // can hand it back as `metadata.order_id` below — real Stripe metadata is set
+    // server-side and read back the same way, and routes/orders.ts's confirm route
+    // (2026-09-05 security fix) now requires that binding to match in every mode,
+    // mock included, or a real PaymentIntent could be replayed against a different
+    // order's confirm call.
+    const orderId = params.metadata?.order_id ?? 'noorder'
     return {
-      payment_intent_id: `pi_mock${suffix}_${Date.now()}`,
+      payment_intent_id: `pi_mock${suffix}_${orderId}_${Date.now()}`,
       client_secret: `cs_mock_${Math.random().toString(36).slice(2)}`,
       amount,
     }
@@ -466,13 +474,18 @@ export async function getPaymentIntent(
     // Mock intent ids carry the method the test checkout picked (see
     // createPaymentIntent), so the PayPal path can be exercised without live keys.
     const method = paymentIntentId.includes('_paypal') ? 'paypal' : 'card'
+    // ...and the order id, in the same encoded-in-the-id fashion, so mock mode's
+    // `metadata.order_id` is just as real a binding check as live Stripe's.
+    const orderId = paymentIntentId
+      .replace(/^pi_mock(_paypal)?_/, '')
+      .replace(/_\d+$/, '')
     return {
       id: paymentIntentId,
       object: 'payment_intent',
       amount: 100,
       currency: 'gbp',
       status: 'succeeded',
-      metadata: {},
+      metadata: { order_id: orderId },
       payment_method_types: [method],
       payment_method: { type: method },
     } as unknown as Stripe.PaymentIntent

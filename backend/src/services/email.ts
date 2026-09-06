@@ -22,6 +22,26 @@ interface AssetLike {
   base_price: number
 }
 
+/**
+ * Escape free text before interpolating it into an HTML email template.
+ *
+ * Every string below that ultimately traces back to a model name (artist-controlled),
+ * a contact-form field (anonymous-visitor-controlled), or any other value someone
+ * other than the recipient can set, MUST go through this first — otherwise it's a
+ * stored HTML-injection vector into whichever inbox renders the email (buyer, support
+ * staff, or the artist themselves). Found in the 2026-09-05 security audit: model
+ * names were being interpolated raw into the order-confirmation email, and contact-
+ * form fields raw into the support-notification email.
+ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
@@ -344,7 +364,7 @@ export async function sendOrderConfirmation(
     return `
     <tr>
       <td style="padding: 14px 16px; border-bottom: 1px solid #e5e7eb;">
-        <strong style="color: #111827;">${item.asset.name}</strong><br>
+        <strong style="color: #111827;">${escapeHtml(item.asset.name)}</strong><br>
         <span style="color: #6b7280; font-size: 13px;">Digital STL &middot; download any time</span>
       </td>
       <td style="padding: 14px 16px; text-align: right; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
@@ -540,7 +560,7 @@ export async function sendArtistSaleNotification(
   
   const itemsList = items.map(item => `
     <li style="margin-bottom: 8px;">
-      <strong>${item.asset.name}</strong> × ${item.quantity}
+      <strong>${escapeHtml(item.asset.name)}</strong> × ${item.quantity}
     </li>
   `).join('')
   
@@ -662,23 +682,23 @@ export async function sendContactMessageToSupport(params: ContactMessageParams):
   <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
     <tr>
       <td style="padding: 6px 0; color: #6b7280; width: 90px;">From:</td>
-      <td style="padding: 6px 0; font-weight: 600;">${name} &lt;${email}&gt;</td>
+      <td style="padding: 6px 0; font-weight: 600;">${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;</td>
     </tr>
     <tr>
       <td style="padding: 6px 0; color: #6b7280;">Account:</td>
-      <td style="padding: 6px 0;">${userId ? `Signed in (user ${userId})` : 'Not signed in'}</td>
+      <td style="padding: 6px 0;">${userId ? `Signed in (user ${escapeHtml(userId)})` : 'Not signed in'}</td>
     </tr>
     <tr>
       <td style="padding: 6px 0; color: #6b7280;">Subject:</td>
-      <td style="padding: 6px 0; font-weight: 600;">${subject}</td>
+      <td style="padding: 6px 0; font-weight: 600;">${escapeHtml(subject)}</td>
     </tr>
   </table>
 
-  <div style="background: #f9fafb; border-radius: 8px; padding: 16px; white-space: pre-wrap;">${message}</div>
+  <div style="background: #f9fafb; border-radius: 8px; padding: 16px; white-space: pre-wrap;">${escapeHtml(message)}</div>
 
   ${attachmentsHtml}
 
-  <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">Reply to this email to respond directly to ${name}.</p>
+  <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">Reply to this email to respond directly to ${escapeHtml(name)}.</p>
 
 </body>
 </html>
@@ -712,9 +732,9 @@ export async function sendContactConfirmation(params: { name: string; email: str
   </div>
 
   <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
-    <p style="margin: 0 0 12px 0; color: #4b5563;">Hi ${name},</p>
+    <p style="margin: 0 0 12px 0; color: #4b5563;">Hi ${escapeHtml(name)},</p>
     <p style="margin: 0; color: #4b5563;">
-      Thanks for reaching out about "${subject}". Our support team has received your
+      Thanks for reaching out about "${escapeHtml(subject)}". Our support team has received your
       message and will get back to you at this address as soon as they can.
     </p>
   </div>
@@ -762,13 +782,13 @@ export async function sendContactReply(params: ContactReplyParams): Promise<void
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
 
-  <p style="margin: 0 0 16px 0; color: #4b5563;">Hi ${name},</p>
+  <p style="margin: 0 0 16px 0; color: #4b5563;">Hi ${escapeHtml(name)},</p>
 
-  <div style="white-space: pre-wrap; margin-bottom: 24px;">${replyBody}</div>
+  <div style="white-space: pre-wrap; margin-bottom: 24px;">${escapeHtml(replyBody)}</div>
 
   <div style="margin-top: 8px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 13px;">
     <p style="margin: 0 0 8px 0;">On your message to Artifact Armoury support:</p>
-    <blockquote style="margin: 0; padding-left: 12px; border-left: 3px solid #e5e7eb; white-space: pre-wrap; color: #6b7280;">${originalMessage}</blockquote>
+    <blockquote style="margin: 0; padding-left: 12px; border-left: 3px solid #e5e7eb; white-space: pre-wrap; color: #6b7280;">${escapeHtml(originalMessage)}</blockquote>
   </div>
 
   <div style="text-align: center; padding-top: 24px; margin-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">

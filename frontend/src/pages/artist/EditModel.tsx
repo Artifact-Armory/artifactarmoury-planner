@@ -860,8 +860,14 @@ const EditModel: React.FC = () => {
                             <AlertTriangle size={13} className="shrink-0" />
                             {r.name}: no planner preview
                           </p>
-                          <p className="mt-1 text-amber-700">{r.processingError || 'This file is too dense to safely preview.'}</p>
-                          <p className="mt-0.5 text-amber-700">It's still for sale as-is — only the planner preview is missing.</p>
+                          {/* processingError already explains the fix AND which named model it's
+                              hiding from the planner (see process.ts's noPreview) — a whole named
+                              model drops off the planner once any one of its parts is unpreviewable,
+                              not just this file, so don't also show the old "only this part is
+                              missing" line here, it would contradict the real message. */}
+                          <p className="mt-1 text-amber-700">
+                            {r.processingError || "This file is too dense to safely preview. It's still fully for sale as-is."}
+                          </p>
                           <label className={`mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-sm border border-amber-300 bg-white px-2 py-1 font-medium text-amber-900 hover:bg-amber-100 ${attachingPartId === r.id ? 'pointer-events-none opacity-50' : ''}`}>
                             <Upload size={12} />
                             {attachingPartId === r.id ? 'Uploading…' : 'Attach a decimated preview file…'}

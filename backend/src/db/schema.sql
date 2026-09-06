@@ -64,7 +64,12 @@ CREATE TABLE users (
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP
+    last_login TIMESTAMP,
+
+    -- Per-user token-invalidation watermark (migration 060). NULL = no invalidation
+    -- has ever happened. Set to NOW() on password change/reset and 2FA disable;
+    -- middleware/auth.ts rejects any JWT whose `iat` predates this.
+    tokens_valid_from TIMESTAMP
 );
 
 CREATE INDEX idx_users_email ON users(email);

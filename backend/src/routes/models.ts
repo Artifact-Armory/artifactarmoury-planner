@@ -1106,13 +1106,47 @@ router.get('/sets',
     )).rows;
 
     const sets = await Promise.all(models.map(async (m: any) => {
-      const extra = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name, thumbnail_path
+      // Fetch every part regardless of status (not just 'ready') so an
+      // unpreviewable sibling can be seen and used to disqualify its whole
+      // named model below — a plain 'ready' filter would silently show the
+      // OTHER parts of that same model, which looks like a piece floating
+      // with no base rather than a model that's simply not on the planner yet.
+      const allParts = (await db.query(
+        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name,
+                thumbnail_path, processing_status
          FROM model_parts
-         WHERE model_id = $1 AND processing_status = 'ready'
+         WHERE model_id = $1
          ORDER BY group_index ASC, display_order ASC`,
         [m.id]
       )).rows;
+      // A named model (group_index) only belongs on the planner once EVERY one
+      // of its parts has a preview GLB — one oversized/'no_preview' part is
+      // enough to disqualify the whole named model, not just that one file
+      // (built 2026-09-04, at the artist's request after the "South East
+      // Pacific houses" upload left several models missing their base/roof/etc
+      // while their other parts still showed). Group 0 additionally needs the
+      // listing's own primary GLB.
+      const incompleteGroups = new Set<number>();
+      if (!m.glb_file_path) incompleteGroups.add(0);
+      for (const p of allParts) {
+        if (p.processing_status !== 'ready' || !p.glb_file_path) incompleteGroups.add(p.group_index ?? 0);
+      }
+      // A component's photo (migration 058) is only ever uploaded on ONE file —
+      // its primary/first part (`isComponentPrimary` in CreateModel.tsx) — every
+      // OTHER part of that same named model has no thumbnail_path of its own.
+      // Falling straight through to the listing's overall photo for those (the
+      // old behaviour) meant every non-primary part of every named model showed
+      // the group shot instead of that model's own photo. Fall back to the
+      // component's OWN photo first — found on whichever of its parts has one,
+      // in display-order (walk order below), which for group 0 is the listing's
+      // primary_thumbnail_path since its own primary file lives on `models`, not
+      // `model_parts`.
+      const groupThumbnail = new Map<number, string>();
+      if (m.primary_thumbnail_path) groupThumbnail.set(0, m.primary_thumbnail_path);
+      for (const p of allParts) {
+        const gi = p.group_index ?? 0;
+        if (p.thumbnail_path && !groupThumbnail.has(gi)) groupThumbnail.set(gi, p.thumbnail_path);
+      }
       // NB: never expose the raw glb_file_path (public CDN key). The planner fetches
       // each part's preview through the signed endpoint, keyed by id (primary part's
       // id IS the model id; extras are model_parts ids). `is_primary` tells the
@@ -1128,13 +1162,16 @@ router.get('/sets',
           // listing's main store image only if it has none of its own.
           thumbnail_path: m.primary_thumbnail_path ?? m.thumbnail_path ?? null,
         },
-        ...extra.map((p: any) => ({
+        ...allParts.map((p: any) => ({
           id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path,
           width: p.width, depth: p.depth, height: p.height,
           group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
-          thumbnail_path: p.thumbnail_path ?? null,
+          // Own photo, else this NAMED MODEL's own photo (its primary part),
+          // else null — the frontend's own final fallback to the listing's
+          // overall photo (core/assets.ts) only kicks in once neither exists.
+          thumbnail_path: p.thumbnail_path ?? groupThumbnail.get(p.group_index ?? 0) ?? null,
         })),
-      ].filter((p) => p.has_glb);
+      ].filter((p) => p.has_glb && !incompleteGroups.has(p.group_index));
       return {
         id: m.id,
         name: m.name,
@@ -1324,10 +1361,17 @@ router.get('/:id',
     // would let anyone download the original, un-watermarked STL directly, bypassing
     // the entitlement + per-buyer watermark on /:id/download. Expose only booleans;
     // the preview GLB is fetched through the signed /:id/preview.glb endpoint.
+    // full_glb_path (041) and display_stl_path (053/054) are the SAME class of secret
+    // — a random-suffixed key with no signed-URL requirement of its own — and must be
+    // stripped here too (2026-09-05 security audit: these two were missing from this
+    // list, so /:id was handing out a permanent, un-watermarked CDN link to the
+    // owner-tier full-fidelity GLB / clean preview STL for every published model).
     const hasGlb = !!model.glb_file_path;
     delete model.stl_file_path;
     delete model.glb_file_path;
     delete model.source_file_path;
+    delete model.full_glb_path;
+    delete model.display_stl_path;
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
       processing_status: p.processing_status, display_order: p.display_order,

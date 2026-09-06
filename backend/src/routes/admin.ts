@@ -556,6 +556,16 @@ router.get('/models/:id',
     );
     if (modelResult.rows.length === 0) throw new NotFoundError('Model');
 
+    // SECURITY: admin is already fully entitled to every model, but there's no reason
+    // for this response to carry the raw R2 keys either (2026-09-05 audit) — the admin
+    // frontend never reads them, and it costs nothing to keep the same rule everywhere.
+    const model = modelResult.rows[0];
+    delete model.stl_file_path;
+    delete model.glb_file_path;
+    delete model.source_file_path;
+    delete model.full_glb_path;
+    delete model.display_stl_path;
+
     const reportsResult = await db.query(
       `SELECT r.id, r.report_number, r.reason, r.status, r.detail, r.resolution_action, r.resolution_summary,
               r.created_at, r.resolved_at, ru.display_name AS reporter_name, resu.display_name AS resolved_by_name
@@ -568,7 +578,7 @@ router.get('/models/:id',
     );
 
     res.json({
-      model: modelResult.rows[0],
+      model,
       reports: reportsResult.rows.map((r: any) => ({ ...r, reason_label: REASON_LABELS[r.reason] || r.reason })),
     });
   })

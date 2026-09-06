@@ -594,11 +594,19 @@ async function processOnePart(
     }
 
     const noPreview = async (reason: string): Promise<PartOutcome> => {
+      // /sets disqualifies a part's WHOLE named model from the planner once any
+      // one of its parts is 'no_preview' (built 2026-09-04, at the artist's
+      // request) — surface that here rather than leaving the artist to
+      // discover it, since the per-part reason alone reads as if only this one
+      // file is affected.
+      const fullReason = part.group_name
+        ? `${reason} Until it's fixed, none of "${part.group_name}"'s parts will show on the planner (everything stays fully for sale as-is).`
+        : `${reason} Until it's fixed, this part won't show on the planner (it's still fully for sale as-is).`;
       await db.query(
         `UPDATE model_parts SET processing_status='no_preview', processing_error=$1, file_hash=$2, geometry_fingerprint=$3 WHERE id=$4`,
-        [reason, fileHash, fingerprint ? JSON.stringify(fingerprint) : null, part.id],
+        [fullReason, fileHash, fingerprint ? JSON.stringify(fingerprint) : null, part.id],
       );
-      return { outcome: 'no_preview', reason };
+      return { outcome: 'no_preview', reason: fullReason };
     };
 
     // What drives the PREVIEW: an attached clean/decimated companion file
@@ -760,14 +768,23 @@ async function processModelParts(
 
   if (needsPreview.length > 0 && uploaderId) {
     const plural = needsPreview.length > 1;
-    const names = needsPreview.map((p) => `"${p.name}"`).join(', ');
+    // Each entry names the failing FILE and the named model it belongs to (not
+    // just the file) — the whole model is what's actually missing from the
+    // planner now (see /sets's incompleteGroups), so the artist needs to know
+    // which model to look at, not just which file to decimate.
+    const list = needsPreview
+      .map((p) => (p.groupName ? `"${p.name}" in "${p.groupName}"` : `"${p.name}"`))
+      .join(', ');
     await createNotification({
       userId: uploaderId,
       type: 'model.part_needs_preview',
-      title: `Published — ${needsPreview.length} model${plural ? 's need' : ' needs'} a preview`,
+      title: `Published — ${needsPreview.length} part${plural ? 's are' : ' is'} too big to preview`,
       body:
-        `${names} ${plural ? 'are' : 'is'} on sale as part of this listing, but too dense to safely preview on the planner. ` +
-        `Attach a decimated version from My Models to add ${plural ? 'their' : 'its'} planner preview.`,
+        `${list} ${plural ? 'are' : 'is'} too dense to safely preview, so ${plural ? 'those models' : 'that model'} ` +
+        `won't show on the planner until it's fixed — the rest of the listing is unaffected either way, and ` +
+        `everything is still fully for sale as-is in the meantime. Decimate the file${plural ? 's' : ''} and attach ` +
+        `${plural ? 'them' : 'it'} as a replacement preview from My Models; once it's under the triangle limit, ` +
+        `all of ${plural ? 'those models’' : 'that model’s'} parts will show on the planner again.`,
       link: '/artist/models',
       modelId,
     });
@@ -807,11 +824,28 @@ export async function processPartPreviewAttach(modelId: string, partId: string):
         modelId,
       });
     } else if (result.outcome === 'ready' && uploaderId) {
+      // This part alone being ready doesn't guarantee its named model shows on
+      // the planner yet — /sets hides a whole group_index if ANY of its
+      // siblings are still unready, so check before promising it's visible.
+      const sibling = await db.query(
+        `SELECT 1 FROM model_parts
+         WHERE model_id = $1 AND group_index = $2 AND id <> $3
+           AND (processing_status <> 'ready' OR glb_file_path IS NULL) LIMIT 1`,
+        [modelId, part.group_index, part.id],
+      );
+      let primaryBlocked = false;
+      if (part.group_index === 0) {
+        const primary = await db.query('SELECT glb_file_path FROM models WHERE id = $1', [modelId]);
+        primaryBlocked = !primary.rows[0]?.glb_file_path;
+      }
+      const stillBlocked = sibling.rows.length > 0 || primaryBlocked;
       await createNotification({
         userId: uploaderId,
         type: 'model.part_preview_attached',
         title: `Preview added: ${part.name}`,
-        body: `"${part.name}" now has a planner preview.`,
+        body: stillBlocked
+          ? `"${part.name}" now has a preview, but another part of ${part.group_name ? `"${part.group_name}"` : 'this model'} still needs one before it shows on the planner.`
+          : `"${part.name}" now has a preview — ${part.group_name ? `all of "${part.group_name}"'s parts` : 'this model'} will show on the planner.`,
         link: '/artist/models',
         modelId,
       });

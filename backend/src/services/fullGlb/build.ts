@@ -27,8 +27,15 @@ import { convertSTLtoGLBFull } from '../fileProcessor'
 /**
  * Meshes above this are not built at all (job → 'skipped', owner keeps the proxy).
  *
- * This is a MEMORY ceiling first and a framerate ceiling second. Measured peak RSS
- * of the conversion, on the real pipeline:
+ * This is a MEMORY ceiling ONLY, not a framerate one — convertSTLtoGLBFull
+ * (fileProcessor.ts) parses the FULL source mesh into memory before any
+ * decimation runs, so the cost below is paid against the SOURCE triangle count
+ * regardless of what OWNER_GLB_TARGET_TRIS ends up trimming it down to. Raising
+ * this number does NOT change what lands in the planner (still capped at
+ * OWNER_GLB_TARGET_TRIS, 240k by default) — it only decides how dense a source
+ * the worker is willing to ATTEMPT to parse at all before giving up and leaving
+ * the owner on the proxy. Measured peak RSS of the conversion, on the real
+ * pipeline:
  *
  *     307k tris →  419 MB      614k tris →  704 MB      1.23M tris → 1318 MB
  *
@@ -36,11 +43,21 @@ import { convertSTLtoGLBFull } from '../fileProcessor'
  * linear, and the build is only ~8.6s even at 1.23M — so time is not the binding
  * constraint, memory is. Set this from the memory limit of whatever is building:
  * the bake worker normally, but the API server itself when the inline drainer is
- * on (see inline.ts), where a 1 GB spike is far more disruptive.
+ * on (see inline.ts), where a spike is far more disruptive.
  *
- * Default 1M ≈ 1.1 GB peak. Raise it only if the builder has the headroom.
+ * Raised 1M -> 3.5M (2026-09-04, at the artist's request): a 10-model grouped
+ * upload ("South East Pacific houses") had several parts between 1M and 3.4M
+ * source triangles, all permanently 'skipped' under the old 1M gate even though
+ * each is comfortably decimated down to 240k once admitted. 3.5M ≈ 3.9 GB peak
+ * on this pipeline's measured per-triangle cost — matches
+ * MAX_PREVIEW_PART_TRIANGLES (routes/models.ts), the ceiling already used
+ * elsewhere for "is this too dense to safely parse for a preview". Confirmed
+ * this build runs on the dedicated worker service (PROXY_BAKE_ENABLED=true),
+ * never inline in the API server, so a spike here can't take down checkout/
+ * storefront. Not proven against a real 3.4M-triangle build yet — watch worker
+ * memory (`railway logs`) on the next upload that exercises this range.
  */
-export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 1_000_000)
+export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 3_500_000)
 
 /** Refuse a source file this large outright, before parsing it. */
 const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 400 * 1024 * 1024)

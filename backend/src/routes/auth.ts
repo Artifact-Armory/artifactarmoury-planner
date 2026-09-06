@@ -6,11 +6,13 @@ import bcrypt from 'bcrypt';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { validateEmail, validatePassword, sanitizeString } from '../utils/validation';
-import { 
-  generateToken, 
-  generateRefreshToken, 
+import {
+  generateToken,
+  generateRefreshToken,
   authenticate,
-  refreshAccessToken 
+  refreshAccessToken,
+  invalidateUserTokens,
+  JWT_SECRET,
 } from '../middleware/auth';
 import { authRateLimit, emailRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
@@ -31,9 +33,11 @@ import QRCode from 'qrcode';
 
 const router = Router();
 
-// Same secret the auth middleware verifies with — used here to sign the short-lived
-// "2FA challenge" token issued between the password step and the code step.
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+// Same secret the auth middleware verifies with (imported, not re-read from env here —
+// 2026-09-05 audit: this used to be its own independent `process.env.JWT_SECRET ||
+// 'your-secret-...'` fallback, a second copy of the same weak-default footgun) — used
+// to sign the short-lived "2FA challenge" token issued between the password step and
+// the code step.
 
 /**
  * Finish a successful sign-in: record last-login, log the activity, mint the
@@ -592,13 +596,18 @@ router.post('/password-reset/confirm', authRateLimit, asyncHandler(async (req, r
 
   // Update password and clear reset token
   await db.query(
-    `UPDATE users 
-     SET password_hash = $1, 
-         password_reset_token = NULL, 
+    `UPDATE users
+     SET password_hash = $1,
+         password_reset_token = NULL,
          password_reset_expires = NULL
      WHERE id = $2`,
     [passwordHash, user.id]
   );
+
+  // SECURITY (2026-09-05 audit): a password reset is the exact moment an account may
+  // have just been recovered from a compromise — any session token issued before this
+  // must stop working, not just future logins with the old password.
+  await invalidateUserTokens(user.id);
 
   // Log activity
   await db.query(
@@ -652,6 +661,12 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
     'UPDATE users SET password_hash = $1 WHERE id = $2',
     [passwordHash, (req as any).userId]
   );
+
+  // SECURITY (2026-09-05 audit): invalidate every OTHER session — the current
+  // request already passed `authenticate` before this handler ran, so it isn't
+  // affected, but any other captured/leaked token for this account stops working
+  // as of now rather than surviving up to its full 7/30-day lifetime.
+  await invalidateUserTokens((req as any).userId);
 
   // Log activity
   await db.query(
@@ -886,6 +901,11 @@ router.post('/2fa/disable', authenticate, asyncHandler(async (req, res) => {
       WHERE id = $1`,
     [userId]
   );
+
+  // SECURITY (2026-09-05 audit): disabling 2FA removes a factor an attacker with a
+  // captured token would otherwise still need — invalidate other sessions here too,
+  // same reasoning as password change/reset above.
+  await invalidateUserTokens(userId);
 
   await db.query(
     `INSERT INTO activity_log (user_id, action, resource_type, ip_address)

@@ -24,6 +24,7 @@ import {
   remainingRedemptions,
   remainingForCustomer,
   recordRedemption,
+  codeAppliesToModel,
 } from '../services/promoCodes';
 import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../services/vat';
 import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
@@ -270,7 +271,18 @@ router.post('/',
           const price = Math.round(parseFloat(model.base_price) * (100 - modelDiscount.percent)) / 100;
           // Then a promo code on top, if one was entered and applies here — its
           // cost comes out of the artist's commission share (see pushModelRow).
-          const promoDiscount = promoApplier ? promoApplier.apply(price) : 0;
+          // SECURITY (2026-09-05 audit): codeAppliesToModel() enforces the code's own
+          // scope (one specific model, or one artist's whole portfolio) — POST
+          // /validate already checked this for the checkout preview, but this
+          // authoritative path had been applying ANY active code to EVERY model line
+          // regardless of who it was issued for or to. Without this check a code
+          // scoped to one cheap model from one artist could discount an unrelated,
+          // expensive model from a different artist — and since the discount's whole
+          // cost comes out of the artist's commission, that's a direct way to take
+          // money from an artist who never authorized any discount on that model.
+          const promoDiscount = promoApplier && codeAppliesToModel(promoCode, model.id, model.artist_id)
+            ? promoApplier.apply(price)
+            : 0;
           const finalPrice = pushModelRow(model, price, null, null, promoDiscount, promoCode?.id ?? null);
           subtotal += finalPrice;
           taxableLines.push(finalPrice);
@@ -471,6 +483,7 @@ router.post('/',
 // ============================================================================
 
 router.post('/:id/confirm',
+  authenticate,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { paymentIntentId } = req.body;
@@ -491,6 +504,20 @@ router.post('/:id/confirm',
 
     const order = orderResult.rows[0];
 
+    // SECURITY (2026-09-05 audit): this route used to be reachable by anyone, for any
+    // order id, with any paymentIntentId — nothing tied the payment to the order it
+    // was being used to confirm. Two checks close that:
+    //  1. Ownership — only the buyer who placed the order (or an admin) may confirm it.
+    //  2. Binding — the PaymentIntent must have been CREATED for this exact order
+    //     (`order_id` is stamped into its metadata server-side at creation, orders.ts's
+    //     POST / route, and can't be altered by a client), not merely be *some*
+    //     succeeded intent the caller happens to know the id of. Without this, a real
+    //     payment on a cheap order could be replayed to "confirm" — and unlock — a
+    //     completely different, unpaid order.
+    if (order.user_id !== (req as any).userId && (req as any).user?.role !== 'admin') {
+      throw new NotFoundError('Order');
+    }
+
     // Already confirmed — most likely the Stripe webhook won the race, or the buyer
     // reloaded the PayPal return URL. Report success without re-sending the receipt
     // or double-counting sales. (Redirect methods make this genuinely reachable; the
@@ -504,6 +531,10 @@ router.post('/:id/confirm',
 
     // Verify payment with Stripe
     const payment = await getPaymentIntent(paymentIntentId);
+
+    if (payment.metadata?.order_id !== id) {
+      throw new PaymentError('This payment does not belong to this order');
+    }
 
     // Redirect-based methods (PayPal among them) can land back on the site while the
     // payment is still settling. Record the attempt but do NOT mark it paid or unlock
@@ -681,11 +712,15 @@ router.get('/library',
       // SECURITY: never expose raw R2 keys — even to a buyer who owns the model. The
       // bucket is public-CDN-served, so a leaked stl_file_path (the `raw/` key) lets
       // the file be fetched un-watermarked, defeating the per-buyer leak trace. Buyers
-      // download through /models/:id/download, which streams it watermarked.
+      // download through /models/:id/download, which streams it watermarked. Same rule
+      // applies to full_glb_path (041) / display_stl_path (053/054) — both are just as
+      // unguessable-key-shaped, and both were missing here (2026-09-05 security audit).
       const hasGlb = !!model.glb_file_path;
       delete model.stl_file_path;
       delete model.glb_file_path;
       delete model.source_file_path;
+      delete model.full_glb_path;
+      delete model.display_stl_path;
       return {
         ...model,
         has_glb: hasGlb,
