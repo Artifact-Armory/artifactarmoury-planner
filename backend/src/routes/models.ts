@@ -1445,6 +1445,18 @@ router.patch('/:id',
       updates.default_pitch_deg = Number.isFinite(p) ? ((p % 360) + 360) % 360 : 0;
     }
 
+    // Validate base price (same rule as both creation routes: finite, non-negative).
+    // SECURITY (2026-09-06 audit): this update route used to write base_price straight
+    // through with no check at all, so a negative price could be set here after
+    // publishing and used to zero out a cart total at checkout.
+    if (updates.base_price !== undefined) {
+      const p = parseFloat(updates.base_price);
+      if (isNaN(p) || p < 0) {
+        throw new ValidationError('Invalid base price');
+      }
+      updates.base_price = p;
+    }
+
     // Validate the usage licence up-front if the caller is changing it.
     if (updates.license !== undefined && !VALID_LICENSES.includes(updates.license)) {
       throw new ValidationError('Invalid licence');

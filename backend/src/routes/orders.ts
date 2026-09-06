@@ -236,6 +236,15 @@ router.post('/',
           );
           const bundleModels = modelsResult.rows;
           if (bundleModels.length === 0) throw new ValidationError(`Bundle "${bundle.name}" has no models`);
+          // SECURITY (2026-09-06 audit): see the matching check on the single-model
+          // path — a negative base_price on any constituent model would skew the
+          // proportional price split (inflating other models' shares, or handing the
+          // negative-priced one a negative share that reduces what the buyer pays).
+          for (const m of bundleModels) {
+            if (!(parseFloat(m.base_price) >= 0)) {
+              throw new ValidationError(`"${bundle.name}" contains a model with an invalid price and can't be purchased right now`);
+            }
+          }
 
           // Apply any active sale on the bundle (or the artist's portfolio).
           const bundleDiscount = await activeDiscountForBundle(client, bundle.id, bundle.artist_id);
@@ -266,6 +275,14 @@ router.post('/',
           );
           if (modelResult.rows.length === 0) throw new NotFoundError(`Model ${item.modelId}`);
           const model = modelResult.rows[0];
+          // SECURITY (2026-09-06 audit): defense-in-depth against a corrupted/negative
+          // base_price reaching checkout (the write path itself is now validated in
+          // PATCH /models/:id, but a negative line here would otherwise subtract
+          // straight off the cart subtotal and let another model's line be bought for
+          // a fraction of its real price).
+          if (!(parseFloat(model.base_price) >= 0)) {
+            throw new ValidationError(`"${model.name}" has an invalid price and can't be purchased right now`);
+          }
           // Apply any active sale on the model (or the artist's portfolio).
           const modelDiscount = await activeDiscountForModel(client, model.id, model.artist_id);
           const price = Math.round(parseFloat(model.base_price) * (100 - modelDiscount.percent)) / 100;
