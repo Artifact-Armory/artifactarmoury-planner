@@ -11,7 +11,11 @@ import * as THREE from 'three'
 const COLOR = new THREE.Color(0xffb020)
 const ACTIVE_COLOR = new THREE.Color(0xffffff)
 
-const ARC_INNER = 0.78
+// Ring thickness (ARC_OUTER - ARC_INNER) halved from the original 0.22 to 0.11
+// — thinner handles, same outer radius/footprint so the gizmo still sizes the
+// same way against the selected piece. The arrowhead scales off this gap too,
+// so it thins along with the ring.
+const ARC_INNER = 0.89
 const ARC_OUTER = 1.0
 const ARC_SPAN = THREE.MathUtils.degToRad(100)
 const HEAD_END_ANGLE = ARC_SPAN / 2 // the arc's leading end, where the arrowhead sits

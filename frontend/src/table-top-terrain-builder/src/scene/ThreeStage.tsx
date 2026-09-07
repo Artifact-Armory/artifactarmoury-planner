@@ -41,7 +41,16 @@ type LeftDrag =
   | { kind: 'move'; startGround: THREE.Vector3; ids: string[]; orig: Map<string, { x: number; z: number }> }
   | { kind: 'box'; x: number; y: number; base: Set<string> }
   | { kind: 'pan'; x: number; y: number }
-  | { kind: 'rotate'; ids: string[]; center: { x: number; z: number }; initialAngleDeg: number; orig: Map<string, number> }
+  | {
+      kind: 'rotate'
+      ids: string[]
+      center: { x: number; z: number }
+      initialAngleDeg: number
+      // Original position AND yaw per piece — a fused group must orbit the
+      // pivot as a rigid body (position rotates too), not just spin each
+      // piece's own yaw in place. See rotateGroupPatches.
+      orig: Map<string, { x: number; z: number; rotationDeg: number }>
+    }
 
 export function ThreeStage() {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -579,7 +588,10 @@ export function ThreeStage() {
           if (ids.length && gp) {
             const center = rotateHandle.center
             const initialAngleDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - center.z, gp.x - center.x))
-            const orig = new Map(ids.map((id) => [id, store().instances.find((i) => i.id === id)?.rotationDeg ?? 0]))
+            const orig = new Map(ids.map((id) => {
+              const i = store().instances.find((ii) => ii.id === id)
+              return [id, { x: i?.position.x ?? center.x, z: i?.position.z ?? center.z, rotationDeg: i?.rotationDeg ?? 0 }]
+            }))
             eng.drag = { kind: 'rotate', ids, center, initialAngleDeg, orig }
             rotateHandle.setActive(true)
             setCursor('grabbing')
@@ -687,28 +699,38 @@ export function ThreeStage() {
         if (!gp) return
         const dx = gp.x - eng.drag.startGround.x
         const dz = gp.z - eng.drag.startGround.z
-        for (const id of eng.drag.ids) {
+        // Snap the group as ONE rigid body: round a single anchor's target
+        // position to the grid, then carry every member by that exact same
+        // delta. Snapping each member independently (the old behaviour) rounds
+        // each piece's own fractional grid-offset differently, so a fused
+        // group whose internal spacing isn't itself a multiple of the grid
+        // (anything not axis-aligned, e.g. after a free rotate) comes apart —
+        // faster/further drags just make the always-present rounding error
+        // more visible by landing on a less forgiving fractional offset.
+        const ids = eng.drag.ids
+        const anchor = eng.drag.orig.get(ids[0])!
+        const snappedAnchor = snapWorld(anchor.x + dx, anchor.z + dz)
+        const gdx = snappedAnchor.x - anchor.x
+        const gdz = snappedAnchor.z - anchor.z
+        for (const id of ids) {
           const o = eng.drag.orig.get(id)!
-          const { x, z } = snapWorld(o.x + dx, o.z + dz)
           const i = store().instances.find(ii => ii.id === id)
-          inst.setLiveTransform(id, { x, z, rotDeg: i?.rotationDeg ?? 0 })
+          inst.setLiveTransform(id, { x: o.x + gdx, z: o.z + gdz, rotDeg: i?.rotationDeg ?? 0 })
         }
         setCursor('grabbing')
         requestRender()
       } else if (eng.drag.kind === 'rotate') {
         const gp = groundPoint(e)
         if (gp) {
-          const { center, initialAngleDeg, orig } = eng.drag
+          const { center, initialAngleDeg, orig, ids } = eng.drag
           const angleNowDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - center.z, gp.x - center.x))
           // The grabbed point tracks the cursor exactly: as the world angle to the
           // pivot increases by δ, the piece's yaw must decrease by δ to keep that
           // point under the cursor (rotationDeg follows the standard +Y-axis
           // right-hand convention, which runs the other way from atan2(z, x)).
-          const delta = -(angleNowDeg - initialAngleDeg)
-          for (const id of eng.drag.ids) {
-            const rotDeg = normDeg((orig.get(id) ?? 0) + delta)
-            const i = store().instances.find(ii => ii.id === id)
-            if (i) inst.setLiveTransform(id, { x: i.position.x, z: i.position.z, rotDeg })
+          const deltaDeg = -(angleNowDeg - initialAngleDeg)
+          for (const p of rotateGroupPatches(ids, center, deltaDeg, orig)) {
+            inst.setLiveTransform(p.id, { x: p.patch.position.x, z: p.patch.position.z, rotDeg: p.patch.rotationDeg })
           }
         }
         setCursor('grabbing')
@@ -797,15 +819,21 @@ export function ThreeStage() {
       }
       if (d.kind === 'move') {
         const gp = lastGround
-        const patches: Array<{ id: string; patch: { position: { x: number; z: number } } }> = []
+        // Same single-anchor snap as the live preview above, so the committed
+        // position matches exactly what was drawn — see that block for why.
+        let patches: Array<{ id: string; patch: { position: { x: number; z: number } } }> =
+          d.ids.map((id) => ({ id, patch: { position: { x: d.orig.get(id)!.x, z: d.orig.get(id)!.z } } }))
         if (gp) {
           const dx = gp.x - d.startGround.x
           const dz = gp.z - d.startGround.z
-          for (const id of d.ids) {
+          const anchor = d.orig.get(d.ids[0])!
+          const snappedAnchor = snapWorld(anchor.x + dx, anchor.z + dz)
+          const gdx = snappedAnchor.x - anchor.x
+          const gdz = snappedAnchor.z - anchor.z
+          patches = d.ids.map((id) => {
             const o = d.orig.get(id)!
-            const { x, z } = snapWorld(o.x + dx, o.z + dz)
-            patches.push({ id, patch: { position: { x, z } } })
-          }
+            return { id, patch: { position: { x: o.x + gdx, z: o.z + gdz } } }
+          })
         }
         useAppStore.getState().actions.updateInstances(patches)
         inst.clearLive()
@@ -815,14 +843,12 @@ export function ThreeStage() {
       }
       if (d.kind === 'rotate') {
         const gp = lastGround
-        const patches = d.ids.map((id) => {
-          let rotDeg = d.orig.get(id) ?? 0
-          if (gp) {
-            const angleNowDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - d.center.z, gp.x - d.center.x))
-            rotDeg = normDeg(rotDeg - (angleNowDeg - d.initialAngleDeg))
-          }
-          return { id, patch: { rotationDeg: rotDeg } }
-        })
+        let deltaDeg = 0
+        if (gp) {
+          const angleNowDeg = THREE.MathUtils.radToDeg(Math.atan2(gp.z - d.center.z, gp.x - d.center.x))
+          deltaDeg = -(angleNowDeg - d.initialAngleDeg)
+        }
+        const patches = rotateGroupPatches(d.ids, d.center, deltaDeg, d.orig)
         useAppStore.getState().actions.updateInstances(patches)
         inst.clearLive()
         rotateHandle.setActive(false)
@@ -913,14 +939,59 @@ export function ThreeStage() {
       refreshGhost()
     }
 
+    // Rotate a set of pieces as ONE rigid body around `pivot`, by `deltaDeg` —
+    // the same value added to each piece's own rotationDeg. Applying Three.js's
+    // own Y-rotation convention to the position term too means a lone piece
+    // (pivot = its own position, so relX/relZ = 0) reduces to a pure yaw
+    // change — the old single-piece behaviour — while a fused group's members
+    // orbit the pivot together and stay rigidly spaced instead of each piece
+    // spinning in place around itself (which is what came out of alignment).
+    // `origState`, when given, is a per-id snapshot to rotate FROM — a drag
+    // recomputes the total delta from drag-start every frame (same pattern the
+    // old rotationDeg-only math used); omitted, it reads the live store state.
+    function rotateGroupPatches(
+      ids: string[],
+      pivot: { x: number; z: number },
+      deltaDeg: number,
+      origState?: Map<string, { x: number; z: number; rotationDeg: number }>,
+    ): Array<{ id: string; patch: { position: { x: number; z: number }; rotationDeg: number } }> {
+      const rad = THREE.MathUtils.degToRad(deltaDeg)
+      const cos = Math.cos(rad), sin = Math.sin(rad)
+      return ids.map((id) => {
+        const i = store().instances.find((ii) => ii.id === id)
+        const base = origState?.get(id) ?? { x: i?.position.x ?? pivot.x, z: i?.position.z ?? pivot.z, rotationDeg: i?.rotationDeg ?? 0 }
+        const relX = base.x - pivot.x
+        const relZ = base.z - pivot.z
+        return {
+          id,
+          patch: {
+            position: { x: pivot.x + relX * cos + relZ * sin, z: pivot.z - relX * sin + relZ * cos },
+            rotationDeg: normDeg(base.rotationDeg + deltaDeg),
+          },
+        }
+      })
+    }
+
+    /** Centre of a set of pieces (average position) — the natural pivot for
+     *  rotating them as one rigid body. A single id's "group" is just itself,
+     *  so this doubles as that piece's own position in the lone-selection case. */
+    function groupCenter(ids: string[]): { x: number; z: number } | null {
+      const list = ids
+        .map((id) => store().instances.find((ii) => ii.id === id))
+        .filter((i): i is NonNullable<typeof i> => !!i)
+      if (!list.length) return null
+      const x = list.reduce((sum, i) => sum + i.position.x, 0) / list.length
+      const z = list.reduce((sum, i) => sum + i.position.z, 0) / list.length
+      return { x, z }
+    }
+
     function rotateSelection(dir: 1 | -1) {
       const step = rotationStep() * dir
       const ids = useAppStore.getState().selectedInstanceIds
       if (!ids.length) return
-      const patches = ids.map(id => {
-        const i = store().instances.find(ii => ii.id === id)!
-        return { id, patch: { rotationDeg: normDeg(i.rotationDeg + step) } }
-      })
+      const pivot = groupCenter(ids)
+      if (!pivot) return
+      const patches = rotateGroupPatches(ids, pivot, step)
       useAppStore.getState().actions.updateInstances(patches)
       inst.setSelection(new Set(ids))
       requestRender()
@@ -935,7 +1006,7 @@ export function ThreeStage() {
       const ids = useAppStore.getState().selectedInstanceIds
       if (!ids.length) return
       const t = store().table
-      const step = Math.max(0.0005, t.gridSize / 8)
+      const step = Math.max(0.0005, t.gridSize / 16)
       const hw = t.width / 2, hh = t.height / 2
       const patches = ids.map(id => {
         const i = store().instances.find(ii => ii.id === id)!
@@ -957,7 +1028,7 @@ export function ThreeStage() {
     function nudgeSelectionLevel(dir: 1 | -1) {
       const ids = useAppStore.getState().selectedInstanceIds
       if (!ids.length) return
-      const FINE_LEVEL_STEP = 0.125 // ~1.6mm at the default 12.7mm/level — matches nudgeSelection's XZ step
+      const FINE_LEVEL_STEP = 0.0625 // ~0.8mm at the default 12.7mm/level — matches nudgeSelection's XZ step
       const patches = ids.map(id => {
         const i = store().instances.find(ii => ii.id === id)!
         const level = Math.max(0, (i.level ?? 0) + dir * FINE_LEVEL_STEP)
@@ -969,22 +1040,52 @@ export function ThreeStage() {
     }
 
     // Show/hide/reposition the free-rotate gizmo for the current selection. A
-    // single selected piece gets it (multi-select has no single pivot that reads
-    // clearly); it's hidden while placing, sculpting, read-only, or mid-drag.
+    // single piece gets it around its own centre; a single FUSED GROUP (every
+    // selected id shares one groupId — setSelectedInstances always expands to
+    // whole groups, so that's the same as "is this selection one fused group")
+    // gets it around the group's centre, so a stack can be free-rotated as one
+    // rigid body instead of only the 90°/15° keyboard steps. An arbitrary
+    // multi-select of unrelated pieces still has no single pivot that reads
+    // clearly, so it gets nothing. Hidden while placing, sculpting, read-only,
+    // mid-drag, or while Alt is held — Alt drives the fine-nudge/free-placement
+    // mechanics (nudgeSelection, snap toggle) right where the arrows sit, so
+    // they'd only get in the way of the thing Alt is for.
     function syncRotateHandle() {
       const s = store()
       const ids = s.selectedInstanceIds
-      if (s.readOnly || s.terrainTool !== 'none' || s.selectedAssetId || ids.length !== 1 || engine.current!.drag.kind !== 'none') {
+      if (s.readOnly || s.terrainTool !== 'none' || s.selectedAssetId || !ids.length || engine.current!.drag.kind !== 'none' || s.altMomentary) {
         rotateHandle.hide()
         return
       }
-      const i = s.instances.find((ii) => ii.id === ids[0])
-      const asset = i && assetMap().get(i.assetId)
-      if (!i || !asset) { rotateHandle.hide(); return }
-      const a = asset.aabb ?? { x: 0.2, y: 0.2, z: 0.2 }
-      const radius = Math.max((Math.max(a.x, a.z) / 2) * 1.3, 0.05)
-      const y = levelToY(i.level ?? 0) + terrainHeightAt(i.position.x, i.position.z) + 0.006
-      rotateHandle.setTransform(i.position.x, y, i.position.z, radius)
+      if (ids.length === 1) {
+        const i = s.instances.find((ii) => ii.id === ids[0])
+        const asset = i && assetMap().get(i.assetId)
+        if (!i || !asset) { rotateHandle.hide(); return }
+        const a = asset.aabb ?? { x: 0.2, y: 0.2, z: 0.2 }
+        const radius = Math.max((Math.max(a.x, a.z) / 2) * 1.3, 0.05)
+        const y = levelToY(i.level ?? 0) + terrainHeightAt(i.position.x, i.position.z) + 0.006
+        rotateHandle.setTransform(i.position.x, y, i.position.z, radius)
+        return
+      }
+      const members = ids.map((id) => s.instances.find((ii) => ii.id === id)).filter((i): i is NonNullable<typeof i> => !!i)
+      const gid = members[0]?.groupId
+      if (!gid || members.length !== ids.length || !members.every((m) => m.groupId === gid)) {
+        rotateHandle.hide()
+        return
+      }
+      const pivot = groupCenter(ids)
+      if (!pivot) { rotateHandle.hide(); return }
+      let radius = 0.05
+      let topLevel = 0
+      for (const m of members) {
+        const asset = assetMap().get(m.assetId)
+        const a = asset?.aabb ?? { x: 0.2, y: 0.2, z: 0.2 }
+        const pieceRadius = (Math.max(a.x, a.z) / 2) * 1.3
+        radius = Math.max(radius, Math.hypot(m.position.x - pivot.x, m.position.z - pivot.z) + pieceRadius)
+        topLevel = Math.max(topLevel, m.level ?? 0)
+      }
+      const y = levelToY(topLevel) + terrainHeightAt(pivot.x, pivot.z) + 0.006
+      rotateHandle.setTransform(pivot.x, y, pivot.z, radius)
     }
 
     // ---- keyboard ----
