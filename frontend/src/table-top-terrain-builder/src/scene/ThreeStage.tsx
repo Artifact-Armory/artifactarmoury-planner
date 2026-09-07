@@ -445,11 +445,27 @@ export function ThreeStage() {
       return { x: nx, z: nz }
     }
 
+    // assetMap() is called from several hot paths — every mousemove while
+    // placing a piece (buildOccupied3D/surfaceTop below), and every store tick
+    // while anything is selected (syncRotateHandle) — so rebuilding a Map over
+    // the WHOLE catalogue (every published model + set part, which on a live
+    // marketplace can be large) on every single call is real, repeated cost
+    // for no reason: the catalogue only actually changes when `assets` or
+    // `setPartAssets` themselves change. Cache the built Map and only rebuild
+    // when either array reference changes (Zustand replaces these wholesale on
+    // a catalogue load/update, never mutates in place, so reference equality
+    // is a safe and cheap "did it change" check).
+    let assetMapCache: { assets: ReturnType<typeof store>['assets']; setPartAssets: ReturnType<typeof store>['setPartAssets']; map: Map<string, Asset> } | null = null
     function assetMap() {
       const s = store()
+      if (assetMapCache && assetMapCache.assets === s.assets && assetMapCache.setPartAssets === s.setPartAssets) {
+        return assetMapCache.map
+      }
       // Include set-part assets — they're kept off the flat catalogue (s.assets) but
       // are placeable, so collision/stacking/rendering must resolve them too.
-      return new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a]))
+      const map = new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a]))
+      assetMapCache = { assets: s.assets, setPartAssets: s.setPartAssets, map }
+      return map
     }
 
     // Grid cells a footprint covers at the cursor.
