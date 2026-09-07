@@ -414,6 +414,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     if (!tableId && !shareToken) {
       clearInstances()
       useAppStore.getState().actions.resetTerrain()
+      useAppStore.getState().actions.resetPaint()
       setSavedTableId(null)
       setSavedTableName(null)
       setIsOwner(false)
