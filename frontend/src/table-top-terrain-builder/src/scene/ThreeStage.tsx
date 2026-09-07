@@ -155,12 +155,27 @@ export function ThreeStage() {
     }
 
     // ---- instanced placed pieces ----
+    // A template-load callback fires ONCE PER UNIQUE MODEL on the table as
+    // each one's GLB individually arrives — and inst.sync() -> rebuild()
+    // tears down and recreates EVERY asset group's InstancedMeshes, not just
+    // the one that just loaded (see InstancedScene.rebuild). Loading a
+    // showcase with many different models therefore used to run that full
+    // dispose-and-recreate pass once per model, redoing the already-finished
+    // ones every time — an O(unique models²)-ish cascade of GPU churn on
+    // exactly the kind of table (varied, model-on) reported slow. Coalesce
+    // every template that finishes within the same animation frame into one
+    // sync instead of one per model.
+    let pendingTemplateSync = false
     const inst = new InstancedScene(() => {
-      // a template finished loading — re-sync from current store
-      const s = store()
-      inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
-      inst.setSelection(new Set(s.selectedInstanceIds))
-      requestRender()
+      if (pendingTemplateSync) return
+      pendingTemplateSync = true
+      requestAnimationFrame(() => {
+        pendingTemplateSync = false
+        const s = store()
+        inst.sync(s.instances, assetMap())
+        inst.setSelection(new Set(s.selectedInstanceIds))
+        requestRender()
+      })
     })
     inst.setHeightSampler(terrainHeightAt)
     // NB: placed pieces render un-marked. The on-screen "PREVIEW" watermark that used
@@ -1253,7 +1268,7 @@ export function ThreeStage() {
     // After an action mutated instances/selection in the store, re-sync the engine.
     function afterStateChange() {
       const s = store()
-      inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
+      inst.sync(s.instances, assetMap())
       inst.setSelection(new Set(s.selectedInstanceIds))
       syncRotateHandle()
       requestRender()
@@ -1262,7 +1277,7 @@ export function ThreeStage() {
     // ---- store subscriptions (decoupled from React render) ----
     const unsubInstances = useAppStore.subscribe((s, prev) => {
       if (s.instances !== prev.instances || s.assets !== prev.assets || s.setPartAssets !== prev.setPartAssets) {
-        inst.sync(s.instances, new Map([...s.assets, ...s.setPartAssets].map(a => [a.id, a])))
+        inst.sync(s.instances, assetMap())
         inst.setSelection(new Set(s.selectedInstanceIds))
         requestRender()
       }
