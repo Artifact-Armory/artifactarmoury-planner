@@ -958,8 +958,14 @@ export function ThreeStage() {
       const rad = THREE.MathUtils.degToRad(deltaDeg)
       const cos = Math.cos(rad), sin = Math.sin(rad)
       return ids.map((id) => {
-        const i = store().instances.find((ii) => ii.id === id)
-        const base = origState?.get(id) ?? { x: i?.position.x ?? pivot.x, z: i?.position.z ?? pivot.z, rotationDeg: i?.rotationDeg ?? 0 }
+        // During a drag, origState is provided and already has every id — the
+        // store().instances.find() fallback below only actually runs for the
+        // no-origState (keyboard/toolbar) call, not on every frame of a drag.
+        const cached = origState?.get(id)
+        const base = cached ?? (() => {
+          const i = store().instances.find((ii) => ii.id === id)
+          return { x: i?.position.x ?? pivot.x, z: i?.position.z ?? pivot.z, rotationDeg: i?.rotationDeg ?? 0 }
+        })()
         const relX = base.x - pivot.x
         const relZ = base.z - pivot.z
         return {
@@ -1073,12 +1079,24 @@ export function ThreeStage() {
         rotateHandle.hide()
         return
       }
-      const pivot = groupCenter(ids)
-      if (!pivot) { rotateHandle.hide(); return }
+      // Reuse the already-resolved `members` for the centroid instead of
+      // calling groupCenter(ids) — that would re-run its own O(ids × instances)
+      // find() pass over the whole table for every member all over again.
+      const pivot = {
+        x: members.reduce((sum, m) => sum + m.position.x, 0) / members.length,
+        z: members.reduce((sum, m) => sum + m.position.z, 0) / members.length,
+      }
+      // assetMap() rebuilds a Map over the WHOLE catalogue (assets + set
+      // parts) — call it once for the group, not once per member. This runs
+      // on every store tick while a fused group is selected (see the comment
+      // above), so doing it per-member turned into a very expensive
+      // O(group size × catalogue size) recompute on every tick and could
+      // visibly stall the planner with a large catalogue or a big group.
+      const am = assetMap()
       let radius = 0.05
       let topLevel = 0
       for (const m of members) {
-        const asset = assetMap().get(m.assetId)
+        const asset = am.get(m.assetId)
         const a = asset?.aabb ?? { x: 0.2, y: 0.2, z: 0.2 }
         const pieceRadius = (Math.max(a.x, a.z) / 2) * 1.3
         radius = Math.max(radius, Math.hypot(m.position.x - pivot.x, m.position.z - pivot.z) + pieceRadius)
