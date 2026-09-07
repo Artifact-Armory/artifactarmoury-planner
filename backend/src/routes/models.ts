@@ -908,7 +908,15 @@ router.get('/my-models',
         m.mesh_warning_acknowledged, m.mesh_warning_acknowledged_at,
         m.created_at, m.updated_at, m.published_at,
         COUNT(DISTINCT r.id) as review_count,
-        COALESCE(AVG(r.rating), 0) as average_rating
+        COALESCE(AVG(r.rating), 0) as average_rating,
+        -- A grouped/set listing (part_count > 1) can have individual named models
+        -- silently missing from the planner (model.part_needs_preview notification,
+        -- see processModelParts) with no sign of it anywhere on this list — the
+        -- listing itself stays 'ready'/published throughout. Surface a count here
+        -- so My Models can flag it without the artist having to open Edit and
+        -- scroll every named model looking for the warning.
+        (SELECT COUNT(*)::int FROM model_parts mp
+          WHERE mp.model_id = m.id AND mp.processing_status = 'no_preview') AS parts_needing_preview
        FROM models m
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        ${whereClause}
@@ -1379,7 +1387,8 @@ router.get('/:id',
     delete model.display_stl_path;
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
-      processing_status: p.processing_status, display_order: p.display_order,
+      processing_status: p.processing_status, processing_error: p.processing_error,
+      display_order: p.display_order,
       group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
       has_glb: !!p.glb_file_path,
     }));

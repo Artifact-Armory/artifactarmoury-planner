@@ -166,6 +166,13 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   showInPlanner: (model.show_in_planner ?? model.showInPlanner ?? true) as boolean,
   // Multi-part ("set") models: number of STL files + the extra parts.
   partCount: Number(model.part_count ?? model.partCount ?? 1),
+  // My Models list badge (2026-09-07): how many named models within this listing
+  // are missing from the planner because their file was too dense to preview.
+  // Only present on the /my-models list response — undefined elsewhere.
+  partsNeedingPreviewCount:
+    model.parts_needing_preview != null || model.partsNeedingPreviewCount != null
+      ? Number(model.parts_needing_preview ?? model.partsNeedingPreviewCount ?? 0)
+      : undefined,
   parts: model.parts?.map((p: any) => ({
     id: p.id,
     name: p.name,

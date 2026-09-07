@@ -157,6 +157,9 @@ export interface TerrainModel {
   // Multi-part ("set") models: 1 = ordinary single-STL model; >1 = a set whose
   // extra STL parts are listed in `parts`.
   partCount?: number
+  // My Models list only: how many named models in this listing are missing from
+  // the planner (their file was too dense to preview). Undefined everywhere else.
+  partsNeedingPreviewCount?: number
   parts?: Array<{
     id: string
     name?: string

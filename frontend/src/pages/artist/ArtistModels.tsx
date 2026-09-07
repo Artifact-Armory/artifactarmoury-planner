@@ -366,6 +366,17 @@ const ArtistModels: React.FC = () => {
                         Not in planner
                       </span>
                     )}
+                    {!!m.partsNeedingPreviewCount && (
+                      <Link
+                        to={`/artist/models/${m.id}/edit`}
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200"
+                        title="One or more named models in this listing are too dense to preview, so they're missing from the planner — still fully for sale. Open Edit to see which one and attach a lighter stand-in."
+                      >
+                        {m.partsNeedingPreviewCount === 1
+                          ? '1 model missing from planner'
+                          : `${m.partsNeedingPreviewCount} models missing from planner`}
+                      </Link>
+                    )}
                     {(() => {
                       const warning = meshSeriousWarning(m)
                       if (!warning) return null
