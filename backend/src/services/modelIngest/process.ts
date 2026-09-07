@@ -55,6 +55,21 @@ function duplicateMessage(kind: 'file' | 'geometry', partLabel?: string): string
     : `${subject} is nearly identical to a model already on the marketplace (same shape, even if re-exported or rescaled). If you believe this is your own work, contact support.`;
 }
 
+/**
+ * How hard a too-dense file needs to be decimated to clear a triangle limit,
+ * phrased as a target/current ratio (e.g. "0.7602") rather than just the raw
+ * counts — most decimation tools (Blender's Decimate modifier included) take
+ * a 0–1 ratio directly, so this turns the rejection into a number the artist
+ * can type straight into that field instead of having to work it out
+ * themselves. Deliberately generous (rounds the ratio down a touch via more
+ * decimal places than needed) since the declared count is only an upper
+ * bound estimate — see declaredTriangleCount.
+ */
+function decimationRatioHint(current: number, max: number): string {
+  const ratio = max / current;
+  return `about ${ratio.toFixed(4)}x (e.g. a Decimate ratio of ~${ratio.toFixed(2)}) its current density`;
+}
+
 export async function processUploadedModel(
   modelId: string,
   rawKey: string,
@@ -631,7 +646,8 @@ async function processOnePart(
       if (displayDeclared !== null && displayDeclared > MAX_PREVIEW_PART_TRIANGLES) {
         const reason =
           `Preview file has ${displayDeclared.toLocaleString()} triangles — still over the ` +
-          `${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle limit. Attach a more decimated file to add a preview.`;
+          `${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle limit. Reduce it by ` +
+          `${decimationRatioHint(displayDeclared, MAX_PREVIEW_PART_TRIANGLES)} and attach a more decimated file to add a preview.`;
         await safeDeleteObject(displayRawKey);
         return noPreview(reason);
       }
@@ -682,7 +698,8 @@ async function processOnePart(
       if (declared !== null && declared > MAX_PREVIEW_PART_TRIANGLES) {
         const reason =
           `${declared.toLocaleString()} triangles — over the ${MAX_PREVIEW_PART_TRIANGLES.toLocaleString()}-triangle ` +
-          `limit for a preview. Attach a decimated preview file for "${part.name}" to add a preview on the planner.`;
+          `limit for a preview. Reduce it by ${decimationRatioHint(declared, MAX_PREVIEW_PART_TRIANGLES)} and attach a ` +
+          `decimated preview file for "${part.name}" to add a preview on the planner.`;
         return noPreview(reason);
       }
     }

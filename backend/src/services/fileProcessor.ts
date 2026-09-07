@@ -177,9 +177,11 @@ export async function parseSTL(filePath: string): Promise<ParsedSTL> {
 
   const declaredTriangles = isBinary ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
   if (declaredTriangles !== null && declaredTriangles > MAX_INGEST_TRIANGLES) {
+    const ratio = MAX_INGEST_TRIANGLES / declaredTriangles
     throw new Error(
       `Mesh has ${declaredTriangles.toLocaleString()} triangles — the maximum is ` +
-      `${MAX_INGEST_TRIANGLES.toLocaleString()}. Please decimate the model and upload again.`,
+      `${MAX_INGEST_TRIANGLES.toLocaleString()}. Reduce it by about ${ratio.toFixed(4)}x (e.g. a Decimate ratio ` +
+      `of ~${ratio.toFixed(2)}) its current density, then upload again.`,
     )
   }
 
