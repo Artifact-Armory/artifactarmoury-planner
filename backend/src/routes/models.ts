@@ -2356,6 +2356,16 @@ async function watermarkedEntryBuffer(key: string, format: MeshFormat, payload: 
   return watermarkOriginal(buf, format, payload);
 }
 
+// How many R2 fetches streamWatermarkedZip runs at once. A large multi-part
+// "set" (e.g. a 10-building village, ~28 files) used to fetch+watermark every
+// file sequentially — each `await` blocked the next file's R2 round-trip from
+// even starting, so total time was the SUM of every file's latency+transfer
+// (a real one measured at ~194s for 28 files). Fetching several in parallel
+// turns that sum into (count / concurrency) round-trips instead. Entry order
+// inside the ZIP doesn't matter (each has its own path/folder name), so
+// whichever finishes first is appended first.
+const ZIP_FETCH_CONCURRENCY = 6;
+
 /**
  * Stream a ZIP of watermarked deliverables. Used for multi-part "sets" and for
  * single OBJ/3MF models (where the buyer gets the original file + a converted STL).
@@ -2374,10 +2384,20 @@ async function streamWatermarkedZip(
     res.destroy(err);
   });
   archive.pipe(res);
-  for (const f of files) {
-    const buf = await watermarkedEntryBuffer(f.key, f.format, payload);
-    archive.append(buf, { name: f.name });
-  }
+
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= files.length) return;
+      const f = files[i];
+      const buf = await watermarkedEntryBuffer(f.key, f.format, payload);
+      archive.append(buf, { name: f.name });
+    }
+  };
+  const workerCount = Math.min(ZIP_FETCH_CONCURRENCY, files.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
   await archive.finalize();
 }
 
