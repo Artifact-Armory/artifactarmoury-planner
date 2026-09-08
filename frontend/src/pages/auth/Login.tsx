@@ -136,6 +136,12 @@ const Login: React.FC = () => {
               Sign in
             </Button>
           </form>
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
+            <Link to="/register" className="font-medium text-primary hover:underline">
+              Create account
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

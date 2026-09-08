@@ -4,6 +4,7 @@ import { Plus, ShieldCheck, Upload } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { modelsApi } from '../../api/endpoints/models'
+import { payoutsApi } from '../../api/endpoints/payouts'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import FacetSelects from '../../components/taxonomy/FacetSelects'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
@@ -99,6 +100,14 @@ const CreateModel: React.FC = () => {
     taxonomyApi.getTree().then(setFacetTree).catch(() => {})
   }, [])
 
+  // The artist's own share of each sale (users.commission_rate) — defaults to the
+  // standard 85% until the real per-artist figure loads, so the "you'll receive"
+  // line never sits blank while this fetch is in flight.
+  const [artistSharePercent, setArtistSharePercent] = React.useState(85)
+  React.useEffect(() => {
+    payoutsApi.getMine().then((res) => setArtistSharePercent(res.config.artistSharePercent)).catch(() => {})
+  }, [])
+
   // Current class from the selected model-class token (defaults to terrain).
   const modelClass = React.useMemo(() => {
     const tok = terms.find((t) => t.startsWith(`${MODEL_CLASS_SLUG}:`))
@@ -167,6 +176,14 @@ const CreateModel: React.FC = () => {
   const busy = phase === 'uploading' || phase === 'processing'
 
   const totalFiles = components.reduce((n, c) => n + c.files.length, 0)
+
+  // What the artist actually keeps per sale, at their own commission share — VAT is
+  // added on top of this price for the buyer (see the note under the price field) and
+  // never comes out of it, so this figure is the whole story regardless of buyer country.
+  const parsedBasePrice = parseFloat(basePrice)
+  const youReceive = Number.isFinite(parsedBasePrice) && parsedBasePrice > 0
+    ? (parsedBasePrice * artistSharePercent) / 100
+    : null
   const componentLabel = (i: number) =>
     components[i]?.name.trim() || (i === 0 ? 'your first model' : `model ${i + 1}`)
 
@@ -509,6 +526,16 @@ const CreateModel: React.FC = () => {
           <div>
             <label className="block text-sm font-medium mb-1">Base price (£)</label>
             <input type="number" min={0} step="0.01" className="w-full border rounded-sm px-3 py-2" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} disabled={busy} />
+            {youReceive !== null && (
+              <p className="text-xs text-muted-foreground mt-1">
+                You&apos;ll receive <span className="font-medium text-foreground">£{youReceive.toFixed(2)}</span> per
+                sale ({artistSharePercent}% share).
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              This is a net price — buyers also pay tax on top, calculated automatically from their own
+              country at checkout. It doesn&apos;t change what you receive.
+            </p>
           </div>
         </div>
 
