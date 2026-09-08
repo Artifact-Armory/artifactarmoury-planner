@@ -31,8 +31,8 @@ const Dashboard: React.FC = () => {
       <Card>
         <CardContent>
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">My models</h2>
-            <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/models')}>
+            <h2 className="text-lg font-semibold text-foreground">My downloads</h2>
+            <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/downloads')}>
               View all
             </Button>
           </div>
@@ -46,7 +46,7 @@ const Dashboard: React.FC = () => {
               {library.slice(0, 4).map(({ model, myReview }) => (
                 <Link
                   key={model.id}
-                  to="/dashboard/models"
+                  to="/dashboard/downloads"
                   className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs transition hover:shadow-md"
                 >
                   <div className="relative h-28 w-full overflow-hidden bg-muted">

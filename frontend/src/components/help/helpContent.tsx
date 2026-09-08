@@ -132,7 +132,7 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
     },
   },
   {
-    test: (p) => p.startsWith('/dashboard/purchases') || p.startsWith('/dashboard/models'),
+    test: (p) => p.startsWith('/dashboard/purchases') || p.startsWith('/dashboard/downloads'),
     entry: {
       title: 'Your purchases',
       sections: [

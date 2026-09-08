@@ -46,7 +46,6 @@ import Bundles from './pages/Bundles';
 import Dashboard from './pages/dashboard/Dashboard';
 import PurchaseHistory from './pages/dashboard/PurchaseHistory';
 import MyDownloads from './pages/dashboard/MyDownloads';
-import MyModels from './pages/dashboard/MyModels';
 import Wishlist from './pages/dashboard/Wishlist';
 import UserProfile from './pages/dashboard/UserProfile';
 import SecuritySettings from './pages/dashboard/SecuritySettings';
@@ -248,7 +247,10 @@ function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="downloads" element={<MyDownloads />} />
-              <Route path="models" element={<MyModels />} />
+              {/* "My Models" and "My Downloads" used to be two separate pages driven
+                  by the identical GET /orders/library call. Merged into MyDownloads
+                  (2026-09-08); redirect the old URL so no bookmark/link breaks. */}
+              <Route path="models" element={<Navigate to="/dashboard/downloads" replace />} />
               <Route path="purchases" element={<PurchaseHistory />} />
               <Route path="wishlist" element={<Wishlist />} />
               <Route path="following" element={<Following />} />

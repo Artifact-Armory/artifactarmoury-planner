@@ -1,20 +1,29 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Package } from 'lucide-react'
-import { ordersApi } from '../../api/endpoints/orders'
+import { Download, Package, Star } from 'lucide-react'
+import { ordersApi, type PurchasedModel } from '../../api/endpoints/orders'
 import { modelsApi } from '../../api/endpoints/models'
 import Spinner from '../../components/ui/Spinner'
 import Button from '../../components/ui/Button'
+import ReviewModal from '../../components/models/ReviewModal'
 
 /**
  * "My Downloads" — every STL the signed-in buyer owns, in one place, each with a
- * download button. Files are streamed watermarked-per-buyer from the API (see
- * modelsApi.downloadModelStl); ownership + re-download are unlimited, so this is
- * the home base for getting your files instead of hunting through model pages.
+ * download button and a review prompt. Files are streamed watermarked-per-buyer
+ * from the API (see modelsApi.downloadModelStl); ownership + re-download are
+ * unlimited, so this is the home base for getting your files instead of hunting
+ * through model pages.
+ *
+ * This used to be two separate pages — "My Models" (/dashboard/models) and "My
+ * Downloads" — both driven by the exact same `GET /orders/library` call, one
+ * with a review button and no purchase date, the other with a purchase date and
+ * no review button. Merged into this one page (2026-09-08); /dashboard/models
+ * now redirects here.
  */
 const MyDownloads: React.FC = () => {
+  const queryClient = useQueryClient()
   const libraryQuery = useQuery({
     queryKey: ['my-library'],
     queryFn: () => ordersApi.getLibrary(),
@@ -22,6 +31,19 @@ const MyDownloads: React.FC = () => {
 
   const items = libraryQuery.data ?? []
   const [busy, setBusy] = React.useState<Record<string, boolean>>({})
+  const [reviewing, setReviewing] = React.useState<PurchasedModel | null>(null)
+
+  const reviewMutation = useMutation({
+    mutationFn: (data: { modelId: string; rating: number; comment: string }) =>
+      modelsApi.createReview(data),
+    onSuccess: () => {
+      toast.success('Thanks for your review!')
+      setReviewing(null)
+      queryClient.invalidateQueries({ queryKey: ['my-library'] })
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.message || 'Could not save your review. Please try again.'),
+  })
 
   async function handleDownload(id: string, name: string, parts: number) {
     setBusy((b) => ({ ...b, [id]: true }))
@@ -83,7 +105,8 @@ const MyDownloads: React.FC = () => {
               {items.length} {items.length === 1 ? 'model' : 'models'}
             </p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {items.map(({ model, purchasedAt }) => {
+              {items.map((item) => {
+                const { model, purchasedAt, myReview } = item
                 const parts = model.partCount ?? 1
                 const isSet = parts > 1
                 return (
@@ -125,19 +148,40 @@ const MyDownloads: React.FC = () => {
                           Purchased {new Date(purchasedAt).toLocaleDateString('en-GB')}
                         </p>
                       )}
+                      {myReview ? (
+                        <div className="mt-2 flex items-center gap-1 text-amber-500">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <Star
+                              key={n}
+                              size={14}
+                              className={n <= myReview.rating ? 'fill-amber-400' : 'fill-none text-muted-foreground'}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
 
-                      <Button
-                        className="mt-3 w-full"
-                        onClick={() => handleDownload(model.id, model.name, parts)}
-                        disabled={busy[model.id]}
-                        leftIcon={<Download size={16} />}
-                      >
-                        {busy[model.id]
-                          ? 'Preparing…'
-                          : isSet
-                            ? `Download ZIP (${parts} parts)`
-                            : 'Download STL'}
-                      </Button>
+                      <div className="mt-3 flex flex-col gap-2">
+                        <Button
+                          className="w-full"
+                          onClick={() => handleDownload(model.id, model.name, parts)}
+                          disabled={busy[model.id]}
+                          leftIcon={<Download size={16} />}
+                        >
+                          {busy[model.id]
+                            ? 'Preparing…'
+                            : isSet
+                              ? `Download ZIP (${parts} parts)`
+                              : 'Download STL'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          leftIcon={<Star size={16} />}
+                          onClick={() => setReviewing(item)}
+                        >
+                          {myReview ? 'Edit review' : 'Write a review'}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )
@@ -146,6 +190,20 @@ const MyDownloads: React.FC = () => {
           </>
         )}
       </section>
+
+      {reviewing && (
+        <ReviewModal
+          modelName={reviewing.model.name}
+          isEditing={!!reviewing.myReview}
+          initialRating={reviewing.myReview?.rating ?? 0}
+          initialComment={reviewing.myReview?.comment ?? ''}
+          submitting={reviewMutation.isPending}
+          onClose={() => setReviewing(null)}
+          onSubmit={({ rating, comment }) =>
+            reviewMutation.mutate({ modelId: reviewing.model.id, rating, comment })
+          }
+        />
+      )}
     </div>
   )
 }

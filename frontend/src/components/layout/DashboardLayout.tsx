@@ -22,7 +22,6 @@ import {
   Plus,
   ChevronLeft,
   Rocket,
-  Download,
   DownloadCloud,
   Handshake,
   Wallet,
@@ -201,17 +200,6 @@ const DashboardLayout: React.FC = () => {
               >
                 <Home size={18} className="mr-3" />
                 Dashboard
-              </NavLink>
-              <NavLink
-                to="/dashboard/models"
-                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-                  isActiveRoute('/dashboard/models')
-                    ? 'text-primary bg-primary/10'
-                    : 'text-foreground hover:text-primary hover:bg-primary/10'
-                }`}
-              >
-                <Download size={18} className="mr-3" />
-                My Models
               </NavLink>
               <NavLink
                 to="/dashboard/downloads"

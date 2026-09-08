@@ -236,13 +236,13 @@ const Header: React.FC = () => {
                     </Link>
 
                     <Link
-                      to="/dashboard/models"
+                      to="/dashboard/downloads"
                       className="block px-4 py-2 text-sm text-foreground hover:bg-accent"
                       onClick={() => setUserMenuOpen(false)}
                     >
                       <div className="flex items-center">
                         <Download size={16} className="mr-2" />
-                        My Models
+                        My Downloads
                       </div>
                     </Link>
 
@@ -450,7 +450,7 @@ const Header: React.FC = () => {
                 </NavLink>
 
                 <NavLink
-                  to="/dashboard/models"
+                  to="/dashboard/downloads"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
                     `block py-2 text-sm ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
@@ -458,7 +458,7 @@ const Header: React.FC = () => {
                 >
                   <div className="flex items-center">
                     <Download size={16} className="mr-2" />
-                    My Models
+                    My Downloads
                   </div>
                 </NavLink>
 
