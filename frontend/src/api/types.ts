@@ -158,8 +158,9 @@ export interface TerrainModel {
   // extra STL parts are listed in `parts`.
   partCount?: number
   // Total bytes the download will transfer (the STL, or the ZIP for a
-  // multi-part set). Only present on the model-details response; null if R2
-  // is unavailable or a file's size couldn't be read.
+  // multi-part set). Present on the model-details response and on the buyer's
+  // library (My downloads); null if R2 is unavailable or a file's size couldn't
+  // be read.
   downloadSizeBytes?: number | null
   // My Models list only: how many named models in this listing are missing from
   // the planner (their file was too dense to preview). Undefined everywhere else.

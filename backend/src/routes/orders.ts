@@ -18,6 +18,7 @@ import {
 import { accrueEarningsForOrder } from '../services/earnings';
 import { sendOrderConfirmation } from '../services/email';
 import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
+import { getDownloadBytesForModels } from '../services/downloadSize';
 import {
   findActiveCode,
   createPromoApplier,
@@ -724,6 +725,12 @@ router.get('/library',
       [userId]
     );
 
+    // Download size per model, so "My downloads" can label its button the same way
+    // the product page does ("Download ZIP (4 parts) · 182 MB"). Computed from the
+    // rows we already have (m.* still carries the R2 keys at this point — they're
+    // stripped below) and cached per model, so a repeat visit costs no R2 calls.
+    const downloadSizes = await getDownloadBytesForModels(result.rows);
+
     const models = result.rows.map((row: any) => {
       const { my_review_id, my_review_rating, my_review_title, my_review_comment, purchased_at, ...model } = row;
       // SECURITY: never expose raw R2 keys — even to a buyer who owns the model. The
@@ -741,6 +748,7 @@ router.get('/library',
       return {
         ...model,
         has_glb: hasGlb,
+        download_size_bytes: downloadSizes.get(model.id) ?? null,
         purchasedAt: purchased_at,
         myReview: my_review_id
           ? {

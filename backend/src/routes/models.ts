@@ -31,6 +31,8 @@ import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
 import { isR2Enabled, objectSize, downloadObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint } from '../services/fingerprint';
+// Shared with GET /orders/library so 'My downloads' shows the same size (2026-09-08).
+import { getEstimatedDownloadBytes } from '../services/downloadSize';
 import { annotateModelsWithSales, recordPrice } from '../services/sales';
 import { buildWatermarkHeader, isBinarySTL, watermarkAsciiSTL, WATERMARK_ZERO_ORDER, type WatermarkPayload } from '../services/watermark';
 import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYTES, MAX_MODEL_FILE_MB, type MeshFormat } from '../services/meshConvert';
@@ -2363,66 +2365,6 @@ async function watermarkedEntryBuffer(key: string, format: MeshFormat, payload: 
   if (format === 'stl') return watermarkedSTLBuffer(key, payload);
   const buf = await downloadObject(key);
   return watermarkOriginal(buf, format, payload);
-}
-
-// Computing a model's total download size means one R2 HEAD request per
-// deliverable file — cheap alone, but wasteful to redo on every product-page
-// view of a large multi-part set. Sizes only change when a file version is
-// replaced, which is rare, so an in-memory TTL cache avoids re-HEADing on
-// every view. Not shared across replicas/restarts and not invalidated on
-// re-upload — worst case is a stale size for up to the TTL, which is fine for
-// a display-only estimate that nothing else depends on.
-const DOWNLOAD_SIZE_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const downloadSizeCache = new Map<string, { bytes: number | null; expires: number }>();
-
-/**
- * Total bytes a buyer's download will actually transfer: the STL (+ original
- * file for an OBJ/3MF upload), or all of that summed across every part for a
- * multi-part "set" (mirrors streamWatermarkedZip's own deliverable list,
- * including its exclusion of failed parts). The watermark header rewrite is a
- * fixed 80-byte swap, so it doesn't change a file's length. Returns null if R2
- * isn't configured, or if any object's size couldn't be read (rather than
- * caching/returning a falsely-small total).
- */
-async function getEstimatedDownloadBytes(
-  modelId: string,
-  model: { stl_file_path?: string | null; source_format?: string | null; source_file_path?: string | null },
-  parts: Array<{ stl_file_path?: string | null; source_format?: string | null; source_file_path?: string | null; processing_status?: string | null }>,
-): Promise<number | null> {
-  if (!isR2Enabled()) return null;
-  const cached = downloadSizeCache.get(modelId);
-  if (cached && cached.expires > Date.now()) return cached.bytes;
-
-  const keys: string[] = [];
-  const addKeys = (m: { stl_file_path?: string | null; source_format?: string | null; source_file_path?: string | null }) => {
-    if (m.stl_file_path) keys.push(m.stl_file_path);
-    if (m.source_format && m.source_format !== 'stl' && m.source_file_path) keys.push(m.source_file_path);
-  };
-  addKeys(model);
-  for (const p of parts) {
-    if (p.processing_status === 'failed') continue;
-    addKeys(p);
-  }
-
-  let total = 0;
-  let anyMissing = false;
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = nextIndex++;
-      if (i >= keys.length) return;
-      const size = await objectSize(keys[i]);
-      if (size == null) { anyMissing = true; continue; }
-      total += size;
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(ZIP_FETCH_CONCURRENCY, keys.length) }, () => worker())
-  );
-
-  if (anyMissing) return null;
-  downloadSizeCache.set(modelId, { bytes: total, expires: Date.now() + DOWNLOAD_SIZE_CACHE_TTL_MS });
-  return total;
 }
 
 // How many R2 fetches streamWatermarkedZip runs at once. A large multi-part

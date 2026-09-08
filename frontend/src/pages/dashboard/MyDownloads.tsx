@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { Download, Package, Star } from 'lucide-react'
 import { ordersApi, type PurchasedModel } from '../../api/endpoints/orders'
 import { modelsApi } from '../../api/endpoints/models'
+import { formatBytes } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
 import Button from '../../components/ui/Button'
 import ReviewModal from '../../components/models/ReviewModal'
@@ -109,6 +110,9 @@ const MyDownloads: React.FC = () => {
                 const { model, purchasedAt, myReview } = item
                 const parts = model.partCount ?? 1
                 const isSet = parts > 1
+                // Null when R2 is off or a file's size couldn't be read — the button
+                // then reads exactly as it did before, with no size suffix.
+                const size = formatBytes(model.downloadSizeBytes)
                 return (
                   <div
                     key={model.id}
@@ -169,9 +173,9 @@ const MyDownloads: React.FC = () => {
                         >
                           {busy[model.id]
                             ? 'Preparing…'
-                            : isSet
-                              ? `Download ZIP (${parts} parts)`
-                              : 'Download STL'}
+                            : `${isSet ? `Download ZIP (${parts} parts)` : 'Download STL'}${
+                                size ? ` · ${size}` : ''
+                              }`}
                         </Button>
                         <Button
                           variant="outline"
