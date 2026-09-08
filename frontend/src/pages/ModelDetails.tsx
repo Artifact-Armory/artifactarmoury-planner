@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -13,7 +13,15 @@ import Button from '../components/ui/Button'
 import PriceDisplay from '../components/models/PriceDisplay'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
-import { formatPrice, formatRating } from '../utils/format'
+import { formatPrice, formatRating, formatBytes } from '../utils/format'
+
+// Above this, the download gets a "this may take a while" note — a heavy
+// multi-part set (many print-ready STLs, often with supports baked in) can
+// run into the gigabytes even though any single uploaded file is capped at
+// 250MB. See the "South East Asian village" case: 28 files, ~3GB total, ~200s
+// to download over a typical connection — no server-side bug, just a lot of
+// data to move over the buyer's own internet connection.
+const LARGE_DOWNLOAD_WARN_BYTES = 300_000_000 // 300 MB
 import { licenseInfo } from '../utils/licenses'
 import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
@@ -582,9 +590,20 @@ const ModelDetails: React.FC = () => {
                   disabled={downloading}
                   leftIcon={<Download size={16} />}
                 >
-                  {downloading ? 'Preparing…' : model.partCount && model.partCount > 1 ? `Download ZIP (${model.partCount} parts)` : 'Download STL'}
+                  {downloading
+                    ? 'Preparing…'
+                    : model.partCount && model.partCount > 1
+                    ? `Download ZIP (${model.partCount} parts)${formatBytes(model.downloadSizeBytes) ? ` · ${formatBytes(model.downloadSizeBytes)}` : ''}`
+                    : `Download STL${formatBytes(model.downloadSizeBytes) ? ` · ${formatBytes(model.downloadSizeBytes)}` : ''}`}
                 </Button>
                 {downloadError && <p className="mt-2 text-xs text-destructive">{downloadError}</p>}
+                {!!model.downloadSizeBytes && model.downloadSizeBytes >= LARGE_DOWNLOAD_WARN_BYTES && (
+                  <p className="mt-2 flex items-start gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    Large download ({formatBytes(model.downloadSizeBytes)}) — this can take several
+                    minutes depending on your connection.
+                  </p>
+                )}
                 <p className="mt-2 text-xs text-muted-foreground">
                   Prepared for your account — print it as often as you like, but please don’t pass
                   the file on.

@@ -166,6 +166,11 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   showInPlanner: (model.show_in_planner ?? model.showInPlanner ?? true) as boolean,
   // Multi-part ("set") models: number of STL files + the extra parts.
   partCount: Number(model.part_count ?? model.partCount ?? 1),
+  // Total download size (STL, or ZIP for a multi-part set) — see the backend's
+  // getEstimatedDownloadBytes. Left undefined/null rather than coerced to 0 so
+  // the UI can tell "not known" apart from "empty".
+  downloadSizeBytes:
+    model.download_size_bytes ?? model.downloadSizeBytes ?? null,
   // My Models list badge (2026-09-07): how many named models within this listing
   // are missing from the planner because their file was too dense to preview.
   // Only present on the /my-models list response — undefined elsewhere.
