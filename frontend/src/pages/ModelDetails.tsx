@@ -132,7 +132,13 @@ const ModelDetails: React.FC = () => {
     enabled: isAuthenticated,
     staleTime: 60_000,
   })
-  const owned = Boolean(id && entitlementsQuery.data?.models.has(id))
+  // The artist can always download their own listing (the backend's /:id/download
+  // allows it — model.artist_id === userId), but /orders/entitlements only ever
+  // lists PURCHASED models. Without this, an artist viewing their own product
+  // page saw "Add to cart" instead of a download button, with no way to get
+  // their own file from here.
+  const isOwnModel = Boolean(currentUser && modelQuery.data?.artistId === currentUser.id)
+  const owned = isOwnModel || Boolean(id && entitlementsQuery.data?.models.has(id))
 
   const relatedQuery = useQuery({
     queryKey: ['related-models', id],
