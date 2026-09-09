@@ -233,9 +233,11 @@ const ArtistModels: React.FC = () => {
 
   async function handleDelete(m: TerrainModel) {
     const ok = window.confirm(
-      `Delete “${m.name}”?\n\nThis permanently removes the model, its files and its ` +
-        `re-upload block (its geometry fingerprint), so you can upload it again later. ` +
-        `Anyone who has purchased it will lose access. This cannot be undone.`,
+      `Delete “${m.name}”?\n\nThis removes the listing from the store straight away. ` +
+        `Anyone who already bought it keeps their download — we can't take back ` +
+        `files people have paid for. The file also stays protected, so no one else ` +
+        `can upload it as their own.\n\nYou can upload this same model again ` +
+        `yourself at any time. This can't be undone from here.`,
     )
     if (!ok) return
     setBusyId(m.id)

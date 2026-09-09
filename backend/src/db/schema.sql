@@ -174,7 +174,11 @@ CREATE TABLE models (
     recommended_infill INTEGER, -- Percentage
     
     -- Status & visibility
-    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived', 'flagged')),
+    -- 'archived'/'flagged' are MODERATION takedowns and block downloads for
+    -- everyone but admins. 'deleted' (migration 061) is the artist's own soft
+    -- delete: hidden from the storefront, but buyers keep downloading and the
+    -- dedup fingerprint stays, so nobody else can re-upload the file.
+    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived', 'flagged', 'deleted')),
     visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'unlisted')),
     in_library BOOLEAN DEFAULT false,
     
@@ -231,6 +235,10 @@ CREATE TABLE models (
     flagged_reason TEXT,
     moderated_by UUID REFERENCES users(id),
     moderated_at TIMESTAMP,
+    -- Artist's own soft delete (migration 061). Non-NULL implies status='deleted'.
+    -- The row, its R2 files and its dedup fingerprint are retained on purpose.
+    deleted_at TIMESTAMP,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
 
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
