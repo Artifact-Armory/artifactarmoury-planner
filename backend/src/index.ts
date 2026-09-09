@@ -46,6 +46,8 @@ import { startPayoutScheduler } from './services/payouts';
 import { startIntroCommissionScheduler } from './services/introCommission';
 import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
 import { startFullGlbInlineDrainer } from './services/fullGlb/inline';
+import { startQueueAlarmScheduler } from './services/queueAlarm';
+import { getQueueHealth } from './services/queueHealth';
 
 // ============================================================================
 // CONFIGURATION
@@ -105,6 +107,48 @@ app.get('/health', async (req, res) => {
       status: 'unhealthy',
       error: 'Database connection failed'
     });
+  }
+});
+
+/**
+ * Queue health for an EXTERNAL uptime monitor (Better Stack, UptimeRobot, ...).
+ *
+ * Deliberately separate from /health: that one is Railway's container probe, and
+ * making it fail on a queue backlog would restart the API server — which is not
+ * where the fault is and would take the storefront down over a worker problem.
+ * This returns 503 when processing is broken so a monitor can page, and 200
+ * otherwise.
+ *
+ * Unauthenticated so a monitor can poll it, therefore it exposes only counts and
+ * problem messages — never model ids, artist names or R2 keys. Set
+ * QUEUE_HEALTH_TOKEN to require `?token=` if even that should be private.
+ */
+app.get('/health/queues', async (req, res) => {
+  const required = process.env.QUEUE_HEALTH_TOKEN;
+  if (required && req.query.token !== required) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  try {
+    const health = await getQueueHealth();
+    res.status(health.healthy ? 200 : 503).json({
+      status: health.healthy ? 'healthy' : 'unhealthy',
+      checkedAt: health.checkedAt,
+      liveWorkers: health.liveWorkers,
+      ingestWorkerRequired: health.ingestWorkerRequired,
+      stuckModels: health.stuckModels.length,
+      queues: health.queues.map((q) => ({
+        queue: q.queue,
+        enabled: q.enabled,
+        queued: q.queued,
+        running: q.running,
+        failed: q.failed,
+        oldestQueuedAgeSec: q.oldestQueuedAgeSec,
+      })),
+      problems: health.problems.map((p) => ({ key: p.key, severity: p.severity, message: p.message })),
+    });
+  } catch (error) {
+    logger.error('Queue health check failed', { error });
+    res.status(503).json({ status: 'unhealthy', error: 'Queue health check failed' });
   }
 });
 
@@ -203,6 +247,11 @@ async function startServer() {
     // no worker is deployed this drains the queue in-process instead, so the
     // feature degrades to "slower" rather than "silently off". No-op otherwise.
     startFullGlbInlineDrainer();
+
+    // Watch the processing queues and shout if uploads stop being processed.
+    // Deliberately hosted HERE and not in the worker: an alarm running inside
+    // the process it monitors cannot report that process being dead.
+    startQueueAlarmScheduler();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {

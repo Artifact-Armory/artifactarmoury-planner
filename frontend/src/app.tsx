@@ -90,6 +90,7 @@ import AdminModeration from './pages/admin/AdminModeration';
 import AdminMessages from './pages/admin/AdminMessages';
 import AdminMessageReports from './pages/admin/AdminMessageReports';
 import AdminContactMessages from './pages/admin/AdminContactMessages';
+import AdminQueues from './pages/admin/AdminQueues';
 
 // Planner
 import Planner from './pages/Planner';
@@ -327,6 +328,7 @@ function App() {
               <Route path="messages" element={<AdminMessages />} />
               <Route path="message-reports" element={<AdminMessageReports />} />
               <Route path="contact" element={<AdminContactMessages />} />
+              <Route path="queues" element={<AdminQueues />} />
               <Route path="reports" element={<AdminReports />} />
             </Route>
 

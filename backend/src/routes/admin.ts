@@ -21,6 +21,7 @@ import { vatPenceOn } from '../services/vat';
 import { getSummary, getProducts } from '../services/artistAnalytics';
 import { ensureRollupsFresh } from '../services/analyticsRollup';
 import { parseRange } from './analytics';
+import { getQueueHealth } from '../services/queueHealth';
 
 const router = Router();
 
@@ -1996,6 +1997,56 @@ router.post('/conversation-reports/:id/resolve',
 
     logger.warn('Conversation report resolved', { adminId, reportId: id, action, notes });
     res.json({ message: 'Report resolved', action, status: newStatus, notes });
+  })
+);
+
+// ============================================================================
+// PROCESSING QUEUES (migration 062): is upload processing actually working?
+// Read-only dashboard data plus a requeue escape hatch. The alarm in
+// services/queueAlarm.ts pushes the same signal out by email/bell; this is
+// where you look once it has.
+// ============================================================================
+
+router.get('/queues',
+  asyncHandler(async (_req, res) => {
+    res.json(await getQueueHealth());
+  })
+);
+
+/**
+ * Hand a stuck or failed job back to the queue.
+ *
+ * The runbook action for "uploads are stuck". Clearing locked_at/locked_by as
+ * well as the status matters: a row left 'running' by a worker that died is
+ * still lock-held, and resetting only the status would leave the next claim
+ * skipping it until the stale-lock window expired anyway. attempts is reset so
+ * a job that already burned its max_attempts can actually run again.
+ */
+router.post('/queues/:queue/:jobId/requeue',
+  asyncHandler(async (req, res) => {
+    const { queue, jobId } = req.params;
+    // Fixed allowlist — the table name is interpolated, so it must never come
+    // from user input.
+    const TABLES: Record<string, string> = {
+      ingest: 'model_ingest_jobs',
+      bake: 'proxy_bake_jobs',
+      full_glb: 'full_glb_jobs',
+    };
+    const table = TABLES[queue];
+    if (!table) throw new ValidationError('Unknown queue');
+
+    const result = await db.query(
+      `UPDATE ${table}
+          SET status = 'queued', attempts = 0, error = NULL,
+              locked_at = NULL, locked_by = NULL, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, status`,
+      [jobId]
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Job');
+
+    logger.info('Admin requeued job', { adminId: (req as any).userId, queue, jobId });
+    res.json({ message: 'Job requeued', job: result.rows[0] });
   })
 );
 

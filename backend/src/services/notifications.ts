@@ -117,6 +117,21 @@ async function notifyAdmins(input: Omit<NotificationInput, 'userId'>): Promise<v
 }
 
 /**
+ * Processing-queue alarm (services/queueAlarm.ts). Goes to the in-app admin bell
+ * as well as email, because sendEmail() logs-and-swallows its failures by design
+ * — if Resend is misconfigured the email channel fails silently, which is the
+ * one thing an outage alarm must not do.
+ */
+export async function notifyAdminsOfQueueAlarm(title: string, body: string): Promise<void> {
+  await notifyAdmins({
+    type: 'admin.queue_alarm',
+    title,
+    body,
+    link: '/admin/queues',
+  })
+}
+
+/**
  * An artist chose to publish (or keep published) a model despite a serious mesh
  * QA warning (real open edges/holes) — let admins know so a pattern of ignored
  * warnings across a listing or an artist is visible, not silent.

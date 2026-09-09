@@ -41,6 +41,7 @@ import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb
 import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
 import { isLargeJobLockHeld } from '../services/modelIngest/queue'
+import { recordWorkerHeartbeat } from '../services/queueHealth'
 import { closeDatabase } from '../db'
 
 const POLL_INTERVAL_MS = Number(process.env.PROXY_BAKE_POLL_MS ?? 5000)
@@ -50,6 +51,9 @@ let stopping = false
 let draining = false
 /** The job this worker is baking right now, so shutdown can hand it back. */
 let currentJob: BakeJobRow | null = null
+/** Jobs finished since boot — reported in the heartbeat so the admin queue view
+ *  can distinguish a worker that is working from one that is merely spinning. */
+let jobsCompleted = 0
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -116,6 +120,12 @@ async function main(): Promise<void> {
   while (!stopping) {
     let didWork = false
     try {
+      // Liveness beacon (migration 062), written EVERY cycle including idle ones.
+      // Per-job locks only prove liveness while a job runs, so they cannot tell
+      // "healthy and idle" from "dead with an empty queue" — and the second is
+      // the state worth catching, since it is the one that precedes a pile-up.
+      await recordWorkerHeartbeat(WORKER_ID, { kind: 'bake', jobsCompleted })
+
       // Ingest jobs first — see the file header for why.
       didWork = await runOneIngestJob(WORKER_ID)
 
@@ -145,6 +155,7 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })
     }
+    if (didWork) jobsCompleted++
     if (draining) break // finished the in-flight job during shutdown
     if (!didWork) await sleep(POLL_INTERVAL_MS)
   }

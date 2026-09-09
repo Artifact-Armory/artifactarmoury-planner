@@ -840,6 +840,25 @@ just relocated from "in the API server" to "across worker replicas" rather than 
   for the lock. Verify by scaling the worker to 2+ replicas and uploading two large files at once,
   watching `railway logs` for one "Large ingest job deferred" line.
 
+## Bundle store page fixes (built 2026-09-09)
+Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
++ BUNDLES" above), fixed together in one session:
+- **Thumbnail upload had no visible button.** `BundleForm.tsx` (used by both `CreateBundle.tsx`
+  and `EditBundle.tsx`) had a bare unstyled `<input type="file">` — restyled to the same bordered
+  "Choose image…" label + `Upload` icon pattern `CreateModel.tsx` already uses for its own
+  thumbnail field, so there's now something to actually click.
+- **Bundle savings are now shown to buyers.** `BundleDetails.tsx` sums each included model's
+  `basePrice` and compares it to the bundle's own (sale-aware) price, rendering "Bought
+  separately: £X" vs. "Bundle £Y — you save £Z (N%)" — once under the model list, once in the buy
+  panel — but only when the saving is actually positive.
+- **Owned models are now flagged inside a bundle.** Each model row gets a "You own this" badge
+  when the signed-in buyer already holds it (reusing the `GET /orders/entitlements` query the page
+  already ran for the "you own every model" banner — no extra request), plus an owned-count
+  summary line under the section heading.
+- Frontend typechecks clean. Not built: the `/bundles` **list** page cards still show only the
+  bundle price, no savings badge — only the detail page (`/bundles/:id`) has it; a reasonable
+  follow-up if wanted, not requested.
+
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as
   **strings**. Coerce with `Number()` before `.toFixed()` etc. (`transformers.ts`,
@@ -1053,6 +1072,36 @@ just relocated from "in the API server" to "across worker replicas" rather than 
   UPDATE users SET role='artist', email_verified=true WHERE email='firefox68@hotmail.co.uk';
   ```
   (Role is baked into the JWT, so the user must **log out/in** after promotion.)
+
+**RUNBOOK — "uploads are stuck at processing"** (the most likely invite-day failure).
+Symptom: an artist uploads and the listing never gets a preview; `processing_status`
+stays `processing`. Because `MODEL_INGEST_WORKER_ENABLED=true` and that queue has **no
+in-process fallback** by design (see 057), a dead worker means *every* upload hangs while
+the rest of the site looks perfectly healthy.
+1. **Look:** `/admin/queues` (admin nav -> "Processing Queues"). It shows live workers, per-queue
+   depth, the oldest waiting job, and which models are stuck. `GET /health/queues` returns the
+   same verdict as 200/503 for an external uptime monitor.
+2. **Diagnose:** if "live workers" is 0, the worker service is down -> `railway logs` on the
+   **worker** service. If workers are live but the ingest queue's oldest job is old, it is
+   wedged or crash-looping on one job — the logs name the model.
+3. **Fix:** restart the worker service on Railway. Queued jobs resume on their own; a job that
+   was mid-flight is reclaimed once its lock goes stale. Nothing is lost, so restarting is
+   always safe.
+4. **Individual stuck job:** requeue it from `/admin/queues`
+   (`POST /api/admin/queues/:queue/:jobId/requeue`) — this clears `locked_at`/`locked_by` and
+   resets `attempts`, so a job that burned its `max_attempts` can run again.
+5. **Last resort** (worker cannot be brought back): unset `MODEL_INGEST_WORKER_ENABLED` to fall
+   back to in-process ingest. This restores uploads but reinstates the OOM risk to the API
+   server that 057 exists to remove — a deliberate emergency trade, not a resting state.
+
+The alarm that tells you all this without looking: `services/queueAlarm.ts`, polled every
+5 min on the **API server** (never the worker — an alarm inside the process it watches cannot
+report that process being dead). It emails `SUPPORT_EMAIL` *and* raises an in-app admin
+notification, because `sendEmail()` swallows its own failures by design. It latches per
+incident (`queue_alert_state`, migration 062), so an ongoing outage mails once, repeats at most
+every `QUEUE_ALARM_REPEAT_MS` (6h), and sends one recovery notice. Knobs:
+`QUEUE_ALARM_ENABLED=false` to mute, `QUEUE_WORKER_STALE_MS` (5 min), `QUEUE_STUCK_MS` (20 min),
+`QUEUE_DEPTH_WARN` (25), `QUEUE_HEALTH_TOKEN` to require a token on `/health/queues`.
 
 **Trace a downloaded STL's watermark** (identify which buyer a leaked file came
 from). Run via `railway run` so the production `WATERMARK_SECRET` is injected:
