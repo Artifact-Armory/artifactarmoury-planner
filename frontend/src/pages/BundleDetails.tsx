@@ -34,10 +34,22 @@ const BundleDetails: React.FC = () => {
   })
 
   const bundle = bundleQuery.data
+  const ownsModel = React.useCallback(
+    (modelId: string) => Boolean(entitlementsQuery.data?.models.has(modelId)),
+    [entitlementsQuery.data],
+  )
   const owned =
     Boolean(bundle) &&
     (entitlementsQuery.data?.bundles.has(bundle!.id) ||
-      (bundle!.models.length > 0 && bundle!.models.every((m) => entitlementsQuery.data?.models.has(m.id))))
+      (bundle!.models.length > 0 && bundle!.models.every((m) => ownsModel(m.id))))
+  const ownedCount = bundle ? bundle.models.filter((m) => ownsModel(m.id)).length : 0
+
+  // What the same models cost bought one by one, against what the bundle asks.
+  const separateTotal = bundle ? bundle.models.reduce((sum, m) => sum + m.basePrice, 0) : 0
+  const bundlePrice = bundle ? (bundle.onSale && bundle.salePrice != null ? bundle.salePrice : bundle.price) : 0
+  const savings = separateTotal - bundlePrice
+  const savingsPercent = separateTotal > 0 ? Math.round((savings / separateTotal) * 100) : 0
+  const showSavings = savings > 0.005
 
   if (bundleQuery.isLoading) {
     return (
@@ -102,6 +114,11 @@ const BundleDetails: React.FC = () => {
 
           <section className="rounded-2xl bg-card p-6 shadow-xs">
             <h2 className="text-lg font-semibold text-foreground">Includes {bundle.models.length} models</h2>
+            {ownedCount > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                You already own {ownedCount} of these {ownedCount === 1 ? 'model' : 'models'}.
+              </p>
+            )}
             <ul className="mt-4 divide-y divide-border">
               {bundle.models.map((m) => (
                 <li key={m.id} className="flex items-center gap-3 py-3">
@@ -111,10 +128,25 @@ const BundleDetails: React.FC = () => {
                   <Link to={`/models/${m.id}`} className="flex-1 truncate text-sm font-medium text-foreground hover:text-primary">
                     {m.name}
                   </Link>
+                  {ownsModel(m.id) && (
+                    <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle size={14} /> You own this
+                    </span>
+                  )}
                   <span className="text-xs text-muted-foreground line-through">{formatPrice(m.basePrice)}</span>
                 </li>
               ))}
             </ul>
+            {showSavings && (
+              <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-4 text-sm">
+                <span className="text-muted-foreground">
+                  Bought separately: <span className="line-through">{formatPrice(separateTotal)}</span>
+                </span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  Bundle {formatPrice(bundlePrice)} — you save {formatPrice(savings)} ({savingsPercent}%)
+                </span>
+              </div>
+            )}
           </section>
         </div>
 
@@ -139,6 +171,13 @@ const BundleDetails: React.FC = () => {
             {bundle.onSale && bundle.saleEndsAt && (
               <p className="mt-1 text-xs font-medium text-rose-600">
                 Sale ends {new Date(bundle.saleEndsAt).toLocaleDateString()}
+              </p>
+            )}
+
+            {showSavings && (
+              <p className="mt-3 rounded-md bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                Save {formatPrice(savings)} ({savingsPercent}%) — these models cost {formatPrice(separateTotal)} bought
+                separately.
               </p>
             )}
 

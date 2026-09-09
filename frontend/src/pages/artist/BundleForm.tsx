@@ -1,4 +1,5 @@
 import React from 'react'
+import { Upload } from 'lucide-react'
 import { modelsApi } from '../../api/endpoints/models'
 import { uploadsApi } from '../../api/endpoints/uploads'
 import { TerrainModel } from '../../api/types'
@@ -96,10 +97,16 @@ const BundleForm: React.FC<BundleFormProps> = ({ initial, submitLabel, onSave, e
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Thumbnail {initial?.thumbnailUrl ? '(replace)' : ''}</label>
-          <input type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
-          {initial?.thumbnailUrl && !thumbFile && (
+          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={16} />
+            Choose image…
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} disabled={busy} />
+          </label>
+          {thumbFile ? (
+            <p className="mt-1 truncate text-xs text-muted-foreground">{thumbFile.name}</p>
+          ) : initial?.thumbnailUrl ? (
             <img src={initial.thumbnailUrl} alt="" className="mt-2 h-16 w-16 rounded-sm object-cover" />
-          )}
+          ) : null}
         </div>
       </div>
 
