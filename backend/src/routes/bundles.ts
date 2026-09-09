@@ -35,7 +35,8 @@ async function assertOwnedReadyModels(artistId: string, modelIds: string[]) {
   const found = await db.query(
     `SELECT id FROM models
      WHERE id = ANY($1::uuid[]) AND artist_id = $2
-       AND (processing_status IS NULL OR processing_status = 'ready')`,
+       AND (processing_status IS NULL OR processing_status = 'ready')
+       AND deleted_at IS NULL`,
     [uniq, artistId]
   );
   if (found.rows.length !== uniq.length) {

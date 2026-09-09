@@ -881,7 +881,9 @@ router.get('/my-models',
 
     const offset = (Number(page) - 1) * Number(limit);
     
-    let whereClause = 'WHERE artist_id = $1';
+    // Soft-deleted listings (061) stay in the table for buyer downloads and
+    // dedup, but must not appear in the artist's own My Models list.
+    let whereClause = 'WHERE artist_id = $1 AND deleted_at IS NULL';
     const params: any[] = [(req as any).userId];
 
     if (status) {
@@ -1220,7 +1222,7 @@ router.get('/mine/planner',
        FROM models
        WHERE artist_id = $1 AND part_count = 1 AND glb_file_path IS NOT NULL
          AND (processing_status IS NULL OR processing_status = 'ready')
-         AND show_in_planner = true
+         AND show_in_planner = true AND deleted_at IS NULL
        ORDER BY created_at DESC`,
       [(req as any).userId]
     )).rows;
@@ -1298,7 +1300,31 @@ router.get('/:id',
 
     // Check visibility permissions
     if (model.status !== 'published' || model.visibility !== 'public') {
-      if (!(req as any).userId || ((req as any).userId !== model.artist_id && (req as any).user?.role !== 'admin')) {
+      const viewerUserId = (req as any).userId;
+      const isOwnerOrAdmin =
+        !!viewerUserId &&
+        (viewerUserId === model.artist_id || (req as any).user?.role === 'admin');
+
+      // A soft-deleted listing (061) stays reachable for someone who already
+      // bought it — retaining their access is the entire point of not hard
+      // deleting — so their My Downloads link and this page's Download button
+      // keep working. Note this deliberately does NOT extend to 'archived' /
+      // 'flagged': those are moderation takedowns, where cutting off prior
+      // buyers is the intended effect (see the download route's own gate).
+      let entitledBuyer = false;
+      if (!isOwnerOrAdmin && viewerUserId && model.status === 'deleted') {
+        const owned = await db.query(
+          `SELECT 1 FROM order_items oi
+             JOIN orders o ON oi.order_id = o.id
+            WHERE oi.model_id = $1 AND o.user_id = $2
+              AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
+            LIMIT 1`,
+          [id, viewerUserId]
+        );
+        entitledBuyer = owned.rows.length > 0;
+      }
+
+      if (!isOwnerOrAdmin && !entitledBuyer) {
         throw new NotFoundError('Model');
       }
     }
@@ -1646,7 +1672,7 @@ router.post('/:id/publish',
     // Verify model is complete enough to publish
     const modelResult = await db.query(
       `SELECT artist_id, name, description, thumbnail_path, base_price, status, published_at,
-              mesh_analyzed, mesh_open_edges, mesh_warning_acknowledged
+              mesh_analyzed, mesh_open_edges, mesh_warning_acknowledged, deleted_at
        FROM models WHERE id = $1`,
       [id]
     );
@@ -1656,6 +1682,12 @@ router.post('/:id/publish',
     }
 
     const model = modelResult.rows[0];
+
+    // A soft-deleted listing (061) is retained for buyer downloads and dedup only.
+    // Re-publishing it would resurrect it on the storefront behind the artist's back.
+    if (model.deleted_at) {
+      throw new ValidationError('This model has been deleted and cannot be published');
+    }
 
     if (!model.thumbnail_path) {
       throw new ValidationError('Model must have a thumbnail before publishing');
@@ -1790,38 +1822,36 @@ router.delete('/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    // Get model file paths for cleanup
     const result = await db.query(
-      `SELECT stl_file_path, glb_file_path, thumbnail_path
-       FROM models WHERE id = $1`,
+      `SELECT status, deleted_at FROM models WHERE id = $1`,
       [id]
     );
 
     if (result.rows.length === 0) {
       throw new NotFoundError('Model');
     }
+    if (result.rows[0].deleted_at) {
+      throw new ValidationError('This model has already been deleted');
+    }
 
-    const model = result.rows[0];
-
-    // Delete model from database
-    await db.query('DELETE FROM models WHERE id = $1', [id]);
-
-    // Delete files from storage (async, don't wait)
-    deleteFromStorage(model.stl_file_path).catch(err => 
-      logger.error('Failed to delete STL file', { error: err })
+    // SOFT DELETE (migration 061). Deliberately NOT a row delete and NOT an R2
+    // cleanup:
+    //   * `order_items.model_id ON DELETE SET NULL` means a hard delete silently
+    //     revokes the downloads of everyone who paid for this model — a refund
+    //     and consumer-law problem once sellers other than us are listing.
+    //   * the row's file_hash + geometry_fingerprint are the anti-theft corpus.
+    //     Dropping them would let a stranger upload this exact file as their own.
+    // The listing disappears from the storefront because every public query
+    // filters `status = 'published'`; the download route still serves it because
+    // 'deleted' is not in its archived/flagged takedown gate.
+    await db.query(
+      `UPDATE models
+          SET status = 'deleted', deleted_at = NOW(), deleted_by = $2, updated_at = NOW()
+        WHERE id = $1`,
+      [id, (req as any).userId]
     );
-    if (model.glb_file_path) {
-      deleteFromStorage(model.glb_file_path).catch(err => 
-        logger.error('Failed to delete GLB file', { error: err })
-      );
-    }
-    if (model.thumbnail_path) {
-      deleteFromStorage(model.thumbnail_path).catch(err => 
-        logger.error('Failed to delete thumbnail', { error: err })
-      );
-    }
 
-    logger.info('Model deleted', { userId: (req as any).userId, modelId: id });
+    logger.info('Model soft-deleted', { userId: (req as any).userId, modelId: id });
 
     res.json({
       message: 'Model deleted successfully',
