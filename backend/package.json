@@ -53,6 +53,7 @@
     "@gltf-transform/core": "^4.3.0",
     "@gltf-transform/extensions": "^4.4.1",
     "@gltf-transform/functions": "^4.4.1",
+    "@sentry/node": "^10.74.0",
     "adm-zip": "^0.6.0",
     "archiver": "^7.0.1",
     "bcrypt": "^5.1.1",

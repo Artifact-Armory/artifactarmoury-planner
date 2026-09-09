@@ -73,6 +73,38 @@ const AdminUsers: React.FC = () => {
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to update status'),
   })
 
+  const roleMut = useMutation({
+    mutationFn: ({ id, role, artistName }: { id: string; role: 'customer' | 'artist' | 'admin'; artistName?: string }) =>
+      adminApi.setUserRole(id, role, artistName),
+    onSuccess: (_d, v) => {
+      toast.success(`Role changed to ${v.role}. Their existing sessions were signed out.`)
+      invalidate()
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Failed to change role'),
+  })
+
+  /**
+   * Promoting needs a store name (every listing renders it); demoting is
+   * destructive enough to confirm. Both sign the user out server-side, since
+   * their JWT carries the old role.
+   */
+  function changeRole(u: any, role: 'customer' | 'artist' | 'admin') {
+    if (role === 'artist') {
+      const artistName = u.artist_name || window.prompt(`Store name for ${u.email}?`, u.display_name || '')
+      if (!artistName || !artistName.trim()) return
+      roleMut.mutate({ id: u.id, role, artistName: artistName.trim() })
+      return
+    }
+    if (!window.confirm(
+      `Change ${u.email} from ${u.role} to ${role}?
+
+` +
+      `They will be signed out immediately. If they are an artist, their listings stay ` +
+      `published and buyers keep their downloads — but they lose access to the artist dashboard.`
+    )) return
+    roleMut.mutate({ id: u.id, role })
+  }
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => adminApi.deleteUser(id),
     onSuccess: () => {
@@ -336,6 +368,24 @@ const AdminUsers: React.FC = () => {
                           >
                             Profile <ExternalLink size={11} />
                           </a>
+                        )}
+                        {u.role === 'customer' && (
+                          <button
+                            onClick={() => changeRole(u, 'artist')}
+                            className="text-primary hover:underline"
+                            title="Grant selling access without an invite code"
+                          >
+                            Make artist
+                          </button>
+                        )}
+                        {u.role === 'artist' && (
+                          <button
+                            onClick={() => changeRole(u, 'customer')}
+                            className="text-muted-foreground hover:text-red-600 hover:underline"
+                            title="Remove selling access"
+                          >
+                            Remove artist
+                          </button>
                         )}
                         {u.account_status === 'active' ? (
                           <>

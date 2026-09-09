@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import Button from '../../components/ui/Button'
+import RedeemArtistInvite from './RedeemArtistInvite'
 import Seo from '../../components/common/Seo'
 import { SITE_NAME } from '../../config/brand'
 
@@ -58,17 +58,21 @@ const ArtistApplication: React.FC = () => {
           </Link>
         </div>
 
+        <RedeemArtistInvite />
+
         <div className="mt-8 rounded-2xl border border-dashed border-border bg-muted p-6 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">Have an invite code already?</p>
+          <p className="font-medium text-foreground">No code yet?</p>
           <p className="mt-2">
-            Use it during registration to unlock the artist dashboard immediately. Once approved you can set pricing,
-            upload STL/GLB files, and schedule releases.
+            Email a portfolio to the curation team and we&apos;ll send one if there&apos;s a good fit.
           </p>
+          <a
+            href="mailto:artists@artifactarmoury.com?subject=Artist%20application"
+            className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            Email the curation team
+          </a>
         </div>
 
-        <Button className="mt-8" variant="primary">
-          Email the curation team
-        </Button>
       </section>
     </div>
   )

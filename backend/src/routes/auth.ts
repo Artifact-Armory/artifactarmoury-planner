@@ -28,6 +28,10 @@ import {
   hashBackupCode,
 } from '../services/totp';
 import crypto from 'crypto';
+import {
+  SELLER_TERMS_VERSION, checkInvite, assertInviteUsable,
+  validateArtistName, assertTermsAccepted,
+} from '../services/artistOnboarding';
 import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
 
@@ -192,7 +196,7 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
 // ============================================================================
 
 router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => {
-  const { email, password, displayName, artistName, inviteCode } = req.body;
+  const { email, password, displayName, artistName, inviteCode, acceptTerms } = req.body;
 
   // Validate input
   if (!email || !password || !displayName || !artistName || !inviteCode) {
@@ -201,6 +205,10 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
 
   validateEmail(email);
   validatePassword(password);
+  const cleanArtistName = validateArtistName(artistName);
+  // The seller agreement is what lets us take commission, hold their files
+  // and pay them out. It gets an explicit, recorded acceptance (063).
+  assertTermsAccepted(acceptTerms);
 
   // Validate invite code. Note: we deliberately do NOT filter on `used_by IS NULL`
   // here — that column only records the *first* redeemer, so filtering on it broke
@@ -213,19 +221,8 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
     [inviteCode]
   );
 
-  if (inviteResult.rows.length === 0) {
-    throw new ValidationError('Invalid invite code');
-  }
-
   const invite = inviteResult.rows[0];
-
-  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-    throw new ValidationError('Invite code has expired');
-  }
-
-  if (invite.current_uses >= invite.max_uses) {
-    throw new ValidationError('Invite code has reached maximum uses');
-  }
+  assertInviteUsable(invite);
 
   // Check if user already exists
   const existingUser = await db.query(
@@ -248,10 +245,12 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
 
     // Create user
     const userResult = await client.query(
-      `INSERT INTO users (email, password_hash, display_name, role, artist_name)
-       VALUES ($1, $2, $3, 'artist', $4)
+      `INSERT INTO users (email, password_hash, display_name, role, artist_name,
+                          artist_terms_accepted_at, artist_terms_version, became_artist_at)
+       VALUES ($1, $2, $3, 'artist', $4, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP)
        RETURNING id, email, display_name, role, artist_name, created_at`,
-      [email.toLowerCase(), passwordHash, sanitizeString(displayName), sanitizeString(artistName)]
+      [email.toLowerCase(), passwordHash, sanitizeString(displayName),
+       sanitizeString(cleanArtistName), SELLER_TERMS_VERSION]
     );
 
     const user = userResult.rows[0];
@@ -755,6 +754,119 @@ router.post('/resend-verification', authenticate, emailRateLimit, asyncHandler(a
 }));
 
 // ============================================================================
+// UPGRADE AN EXISTING ACCOUNT TO ARTIST (migration 063)
+// ============================================================================
+// Without this, a buyer who wants to start selling is stuck: `users.email` is
+// UNIQUE, so "just register as an artist" means abandoning their account and
+// making a second one under a different address — losing their purchases,
+// downloads and saved tables. This redeems an invite code against the account
+// they already have.
+
+router.post('/upgrade-to-artist', authenticate, asyncHandler(async (req: any, res) => {
+  const { artistName, inviteCode, acceptTerms } = req.body ?? {};
+  const userId = req.userId;
+
+  if (!inviteCode) throw new ValidationError('An invite code is required');
+  const cleanArtistName = validateArtistName(artistName);
+  assertTermsAccepted(acceptTerms);
+
+  const currentResult = await db.query(
+    'SELECT id, email, display_name, role, email_verified FROM users WHERE id = $1',
+    [userId]
+  );
+  const current = currentResult.rows[0];
+  if (!current) throw new AuthenticationError('Account not found');
+
+  // Admins are deliberately excluded: flipping an admin's role to 'artist' would
+  // silently DEMOTE them, since role is a single column and not a set.
+  if (current.role === 'artist') {
+    throw new ValidationError('This account is already an artist account');
+  }
+  if (current.role !== 'customer') {
+    throw new ValidationError('This account type cannot be upgraded to an artist account');
+  }
+
+  const client = await (db as any).getClient?.() ?? await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock the invite row for the duration of the transaction. Two people
+    // redeeming a one-use code at the same moment would otherwise both read
+    // current_uses = 0 and both succeed.
+    const inviteResult = await client.query(
+      `SELECT id, max_uses, current_uses, expires_at
+         FROM invite_codes WHERE code = $1 FOR UPDATE`,
+      [inviteCode]
+    );
+    assertInviteUsable(inviteResult.rows[0]);
+    const invite = inviteResult.rows[0];
+
+    const updated = await client.query(
+      `UPDATE users
+          SET role = 'artist',
+              artist_name = $2,
+              artist_terms_accepted_at = CURRENT_TIMESTAMP,
+              artist_terms_version = $3,
+              became_artist_at = COALESCE(became_artist_at, CURRENT_TIMESTAMP),
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING id, email, display_name, role, artist_name, email_verified,
+                  stripe_onboarding_complete, two_factor_enabled`,
+      [userId, sanitizeString(cleanArtistName), SELLER_TERMS_VERSION]
+    );
+
+    await client.query(
+      `UPDATE invite_codes
+          SET used_by = COALESCE(used_by, $1),
+              current_uses = current_uses + 1,
+              used_at = COALESCE(used_at, CURRENT_TIMESTAMP)
+        WHERE id = $2`,
+      [userId, invite.id]
+    );
+
+    await client.query(
+      `INSERT INTO activity_log (user_id, action, resource_type, metadata, ip_address, user_agent)
+       VALUES ($1, 'artist.upgraded', 'user', $2, $3, $4)`,
+      [userId, JSON.stringify({ inviteCode, termsVersion: SELLER_TERMS_VERSION }),
+       req.ip, req.get('user-agent')]
+    );
+
+    await client.query('COMMIT');
+
+    const user = updated.rows[0];
+
+    // Role is baked into the JWT, so the token they are holding still says
+    // 'customer' and every artist route would keep rejecting them until they
+    // happened to log out and back in. Hand back fresh tokens instead.
+    const accessToken = generateToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    logger.info('Account upgraded to artist', { userId, artistName: user.artist_name });
+
+    res.json({
+      message: 'Your account is now an artist account.',
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.display_name,
+        role: user.role,
+        artistName: user.artist_name,
+        emailVerified: user.email_verified,
+        stripeOnboardingComplete: !!user.stripe_onboarding_complete,
+        twoFactorEnabled: !!user.two_factor_enabled
+      },
+      accessToken,
+      refreshToken
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
+// ============================================================================
 // VERIFY INVITE CODE
 // ============================================================================
 
@@ -772,24 +884,7 @@ router.post('/invite/verify', asyncHandler(async (req, res) => {
     [code]
   );
 
-  if (result.rows.length === 0) {
-    res.json({ valid: false, message: 'Invalid invite code' });
-    return;
-  }
-
-  const invite = result.rows[0];
-
-  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-    res.json({ valid: false, message: 'Invite code has expired' });
-    return;
-  }
-
-  if (invite.current_uses >= invite.max_uses) {
-    res.json({ valid: false, message: 'Invite code has reached maximum uses' });
-    return;
-  }
-
-  res.json({ valid: true, message: 'Invite code is valid' });
+  res.json(checkInvite(result.rows[0]));
 }));
 
 // ============================================================================

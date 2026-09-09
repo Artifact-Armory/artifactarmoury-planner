@@ -1,4 +1,5 @@
 import React from 'react'
+import { captureException } from '../../lib/sentry'
 
 type Props = { children: React.ReactNode }
 type State = { hasError: boolean; error?: Error }
@@ -16,6 +17,9 @@ class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught an error', error, errorInfo)
+    // This boundary is the last thing standing between a crash and a blank
+    // screen, so it is also the last chance to find out the crash happened.
+    captureException(error, { componentStack: errorInfo.componentStack })
   }
 
   render() {

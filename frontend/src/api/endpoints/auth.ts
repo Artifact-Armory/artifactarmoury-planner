@@ -53,6 +53,39 @@ export const authApi = {
     return parseAuthResponse(response.data)
   },
 
+  /** Create a NEW artist account against an invite code. */
+  registerArtist: async (data: {
+    email: string
+    password: string
+    displayName: string
+    artistName: string
+    inviteCode: string
+    acceptTerms: boolean
+  }): Promise<AuthResponse> => {
+    const response = await apiClient.post<RawAuthResponse>(`${AUTH_BASE}/register/artist`, data)
+    return parseAuthResponse(response.data)
+  },
+
+  /**
+   * Turn the signed-in customer account into an artist account. Returns FRESH
+   * tokens — the role lives inside the JWT, so the old one still says 'customer'
+   * and must be replaced or every artist route keeps 403ing.
+   */
+  upgradeToArtist: async (data: {
+    artistName: string
+    inviteCode: string
+    acceptTerms: boolean
+  }): Promise<AuthResponse> => {
+    const response = await apiClient.post<RawAuthResponse>(`${AUTH_BASE}/upgrade-to-artist`, data)
+    return parseAuthResponse(response.data)
+  },
+
+  /** Check an invite code before submitting, so a typo is caught early. */
+  verifyInvite: async (code: string): Promise<{ valid: boolean; message: string }> => {
+    const response = await apiClient.post(`${AUTH_BASE}/invite/verify`, { code })
+    return response.data
+  },
+
   login: async (data: LoginRequest): Promise<LoginResult> => {
     const response = await apiClient.post<any>(`${AUTH_BASE}/login`, data)
     if (response.data?.twoFactorRequired) {

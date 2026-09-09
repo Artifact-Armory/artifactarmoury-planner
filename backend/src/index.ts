@@ -1,6 +1,13 @@
 // backend/src/index.ts
 // Main server entry point
 
+// Sentry first, before anything else is imported or any request is served —
+// the SDK instruments modules as they load, so initialising it after the app is
+// already wired up leaves the earliest (and often most interesting) failures
+// unreported. No-op when SENTRY_DSN is unset.
+import { initSentry } from './services/sentry';
+initSentry();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

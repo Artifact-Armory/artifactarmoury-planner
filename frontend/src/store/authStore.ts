@@ -1,3 +1,4 @@
+import { setSentryUser } from '../lib/sentry'
 // src/store/authStore.ts
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -48,6 +49,10 @@ export const useAuthStore = create<AuthState>()(
           localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
         }
 
+        // Tag crash reports with who hit them (id + role only, never the email)
+        // so "one user, forty times" is distinguishable from "forty users".
+        setSentryUser(user.id, user.role)
+
         set({
           user,
           token,
@@ -74,6 +79,8 @@ export const useAuthStore = create<AuthState>()(
       clearAuth: () => {
         localStorage.removeItem(TOKEN_KEY)
         localStorage.removeItem(REFRESH_TOKEN_KEY)
+
+        setSentryUser(null)
 
         set({
           user: null,
@@ -104,6 +111,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         localStorage.removeItem(TOKEN_KEY)
         localStorage.removeItem(REFRESH_TOKEN_KEY)
+        setSentryUser(null)
+
         set({
           user: null,
           token: null,

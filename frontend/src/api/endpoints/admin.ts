@@ -243,6 +243,16 @@ export const adminApi = {
     return data
   },
 
+  /**
+   * Promote/demote a user. Replaces the hand-run SQL this used to need.
+   * Every role change invalidates that user's existing sessions server-side,
+   * because the role is carried inside their JWT.
+   */
+  setUserRole: async (id: string, role: 'customer' | 'artist' | 'admin', artistName?: string) => {
+    const { data } = await apiClient.patch(`${BASE}/users/${id}/role`, { role, artistName })
+    return data
+  },
+
   setUserShadowBan: async (id: string, shadowBanned: boolean) => {
     const { data } = await apiClient.patch(`${BASE}/users/${id}/shadow-ban`, { shadowBanned })
     return data

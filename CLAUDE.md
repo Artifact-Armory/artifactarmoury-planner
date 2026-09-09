@@ -1073,6 +1073,64 @@ Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model �
   ```
   (Role is baked into the JWT, so the user must **log out/in** after promotion.)
 
+## Artist onboarding is now self-serve (built 2026-09-09, migration 063)
+The backend has always had a working `POST /auth/register/artist` (invite code -> artist
+account) and the admin could mint invite codes at `/admin/artist-applications` — but **no
+frontend anywhere collected an invite code**, so the documented path ("we email you a code")
+was a dead end and every artist still had to be created by hand-run SQL. Fixed:
+- **`POST /auth/upgrade-to-artist`** (new) turns the **signed-in** account into an artist
+  against an invite code. Upgrading in place rather than registering again matters because
+  `users.email` is UNIQUE — a buyer who starts selling would otherwise have to abandon the
+  account holding their purchases, downloads and saved tables. The invite row is taken
+  `FOR UPDATE` inside the transaction, so two people racing for a one-use code can't both win.
+  It returns **fresh tokens**: role lives inside the JWT, so the old one still says `customer`
+  and every artist route would keep 403ing until they happened to log out and back in.
+- **UI:** `pages/artist/RedeemArtistInvite.tsx`, rendered on the already-sign-in-gated
+  `/apply-artist` page (which previously just said "use it during registration" and offered
+  nowhere to do so, plus a dead "Email the curation team" button — now a real `mailto:`).
+- **`PATCH /admin/users/:id/role`** (new) replaces the hand-run `UPDATE users SET role=...`.
+  Buttons on `/admin/users`. **Authority is split deliberately:** customer<->artist is routine
+  seller onboarding that any admin can do (gating it on super-admin would push everyone back to
+  raw SQL, which is what this replaces), but granting **or removing** `admin` is privilege
+  escalation and stays super-admin-only. Every role change calls `invalidateUserTokens()` —
+  a demotion would otherwise leave them holding an `artist` token for up to 7 days.
+- **Seller terms are now recorded** (`users.artist_terms_accepted_at` + `artist_terms_version`
+  + `became_artist_at`). Buyers have had `orders.terms_accepted_at` since 042; the artist side —
+  the party we take commission from, hold files for and pay out to — had nothing. The **version**
+  is stored alongside the timestamp because "they accepted" stops being evidence once the text is
+  edited. Bump `SELLER_TERMS_VERSION` in `services/artistOnboarding.ts` when the terms change.
+  **An admin promotion deliberately writes NO terms acceptance** — an admin clicking a button is
+  not that person agreeing, and recording it as though it were would fabricate the exact evidence
+  this migration exists to keep honest.
+- Invite validation was written out twice with different behaviour; it now lives once in
+  `services/artistOnboarding.ts` (`checkInvite`/`assertInviteUsable`), used by register, upgrade
+  and verify alike.
+- **Untested against a real Postgres or a real invite redemption** — same `DB_MOCK=true` limit as
+  everything else here. Verify on first deploy by minting a code and redeeming it on a customer
+  account.
+
+## Error tracking: Sentry (built 2026-09-09)
+Previously a production 500 existed only as a Railway log line, so a crash affecting real users
+was invisible unless one of them complained. `@sentry/node` (backend + worker) and
+`@sentry/react` (frontend) are now wired in, **entirely optional** — with the DSN unset every
+call is a no-op, so local dev and forks are unchanged.
+- **Set `SENTRY_DSN` on BOTH Railway services** (API + worker) and `VITE_SENTRY_DSN` on
+  Cloudflare Pages. Optional: `SENTRY_TRACES_RATE` / `VITE_SENTRY_TRACES_RATE` (default **0** —
+  tracing is billed per transaction and this is here to catch crashes, not to profile).
+- **Only 5xx is reported.** 4xx is the API correctly rejecting a bad request; shipping it would
+  bury real crashes in routine traffic. Hooked into `errorHandler`, `handleUncaughtException`,
+  `handleUnhandledRejection` (both **flush before `process.exit`** — otherwise the crash that
+  killed the process is exactly the one Sentry never hears about), the pre-existing `reportError`
+  stub, the worker's poll-loop catch, and the frontend `ErrorBoundary`.
+- **The worker gets it too, and matters most** — it runs the memory-heavy work, so it is the
+  process most likely to die, and the one nobody is watching since it serves no traffic.
+- **PII is off by design.** This site holds real names, addresses and payment references, so
+  `sendDefaultPii` is false, request bodies are never attached, auth/cookie/`stripe-signature`
+  headers and password/token/code-ish query keys are scrubbed in `beforeSend`, and **Session
+  Replay is deliberately NOT enabled** (it records the DOM, which at checkout includes billing
+  addresses). User context is **id + role only, never the email** — enough to tell "one user hit
+  this 40 times" from "40 users hit it once", which is the actual diagnostic need.
+
 **RUNBOOK — "uploads are stuck at processing"** (the most likely invite-day failure).
 Symptom: an artist uploads and the listing never gets a preview; `processing_status`
 stays `processing`. Because `MODEL_INGEST_WORKER_ENABLED=true` and that queue has **no

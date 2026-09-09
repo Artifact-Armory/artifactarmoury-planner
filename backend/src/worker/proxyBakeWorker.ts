@@ -25,6 +25,10 @@
 // mean idling while ingest jobs pile up.
 
 import 'dotenv/config'
+// The worker is where the memory-heavy work runs, so it is the process most
+// likely to die — and the one nobody is watching, since it serves no traffic.
+import { initSentry, captureException } from '../services/sentry'
+initSentry()
 import os from 'os'
 import logger from '../utils/logger'
 import { runProxyBake } from '../services/proxyBake/bake'
@@ -154,6 +158,9 @@ async function main(): Promise<void> {
       }
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })
+      // The loop swallows this to stay alive, which is right — but swallowed
+      // silently it means a worker can spin failing forever with nothing said.
+      captureException(err, { kind: 'workerLoop', workerId: WORKER_ID })
     }
     if (didWork) jobsCompleted++
     if (draining) break // finished the in-flight job during shutdown

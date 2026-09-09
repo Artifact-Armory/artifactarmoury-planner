@@ -22,6 +22,7 @@ import { getSummary, getProducts } from '../services/artistAnalytics';
 import { ensureRollupsFresh } from '../services/analyticsRollup';
 import { parseRange } from './analytics';
 import { getQueueHealth } from '../services/queueHealth';
+import { invalidateUserTokens } from '../middleware/auth';
 
 const router = Router();
 
@@ -287,6 +288,113 @@ router.get('/users/:id/analytics/products',
     await ensureRollupsFresh();
     const sort = typeof req.query.sort === 'string' ? req.query.sort : 'units';
     res.json({ products: await getProducts(id, parseRange(req.query), sort) });
+  })
+);
+
+/**
+ * Change a user's role. The admin counterpart to the invite-code flow — for
+ * promoting someone without a code, and for demoting an artist back to customer.
+ *
+ * Replaces the hand-run `UPDATE users SET role='artist'` this used to require,
+ * which left no audit trail and could not be done by anyone who did not have
+ * Postgres access.
+ */
+router.patch('/users/:id/role',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { role, artistName } = req.body ?? {};
+    const adminId = (req as any).userId;
+
+    const VALID_ROLES = ['customer', 'artist', 'admin'];
+    if (!VALID_ROLES.includes(role)) {
+      throw new ValidationError(`Role must be one of: ${VALID_ROLES.join(', ')}`);
+    }
+
+    // Granting or removing ADMIN is privilege escalation and stays super-admin
+    // only. Customer <-> artist is routine seller onboarding, so any admin can
+    // do it — gating that on super-admin too would just push everyone back to
+    // running UPDATE statements by hand, which is what this replaces.
+    const touchesAdminRole = role === 'admin';
+    if (touchesAdminRole && !(req as any).user?.is_super_admin) {
+      throw new ValidationError('Only a super admin can grant the admin role');
+    }
+
+    const existing = await db.query(
+      'SELECT id, email, role, artist_name, is_super_admin FROM users WHERE id = $1',
+      [id]
+    );
+    if (existing.rows.length === 0) throw new NotFoundError('User');
+    const user = existing.rows[0];
+
+    // Guard rails. An admin locking themselves out, or quietly stripping a
+    // super-admin, are both one careless click away otherwise.
+    if (user.id === adminId) {
+      throw new ValidationError('You cannot change your own role');
+    }
+    if (user.is_super_admin && role !== 'admin') {
+      throw new ValidationError('A super admin cannot be demoted from the admin panel');
+    }
+    // Removing someone's admin rights is the same privilege decision as granting
+    // them, so it needs the same authority.
+    if (user.role === 'admin' && !(req as any).user?.is_super_admin) {
+      throw new ValidationError("Only a super admin can change an admin's role");
+    }
+    if (user.role === role) {
+      throw new ValidationError(`This user is already a ${role}`);
+    }
+
+    // Promoting to artist needs a store name, since every listing renders it.
+    // Reuse whatever they already had if this is a re-promotion.
+    let nameForArtist: string | null = user.artist_name ?? null;
+    if (role === 'artist') {
+      if (!nameForArtist && !artistName) {
+        throw new ValidationError('An artist name is required when promoting a user to artist');
+      }
+      if (artistName) nameForArtist = String(artistName).trim().slice(0, 80);
+    }
+
+    // NB: no artist_terms_accepted_at is written here. An admin promoting an
+    // account is NOT that person agreeing to the seller terms, and recording it
+    // as though they had would fabricate the exact evidence 063 exists to keep
+    // honest. The artist is prompted to accept on first entering the dashboard.
+    const updated = await db.query(
+      `UPDATE users
+          SET role = $2,
+              artist_name = CASE WHEN $2 = 'artist' THEN $3 ELSE artist_name END,
+              became_artist_at = CASE WHEN $2 = 'artist'
+                                      THEN COALESCE(became_artist_at, CURRENT_TIMESTAMP)
+                                      ELSE became_artist_at END,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING id, email, display_name, role, artist_name, became_artist_at,
+                  artist_terms_accepted_at`,
+      [id, role, nameForArtist]
+    );
+
+    // Role lives in the JWT, so a demotion would otherwise leave the user holding
+    // a token that still says 'artist' for up to its full 7-day life. Invalidate
+    // every existing session on any role change — the privilege set just moved.
+    await invalidateUserTokens(id);
+
+    await db.query(
+      `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata, ip_address, user_agent)
+       VALUES ($1, 'admin.role_changed', 'user', $2, $3, $4, $5)`,
+      [adminId, id, JSON.stringify({ from: user.role, to: role, email: user.email }),
+       req.ip, req.get('user-agent')]
+    );
+
+    await createNotification({
+      userId: id,
+      type: role === 'artist' ? 'account.became_artist' : 'account.role_changed',
+      title: role === 'artist' ? 'Your account can now sell models' : 'Your account role changed',
+      body: role === 'artist'
+        ? 'An admin enabled selling on your account. Sign in again to open your artist dashboard.'
+        : `Your account role is now "${role}". Please sign in again.`,
+      link: role === 'artist' ? '/artist/models' : '/',
+    });
+
+    logger.info('Admin changed user role', { adminId, userId: id, from: user.role, to: role });
+    res.json({ message: `Role updated to ${role}`, user: updated.rows[0] });
   })
 );
 

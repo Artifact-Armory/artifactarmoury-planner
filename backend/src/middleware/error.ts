@@ -4,6 +4,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import type { AuthRequest } from './auth';
+import { captureException, setSentryUser, flushSentry } from '../services/sentry';
 
 // ============================================================================
 // CUSTOM ERROR CLASSES
@@ -188,6 +189,16 @@ export function errorHandler(
 
   if (statusCode >= 500) {
     logger.error('Server error', logData);
+    // Only 5xx reaches Sentry. 4xx is the API correctly rejecting a bad request
+    // — routine traffic, and shipping it would bury the real crashes in noise.
+    setSentryUser((req as AuthRequest).userId, (req as AuthRequest).user?.role);
+    captureException(err, {
+      requestId,
+      errorCode,
+      method: req.method,
+      path: req.path,
+      statusCode,
+    });
   } else {
     logger.warn('Client error', logData);
   }
@@ -382,10 +393,17 @@ export function handleUnhandledRejection(): void {
       promise
     });
 
+    captureException(reason instanceof Error ? reason : new Error(String(reason)), {
+      kind: 'unhandledRejection',
+    });
+
     // In production, you might want to restart the process
     if (process.env.NODE_ENV === 'production') {
       logger.error('Shutting down due to unhandled rejection');
-      process.exit(1);
+      // Flush first — exiting immediately would discard the very report that
+      // explains why the process died.
+      void flushSentry().finally(() => process.exit(1));
+      return;
     }
   });
 }
@@ -400,9 +418,12 @@ export function handleUncaughtException(): void {
       stack: error.stack
     });
 
-    // Always exit on uncaught exceptions
+    captureException(error, { kind: 'uncaughtException' });
+
+    // Always exit on uncaught exceptions — but flush the report first, or the
+    // crash that killed the process is exactly the one Sentry never hears about.
     logger.error('Shutting down due to uncaught exception');
-    process.exit(1);
+    void flushSentry().finally(() => process.exit(1));
   });
 }
 
@@ -471,12 +492,12 @@ export function isOperationalError(error: Error): boolean {
 export function reportError(error: Error, context?: any): void {
   // In production, send to error tracking service
   if (process.env.NODE_ENV === 'production') {
-    // Example: Sentry.captureException(error, { extra: context });
     logger.error('Error reported to monitoring service', {
       error: error.message,
       stack: error.stack,
       context
     });
+    captureException(error, context);
   }
 }
 
