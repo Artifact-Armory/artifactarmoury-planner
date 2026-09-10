@@ -71,7 +71,26 @@ export function initSentry(): void {
     tracesSampleRate: Number(process.env.SENTRY_TRACES_RATE ?? 0),
 
     // Never let the SDK harvest PII on its own — see the privacy note above.
+    //
+    // VERIFIED against the installed SDK (v10) rather than assumed, because the
+    // resolution is counter-intuitive: `resolveDataCollectionOptions` picks its
+    // base from `sendDefaultPii` ONLY when `dataCollection` is absent. Setting
+    // `dataCollection` AT ALL — even `{}`, even one field — switches the base to
+    // the permissive DEFAULTS, where cookies, all four HTTP body types, query
+    // params and DB query values are collected. So leaving `dataCollection`
+    // unset is what actually gives us `httpBodies: []`, `userInfo: false` and
+    // PII deny-lists on cookies/headers/query params. Do NOT add a partial
+    // `dataCollection` block here — it would silently turn all of that ON.
     sendDefaultPii: false,
+
+    // Drop LocalVariables. It is in Node's DEFAULT integration list, and
+    // `stackFrameVariables` is true even under `sendDefaultPii: false`, so a
+    // 500 thrown inside a login/register handler would ship that frame's local
+    // variables — including the plaintext `password` and `inviteCode` — straight
+    // to Sentry. Removed by filtering the defaults rather than via
+    // `dataCollection.stackFrameVariables`, since setting `dataCollection` would
+    // flip everything above into its permissive mode (see the note on it).
+    integrations: (defaults) => defaults.filter((i) => i.name !== 'LocalVariables'),
 
     beforeSend(event) {
       if (event.request) {
