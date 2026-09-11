@@ -29,13 +29,21 @@
 //   railway run npm run backfill:planner-lod
 //   railway run npm run backfill:planner-lod -- --force      # re-bake even ones already done
 //
-// Run it linked to the BACKEND service so DATABASE_URL is injected. Safe to
-// re-run: meshes with an open bake job are skipped, and so are meshes whose
-// proxy_report already records a planner-LOD outcome.
+// Run it linked to the **Postgres** service, not the backend one: `railway run`
+// injects production's env but executes on your machine, and the backend's
+// DATABASE_URL is a private *.railway.internal host that only resolves inside
+// Railway. Postgres also exposes DATABASE_PUBLIC_URL, which is reachable — see
+// scripts/script-env.ts, which does the swap. Safe to re-run: meshes with an open
+// bake job are skipped, and so are meshes whose proxy_report already records a
+// planner-LOD outcome.
 
 import './script-env'
 import { db, closeDatabase } from '../src/db'
-import { enqueueBakeJob, isBakeWorkerEnabled } from '../src/services/proxyBake/queue'
+import { enqueueBakeJob } from '../src/services/proxyBake/queue'
+
+// Same window /admin/queues and the queue alarm use (queueHealth.ts owns the
+// default); read here rather than importing that service into a one-off script.
+const WORKER_STALE_MS = Number(process.env.QUEUE_WORKER_STALE_MS ?? 5 * 60_000)
 
 interface Mesh {
   model_id: string
@@ -77,35 +85,63 @@ const SOURCE_FORMAT_SQL = (t: string) => `
   END`
 
 async function main() {
-  // Check the CONNECTION before the feature flag. Both failures look identical
-  // from the outside — neither var is set — but only one of them is about this
-  // script: running without `railway run` (or linked to the wrong service) injects
-  // no production env at all, so the flag reads as off AND every query would run
-  // against the local mock and cheerfully report zero models. Blaming the flag
-  // there sends you off to change a Railway setting that was already correct.
+  // Connection first. Running against the local DB_MOCK would report "0 live
+  // workers, 0 models" — indistinguishable from a healthy, already-done system.
   if (process.env.DB_MOCK === 'true' || !process.env.DATABASE_URL) {
     console.error(
-      'Not connected to a real database — this is the local DB_MOCK environment.\n\n' +
-        'Run it through Railway, linked to the BACKEND service, so DATABASE_URL and\n' +
-        'PROXY_BAKE_ENABLED are injected:\n\n' +
-        '  railway link          (choose the project, then the backend service)\n' +
-        '  railway run npm run backfill:planner-lod -- --dry-run\n',
+      [
+        'Not connected to a real database — this is the local DB_MOCK environment.',
+        '',
+        'Run it through Railway, linked to the POSTGRES service. It exposes the',
+        'publicly reachable DATABASE_PUBLIC_URL; the backend service only has the',
+        'private internal one, which does not resolve off-platform:',
+        '',
+        '  railway link          (same project, choose "Postgres")',
+        '  railway run npm run backfill:planner-lod -- --dry-run',
+        '',
+      ].join('\n'),
     )
     process.exit(1)
   }
 
-  // A dry run writes nothing, so it is allowed through with a warning: seeing how
-  // big the job is before deciding whether to turn the worker on is a reasonable
-  // thing to want, and refusing it forces the flag to be flipped blind.
-  if (!isBakeWorkerEnabled()) {
+  // Is anything actually going to RUN these jobs?
+  //
+  // This used to read PROXY_BAKE_ENABLED, which was the wrong question twice
+  // over. It is a property of whichever Railway service the shell happens to be
+  // linked to — and this script has to be linked to POSTGRES, for the public
+  // database URL, where that variable does not exist — so it reported "disabled"
+  // on a perfectly healthy system. More importantly the flag only says uploads
+  // are routed to the worker, not that a worker is alive to receive them, which
+  // is the thing that actually matters before queueing hundreds of re-bakes.
+  //
+  // worker_heartbeats (migration 062) answers the real question, from the same
+  // database we are already connected to, using the same staleness window
+  // /admin/queues and the queue alarm use.
+  const { rows: workerRows } = await db.query(
+    `SELECT COUNT(*) FILTER (
+              WHERE last_seen_at > NOW() - ($1::int * INTERVAL '1 millisecond')
+            ) AS live,
+            COUNT(*) AS total,
+            MAX(last_seen_at) AS newest
+       FROM worker_heartbeats`,
+    [WORKER_STALE_MS],
+  )
+  const liveWorkers = Number(workerRows[0]?.live ?? 0)
+  if (liveWorkers === 0) {
+    const newest = workerRows[0]?.newest
     const msg =
-      'PROXY_BAKE_ENABLED is not "true" — nothing would ever drain these jobs.\n' +
-      'Set it on the backend service, and confirm the worker service is running.'
+      'No bake worker has checked in within the last ' +
+      `${Math.round(WORKER_STALE_MS / 60000)} minutes` +
+      (newest ? ` (last seen ${new Date(newest).toISOString()})` : ' (none has ever checked in)') +
+      '.\nQueued jobs would sit there indefinitely. Check /admin/queues and the\n' +
+      'worker service on Railway before backfilling.'
     if (!DRY_RUN) {
       console.error(msg)
       process.exit(1)
     }
     console.warn(`WARNING: ${msg}\nContinuing anyway because this is a --dry-run.\n`)
+  } else {
+    console.log(`${liveWorkers} live bake worker(s).\n`)
   }
 
   const { rows: models } = await db.query(
