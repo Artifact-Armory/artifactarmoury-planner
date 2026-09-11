@@ -66,6 +66,48 @@ export interface AssetTemplate {
 
 const templateCache = new Map<string, Promise<AssetTemplate>>()
 
+// ---------------------------------------------------------------------------
+// Byte-level download progress.
+//
+// The loading gate used to count *finished* models, which on a busy table reads
+// as 0% for several seconds and then jumps to done: every GLB is requested at
+// once, so they all land together at the end. Bytes are what the viewer is
+// actually waiting for, so they're what the bar should show.
+// ---------------------------------------------------------------------------
+interface ByteProgress { loaded: number; total: number }
+const bytesByUrl = new Map<string, ByteProgress & { startedAt: number }>()
+const byteListeners = new Set<() => void>()
+
+function emitBytes() {
+  for (const fn of byteListeners) fn()
+}
+
+/** Notified whenever a GLB download reports progress. Returns an unsubscribe. */
+export function subscribeGlbBytes(fn: () => void): () => void {
+  byteListeners.add(fn)
+  return () => { byteListeners.delete(fn) }
+}
+
+/**
+ * Download progress for every GLB whose fetch STARTED at or after `since`,
+ * expressed in whole-model units: a file 40% downloaded contributes 0.4, a
+ * finished one contributes 1.
+ *
+ * A finished download counts in full here even though decoding it (Draco, on a
+ * worker) hasn't produced a usable template yet — otherwise the caller's bar
+ * runs backwards every time a file lands, in the gap before its decode
+ * finishes. A response with no Content-Length can't report a fraction and
+ * contributes 0; the caller's own count of finished models covers it.
+ */
+export function glbUnitsSince(since: number): number {
+  let units = 0
+  for (const e of bytesByUrl.values()) {
+    if (e.startedAt < since || e.total <= 0) continue
+    units += Math.min(1, e.loaded / e.total)
+  }
+  return units
+}
+
 /**
  * Centre an object in X/Z and sit its base on y=0, so the asset's footprint
  * centre matches the instance position the occupancy grid uses.
@@ -201,11 +243,22 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
     return p
   }
 
+  const url = resolveAssetUrl(asset.model!)
   const p = new Promise<AssetTemplate>((resolve) => {
     applyAuthHeader() // pick up a token acquired after this module first loaded
+    const startedAt = Date.now()
+    bytesByUrl.set(url, { loaded: 0, total: 0, startedAt })
+    const settleBytes = () => {
+      const e = bytesByUrl.get(url)
+      // Mark it complete even when the response had no Content-Length, so a
+      // finished download never holds the bar back.
+      if (e) bytesByUrl.set(url, { ...e, total: Math.max(e.total, e.loaded), loaded: Math.max(e.total, e.loaded) })
+      emitBytes()
+    }
     gltfLoader.load(
-      resolveAssetUrl(asset.model!),
+      url,
       (gltf) => {
+        settleBytes()
         const root = gltf.scene
         if (asset.scaleToFit && asset.aabb) fitToAABB(root, asset.aabb)
         const aabb = baseAlign(root)
@@ -219,9 +272,16 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
         try { setFootprintBitmap(asset.id, footprintBitmapFromParts(parts, aabb)) } catch { /* keep rectangle fallback */ }
         resolve({ parts, aabb, scene: root as THREE.Group, fallback: false })
       },
-      undefined,
+      (e) => {
+        if (!e.lengthComputable) return
+        const cur = bytesByUrl.get(url)
+        bytesByUrl.set(url, { loaded: e.loaded, total: e.total, startedAt: cur?.startedAt ?? Date.now() })
+        emitBytes()
+      },
       () => {
         console.warn(`[planner] failed to load model for "${asset.id}" (${asset.model}); using box fallback`)
+        bytesByUrl.delete(url) // a failed download shouldn't pin the bar short of 100%
+        emitBytes()
         resolve(fallbackTemplate(asset))
       },
     )

@@ -6,7 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2,
+  Pencil, Loader2, AlertTriangle,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -23,6 +23,7 @@ import { serializeLayout, deserializeLayout } from '@state/tableMapping'
 import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
+import { ensureTemplate, subscribeGlbBytes, glbUnitsSince } from '@scene/loaders'
 import { CoachMarks } from './CoachMarks'
 import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
@@ -37,6 +38,18 @@ import FacetRail from '@/components/taxonomy/FacetRail'
 import { facetAppliesTo, MODEL_CLASSES, MODEL_CLASS_SLUG } from '@/api/endpoints/taxonomy'
 import { SlidersHorizontal } from 'lucide-react'
 import './styles.css'
+
+// Longest we'll hold the loading gate waiting for a loaded table's models. Past
+// this something is wrong with the connection, and a visible half-built table
+// beats an overlay that never lifts.
+const TABLE_PIECE_LOAD_TIMEOUT_MS = 45000
+
+// What counts as a "heavy" table, i.e. one worth warning about before the
+// framerate does it for us. Distinct models drive download size and draw calls
+// (one GLB + one InstancedMesh set each); total pieces drive the per-frame cost
+// even though copies share geometry. Either alone is enough to be felt.
+const HEAVY_TABLE_MODELS = 15
+const HEAVY_TABLE_PIECES = 45
 
 const M_PER_FT = 0.3048
 // Common tabletop-wargaming board sizes (feet).
@@ -346,13 +359,67 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     return () => { unsub(); window.clearTimeout(settleTimer); window.clearTimeout(hard) }
   }, [])
 
+  // A saved/shared/published table is a SECOND load that starts after the one
+  // above: the layout itself is fetched over REST (invisible to the loading
+  // manager), and only then does every placed piece's GLB start downloading. So
+  // the settle-based gate above happily drains on the table textures alone and
+  // reveals a bare board that fills in piece by piece over the next several
+  // seconds — exactly what a tester reported on an artist's showcase. Hold the
+  // overlay until every distinct model on the table has its geometry in hand.
+  const [heavyWarnDismissed, setHeavyWarnDismissed] = React.useState(false)
+  const isHeavyTable = React.useMemo(() => {
+    if (instances.length >= HEAVY_TABLE_PIECES) return true
+    return new Set(instances.map((i) => i.assetId)).size >= HEAVY_TABLE_MODELS
+  }, [instances])
+
+  const loadsSavedTable = Boolean(tableId || shareToken)
+  const [tableAssetsReady, setTableAssetsReady] = React.useState(!loadsSavedTable)
+  // {loaded,total} once we know how many distinct models the table uses.
+  const [tablePieceLoad, setTablePieceLoad] = React.useState<{ loaded: number; total: number } | null>(null)
+  React.useEffect(() => {
+    // Navigating between tables (or to scratch) restarts the gate.
+    setTableAssetsReady(!loadsSavedTable)
+    setTablePieceLoad(null)
+    setHeavyWarnDismissed(false)
+  }, [tableId, shareToken, loadsSavedTable])
+
+  // The single condition the overlay is keyed off.
+  const showTable = sceneReady && tableAssetsReady
+
+  // Progress for the bar. Counting finished models alone leaves it at 0% for the
+  // whole wait and then jumps to done — every GLB is requested at once, so they
+  // land in a clump at the end, and a frozen bar reads as a hung page. So each
+  // in-flight download also contributes its own fraction of a model. A response
+  // without a Content-Length can't report one and contributes nothing, which
+  // just degrades the bar to the old model-at-a-time behaviour; the striped
+  // animation on it is what shows life in that case.
+  const [glbUnits, setGlbUnits] = React.useState(0)
+  const pieceLoadStartedAt = React.useRef(0)
+  React.useEffect(() => {
+    if (tableAssetsReady) return
+    if (!pieceLoadStartedAt.current) pieceLoadStartedAt.current = Date.now()
+    const read = () => setGlbUnits(glbUnitsSince(pieceLoadStartedAt.current))
+    read()
+    return subscribeGlbBytes(read)
+  }, [tableAssetsReady])
+
+  const gatePct = React.useMemo(() => {
+    if (!tablePieceLoad || tablePieceLoad.total <= 0) return loadPct
+    if (tableAssetsReady) return 100
+    // Whichever is further along: models fully in hand, or bytes on the wire.
+    // The two overlap (a downloaded model is also a decoded one moments later),
+    // so max() rather than a sum — adding them would overshoot.
+    const done = Math.max(tablePieceLoad.loaded, glbUnits)
+    return Math.min(99, Math.round((done / tablePieceLoad.total) * 100))
+  }, [tableAssetsReady, tablePieceLoad, glbUnits, loadPct])
+
   // First-visit onboarding. Runs once the scene is ready (so palette/toolbar
   // targets are painted) and skipped in read-only preview mode. Artists who
   // haven't seen it get the guided *showcase* walkthrough; everyone else gets
   // the one-time Controls guide. We suppress the generic aids for artists so the
   // two don't stack on the same first load.
   React.useEffect(() => {
-    if (readOnly || onboardRef.current || !sceneReady) return
+    if (readOnly || onboardRef.current || !showTable) return
     // A signed-in user whose profile hasn't loaded yet — wait so we know the role.
     if (isAuthenticated && !user) return
     try {
@@ -384,18 +451,18 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         localStorage.setItem('tb_coach_v1', '1')
       }
     } catch { /* localStorage unavailable (private mode) — just skip */ }
-  }, [readOnly, sceneReady, isAuthenticated, user, startTour])
+  }, [readOnly, showTable, isAuthenticated, user, startTour])
 
   // First visit: explain that the table shows decimated + watermarked previews,
   // not the STL they'd print. Deliberately waits until the walkthrough and the
   // controls overlay are done — three modals stacked on load is worse than the
   // confusion this is meant to prevent — so it lands on a table they can see.
   React.useEffect(() => {
-    if (readOnly || !sceneReady || tourActive || showHelp) return
+    if (readOnly || !showTable || tourActive || showHelp) return
     if (hasAcknowledgedPreviewQuality()) return
     const t = window.setTimeout(() => setShowPreviewQuality(true), 600)
     return () => window.clearTimeout(t)
-  }, [readOnly, sceneReady, tourActive, showHelp])
+  }, [readOnly, showTable, tourActive, showHelp])
 
   // Clear any tour left active elsewhere (e.g. the dashboard walkthrough) so it
   // can't bleed into the planner; our own effect above starts it when relevant.
@@ -405,8 +472,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
   // Load the catalogue, then frame the (empty) table once it's ready. The planner
   // opens on a clear table — the user places pieces themselves.
+  // Kept as a promise, not fire-and-forget: the loading gate below has to wait
+  // for it. A table's pieces are often SET PARTS, whose assets are registered by
+  // this call (loadSetsFromAPI) and by nothing else — resolveAssetsByIds skips
+  // `part:` ids on purpose — so resolving them any earlier finds nothing.
+  const cataloguePromise = React.useRef<Promise<unknown> | null>(null)
   React.useEffect(() => {
-    loadCatalogue()
+    cataloguePromise.current = Promise.resolve(loadCatalogue()).catch(() => {})
   }, [loadCatalogue])
   React.useEffect(() => {
     if (assets.length && !startedRef.current) {
@@ -448,6 +520,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         await resolveAssetsByIds(instances.map((i) => i.assetId))
         if (cancelled) return
         applyLayout({ table, tableMaterial, instances, heightmap, paint })
+        // Pull every distinct model's geometry BEFORE lifting the loading gate
+        // (see tableAssetsReady above). ensureTemplate is the same cache the
+        // scene uses, so this is not an extra download — it just lets us wait
+        // for the ones the scene is about to request anyway.
+        void preloadTablePieces(instances.map((i) => i.assetId), () => cancelled)
         setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
         if (!shareToken) {
           setSavedTableId(t.id)
@@ -462,11 +539,47 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           refreshCollabs(null, false)
         }
       } catch {
-        if (!cancelled) hotToast.error('Could not load that table')
+        if (!cancelled) {
+          hotToast.error('Could not load that table')
+          setTableAssetsReady(true) // nothing to wait for — don't strand the overlay
+        }
       }
     })()
     return () => { cancelled = true }
   }, [tableId, shareToken, user?.email]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wait for each distinct model on a loaded table, reporting progress as it
+  // goes. ensureTemplate resolves to a grey box rather than rejecting when a
+  // GLB 404s or fails to parse, so this always settles; the timeout is only a
+  // guard against a request that hangs open forever on a bad connection.
+  async function preloadTablePieces(assetIds: string[], isCancelled: () => boolean) {
+    const ids = [...new Set(assetIds)]
+    if (!ids.length) { setTableAssetsReady(true); return }
+    setTablePieceLoad({ loaded: 0, total: ids.length })
+    // The catalogue is what registers set-part assets, and it loads in parallel
+    // with the table itself — without this wait every `part:` piece looks
+    // unknown, gets skipped, and the gate lifts on an empty board.
+    await cataloguePromise.current
+    if (isCancelled()) return
+    let loaded = 0
+    const one = (id: string) => {
+      const asset = getAssetById(id)
+      if (!asset) return Promise.resolve()
+      return ensureTemplate(asset)
+        .catch(() => {})
+        .then(() => {
+          loaded += 1
+          if (!isCancelled()) setTablePieceLoad({ loaded, total: ids.length })
+        })
+    }
+    const all = Promise.all(ids.map(one))
+    await Promise.race([all, new Promise((r) => window.setTimeout(r, TABLE_PIECE_LOAD_TIMEOUT_MS))])
+    if (isCancelled()) return
+    // Geometry is in hand, but the scene rebuilds its instanced meshes off the
+    // same promises — give it a frame or two to upload them so the reveal shows
+    // a finished table rather than the last piece popping in.
+    window.setTimeout(() => { if (!isCancelled()) setTableAssetsReady(true) }, 250)
+  }
 
   // global UI keys (scene keys are handled inside ThreeStage)
   React.useEffect(() => {
@@ -902,17 +1015,47 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     <div className={`tb-fs${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}`}>
       <ThreeStage />
 
-      {/* Loading gate — blocks interaction until the table + its textures are ready */}
-      {!sceneReady && (
+      {/* Loading gate — blocks interaction until the table, its textures AND
+          (for a saved/shared/published table) every model on it are ready. */}
+      {!showTable && (
         <div className="tb-loading" role="status" aria-live="polite">
           <div className="tb-loading-card">
             <Logo variant="lockup" title="Artifact Armoury" className="tb-loading-logo" />
-            <div className="tb-loading-title">Preparing your table…</div>
-            <div className="tb-loading-track">
-              <div className="tb-loading-bar" style={{ transform: `scaleX(${Math.max(6, loadPct) / 100})` }} />
+            <div className="tb-loading-title">
+              {tablePieceLoad ? 'Loading the models on this table…' : 'Preparing your table…'}
             </div>
-            <div className="tb-loading-pct">{loadPct}%</div>
+            <div className="tb-loading-track">
+              <div className="tb-loading-bar" style={{ transform: `scaleX(${Math.max(6, gatePct) / 100})` }} />
+            </div>
+            <div className="tb-loading-pct">
+              {tablePieceLoad
+                ? `${tablePieceLoad.loaded} of ${tablePieceLoad.total} models · ${gatePct}%`
+                : `${gatePct}%`}
+            </div>
+            {tablePieceLoad && tablePieceLoad.total >= HEAVY_TABLE_MODELS && (
+              <div className="tb-loading-note">
+                This is a large, detailed table — it can take a moment to load and may
+                run slower on older devices.
+              </div>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Heavy table warning — shown once the table is up, so the framerate it
+          warns about isn't the first explanation the viewer gets. */}
+      {showTable && isHeavyTable && !heavyWarnDismissed && !uiHidden && (
+        <div className={`tb-heavy-warn${readOnly ? '' : ' is-below-badge'}`} role="status">
+          <AlertTriangle size={14} className="tb-heavy-warn-icon" />
+          <span>Large detailed tables may cause latency — panning and zooming can feel slower here.</span>
+          <button
+            className="tb-heavy-warn-x"
+            onClick={() => setHeavyWarnDismissed(true)}
+            title="Dismiss"
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 

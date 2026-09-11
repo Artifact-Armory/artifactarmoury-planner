@@ -851,12 +851,103 @@
   background: linear-gradient(90deg, #4da3ff, #6cc4ff);
   transform-origin: left center;
   transition: transform 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+/* Downloads that report no Content-Length can't move the bar between models, so
+   it can hold the same width for a few seconds on a big table. The stripes keep
+   it visibly alive rather than reading as a hung page. */
+.tb-loading-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.22) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.22) 75%,
+    transparent 75%
+  );
+  background-size: 28px 28px;
+  animation: tb-loading-stripes 0.9s linear infinite;
+}
+@keyframes tb-loading-stripes {
+  from { background-position: 0 0; }
+  to { background-position: 28px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-loading-bar::after { animation: none; }
 }
 .tb-loading-pct {
   margin-top: 8px;
   font-size: 12px;
   color: var(--tb-muted);
   font-variant-numeric: tabular-nums;
+}
+/* "this one's a big table" note inside the loading card — sets the expectation
+   while the wait is happening, rather than explaining it afterwards. */
+.tb-loading-note {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #ffd479;
+  background: rgba(40, 33, 12, 0.85);
+  border: 1px solid #6b5a2a;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+/* Heavy-table warning banner, shown over the table once it's up. Sits under the
+   top-centre bar; in edit mode the placement badge already owns that slot, so
+   .is-below-badge drops it one row further down. */
+.tb-heavy-warn {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 28px));
+  padding: 7px 8px 7px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #ffd479;
+  background: rgba(40, 33, 12, 0.92);
+  border: 1px solid #6b5a2a;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 19;
+}
+.tb-heavy-warn.is-below-badge {
+  top: 104px;
+}
+.tb-heavy-warn-icon {
+  flex: none;
+}
+.tb-heavy-warn-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.tb-heavy-warn-x:hover {
+  background: rgba(255, 212, 121, 0.15);
+}
+@media (max-width: 760px) {
+  .tb-heavy-warn {
+    border-radius: 12px;
+  }
 }
 
 /* Terrain sculpt panel (right) */
