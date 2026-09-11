@@ -482,9 +482,67 @@ def make_proxy(src, src_tris):
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
 
+    # Crease-angle shading BEFORE the unwrap/bake — see apply_crease_shading for
+    # why (vertex sharing, and a normal map that doesn't sit on faceted shading).
+    apply_crease_shading(proxy, float(CFG.get("proxyCreaseAngleDeg", 0.0)), "proxy")
+
     REPORT["proxyTriangles"] = triangle_count(proxy)
     REPORT["remeshStrategy"] = strategy
     return proxy, strategy
+
+
+def apply_crease_shading(obj, angle_deg, label):
+    """Shade the mesh smooth, splitting normals only across edges sharper than
+    `angle_deg` — the same crease-angle treatment convertSTLtoGLBPure already gives
+    the pure-Node previews.
+
+    WHY THIS MATTERS MORE THAN IT LOOKS: an STL has no vertex normals, so Blender
+    imports it flat-shaded, and a flat-shaded mesh cannot share a single vertex
+    between two triangles — each triangle needs its own copy carrying the face
+    normal. Measured on a live marketplace proxy: 332,191 triangles exported as
+    957,595 vertices against only 172,652 unique positions, i.e. 5.5x duplication.
+    Draco compresses per-vertex attributes, so that multiplies the download; the GPU
+    stores every copy; and nothing downstream can simplify the mesh, because there
+    are no shared edges left to collapse. Marking creases instead of splitting
+    everything lets the exporter share vertices across the smooth interior.
+
+    It also looks BETTER: a tangent-space normal map on flat-shaded geometry reads
+    faceted, which is the opposite of what the bake is for.
+
+    Called BEFORE the bake (so the baked map's tangent basis matches the normals the
+    viewer will shade with) and again after the emboss boolean (whose new faces would
+    otherwise inherit smooth shading with no sharp edges marked). The second call is
+    idempotent on untouched geometry — same angle, same mesh, same sharp edges — so
+    it cannot invalidate the map that was baked against the first.
+    """
+    if angle_deg <= 0:
+        REPORT["proxyCreaseAngleDeg"] = 0
+        return
+    import bmesh
+    deselect_all()
+    obj.select_set(True)
+    set_active(obj)
+    bpy.ops.object.shade_smooth()
+    thr = math.radians(float(angle_deg))
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    sharp = 0
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            # calc_face_angle_signed is unreliable on degenerate faces; the unsigned
+            # angle with a 0.0 fallback treats a zero-area neighbour as "flat".
+            if e.calc_face_angle(0.0) > thr:
+                e.smooth = False
+                sharp += 1
+        else:
+            # Boundary/non-manifold: nothing to share across anyway.
+            e.smooth = False
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    REPORT["proxyCreaseAngleDeg"] = float(angle_deg)
+    REPORT["proxySharpEdges_" + label] = sharp
 
 
 def unwrap(proxy):
@@ -3772,6 +3830,10 @@ def main():
             "not legitimate simplification; refusing to export a ruined preview"
             % ((1 - final_tris / proxy_tris_before_cleanup) * 100, proxy_tris_before_cleanup, final_tris)
         )
+
+    # Re-mark creases: the emboss boolean and the cleanup passes above add faces
+    # that carry no sharp-edge marks of their own.
+    apply_crease_shading(proxy, float(CFG.get("proxyCreaseAngleDeg", 0.0)), "final")
 
     strip_metadata(proxy)
     with Stage("export"):

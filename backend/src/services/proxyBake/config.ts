@@ -90,6 +90,32 @@ export interface ProxyBakeConfig {
    *  default since 2026-08-21 (alongside proxyDecimationEnabled=false) so the
    *  preview keeps its full, undegraded detail rather than a melted/rounded
    *  silhouette; anti-theft then leans on the emboss watermark holes instead. */
+  /** Crease angle, in degrees, for the proxy's shading — 0 (default) keeps today's
+   *  behaviour: flat, per-face normals.
+   *
+   *  An STL has no vertex normals, so Blender imports it flat-shaded, and a
+   *  flat-shaded mesh cannot share a vertex between two triangles: each one needs
+   *  its own copy carrying the face normal. Measured on a live marketplace proxy:
+   *  332,191 triangles exported as 957,595 vertices against only 172,652 unique
+   *  positions. Shading smooth with creases above this angle (45 matches
+   *  PREVIEW_CREASE_ANGLE in fileProcessor.ts, the pure-Node path's equivalent)
+   *  cut that to ~0.6-0.9 verts/triangle on two real sources — 65-77% fewer
+   *  vertices for the GPU to store and transform, at identical triangle count,
+   *  identical geometry and (verified by render) no visible change.
+   *
+   *  Download size is roughly a wash on its own: the geometry shrinks 18-32% but
+   *  the normal map grows, since a smooth-shaded surface needs the map to carry
+   *  what the facet normals used to. The real payoff is that a welded mesh can be
+   *  SIMPLIFIED — meshopt cannot collapse anything on today's split-vertex output
+   *  (196,267 -> 179,544 triangles when asked for 33%), but reaches the target
+   *  exactly once creases are used (196,267 -> 64,763, 645 KB vs 1050 KB). That is
+   *  what a planner-specific LOD would be built on.
+   *
+   *  Applied twice in bake_proxy.py: before the unwrap/bake (so the baked map's
+   *  tangent basis matches the normals the viewer shades with) and again after the
+   *  emboss boolean (whose new faces carry no sharp marks). Existing proxies keep
+   *  their current shading until re-baked. */
+  proxyCreaseAngleDeg: number
   proxySmoothIterations: number
   /** Per-iteration smoothing factor (0..1) for the LEGACY plain Smooth modifier
    *  (only used when proxySmoothVolumePreserve is false). Higher = flatter. */
@@ -629,6 +655,7 @@ export function loadDefaults(): ProxyBakeConfig {
     triangleBudgetCeiling: envNum('PROXY_BAKE_TRIANGLE_CEILING'),
     weldMergeDistanceMm: envNum('PROXY_BAKE_WELD_DISTANCE_MM'),
     proxySmoothIterations: envNum('PROXY_BAKE_SMOOTH_ITERS'),
+    proxyCreaseAngleDeg: envNum('PROXY_BAKE_CREASE_ANGLE_DEG'),
     proxySmoothFactor: envNum('PROXY_BAKE_SMOOTH_FACTOR'),
     proxySmoothLambda: envNum('PROXY_BAKE_SMOOTH_LAMBDA'),
     bakeDisplacementSafety: envNum('PROXY_BAKE_DISPLACEMENT_SAFETY'),
