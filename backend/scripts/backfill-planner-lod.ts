@@ -239,10 +239,10 @@ async function main() {
   console.log(`\nQueued ${queued} re-bake(s). Watch it drain:`)
   console.log(`  /admin/queues`)
   console.log(
-    `  npm run db:query -- "SELECT status, count(*) FROM proxy_bake_jobs GROUP BY status"`,
+    `  railway run npm run db:query -- "SELECT status, count(*) FROM proxy_bake_jobs GROUP BY status"`,
   )
   console.log(
-    `  npm run db:query -- "SELECT count(*) FILTER (WHERE lod_glb_path IS NOT NULL) AS with_lod, count(*) FROM models WHERE processing_status = 'ready'"`,
+    `  railway run npm run db:query -- "SELECT count(*) FILTER (WHERE lod_glb_path IS NOT NULL) AS with_lod, count(*) FROM models WHERE processing_status = 'ready'"`,
   )
 }
 

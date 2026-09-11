@@ -109,7 +109,7 @@ async function main() {
     if (queued % 25 === 0 && queued) console.log(`  … ${queued} queued`)
   }
   console.log(`Queued ${queued} build(s). Drain progress:`)
-  console.log(`  npm run db:query -- "SELECT status, count(*) FROM full_glb_jobs GROUP BY status"`)
+  console.log(`  railway run npm run db:query -- "SELECT status, count(*) FROM full_glb_jobs GROUP BY status"`)
 }
 
 main()

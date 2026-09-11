@@ -841,6 +841,19 @@ just relocated from "in the API server" to "across worker replicas" rather than 
   watching `railway logs` for one "Large ingest job deferred" line.
 
 ## Planner LOD + crease shading (built 2026-09-11, migration 064)
+> **THE LOD TIER IS CURRENTLY DISABLED IN PRODUCTION — it visibly destroyed models and was rolled back the same day.** Everything below about the LOD describes a mechanism that works and a triangle budget that does not. **The crease-shading half is fine, live, and must not be reverted.** See `PLANNER_LOD_NEXT.md` for the retune brief.
+>
+> At `plannerLodTriangleBudget: 50000` the real catalogue's dense architectural models ("South East Asian village") were cut 73-82% — far harder than any QA fixture — and came out as smooth blobs with spikes through them: carved panels, roof tiles and window frames gone. **Root cause of the miss: file sizes and triangle counts were validated on the REAL catalogue, but APPEARANCE was only ever validated on four substitute models from another artist.** The fixture closest to this asset class *resisted* simplification (290k -> 173k, a 40% cut), so the aggressive path was never exercised on detailed architecture, and its LOD was never rendered. A `--limit 1` smoke test then confirmed the pipeline RAN without anyone checking that the output LOOKED right.
+>
+> **Kill switch (instant, no deploy)** — the route falls back to the proxy when the column is NULL, which is the pre-LOD behaviour:
+> ```
+> railway run npm run db:query -- "UPDATE models SET lod_glb_path = NULL"
+> railway run npm run db:query -- "UPDATE model_parts SET lod_glb_path = NULL"
+> ```
+> (Applied 2026-09-11; verified 0 rows serving an LOD.) Note the LOD response sets `max-age=3600`, so a browser that already fetched one can serve it for up to an hour — that lifetime is worth reconsidering for something this easy to get wrong.
+>
+> The catalogue-wide re-bake DID happen and is retained: all 42 meshes now have crease-shaded proxies, which is a prerequisite for any future LOD. Re-enabling means a re-bake with `--force` (meshes whose `proxy_report` already records a `plannerLod` verdict are otherwise skipped).
+
 The planner took ~9s to show an artist's showcase table and ran heavily afterwards. Measured
 in a browser against live production, that table is **28 models, 85.07 MB, 9,116,141 triangles
 — and 26,217,059 stored vertices, i.e. 2.88 per triangle.** That last number is the whole
