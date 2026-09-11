@@ -170,31 +170,48 @@ async function main() {
   const proxyStats = await inspect(proxy)
   row('SHIPPED proxy', proxyStats)
 
-  const budgets = (process.env.LOD_BUDGETS || '80000,60000,50000,40000,30000')
+  // The ERROR bound is the knob that decides quality on a baked proxy — the
+  // triangle budget is a floor the collapse rarely reaches (meshopt stops at
+  // whichever of the two it hits first, so the result is max(budget, what the error
+  // permits)). Sweeping budgets alone is what produced a config that looked fine in
+  // numbers and destroyed the catalogue on screen; sweep errors first.
+  const budgets = (process.env.LOD_BUDGETS || String(cfg.plannerLodTriangleBudget))
     .split(',')
     .map(Number)
+  const errs = (process.env.LOD_ERRORS || '0.0002,0.0005,0.001,0.01').split(',').map(Number)
   for (const lock of [true, false]) {
+    for (const err of errs) {
     for (const budget of budgets) {
-      const out = path.join(outDir, `lod-${budget}-${lock ? 'lock' : 'free'}.glb`)
+      const out = path.join(outDir, `lod-e${err}-${budget}-${lock ? 'lock' : 'free'}.glb`)
       const res = await buildPlannerLod(rawGlb, out, {
         ...cfg,
         plannerLodTriangleBudget: budget,
+        plannerLodSimplifyError: err,
         plannerLodLockBorder: lock,
         plannerLodMinReduction: 0, // measure everything; the gate is a product decision
-      })
+      }, proxyStats.fileBytes)
       if (res.skipped) {
-        console.log(`lod ${budget} ${lock ? 'lock' : 'free'}: SKIPPED — ${res.note}`)
+        console.log(`lod e${err} ${budget} ${lock ? 'lock' : 'free'}: SKIPPED — ${res.note}`)
         continue
       }
       const s = await inspect(out)
       row(
-        `LOD ${budget} ${lock ? 'lockBorder' : 'free      '}`,
+        `LOD e${err} ${budget} ${lock ? 'lock' : 'free'}`,
         s,
         `${((1 - s.fileBytes / proxyStats.fileBytes) * 100).toFixed(0)}% smaller, ` +
           `holes ${s.boundaryLoops === proxyStats.boundaryLoops ? 'INTACT' : `${s.boundaryLoops}/${proxyStats.boundaryLoops}`}`,
       )
     }
+    }
   }
+  console.log(
+    [
+      '',
+      'This script does not RENDER anything, and numbers alone once passed a config',
+      'that melted the catalogue. Run `npm run qa:lod -- --set "<set name>"` and LOOK',
+      'AT THE IMAGES before changing a default.',
+    ].join('\n'),
+  )
 }
 
 main().catch((e) => {

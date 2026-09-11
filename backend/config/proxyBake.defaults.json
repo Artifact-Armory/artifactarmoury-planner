@@ -94,7 +94,7 @@
   "plannerFullTableCameraDistanceM": 16.0,
   "plannerLodEnabled": true,
   "plannerLodTriangleBudget": 50000,
-  "plannerLodSimplifyError": 0.01,
+  "plannerLodSimplifyError": 0.0002,
   "plannerLodLockBorder": true,
   "plannerLodMinReduction": 0.25,
   "plannerLodNormalMapSize": 1024

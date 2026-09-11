@@ -12,6 +12,7 @@
     "worker:dev": "nodemon --exec \"ts-node -r dotenv/config src/worker/proxyBakeWorker.ts\"",
     "test:proxybake": "node -r ts-node/register/transpile-only scripts/test-proxy-bake.ts",
     "measure:lod": "node -r ts-node/register/transpile-only scripts/measure-planner-lod.ts",
+    "qa:lod": "node -r ts-node/register/transpile-only scripts/qa-planner-lod.ts",
     "backfill:planner-lod": "node -r ts-node/register/transpile-only scripts/backfill-planner-lod.ts",
     "migrate": "node -r ts-node/register scripts/migrate.ts",
     "postmigrate": "node -r ts-node/register/transpile-only scripts/seed-taxonomy.ts || echo \"taxonomy seed skipped (non-fatal)\"",

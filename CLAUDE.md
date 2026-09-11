@@ -840,105 +840,128 @@ just relocated from "in the API server" to "across worker replicas" rather than 
   for the lock. Verify by scaling the worker to 2+ replicas and uploading two large files at once,
   watching `railway logs` for one "Large ingest job deferred" line.
 
-## Planner LOD + crease shading (built 2026-09-11, migration 064)
-> **THE LOD TIER IS CURRENTLY DISABLED IN PRODUCTION — it visibly destroyed models and was rolled back the same day.** Everything below about the LOD describes a mechanism that works and a triangle budget that does not. **The crease-shading half is fine, live, and must not be reverted.** See `PLANNER_LOD_NEXT.md` for the retune brief.
->
-> At `plannerLodTriangleBudget: 50000` the real catalogue's dense architectural models ("South East Asian village") were cut 73-82% — far harder than any QA fixture — and came out as smooth blobs with spikes through them: carved panels, roof tiles and window frames gone. **Root cause of the miss: file sizes and triangle counts were validated on the REAL catalogue, but APPEARANCE was only ever validated on four substitute models from another artist.** The fixture closest to this asset class *resisted* simplification (290k -> 173k, a 40% cut), so the aggressive path was never exercised on detailed architecture, and its LOD was never rendered. A `--limit 1` smoke test then confirmed the pipeline RAN without anyone checking that the output LOOKED right.
->
-> **Kill switch (instant, no deploy)** — the route falls back to the proxy when the column is NULL, which is the pre-LOD behaviour:
-> ```
-> railway run npm run db:query -- "UPDATE models SET lod_glb_path = NULL"
-> railway run npm run db:query -- "UPDATE model_parts SET lod_glb_path = NULL"
-> ```
-> (Applied 2026-09-11; verified 0 rows serving an LOD.) Note the LOD response sets `max-age=3600`, so a browser that already fetched one can serve it for up to an hour — that lifetime is worth reconsidering for something this easy to get wrong.
->
-> The catalogue-wide re-bake DID happen and is retained: all 42 meshes now have crease-shaded proxies, which is a prerequisite for any future LOD. Re-enabling means a re-bake with `--force` (meshes whose `proxy_report` already records a `plannerLod` verdict are otherwise skipped).
+## Planner LOD + crease shading (built 2026-09-11, migration 064; retuned 2026-09-11)
+> **RETUNED AFTER A VISIBLE REGRESSION. The tier is still OFF in production by data
+> (`lod_glb_path` NULL) and turning it back on needs a deploy + a `--force` re-bake — see
+> "Re-enabling" below.** What shipped first, and broke, was a fixed 50,000-triangle budget with a
+> loose 0.01 error bound. What replaces it is an error-led config: `plannerLodSimplifyError`
+> **0.0002** (about 0.05 mm, one resin print layer, on a 250 mm terrain piece) with the triangle
+> budget demoted to a floor it rarely reaches. **The crease-shading half was never at fault and
+> must not be reverted.**
 
-The planner took ~9s to show an artist's showcase table and ran heavily afterwards. Measured
-in a browser against live production, that table is **28 models, 85.07 MB, 9,116,141 triangles
-— and 26,217,059 stored vertices, i.e. 2.88 per triangle.** That last number is the whole
-diagnosis: an STL has no vertex normals, so Blender imports it **flat-shaded**, and a
-flat-shaded mesh cannot share a vertex between two triangles (each needs its own copy carrying
-the face normal). With every edge a seam there is nothing to collapse and meshopt refuses —
-asked for 33% of a real bake it returned 91-95% of the triangles. That, not a missing feature,
-is why `proxyDecimationEnabled`'s long history of destructive results never had a good option.
-- **`proxyCreaseAngleDeg` is now 45 (was 0).** Shades the proxy smooth with creases above the
-  angle, restoring shared edges (2.88 → 0.6-1.4 verts/tri). **Changes shading, never geometry**:
-  triangle count, emboss hole count and placement, deleted base faces and warnings came out
-  IDENTICAL with and without, on every test bake. QA'd before flipping on the classes
-  `config.ts` warns decimation destroys — a louvred shutter (thin shells), a dense
-  architectural piece with railings/spires/balusters/pipework (0.79% of pixels changed by
-  >8/255 at 0.3 m, 0.02% at 2 m, nothing lost), plus a wall panel and an organic stack. Bake
-  time unaffected. **On its own it is roughly download-neutral** — the geometry shrinks but the
-  normal map grows. Its value is that it makes simplification possible at all.
+**What broke, and why it got through.** At `plannerLodTriangleBudget: 50000` the catalogue's dense
+architecture was cut 73–82%: carved wall panels collapsed into lumpy blobs with spikes through
+them, roof tiles and window frames gone, whole pieces reading as melted. Verified again this
+session on the real meshes — the Gothic church was hit just as hard as the SE Asian village, so
+the regression was catalogue-wide, not one artist's set. **Root cause of the miss: file sizes and
+triangle counts were validated on the REAL catalogue, but APPEARANCE was only ever validated on
+four substitute models from another artist.** The fixture closest to this asset class *resisted*
+simplification (290k → 173k), so the aggressive path was never exercised on detailed architecture
+and its LOD was never rendered. A `--limit 1` smoke test then confirmed the pipeline RAN without
+anyone checking that the output LOOKED right.
+
+- **`plannerLodSimplifyError` is the quality knob; the triangle budget is not.** meshopt stops at
+  whichever limit it reaches first, so the result is **max(triangle target, what the error allows)**.
+  A triangle count is one number applied to every model regardless of the detail it carries — which
+  is exactly why 50k destroyed architecture and left a shutter untouched. An error bound is a
+  geometric tolerance and allocates triangles per model on its own. Measured on **32 real catalogue
+  parts** rendered against their own proxies in the planner's lighting and 50° lens, scored as the
+  proxy edge energy the LOD fails to reproduce inside the silhouette: **0.01 → 19–33% edge loss
+  (melted); 0.0005 → 9–17% (inconsistent); 0.0002 → 4.5–10.4%, mean 7.5%** (1.1–4.5% at 2 m). About
+  3.6 points of that is the 1024 normal-map bound, not geometry: the no-decimation control is 0.1%.
+- **Whole-table result** (the 28-part showcase, every part getting an LOD): **71.27 MB → 31.04 MB
+  (−56.5%)** and **9,116,141 → 6,654,324 triangles (−27.0%)**.
+- **The win is BYTES, not triangles, and that is a real finding.** A no-decimation control — same
+  pipeline, 1% of triangles removed — is already **45–48% smaller**, purely from dropping `TANGENT`
+  and re-quantising through Draco. This asset class cannot give up much geometry without looking
+  wrong, and it does not need to in order for the tier to earn its keep.
+- **The crease re-bake alone already paid off, measured not projected:** the showcase table went
+  from 85.07 MB / 26,217,059 stored vertices (2.88 per triangle) to **71.27 MB / 8,017,987 (0.88)**,
+  with the triangle count **identical to the digit** — 9,116,141 before and after, which is the
+  cleanest possible confirmation that crease shading changes shading and never geometry.
+- **`plannerLodMinReduction` now counts BYTES.** It counted triangles, which is the wrong quantity
+  for a tier that exists to make a page download less: under an error bound a detailed mesh keeps
+  most of its triangles (16–29% cut) while still producing a file 55% smaller. The triangle gate at
+  0.25 threw away roughly a third of the LODs, including the heaviest parts in the table and one
+  whose weight was in its normal map, not its geometry. `bake.ts` passes the finished proxy's size
+  into `buildPlannerLod`; without it the check falls back to triangles. Triangle reduction is still
+  reported (`proxy_report.plannerLod.trianglesCutPct`) — near zero there is the
+  `proxyCreaseAngleDeg: 0` signature. The "already under the triangle budget, skip" bail is gone
+  for the same reason.
+- **The LOD's Cache-Control is now `max-age=300`, not 3600.** The hour was justified on entitlement
+  grounds (the LOD is the same bytes for every viewer) and that reasoning was right; what it missed
+  is that the cache lifetime is the **blast radius of the kill switch**. Setting `lod_glb_path` to
+  NULL falls back to the proxy instantly with no deploy, but browsers holding an hour-old LOD kept
+  rendering the bad mesh for up to an hour after the rollback. The rate-limit headroom given up is
+  headroom the proxy has always run without.
+- **`npm run qa:lod` is the acceptance test** (`scripts/qa-planner-lod.ts` +
+  `blender/render_lod_compare.py`). It pulls the **production** proxies for a published set (no
+  auth — `?variant=preview` is what buyers get), builds candidates with the shipped
+  `buildPlannerLod`, renders each against its proxy at the three planner camera distances in the
+  planner's own lighting/lens, and reports **edge loss** worst-first, exiting non-zero over a
+  threshold. Edge loss rather than a pixel difference because a flat pixel metric is what missed
+  the regression: the previous session measured "under 0.01% of pixels differ at 2 m", and a melted
+  roof covers the same pixels at the same average brightness. Run it **before** a backfill.
+  `npm run backfill:planner-lod` now takes `--model <id>` so the one-model verification step lands
+  on a model someone can recognise and open, instead of whatever `--limit 1` happened to pick.
+- **Re-enabling (not done — needs the user's production access):** deploy, then
+  `railway run npm run backfill:planner-lod -- --model <id> --force`, **look at that model in the
+  live planner**, then batch the rest with `--limit`. `--force` matters: meshes whose `proxy_report`
+  already records a `plannerLod` verdict are skipped, so a config change is a no-op without it.
+  Kill switch unchanged (`UPDATE models SET lod_glb_path = NULL`, same for `model_parts`); verify
+  from outside with `?variant=lod` returning the header `X-Preview-Variant: preview`.
 - **The LOD is a THIRD variant** (`services/proxyBake/lod.ts`, `models.lod_glb_path` /
-  `model_parts.lod_glb_path`), derived from the same bake output with gltf-transform
-  weld+simplify — no Blender, no new queue, ~2s on a mesh already in the bake's temp dir.
-  Served from the existing URL as `GET /api/models/:id/preview.glb?variant=lod`; the planner
-  asks for it unconditionally via `plannerMeshUrl` (frontend `api/transformers.ts`) and the
-  server falls back to the proxy when a model has none. **Owners get the LOD too, deliberately**
-  — their full-fidelity copy (041) is much of why an owner's table is heaviest, and at 2-16 m it
-  cannot be told from the proxy; the product page asks for no variant, so an owner still gets
-  their full copy there. **Before the backfill runs, `variant=lod` falls back to the
-  PROXY, not the owner copy** — so an owner's planner table gets lighter on deploy day
-  rather than waiting for a re-bake. Cache-Control for the LOD is back to 3600s (it is the same bytes for
-  every viewer, unlike the proxy/full split). **The key is a secret like `full_glb_path`** —
-  random 16-byte suffix, stripped at all three redaction sites.
-- **Measured, shipped config** (crease 45, 50k budget, lockBorder on, normal map ≤1024):
-  wall panel 196k tris/1,506 KB → 56k/512 KB (**−66% file, −71% tris**); dense architectural
-  290k/2,379 KB → 173k/1,080 KB (−55%/−40%); organic 251k/2,542 KB → 50k/952 KB (−63%/−80%);
-  a 14k-tri shutter is already under budget and correctly gets no LOD.
-- **The dense-architectural ceiling is real and diagnosed.** It stops at 173k however low the
-  budget, and the error bound is NOT what binds (even `error: 1.0` lands identically). Dropping
-  `TEXCOORD_0` alone still stopped at 148k, `NORMAL` alone at 152k, but **both** reached 64k:
-  it is the *union* of UV-island seams and crease seams that fragments a many-shell mesh into
-  uncollapsible regions, and neither can be given up (UVs carry the baked normal map; creases
-  are what made welding work). Getting past it needs a second unwrap+bake in Blender at LOD
-  resolution (~+25s/bake, in the most failure-prone code here) — **not built**.
-- **`plannerLodLockBorder` is an ANTI-THEFT setting, not a quality one.** A baked proxy's open
-  boundaries ARE its non-printability (emboss through-holes, deleted base, stripped interior).
-  With it off the LOD is only ~5% smaller and the monogram cut-outs visibly deform into lumpy
-  blobs (verified by render); the organic source lost 55% of its boundary loops (751 → 335).
-  Leave it on.
-- **`plannerLodNormalMapSize` (1024) matters more than it looks** — once geometry collapses the
-  map IS the file (1,446 KB of a 1,878 KB LOD on the organic source). Halving it changed nothing
-  at 2 m/16 m and added 0.19pp of >8/255 pixels at 0.3 m, for a 40% smaller file. 512 was still
-  legible but softened seams, so it was not taken.
-- **The LOD drops `TANGENT`; the proxy keeps it.** It is 15-38% of the finished file and three.js
-  derives tangents from screen-space derivatives without it. Verified in a real browser through
-  the planner's own three.js + lighting, closer than its nearest camera preset, including a model
-  that previously DID carry tangents — indistinguishable.
-- **Fixed while in here: MikkTSpace was silently dropping TANGENT from whole models.** The emboss
-  leaves n-gons, MikkTSpace aborts on those ("Tangent space can only be computed for tris/quads"),
-  and the exporter then drops the attribute from the ENTIRE mesh — hit 2 of 4 real test bakes, so
-  those models' normal maps had always shaded through three.js's fallback. New
-  `triangulate_for_export` in `bake_proxy.py`, run **before** the final crease pass (so the new
-  interior edges are classified by their real angle and a former n-gon still shades flat). Every
-  emboss/cleanup number identical afterwards; 14,982 n-gons triangulated on the wall panel.
-- **Heavy-table warning is now BYTE-based** (`HEAVY_TABLE_BYTES` 45MB, replacing
-  `HEAVY_TABLE_MODELS` 15) via a new `glbBytesFor()` in `scene/loaders.ts`. A count was only ever
-  a stand-in for weight and the LOD breaks the conversion — and the two tiers coexist for as long
-  as the backfill takes, so no single count is right for both. 45 MB is exactly where the old
-  15-model rule landed at the ~3 MB/model it was tuned against. The loading-bar note keeps a count
-  (`LARGE_TABLE_LOAD_MODELS` 20) because during a load the sizes are what is still being fetched.
-- **BACKFILL IS A RE-BAKE, NOT A RE-PROCESS** (`npm run backfill:planner-lod`). Existing proxies
-  are flat-shaded and cannot be derived from. Jobs queue **behind live artist uploads**, so batch
-  it with `--limit`. It also re-bakes the proxy (now crease-shaded), so it changes what buyers see
-  on the product page too — QA'd, but not purely additive. Source-key resolution mirrors
-  `previewSourceKey` in `modelIngest/process.ts` (pre-supported listings preview from
-  `display_stl_path`, OBJ bakes from the original) — getting that wrong would regenerate a
-  presupported model's preview *with the support struts back in*.
-- `npm run measure:lod -- <proxy_raw.glb>` reports triangles, stored verts, unique positions,
-  texture bytes and boundary loops for the proxy and for LOD candidates. The unique-position
-  count is what reveals vertex splitting.
-- Both projects typecheck clean and the frontend builds. **The backend route, migration 064 and
-  the queue SQL are UNTESTED against a real Postgres** — local dev is `DB_MOCK=true`, the same
-  limitation as most of this file. The frontend half WAS verified end-to-end against live
-  production (the planner requests `?variant=lod` for all 28 models; today's backend ignores the
-  param and returns the proxy, so the frontend is safe to deploy either side of the backend).
-  **The post-LOD showcase figures are a PROJECTION from four local bakes, not a measurement of
-  that table** — the LOD needs a production re-bake that can't be run from here: 85.07 MB →
-  roughly 28-36 MB, 9.12M triangles → roughly 2.6-4.8M.
+  `model_parts.lod_glb_path`), derived from the same bake output with gltf-transform weld+simplify
+  — no Blender, no new queue, ~2 s on a mesh already in the bake's temp dir. Served from the
+  existing URL as `GET /api/models/:id/preview.glb?variant=lod`; the planner asks for it
+  unconditionally via `plannerMeshUrl` (frontend `api/transformers.ts`) and the server falls back to
+  the proxy when a model has none. **Owners get the LOD too, deliberately** — their full-fidelity
+  copy (041) is much of why an owner's table is heaviest, and at 2–16 m it cannot be told from the
+  proxy; the product page asks for no variant, so an owner still gets their full copy there. **The
+  key is a secret like `full_glb_path`** — random 16-byte suffix, stripped at all three redaction
+  sites.
+- **`proxyCreaseAngleDeg` is 45 (was 0)** and is what makes simplification possible at all. An STL
+  has no vertex normals, so Blender imports it flat-shaded and no two triangles share a vertex;
+  meshopt asked for 33% of a flat bake returned 91–95% of the triangles. Crease shading restores
+  shared edges. That is why `proxyDecimationEnabled`'s long history of destructive results never
+  had a good option. QA'd before the flip on the classes `config.ts` warns decimation destroys —
+  a louvred shutter, a dense architectural piece, a wall panel, an organic stack. On its own it is
+  roughly download-neutral per model (geometry shrinks, normal map grows); its value is the unlock.
+- **`plannerLodLockBorder` must stay on.** A baked proxy's open boundaries *are* its
+  non-printability (emboss through-holes, deleted base faces, stripped interior). With it off the
+  LOD is only ~5% smaller and the monogram cut-outs visibly deform into blobs; on an organic source
+  it lost 55% of its boundary loops (751 → 335). **Security setting, not a quality knob.**
+  `CreatorProtection.tsx` promises the preview is unprintable. At the current config boundary loops
+  survive essentially intact across all 32 parts (e.g. 1,247 of 1,260).
+- **The LOD drops `TANGENT`; the proxy keeps it.** 15–38% of the file, and three.js derives tangents
+  from screen-space derivatives without it. Verified in a real browser through the planner's own
+  three.js and lighting, closer than its nearest camera preset, including a model that previously
+  carried tangents — indistinguishable, and re-confirmed here by the no-decimation control at 0.1%
+  edge loss. **This is where most of the download win comes from**, which also means the *proxy*
+  is carrying 15–38% it may not need on the product page — untested, and a separate decision.
+- **A known ceiling, diagnosed:** on a many-shell mesh the collapse can stall well above any budget,
+  and there the error bound is not what binds (even `error: 1.0` lands identically). Dropping
+  `TEXCOORD_0` alone stopped at 148k, `NORMAL` alone at 152k, **both** reached 64k — it is the union
+  of UV-island and crease seams. Neither can be given up (UVs carry the baked normal map; creases
+  are what made welding work). Mostly moot at 0.0002, where the error stops the collapse first on
+  every part measured.
+- **Fixed while in here (earlier session): MikkTSpace was silently dropping TANGENT from whole
+  models.** The emboss leaves n-gons, MikkTSpace aborts on those, and the exporter then drops the
+  attribute from the ENTIRE mesh — hit 2 of 4 real test bakes. New `triangulate_for_export` in
+  `bake_proxy.py`, run **before** the final crease pass so new interior edges are classified by
+  their real angle and a former n-gon still shades flat.
+- **Heavy-table warning is BYTE-based** (`HEAVY_TABLE_BYTES` 45 MB, replacing `HEAVY_TABLE_MODELS`
+  15) via `glbBytesFor()` in `scene/loaders.ts`. A count was only ever a stand-in for weight and the
+  LOD breaks the conversion. The loading-bar note keeps a count (`LARGE_TABLE_LOAD_MODELS` 20)
+  because during a load the sizes are what is still being fetched.
+- **BACKFILL IS A RE-BAKE, NOT A RE-PROCESS.** Existing proxies are flat-shaded and cannot be
+  derived from. Jobs queue **behind live artist uploads**, so batch with `--limit`. It also re-bakes
+  the proxy, so it changes what buyers see on the product page too — QA'd, but not purely additive.
+  Source-key resolution mirrors `previewSourceKey` in `modelIngest/process.ts`; getting it wrong
+  would regenerate a presupported model's preview *with the support struts back in*.
+- **Still untested against a real Postgres:** the backend route, migration 064, the queue SQL and
+  the backfill's new `--model` filter. Local dev is `DB_MOCK=true`, the same limitation as most of
+  this file. Everything about mesh quality above was measured on the real production meshes.
 
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY

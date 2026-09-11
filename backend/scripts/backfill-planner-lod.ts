@@ -28,6 +28,12 @@
 //   railway run npm run backfill:planner-lod -- --limit 25
 //   railway run npm run backfill:planner-lod
 //   railway run npm run backfill:planner-lod -- --force      # re-bake even ones already done
+//   railway run npm run backfill:planner-lod -- --model <id> --force   # one model + its parts
+//
+// AFTER CHANGING A plannerLod* DEFAULT, START WITH --model. The config only takes
+// effect through a re-bake, and the thing that has to be checked is not that the
+// job ran but that the result LOOKS right in the planner — so re-bake one model you
+// can recognise, open it, and only then do the rest.
 //
 // Run it linked to the **Postgres** service, not the backend one: `railway run`
 // injects production's env but executes on your machine, and the backend's
@@ -65,6 +71,12 @@ function arg(name: string): string | undefined {
 const DRY_RUN = process.argv.includes('--dry-run')
 const FORCE = process.argv.includes('--force')
 const LIMIT = Number(arg('limit') ?? 0) || Infinity
+// Restrict to ONE model and its parts. `--limit 1` picks whichever mesh sorts
+// first, which is how a smoke test can confirm the pipeline RAN without anyone
+// being able to go and look at a model they recognise — the exact gap that let a
+// visibly broken LOD reach the whole catalogue. Naming the model means the
+// verification step is "open this piece in the planner and look at it".
+const MODEL = arg('model')
 
 // The bake's source is NOT simply stl_file_path. A pre-supported listing
 // (migrations 053/054) previews from its clean display file, and an OBJ upload
@@ -159,7 +171,9 @@ async function main() {
        FROM models m
       WHERE m.processing_status = 'ready'
         AND m.status <> 'archived'
+        AND ($1::uuid IS NULL OR m.id = $1::uuid)
       ORDER BY m.sale_count DESC NULLS LAST, m.created_at DESC`,
+    [MODEL ?? null],
   )
 
   const { rows: parts } = await db.query(
@@ -181,7 +195,9 @@ async function main() {
        JOIN models m ON m.id = p.model_id
       WHERE p.processing_status = 'ready'
         AND m.status <> 'archived'
+        AND ($1::uuid IS NULL OR p.model_id = $1::uuid)
       ORDER BY m.sale_count DESC NULLS LAST, m.created_at DESC`,
+    [MODEL ?? null],
   )
 
   // Most-sold first, so a partly-drained queue has still re-baked the models
@@ -197,7 +213,11 @@ async function main() {
   const skippedOpen = all.filter((m) => m.source_key && m.open_job).length
   const alreadyDone = all.filter((m) => m.done).length
 
+  if (MODEL) console.log(`Restricted to model ${MODEL} (--model)`)
   console.log(`Meshes found:   ${all.length} (${models.length} models, ${parts.length} set parts)`)
+  if (MODEL && all.length === 0) {
+    console.log('Nothing matched that model id — check it against GET /api/models/sets.')
+  }
   console.log(`  already done: ${alreadyDone}${FORCE ? ' (ignored — --force)' : ''}`)
   console.log(`  bake in queue:${skippedOpen}`)
   console.log(`  no source key:${skippedNoSource}`)

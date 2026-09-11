@@ -644,21 +644,53 @@ export interface ProxyBakeConfig {
    *  returned 91-95% of the triangles), so with crease shading off this produces
    *  nothing and the planner keeps loading the proxy — no failure, just no win. */
   plannerLodEnabled: boolean
-  /** Triangle target for the LOD.
+  /** Triangle target for the LOD — a FLOOR the collapse aims for, not a ceiling it
+   *  is held to.
    *
-   *  Chosen by rendering candidates at the three planner camera distances above and
-   *  comparing them to the proxy, not by picking a round number: at 2 m — the
-   *  distance a table is actually laid out from — a 50k LOD of a 276k proxy was
-   *  indistinguishable, because the baked normal map carries the surface detail and
-   *  only the silhouette depends on triangles. The cost lands at the 0.3 m
-   *  inspection distance, where the LOD is visibly the coarser mesh; that is the
-   *  accepted trade, and the product page (which serves the proxy or, for an owner,
-   *  the full-fidelity copy) is where close inspection belongs. */
+   *  meshopt stops at whichever of the two limits it reaches first, so the result
+   *  is max(this target, what plannerLodSimplifyError permits). Since the error is
+   *  the tighter of the two on every real bake measured, this number normally never
+   *  binds: it is what the LOD would collapse to IF the geometry were smooth enough
+   *  to allow it (a flat panel can lose almost every triangle at zero error), and a
+   *  safety floor on the very simplest meshes. Read plannerLodSimplifyError first —
+   *  that is the knob that decides quality.
+   *
+   *  IT WAS NOT ALWAYS A FLOOR. Shipped at 50,000 with a loose error bound, it WAS
+   *  the binding constraint, and it visibly destroyed the catalogue — see the error
+   *  bound below for what that looked like and how the replacement was chosen. */
   plannerLodTriangleBudget: number
   /** Error bound handed to meshopt for the LOD collapse, as a fraction of the mesh
-   *  extent. Looser than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR) because
-   *  this tier is explicitly allowed to move the surface — it just must not be
-   *  allowed to do so without limit, or thin members drift into each other. */
+   *  extent. THIS IS THE QUALITY KNOB — the triangle budget above almost never
+   *  binds before it does.
+   *
+   *  0.0002 of the mesh extent, which on a ~250 mm terrain piece is about 0.05 mm:
+   *  the LOD surface may not move further from the proxy than roughly one resin
+   *  print layer. Stating the tolerance geometrically rather than as a triangle
+   *  count is the whole point — it adapts per model, so a mesh made of thousands of
+   *  separate roof-tile shells keeps the triangles it needs (16-29% cut on the real
+   *  catalogue) while a low-relief walkway gives up 63% of its own, and both land at
+   *  the same visual fidelity. A single triangle count cannot do that, which is
+   *  exactly how the first attempt failed.
+   *
+   *  CHOSEN BY RENDERING, on the real catalogue, not on substitute models: every
+   *  part of a 28-piece showcase table plus a second artist's set, rendered against
+   *  its own proxy at all three planner camera distances through the planner's own
+   *  lighting and 50-degree camera. Measured as the share of the proxy's Sobel edge
+   *  energy the LOD fails to reproduce inside the model's silhouette — a flat pixel
+   *  difference is the metric that MISSED the first regression, because a melted
+   *  roof covers the same pixels at the same average brightness.
+   *
+   *    error    0.3 m edge loss (8 parts)   verdict
+   *    0.01     19-33%   (the shipped one)  carved panels and roof tiles melted to
+   *                                         lumpy blobs; unusable
+   *    0.0005    9-17%                      inconsistent — fine on some parts,
+   *                                         visibly soft on others
+   *    0.0002   4.8-9.9%                    indistinguishable from the proxy by eye
+   *
+   *  Tighter than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR), which is not a
+   *  contradiction: that tier simplifies an unbaked mesh whose detail IS its
+   *  triangles, while this one is already standing on a proxy that has had its
+   *  detail baked down into a normal map once. There is far less left to give. */
   plannerLodSimplifyError: number
   /** Keep every open boundary pinned through the collapse.
    *
@@ -671,11 +703,24 @@ export interface ProxyBakeConfig {
    *  its budget and every hole's boundary loop survived intact — so the default is
    *  on and should stay on unless a specific model cannot reach its budget with it. */
   plannerLodLockBorder: boolean
-  /** Minimum fraction of triangles the collapse must actually remove before the LOD
-   *  is worth writing. Below this the result is near-identical to the proxy (the
-   *  flat-shaded case, or a mesh so boundary-dominated that lockBorder pinned it),
-   *  and shipping a second almost-identical file would cost storage, bandwidth and
-   *  a cache entry to save nothing — so it is skipped and the planner uses the proxy. */
+  /** Minimum fraction of the proxy's DOWNLOAD SIZE the LOD must save before it is
+   *  worth writing. Below this, shipping a second almost-identical file would cost
+   *  storage, bandwidth and a cache entry to save nothing — so it is skipped and the
+   *  planner uses the proxy, which is the pre-LOD behaviour.
+   *
+   *  BYTES, NOT TRIANGLES — it used to count triangles, and that is the wrong
+   *  quantity for a tier that exists to make a page download less. Once the collapse
+   *  is bounded by a geometric error rather than a flat triangle target, a detailed
+   *  mesh legitimately keeps most of its triangles while still producing a file
+   *  55% smaller, because dropping TANGENT and re-quantising through Draco does that
+   *  much on its own. Measured on the real catalogue, a triangle gate at 0.25 threw
+   *  away roughly a third of the LODs — including the heaviest parts in the table,
+   *  and including one whose weight was in its normal map rather than its geometry —
+   *  for failing a test of something the tier was not trying to reduce.
+   *
+   *  The triangle reduction is still reported (proxy_report.plannerLod.trianglesCutPct):
+   *  near zero there is the proxyCreaseAngleDeg-is-0 signature, worth seeing even
+   *  when the file did shrink. */
   plannerLodMinReduction: number
   /** Maximum normal-map edge length on the LOD, in pixels (0 keeps it as baked).
    *  Only ever SHRINKS a map — gltf-transform treats this as an upper bound — so a

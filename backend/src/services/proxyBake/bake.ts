@@ -314,7 +314,10 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
     let lodBuilt = false
     if (cfg.plannerLodEnabled) {
       try {
-        const lod = await buildPlannerLod(rawGlb, lodGlb, cfg)
+        // glbBytes is the FINISHED proxy — the thing the planner would otherwise
+        // download — so the LOD's "is this worth a second file" test can weigh
+        // bytes against bytes instead of counting triangles.
+        const lod = await buildPlannerLod(rawGlb, lodGlb, cfg, glbBytes)
         lodBuilt = !lod.skipped
         report.plannerLod = {
           built: lodBuilt,
@@ -322,13 +325,23 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
           proxyTriangles: lod.sourceTriangles,
           fileMb: lod.bytes ? Number((lod.bytes / (1024 * 1024)).toFixed(3)) : 0,
           budget: cfg.plannerLodTriangleBudget,
+          simplifyError: cfg.plannerLodSimplifyError,
           lockBorder: cfg.plannerLodLockBorder,
+          trianglesCutPct: Number((lod.triangleReduction * 100).toFixed(1)),
+          bytesSavedPct:
+            lod.byteReduction >= 0 ? Number((lod.byteReduction * 100).toFixed(1)) : null,
           note: lod.note,
         }
-        if (!lodBuilt && cfg.proxyCreaseAngleDeg <= 0) {
+        // A flat-shaded source is now visible as a near-zero TRIANGLE cut rather
+        // than as a missing LOD: with the gate on bytes, such a mesh still ships a
+        // usefully smaller file (the TANGENT drop alone does that), it just never
+        // got the geometry win this tier was built for, and the report should say
+        // so either way.
+        if (cfg.proxyCreaseAngleDeg <= 0) {
           report.warnings = report.warnings || []
           report.warnings.push(
-            'No planner LOD: proxyCreaseAngleDeg is 0, so the flat-shaded proxy has no shared edges to collapse',
+            `Planner LOD collapsed only ${(lod.triangleReduction * 100).toFixed(1)}% of triangles: ` +
+              'proxyCreaseAngleDeg is 0, so the flat-shaded proxy has no shared edges to collapse',
           )
         }
       } catch (err) {

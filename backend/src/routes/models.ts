@@ -1071,12 +1071,18 @@ async function servePreviewGlb(
   // absorbs reload bursts — which matters, because previewRateLimit counts every
   // request that isn't served from cache and a planner load is dozens of them.
   //
-  // The LOD is the exception and gets the long cache back: it is the same bytes
-  // for every viewer who can see the model, so buying it changes nothing about
-  // this response and there is nothing for a short lifetime to pick up. That
-  // matters most exactly where it applies — a planner table is dozens of these
-  // requests against a 150-per-15-minutes rate limit.
-  res.set('Cache-Control', variant === 'lod' ? 'private, max-age=3600' : 'private, max-age=300');
+  // The LOD used to be the exception and hold this for an hour, on the reasoning
+  // that it is the same bytes for every viewer so nothing about it can go stale.
+  // That reasoning was about ENTITLEMENT and it was correct; what it missed is that
+  // the cache lifetime is also the blast radius of the kill switch. Setting
+  // lod_glb_path to NULL makes this route fall back to the proxy instantly and with
+  // no deploy — which is the whole rollback plan for this tier — but a browser
+  // holding an hour-old LOD kept rendering the bad mesh for up to an hour after the
+  // switch was thrown, and that is exactly what happened the day the 50k budget went
+  // out. Five minutes matches the other two variants and bounds that to five
+  // minutes. The rate-limit headroom it gives up is headroom the proxy has always
+  // run without: a planner table has been served at max-age=300 all along.
+  res.set('Cache-Control', 'private, max-age=300');
   // Entitlement — and therefore which variant this response is — is decided
   // entirely off the Authorization header (see optionalAuth), but the browser's
   // HTTP cache only ever keys on (method, URL) unless a response's Vary header
