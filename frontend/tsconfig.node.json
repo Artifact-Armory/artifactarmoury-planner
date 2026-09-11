@@ -1,6 +1,13 @@
 {
   "compilerOptions": {
     "composite": true,
+    // Keep every artefact of this project OUT of the source tree. Without an
+    // outDir, `tsc -b` compiles vite.config.ts to a vite.config.js sitting
+    // beside it — and Vite loads the .js in preference to the .ts, so edits to
+    // the real config silently do nothing (this happened; both files were
+    // committed). Emit into node_modules instead, where it can't shadow.
+    "outDir": "./node_modules/.tmp/tsconfig.node",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
