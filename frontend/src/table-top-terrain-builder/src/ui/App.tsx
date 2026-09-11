@@ -23,7 +23,7 @@ import { serializeLayout, deserializeLayout } from '@state/tableMapping'
 import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
-import { ensureTemplate, subscribeGlbBytes, glbUnitsSince } from '@scene/loaders'
+import { ensureTemplate, subscribeGlbBytes, glbUnitsSince, glbBytesFor } from '@scene/loaders'
 import { CoachMarks } from './CoachMarks'
 import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
@@ -45,11 +45,34 @@ import './styles.css'
 const TABLE_PIECE_LOAD_TIMEOUT_MS = 45000
 
 // What counts as a "heavy" table, i.e. one worth warning about before the
-// framerate does it for us. Distinct models drive download size and draw calls
-// (one GLB + one InstancedMesh set each); total pieces drive the per-frame cost
-// even though copies share geometry. Either alone is enough to be felt.
-const HEAVY_TABLE_MODELS = 15
+// framerate does it for us.
+//
+// Download weight is measured in BYTES, not model count. A count was only ever a
+// stand-in for weight, and the planner LOD (migration 064) broke the conversion:
+// a re-baked model costs roughly a third of what it did, so 15 models is 45 MB of
+// old proxies but well under 20 MB of LODs. Worse, the two coexist for as long as
+// the catalogue backfill takes, so no single count is right for both. Bytes stay
+// right throughout, and 45 MB is deliberately where the old 15-model rule landed
+// at the ~3 MB/model it was tuned against — the same bar, expressed in the thing
+// it was always trying to measure.
+//
+// Pieces stay a count: copies share geometry and cost no download at all, so what
+// they drive is per-frame work, which a count does describe.
+const HEAVY_TABLE_BYTES = 45 * 1024 * 1024
 const HEAVY_TABLE_PIECES = 45
+// Fallback for when sizes aren't known — the local dev manifest, or a response
+// with no Content-Length. Deliberately well above the old 15: reaching it means
+// we are guessing, and a wrong warning on a table the viewer can see is running
+// fine is worse than a missing one.
+const HEAVY_TABLE_MODELS_UNMEASURED = 30
+// Separate, and deliberately still a count: the note under the loading bar is
+// shown WHILE the models download, when the only figure available is how many
+// there are — the sizes are exactly what is still being fetched. It also says
+// something different from the warning above ("this will take a moment", not
+// "this will run slowly"). Raised from the 15 it shared with the old heavy-table
+// rule because an LOD'd table of that size now loads quickly enough not to need
+// reassuring about.
+const LARGE_TABLE_LOAD_MODELS = 20
 
 const M_PER_FT = 0.3048
 // Common tabletop-wargaming board sizes (feet).
@@ -367,10 +390,37 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // seconds — exactly what a tester reported on an artist's showcase. Hold the
   // overlay until every distinct model on the table has its geometry in hand.
   const [heavyWarnDismissed, setHeavyWarnDismissed] = React.useState(false)
+  // Latched: a table only ever gets heavier as its models finish downloading, and
+  // a warning that appeared and then vanished mid-load would read as a glitch.
+  const [heavyByBytes, setHeavyByBytes] = React.useState(false)
+  React.useEffect(() => {
+    if (heavyByBytes) return
+    const check = () => {
+      const models: string[] = []
+      for (const id of new Set(instances.map((i) => i.assetId))) {
+        const m = getAssetById(id)?.model
+        if (m) models.push(m)
+      }
+      if (glbBytesFor(models).bytes >= HEAVY_TABLE_BYTES) setHeavyByBytes(true)
+    }
+    check()
+    // Recheck as bytes land: on a saved table every GLB is requested at once, so
+    // the total is only true at the end; on a scratch table it grows per placement.
+    return subscribeGlbBytes(check)
+  }, [instances, heavyByBytes])
+
   const isHeavyTable = React.useMemo(() => {
     if (instances.length >= HEAVY_TABLE_PIECES) return true
-    return new Set(instances.map((i) => i.assetId)).size >= HEAVY_TABLE_MODELS
-  }, [instances])
+    if (heavyByBytes) return true
+    // Only guess from the model count when the bytes genuinely aren't available.
+    const models: string[] = []
+    for (const id of new Set(instances.map((i) => i.assetId))) {
+      const m = getAssetById(id)?.model
+      if (m) models.push(m)
+    }
+    const { unknown } = glbBytesFor(models)
+    return unknown > 0 && models.length >= HEAVY_TABLE_MODELS_UNMEASURED
+  }, [instances, heavyByBytes])
 
   const loadsSavedTable = Boolean(tableId || shareToken)
   const [tableAssetsReady, setTableAssetsReady] = React.useState(!loadsSavedTable)
@@ -381,6 +431,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     setTableAssetsReady(!loadsSavedTable)
     setTablePieceLoad(null)
     setHeavyWarnDismissed(false)
+    setHeavyByBytes(false)
   }, [tableId, shareToken, loadsSavedTable])
 
   // The single condition the overlay is keyed off.
@@ -1032,7 +1083,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 ? `${tablePieceLoad.loaded} of ${tablePieceLoad.total} models · ${gatePct}%`
                 : `${gatePct}%`}
             </div>
-            {tablePieceLoad && tablePieceLoad.total >= HEAVY_TABLE_MODELS && (
+            {tablePieceLoad && tablePieceLoad.total >= LARGE_TABLE_LOAD_MODELS && (
               <div className="tb-loading-note">
                 This is a large, detailed table — it can take a moment to load and may
                 run slower on older devices.

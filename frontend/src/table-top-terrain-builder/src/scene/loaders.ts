@@ -109,6 +109,39 @@ export function glbUnitsSince(since: number): number {
 }
 
 /**
+ * How many bytes a specific set of assets' GLBs actually weigh, and how many of
+ * them couldn't say.
+ *
+ * This is what "is this table heavy?" should be asking. Counting distinct models
+ * was only ever a stand-in for download size, and it stopped tracking it the
+ * moment the planner LOD landed (migration 064): a re-baked model costs roughly a
+ * third of what it used to, but only once it HAS been re-baked, so during a
+ * catalogue backfill two tables with the same model count can differ several-fold
+ * in weight. Bytes distinguish them; a count cannot.
+ *
+ * `unknown` counts assets with a size we don't have — a response with no
+ * Content-Length, or one that simply hasn't started downloading yet — so the
+ * caller can tell "genuinely light" from "not measured", and fall back rather than
+ * treating an unmeasured table as a small one.
+ *
+ * Takes asset MODEL paths (`Asset.model`) and resolves them the same way
+ * loadAssetTemplate does, so the keys match what the loader recorded.
+ */
+export function glbBytesFor(models: Iterable<string>): { bytes: number; unknown: number } {
+  let bytes = 0
+  let unknown = 0
+  for (const model of models) {
+    const e = bytesByUrl.get(resolveAssetUrl(model))
+    // `total` is 0 until the first lengthComputable progress event; settleBytes
+    // backfills it from `loaded` on completion, so a finished download always has
+    // a figure even when the server sent no Content-Length.
+    if (!e || e.total <= 0) unknown++
+    else bytes += Math.min(e.loaded, e.total)
+  }
+  return { bytes, unknown }
+}
+
+/**
  * Centre an object in X/Z and sit its base on y=0, so the asset's footprint
  * centre matches the instance position the occupancy grid uses.
  */

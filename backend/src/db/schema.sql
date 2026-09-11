@@ -124,6 +124,13 @@ CREATE TABLE models (
     full_glb_status VARCHAR(20),   -- queued|processing|ready|failed|skipped
     full_glb_error TEXT,
     full_glb_tris INTEGER,
+    -- Planner LOD (migration 064): a much lighter variant of the preview proxy,
+    -- derived from the same bake, for the 3D planner — which lays out dozens of
+    -- models at once where the product page shows one. NULL is normal (baked
+    -- before 064, already under budget, or topology the simplifier can't reduce)
+    -- and just means the planner loads glb_file_path instead. Key is
+    -- unguessable and must never appear in an API payload, same as full_glb_path.
+    lod_glb_path VARCHAR(500),
     -- Optional "clean preview" companion file (migration 053). An artist whose
     -- print STL already has supports attached ticks is_presupported and uploads a
     -- separate support-free STL; that file, canonicalized here, becomes the
@@ -300,6 +307,8 @@ CREATE TABLE model_parts (
     full_glb_status VARCHAR(20),
     full_glb_error TEXT,
     full_glb_tris INTEGER,
+    -- Planner LOD for this part (see models.lod_glb_path, migration 064).
+    lod_glb_path VARCHAR(500),
     width DECIMAL(10,2), depth DECIMAL(10,2), height DECIMAL(10,2), -- mm
     file_hash VARCHAR(64),
     geometry_fingerprint JSONB,

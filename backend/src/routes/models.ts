@@ -978,7 +978,7 @@ async function isEntitledToModel(modelId: string, viewerId?: string, role?: stri
 /**
  * Stream the GLB if the viewer may see this model, else 404.
  *
- * TWO variants live behind this one URL:
+ * THREE variants live behind this one URL:
  *
  *   - the PREVIEW proxy (`glb_file_path`) — decimated and, on the bake path,
  *     carrying an embossed watermark. What anyone browsing the marketplace gets.
@@ -988,17 +988,36 @@ async function isEntitledToModel(modelId: string, viewerId?: string, role?: stri
  *     fileProcessor.ts), no watermark. Served only to someone who has bought the
  *     model (or its artist, or an admin), who already holds the STL and has
  *     nothing left to be protected from (migration 041).
+ *   - the PLANNER LOD (`lod_glb_path`) — a much lighter mesh carrying the same
+ *     baked normal/AO maps, for the one surface that draws DOZENS of models at
+ *     once (migration 064).
  *
- * Serving both from one URL — rather than a second endpoint the planner has to
- * choose between — keeps the entitlement decision on the server, where it belongs,
- * and means the planner needs no ownership logic at load time. It does make the
- * response vary by viewer, which is why the cache lifetime below is minutes rather
- * than the hour it used to be: buy a model and the planner picks up the real mesh
- * on the next load, instead of serving the cached proxy for the rest of the hour.
- * `?variant=preview` forces the proxy (an artist checking what buyers actually see).
+ * Serving them from one URL — rather than separate endpoints the client has to
+ * choose between — keeps the ENTITLEMENT decision on the server, where it belongs,
+ * and means the planner needs no ownership logic at load time (which matters:
+ * loadAssetCatalogue registers assets before it fetches entitlements). It does make
+ * the response vary by viewer, which is why the cache lifetime below is minutes
+ * rather than the hour it used to be: buy a model and the planner picks up the real
+ * mesh on the next load, instead of serving the cached proxy for the rest of the
+ * hour.
  *
- * If the owner copy isn't built yet, has been skipped, or failed, this silently
- * serves the proxy — the full build is a bonus, never a dependency.
+ * `?variant` lets a CLIENT declare its own context — never the viewer's ownership,
+ * which is never taken from the client:
+ *   - `preview` forces the proxy (an artist checking what buyers actually see).
+ *   - `lod` asks for the planner tier. Granted to EVERYONE who can see the model,
+ *     owners included. That is a deliberate decision, not an oversight: the owner's
+ *     full-fidelity copy is a large part of why an owner's table is the heaviest
+ *     one, and a layout tool viewed from 2-16 metres cannot show the difference —
+ *     measured at those distances, under 0.01% of pixels differ from the proxy by
+ *     more than 8/255. Close inspection of the real mesh belongs on the product
+ *     page, which asks for no variant and so still serves an owner their full copy.
+ *
+ * If the requested variant isn't built yet, was skipped, or failed, this silently
+ * serves the proxy — both extra variants are a bonus, never a dependency. Note what
+ * that means for `lod` BEFORE the catalogue has been re-baked: it falls back to the
+ * proxy, NOT to the owner copy, so an owner's planner table gets lighter on deploy
+ * day rather than waiting for the backfill. That is intended, and is the same
+ * decision as above applied to the case where no LOD exists yet.
  */
 async function servePreviewGlb(
   req: any,
@@ -1010,6 +1029,7 @@ async function servePreviewGlb(
     visibility: string;
     glb_file_path: string | null;
     full_glb_path: string | null;
+    lod_glb_path: string | null;
   },
 ) {
   const isPublic = row.status === 'published' && row.visibility === 'public';
@@ -1017,9 +1037,15 @@ async function servePreviewGlb(
   const isOwnerOrAdmin = viewerId && (viewerId === row.artist_id || req.user?.role === 'admin');
   if (!isPublic && !isOwnerOrAdmin) throw new NotFoundError('Preview');
 
+  const requested = req.query?.variant;
   let key = row.glb_file_path;
-  let variant: 'preview' | 'full' = 'preview';
-  if (row.full_glb_path && req.query?.variant !== 'preview') {
+  let variant: 'preview' | 'full' | 'lod' = 'preview';
+  if (requested === 'lod' && row.lod_glb_path) {
+    // No entitlement check at all — the LOD is the lightest of the three, so
+    // serving it can never hand anyone a mesh they weren't already entitled to.
+    key = row.lod_glb_path;
+    variant = 'lod';
+  } else if (row.full_glb_path && requested !== 'preview' && requested !== 'lod') {
     if (await isEntitledToModel(row.model_id, viewerId, req.user?.role)) {
       key = row.full_glb_path;
       variant = 'full';
@@ -1044,7 +1070,13 @@ async function servePreviewGlb(
   // model (and a stale full GLB after a file-version rebuild). Five minutes still
   // absorbs reload bursts — which matters, because previewRateLimit counts every
   // request that isn't served from cache and a planner load is dozens of them.
-  res.set('Cache-Control', 'private, max-age=300');
+  //
+  // The LOD is the exception and gets the long cache back: it is the same bytes
+  // for every viewer who can see the model, so buying it changes nothing about
+  // this response and there is nothing for a short lifetime to pick up. That
+  // matters most exactly where it applies — a planner table is dozens of these
+  // requests against a 150-per-15-minutes rate limit.
+  res.set('Cache-Control', variant === 'lod' ? 'private, max-age=3600' : 'private, max-age=300');
   // Entitlement — and therefore which variant this response is — is decided
   // entirely off the Authorization header (see optionalAuth), but the browser's
   // HTTP cache only ever keys on (method, URL) unless a response's Vary header
@@ -1075,7 +1107,8 @@ router.get('/:id/preview.glb',
   optionalAuth,
   asyncHandler(async (req, res) => {
     const row = (await db.query(
-      `SELECT id AS model_id, artist_id, status, visibility, glb_file_path, full_glb_path
+      `SELECT id AS model_id, artist_id, status, visibility, glb_file_path, full_glb_path,
+              lod_glb_path
          FROM models WHERE id = $1`,
       [req.params.id],
     )).rows[0];
@@ -1093,7 +1126,7 @@ router.get('/parts/:partId/preview.glb',
     // every part — so the model's id travels with the part's file paths.
     const row = (await db.query(
       `SELECT m.id AS model_id, m.artist_id, m.status, m.visibility,
-              p.glb_file_path, p.full_glb_path
+              p.glb_file_path, p.full_glb_path, p.lod_glb_path
        FROM model_parts p JOIN models m ON m.id = p.model_id
        WHERE p.id = $1`,
       [req.params.partId],
@@ -1410,16 +1443,18 @@ router.get('/:id',
     // would let anyone download the original, un-watermarked STL directly, bypassing
     // the entitlement + per-buyer watermark on /:id/download. Expose only booleans;
     // the preview GLB is fetched through the signed /:id/preview.glb endpoint.
-    // full_glb_path (041) and display_stl_path (053/054) are the SAME class of secret
-    // — a random-suffixed key with no signed-URL requirement of its own — and must be
-    // stripped here too (2026-09-05 security audit: these two were missing from this
-    // list, so /:id was handing out a permanent, un-watermarked CDN link to the
-    // owner-tier full-fidelity GLB / clean preview STL for every published model).
+    // full_glb_path (041), lod_glb_path (064) and display_stl_path (053/054) are the
+    // SAME class of secret — a random-suffixed key with no signed-URL requirement of
+    // its own — and must be stripped here too (2026-09-05 security audit: full_glb_path
+    // and display_stl_path were missing from this list, so /:id was handing out a
+    // permanent, un-watermarked CDN link to the owner-tier full-fidelity GLB / clean
+    // preview STL for every published model).
     const hasGlb = !!model.glb_file_path;
     delete model.stl_file_path;
     delete model.glb_file_path;
     delete model.source_file_path;
     delete model.full_glb_path;
+    delete model.lod_glb_path;
     delete model.display_stl_path;
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,

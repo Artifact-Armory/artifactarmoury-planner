@@ -13,12 +13,14 @@
 // and treats a Blender timeout as a clean failure (kills the process group).
 
 import { spawn } from 'child_process'
+import crypto from 'crypto'
 import { promises as fsp } from 'fs'
 import os from 'os'
 import path from 'path'
 import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { loadBakeConfig, type ProxyBakeConfig, type ProxyBakeConfigOverrides } from './config'
+import { buildPlannerLod } from './lod'
 
 // @gltf-transform/* is ESM-only; the CommonJS build must import it dynamically
 // (same shim used in services/fileProcessor.ts).
@@ -46,6 +48,11 @@ export interface BakeJobInput {
 export interface BakeResult {
   /** R2 key of the final Draco-compressed proxy GLB (store as glb_file_path). */
   glbKey: string
+  /** R2 key of the planner LOD GLB (store as lod_glb_path), or null when this
+   *  bake produced none — see services/proxyBake/lod.ts for when that happens. A
+   *  null here means the planner keeps loading `glbKey`, which is the pre-LOD
+   *  behaviour and never an error. */
+  lodGlbKey: string | null
   /** R2 key of the side-by-side comparison PNG (QA aid). */
   comparisonKey: string | null
   /** R2 key of the report JSON. */
@@ -59,6 +66,21 @@ function artefactPrefix(input: BakeJobInput): string {
   return input.partId
     ? `previews/${input.modelId}/part-${input.partId}`
     : `previews/${input.modelId}`
+}
+
+/**
+ * R2 key for a planner LOD. Unlike the proxy's stable `previews/<id>/proxy.glb`
+ * this carries 16 random bytes, following the owner-GLB precedent in
+ * fullGlb/build.ts: the bucket is public through the CDN and model ids are public,
+ * so a predictable key is a free, un-gated copy of the mesh to anyone who can
+ * guess it. The key lives only in `lod_glb_path` and is never returned by any API
+ * (not even inside the preview route's ETag, which hashes it). The cost of a
+ * random key is that a re-bake no longer overwrites in place, so the caller must
+ * delete the superseded object — see completeJob in queue.ts.
+ */
+function lodKey(input: BakeJobInput): string {
+  const leaf = input.partId ? `part-${input.partId}` : 'primary'
+  return `previews/${input.modelId}/lod-${leaf}-${crypto.randomBytes(16).toString('hex')}.glb`
 }
 
 function sourceExt(format: string): string {
@@ -284,6 +306,41 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       )
     }
 
+    // 4b. Planner LOD, derived from the same raw GLB. Best-effort by design: the
+    // planner falls back to the proxy when there is no LOD, which is exactly what
+    // it did before this existed, so a failure here must never fail a bake that
+    // has otherwise produced a perfectly good preview.
+    const lodGlb = path.join(outDir, 'lod.glb')
+    let lodBuilt = false
+    if (cfg.plannerLodEnabled) {
+      try {
+        const lod = await buildPlannerLod(rawGlb, lodGlb, cfg)
+        lodBuilt = !lod.skipped
+        report.plannerLod = {
+          built: lodBuilt,
+          triangles: lod.triangles,
+          proxyTriangles: lod.sourceTriangles,
+          fileMb: lod.bytes ? Number((lod.bytes / (1024 * 1024)).toFixed(3)) : 0,
+          budget: cfg.plannerLodTriangleBudget,
+          lockBorder: cfg.plannerLodLockBorder,
+          note: lod.note,
+        }
+        if (!lodBuilt && cfg.proxyCreaseAngleDeg <= 0) {
+          report.warnings = report.warnings || []
+          report.warnings.push(
+            'No planner LOD: proxyCreaseAngleDeg is 0, so the flat-shaded proxy has no shared edges to collapse',
+          )
+        }
+      } catch (err) {
+        log.warn('Planner LOD build failed (serving the proxy instead)', {
+          jobId: input.jobId,
+          modelId: input.modelId,
+          error: err,
+        })
+        report.plannerLod = { built: false, note: `build threw: ${String(err)}` }
+      }
+    }
+
     // 5. Comparison PNG (QA aid; best-effort). Skipped unless the config opts in —
     // Blender didn't produce render_source_*/render_proxy_* files in that case, so
     // don't bother probing for them.
@@ -297,8 +354,14 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
     const glbKey = `${prefix}/proxy.glb`
     const reportKey = `${prefix}/report.json`
     const comparisonKey = composed ? `${prefix}/compare.png` : null
+    const lodGlbKey = lodBuilt ? lodKey(input) : null
 
     await uploadObject(glbKey, await fsp.readFile(finalGlb), 'model/gltf-binary', { immutable: false })
+    if (lodGlbKey) {
+      await uploadObject(lodGlbKey, await fsp.readFile(lodGlb), 'model/gltf-binary', {
+        immutable: false,
+      })
+    }
     await uploadObject(
       reportKey,
       Buffer.from(JSON.stringify(report, null, 2)),
@@ -316,8 +379,10 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       glbKey,
       proxyTriangles: report.proxyTriangles,
       finalMb: report.finalFileMb,
+      lodTriangles: report.plannerLod?.triangles ?? null,
+      lodMb: report.plannerLod?.fileMb ?? null,
     })
-    return { glbKey, comparisonKey, reportKey, report }
+    return { glbKey, lodGlbKey, comparisonKey, reportKey, report }
   } finally {
     await fsp.rm(work, { recursive: true, force: true }).catch(() => {})
   }

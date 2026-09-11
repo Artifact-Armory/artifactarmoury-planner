@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import * as THREE from 'three'
 import { browseApi } from '@/api/endpoints/browse'
 import { modelsApi } from '@/api/endpoints/models'
-import { assetUrl, previewGlbUrl, previewPartGlbUrl } from '@/api/transformers'
+import { assetUrl, plannerMeshUrl, previewGlbUrl, previewPartGlbUrl } from '@/api/transformers'
 
 export const AssetSchema = z.object({
   id: z.string().min(1),
@@ -234,7 +234,8 @@ function modelToAsset(m: {
     artistName: m.artistName,
     artistId: m.artistId,
     category: m.category, // palette grouping heading (buildings / vehicles / …)
-    model: m.glbUrl,
+    // Planner tier, not the product page's proxy — see plannerMeshUrl.
+    model: plannerMeshUrl(m.glbUrl),
     thumbnail: m.thumbnailUrl,
     scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
     defaultPitchDeg: m.defaultPitchDeg || undefined,
@@ -333,7 +334,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           price: assetId === s.id ? s.price : 0,
           fulfillment: 'stl',
           artistId: s.artistId,
-          model: part.isPrimary ? previewGlbUrl(s.id) : previewPartGlbUrl(part.id),
+          model: plannerMeshUrl(part.isPrimary ? previewGlbUrl(s.id) : previewPartGlbUrl(part.id)),
           // Per-component thumbnail (migration 058) when the artist set one for
           // THIS named model — already a full URL from getSets(), unlike
           // thumbnailPath below, which is a raw key. Falls back to the

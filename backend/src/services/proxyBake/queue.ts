@@ -13,6 +13,7 @@
 import { db } from '../../db'
 import logger from '../../utils/logger'
 import { createNotification } from '../notifications'
+import { deleteObject } from '../r2'
 import type { ProxyBakeConfigOverrides } from './config'
 import type { BakeResult } from './bake'
 
@@ -169,20 +170,38 @@ export async function completeJob(job: BakeJobRow, result: BakeResult): Promise<
     [job.id, JSON.stringify(result.report)],
   )
 
+  const table = job.part_id ? 'model_parts' : 'models'
+  const rowId = job.part_id ?? job.model_id
+
+  // Keep the LOD key we're replacing so the old object can be dropped. Unlike the
+  // proxy — whose key is stable, so a re-bake overwrites in place — each LOD gets
+  // a fresh random key (see lodKey in bake.ts), so without this a re-bake would
+  // orphan the previous one in R2 forever. Same reasoning, same shape, as
+  // completeFullGlbJob in fullGlb/queue.ts.
+  const prevLod = (
+    await db.query(`SELECT lod_glb_path FROM ${table} WHERE id = $1`, [rowId])
+  ).rows[0]?.lod_glb_path as string | null | undefined
+
   if (job.part_id) {
     await db.query(
       `UPDATE model_parts
-          SET glb_file_path = $2, proxy_report = $3, processing_status = 'ready',
-              processing_error = NULL
+          SET glb_file_path = $2, lod_glb_path = $4, proxy_report = $3,
+              processing_status = 'ready', processing_error = NULL
         WHERE id = $1`,
-      [job.part_id, result.glbKey, JSON.stringify(result.report)],
+      [job.part_id, result.glbKey, JSON.stringify(result.report), result.lodGlbKey ?? null],
     )
   } else {
     await db.query(
       `UPDATE models
-          SET glb_file_path = $2, proxy_report = $3, updated_at = NOW()
+          SET glb_file_path = $2, lod_glb_path = $4, proxy_report = $3, updated_at = NOW()
         WHERE id = $1`,
-      [job.model_id, result.glbKey, JSON.stringify(result.report)],
+      [job.model_id, result.glbKey, JSON.stringify(result.report), result.lodGlbKey ?? null],
+    )
+  }
+
+  if (prevLod && prevLod !== result.lodGlbKey) {
+    deleteObject(prevLod).catch((err) =>
+      logger.warn('Could not delete superseded planner LOD', { error: err, key: prevLod }),
     )
   }
 

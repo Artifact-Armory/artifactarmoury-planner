@@ -673,6 +673,7 @@ router.get('/models/:id',
     delete model.glb_file_path;
     delete model.source_file_path;
     delete model.full_glb_path;
+    delete model.lod_glb_path;
     delete model.display_stl_path;
 
     const reportsResult = await db.query(

@@ -840,6 +840,93 @@ just relocated from "in the API server" to "across worker replicas" rather than 
   for the lock. Verify by scaling the worker to 2+ replicas and uploading two large files at once,
   watching `railway logs` for one "Large ingest job deferred" line.
 
+## Planner LOD + crease shading (built 2026-09-11, migration 064)
+The planner took ~9s to show an artist's showcase table and ran heavily afterwards. Measured
+in a browser against live production, that table is **28 models, 85.07 MB, 9,116,141 triangles
+— and 26,217,059 stored vertices, i.e. 2.88 per triangle.** That last number is the whole
+diagnosis: an STL has no vertex normals, so Blender imports it **flat-shaded**, and a
+flat-shaded mesh cannot share a vertex between two triangles (each needs its own copy carrying
+the face normal). With every edge a seam there is nothing to collapse and meshopt refuses —
+asked for 33% of a real bake it returned 91-95% of the triangles. That, not a missing feature,
+is why `proxyDecimationEnabled`'s long history of destructive results never had a good option.
+- **`proxyCreaseAngleDeg` is now 45 (was 0).** Shades the proxy smooth with creases above the
+  angle, restoring shared edges (2.88 → 0.6-1.4 verts/tri). **Changes shading, never geometry**:
+  triangle count, emboss hole count and placement, deleted base faces and warnings came out
+  IDENTICAL with and without, on every test bake. QA'd before flipping on the classes
+  `config.ts` warns decimation destroys — a louvred shutter (thin shells), a dense
+  architectural piece with railings/spires/balusters/pipework (0.79% of pixels changed by
+  >8/255 at 0.3 m, 0.02% at 2 m, nothing lost), plus a wall panel and an organic stack. Bake
+  time unaffected. **On its own it is roughly download-neutral** — the geometry shrinks but the
+  normal map grows. Its value is that it makes simplification possible at all.
+- **The LOD is a THIRD variant** (`services/proxyBake/lod.ts`, `models.lod_glb_path` /
+  `model_parts.lod_glb_path`), derived from the same bake output with gltf-transform
+  weld+simplify — no Blender, no new queue, ~2s on a mesh already in the bake's temp dir.
+  Served from the existing URL as `GET /api/models/:id/preview.glb?variant=lod`; the planner
+  asks for it unconditionally via `plannerMeshUrl` (frontend `api/transformers.ts`) and the
+  server falls back to the proxy when a model has none. **Owners get the LOD too, deliberately**
+  — their full-fidelity copy (041) is much of why an owner's table is heaviest, and at 2-16 m it
+  cannot be told from the proxy; the product page asks for no variant, so an owner still gets
+  their full copy there. **Before the backfill runs, `variant=lod` falls back to the
+  PROXY, not the owner copy** — so an owner's planner table gets lighter on deploy day
+  rather than waiting for a re-bake. Cache-Control for the LOD is back to 3600s (it is the same bytes for
+  every viewer, unlike the proxy/full split). **The key is a secret like `full_glb_path`** —
+  random 16-byte suffix, stripped at all three redaction sites.
+- **Measured, shipped config** (crease 45, 50k budget, lockBorder on, normal map ≤1024):
+  wall panel 196k tris/1,506 KB → 56k/512 KB (**−66% file, −71% tris**); dense architectural
+  290k/2,379 KB → 173k/1,080 KB (−55%/−40%); organic 251k/2,542 KB → 50k/952 KB (−63%/−80%);
+  a 14k-tri shutter is already under budget and correctly gets no LOD.
+- **The dense-architectural ceiling is real and diagnosed.** It stops at 173k however low the
+  budget, and the error bound is NOT what binds (even `error: 1.0` lands identically). Dropping
+  `TEXCOORD_0` alone still stopped at 148k, `NORMAL` alone at 152k, but **both** reached 64k:
+  it is the *union* of UV-island seams and crease seams that fragments a many-shell mesh into
+  uncollapsible regions, and neither can be given up (UVs carry the baked normal map; creases
+  are what made welding work). Getting past it needs a second unwrap+bake in Blender at LOD
+  resolution (~+25s/bake, in the most failure-prone code here) — **not built**.
+- **`plannerLodLockBorder` is an ANTI-THEFT setting, not a quality one.** A baked proxy's open
+  boundaries ARE its non-printability (emboss through-holes, deleted base, stripped interior).
+  With it off the LOD is only ~5% smaller and the monogram cut-outs visibly deform into lumpy
+  blobs (verified by render); the organic source lost 55% of its boundary loops (751 → 335).
+  Leave it on.
+- **`plannerLodNormalMapSize` (1024) matters more than it looks** — once geometry collapses the
+  map IS the file (1,446 KB of a 1,878 KB LOD on the organic source). Halving it changed nothing
+  at 2 m/16 m and added 0.19pp of >8/255 pixels at 0.3 m, for a 40% smaller file. 512 was still
+  legible but softened seams, so it was not taken.
+- **The LOD drops `TANGENT`; the proxy keeps it.** It is 15-38% of the finished file and three.js
+  derives tangents from screen-space derivatives without it. Verified in a real browser through
+  the planner's own three.js + lighting, closer than its nearest camera preset, including a model
+  that previously DID carry tangents — indistinguishable.
+- **Fixed while in here: MikkTSpace was silently dropping TANGENT from whole models.** The emboss
+  leaves n-gons, MikkTSpace aborts on those ("Tangent space can only be computed for tris/quads"),
+  and the exporter then drops the attribute from the ENTIRE mesh — hit 2 of 4 real test bakes, so
+  those models' normal maps had always shaded through three.js's fallback. New
+  `triangulate_for_export` in `bake_proxy.py`, run **before** the final crease pass (so the new
+  interior edges are classified by their real angle and a former n-gon still shades flat). Every
+  emboss/cleanup number identical afterwards; 14,982 n-gons triangulated on the wall panel.
+- **Heavy-table warning is now BYTE-based** (`HEAVY_TABLE_BYTES` 45MB, replacing
+  `HEAVY_TABLE_MODELS` 15) via a new `glbBytesFor()` in `scene/loaders.ts`. A count was only ever
+  a stand-in for weight and the LOD breaks the conversion — and the two tiers coexist for as long
+  as the backfill takes, so no single count is right for both. 45 MB is exactly where the old
+  15-model rule landed at the ~3 MB/model it was tuned against. The loading-bar note keeps a count
+  (`LARGE_TABLE_LOAD_MODELS` 20) because during a load the sizes are what is still being fetched.
+- **BACKFILL IS A RE-BAKE, NOT A RE-PROCESS** (`npm run backfill:planner-lod`). Existing proxies
+  are flat-shaded and cannot be derived from. Jobs queue **behind live artist uploads**, so batch
+  it with `--limit`. It also re-bakes the proxy (now crease-shaded), so it changes what buyers see
+  on the product page too — QA'd, but not purely additive. Source-key resolution mirrors
+  `previewSourceKey` in `modelIngest/process.ts` (pre-supported listings preview from
+  `display_stl_path`, OBJ bakes from the original) — getting that wrong would regenerate a
+  presupported model's preview *with the support struts back in*.
+- `npm run measure:lod -- <proxy_raw.glb>` reports triangles, stored verts, unique positions,
+  texture bytes and boundary loops for the proxy and for LOD candidates. The unique-position
+  count is what reveals vertex splitting.
+- Both projects typecheck clean and the frontend builds. **The backend route, migration 064 and
+  the queue SQL are UNTESTED against a real Postgres** — local dev is `DB_MOCK=true`, the same
+  limitation as most of this file. The frontend half WAS verified end-to-end against live
+  production (the planner requests `?variant=lod` for all 28 models; today's backend ignores the
+  param and returns the proxy, so the frontend is safe to deploy either side of the backend).
+  **The post-LOD showcase figures are a PROJECTION from four local bakes, not a measurement of
+  that table** — the LOD needs a production re-bake that can't be run from here: 85.07 MB →
+  roughly 28-36 MB, 9.12M triangles → roughly 2.6-4.8M.
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

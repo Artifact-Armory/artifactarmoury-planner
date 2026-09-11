@@ -90,8 +90,10 @@ export interface ProxyBakeConfig {
    *  default since 2026-08-21 (alongside proxyDecimationEnabled=false) so the
    *  preview keeps its full, undegraded detail rather than a melted/rounded
    *  silhouette; anti-theft then leans on the emboss watermark holes instead. */
-  /** Crease angle, in degrees, for the proxy's shading — 0 (default) keeps today's
-   *  behaviour: flat, per-face normals.
+  /** Crease angle, in degrees, for the proxy's shading. 0 restores the old
+   *  behaviour: flat, per-face normals. **Default 45 since 2026-09-11**, when the
+   *  planner LOD it unblocks was built (see plannerLodEnabled below and
+   *  services/proxyBake/lod.ts).
    *
    *  An STL has no vertex normals, so Blender imports it flat-shaded, and a
    *  flat-shaded mesh cannot share a vertex between two triangles: each one needs
@@ -114,7 +116,17 @@ export interface ProxyBakeConfig {
    *  Applied twice in bake_proxy.py: before the unwrap/bake (so the baked map's
    *  tangent basis matches the normals the viewer shades with) and again after the
    *  emboss boolean (whose new faces carry no sharp marks). Existing proxies keep
-   *  their current shading until re-baked. */
+   *  their current shading until re-baked.
+   *
+   *  QA'd before the default was flipped, on the asset classes the
+   *  proxyDecimationEnabled note above warns decimation destroys — thin shells
+   *  (a louvred shutter: slats identically crisp, renders pixel-comparable), a
+   *  dense architectural piece with railings, spires, balusters and pipework
+   *  (0.79% of pixels changed by more than 8/255 at the 0.3 m inspection distance,
+   *  0.02% at 2 m, 0.00% at 16 m — and no thin member lost), plus a high-frequency
+   *  wall panel and an organic sandbag stack. Emboss hole count, hole placement,
+   *  deleted base faces, triangle count and warnings came out IDENTICAL with and
+   *  without it: this changes shading, never geometry. Bake time is unaffected. */
   proxyCreaseAngleDeg: number
   proxySmoothIterations: number
   /** Per-iteration smoothing factor (0..1) for the LEGACY plain Smooth modifier
@@ -622,6 +634,66 @@ export interface ProxyBakeConfig {
   plannerMinCameraDistanceM: number
   plannerTypicalCameraDistanceM: number
   plannerFullTableCameraDistanceM: number
+  /** Build a third, planner-specific LOD alongside the proxy (services/proxyBake/
+   *  lod.ts). The proxy is sized for looking at ONE piece on its product page; the
+   *  planner lays out dozens at once, and a measured live showcase came to 28
+   *  models / 84.9 MB / ~8.5M triangles. The LOD is what that page loads instead.
+   *
+   *  Requires proxyCreaseAngleDeg > 0. A flat-shaded proxy has no shared edges to
+   *  collapse and meshopt refuses to simplify it (asked for 33% of a real bake it
+   *  returned 91-95% of the triangles), so with crease shading off this produces
+   *  nothing and the planner keeps loading the proxy — no failure, just no win. */
+  plannerLodEnabled: boolean
+  /** Triangle target for the LOD.
+   *
+   *  Chosen by rendering candidates at the three planner camera distances above and
+   *  comparing them to the proxy, not by picking a round number: at 2 m — the
+   *  distance a table is actually laid out from — a 50k LOD of a 276k proxy was
+   *  indistinguishable, because the baked normal map carries the surface detail and
+   *  only the silhouette depends on triangles. The cost lands at the 0.3 m
+   *  inspection distance, where the LOD is visibly the coarser mesh; that is the
+   *  accepted trade, and the product page (which serves the proxy or, for an owner,
+   *  the full-fidelity copy) is where close inspection belongs. */
+  plannerLodTriangleBudget: number
+  /** Error bound handed to meshopt for the LOD collapse, as a fraction of the mesh
+   *  extent. Looser than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR) because
+   *  this tier is explicitly allowed to move the surface — it just must not be
+   *  allowed to do so without limit, or thin members drift into each other. */
+  plannerLodSimplifyError: number
+  /** Keep every open boundary pinned through the collapse.
+   *
+   *  This is an ANTI-THEFT setting, not a quality one. The open boundaries on a
+   *  baked proxy are exactly the cuts that make it unprintable: the embossed logo
+   *  through-holes, the deleted base faces, the stripped interior. Left unlocked,
+   *  the simplifier is free to round a hole's outline away as it collapses the
+   *  surface around it. Measured on a 276k-triangle architectural bake with 16
+   *  emboss holes, locking the border cost nothing worth having — the LOD still hit
+   *  its budget and every hole's boundary loop survived intact — so the default is
+   *  on and should stay on unless a specific model cannot reach its budget with it. */
+  plannerLodLockBorder: boolean
+  /** Minimum fraction of triangles the collapse must actually remove before the LOD
+   *  is worth writing. Below this the result is near-identical to the proxy (the
+   *  flat-shaded case, or a mesh so boundary-dominated that lockBorder pinned it),
+   *  and shipping a second almost-identical file would cost storage, bandwidth and
+   *  a cache entry to save nothing — so it is skipped and the planner uses the proxy. */
+  plannerLodMinReduction: number
+  /** Maximum normal-map edge length on the LOD, in pixels (0 keeps it as baked).
+   *  Only ever SHRINKS a map — gltf-transform treats this as an upper bound — so a
+   *  bake configured with a smaller normalMapRes is unaffected.
+   *
+   *  This matters more than it looks, because once the geometry collapses the map
+   *  becomes the file. Measured on an organic bake: a 251k proxy went to a 50k LOD
+   *  whose geometry was 433 KB against a normal map of 1,446 KB — 77% of the
+   *  download. And the models whose maps are biggest are the smooth organic ones
+   *  that need the resolution least; the crisp architectural pieces that would miss
+   *  it compress to a few hundred KB and barely move.
+   *
+   *  1024 rather than a guess: rendered at all three planner camera distances
+   *  against the 2048 LOD, halving the map changed nothing at 2 m or 16 m and added
+   *  0.19 percentage points of >8/255 pixels at 0.3 m (0.70% -> 0.89%), on a file
+   *  40% smaller. 512 was also legible but visibly softened the sack seams, so it
+   *  was not taken. */
+  plannerLodNormalMapSize: number
 }
 
 export type ProxyBakeConfigOverrides = Partial<ProxyBakeConfig>
@@ -672,6 +744,9 @@ export function loadDefaults(): ProxyBakeConfig {
     aoSamples: envNum('PROXY_BAKE_AO_SAMPLES'),
     bakeExtrusionPct: envNum('PROXY_BAKE_EXTRUSION_PCT'),
     maxRayDistancePct: envNum('PROXY_BAKE_MAX_RAY_PCT'),
+    plannerLodTriangleBudget: envNum('PROXY_BAKE_LOD_TRIANGLE_BUDGET'),
+    plannerLodSimplifyError: envNum('PROXY_BAKE_LOD_SIMPLIFY_ERROR'),
+    plannerLodNormalMapSize: envNum('PROXY_BAKE_LOD_NORMAL_MAP_SIZE'),
   }
   for (const k of Object.keys(envOverrides) as (keyof ProxyBakeConfig)[]) {
     if (envOverrides[k] !== undefined) (base as any)[k] = envOverrides[k]

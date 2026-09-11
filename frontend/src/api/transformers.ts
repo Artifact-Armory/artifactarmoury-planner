@@ -20,6 +20,21 @@ export const previewGlbUrl = (modelId: string): string =>
 export const previewPartGlbUrl = (partId: string): string =>
   `${API_BASE}/api/models/parts/${partId}/preview.glb`
 
+/**
+ * Ask the preview endpoint for the PLANNER tier of a mesh (migration 064).
+ *
+ * The planner is the one surface that draws dozens of models at once, so it gets
+ * a much lighter LOD built from the same bake — the product page, which shows one
+ * piece and is where close inspection belongs, keeps asking for the default and so
+ * still gets the proxy (or, for someone who owns the model, their full-fidelity
+ * copy). This says nothing about who is viewing: the server decides what each
+ * variant is and falls back to the proxy when a model has no LOD, so the planner
+ * needs no ownership logic at load time — which it could not do anyway, since
+ * loadAssetCatalogue registers assets before it fetches entitlements.
+ */
+export const plannerMeshUrl = (previewUrl: string): string =>
+  `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}variant=lod`
+
 export const mapApiUserToUser = (user: ApiUser): User => ({
   ...user,
   name: user.displayName,

@@ -5,7 +5,7 @@
   "triangleBudgetCeiling": 300000,
   "weldMergeDistanceMm": 0.05,
   "proxySmoothIterations": 0,
-  "proxyCreaseAngleDeg": 0,
+  "proxyCreaseAngleDeg": 45,
   "proxySmoothFactor": 0.5,
   "proxySmoothVolumePreserve": true,
   "proxySmoothLambda": 0.4,
@@ -91,5 +91,11 @@
   "validationRenderPx": 512,
   "plannerMinCameraDistanceM": 0.3,
   "plannerTypicalCameraDistanceM": 2.0,
-  "plannerFullTableCameraDistanceM": 16.0
+  "plannerFullTableCameraDistanceM": 16.0,
+  "plannerLodEnabled": true,
+  "plannerLodTriangleBudget": 50000,
+  "plannerLodSimplifyError": 0.01,
+  "plannerLodLockBorder": true,
+  "plannerLodMinReduction": 0.25,
+  "plannerLodNormalMapSize": 1024
 }

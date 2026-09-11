@@ -737,13 +737,15 @@ router.get('/library',
       // bucket is public-CDN-served, so a leaked stl_file_path (the `raw/` key) lets
       // the file be fetched un-watermarked, defeating the per-buyer leak trace. Buyers
       // download through /models/:id/download, which streams it watermarked. Same rule
-      // applies to full_glb_path (041) / display_stl_path (053/054) — both are just as
-      // unguessable-key-shaped, and both were missing here (2026-09-05 security audit).
+      // applies to full_glb_path (041), lod_glb_path (064) and display_stl_path
+      // (053/054) — all are just as unguessable-key-shaped, and the first and last were
+      // missing here until the 2026-09-05 security audit.
       const hasGlb = !!model.glb_file_path;
       delete model.stl_file_path;
       delete model.glb_file_path;
       delete model.source_file_path;
       delete model.full_glb_path;
+      delete model.lod_glb_path;
       delete model.display_stl_path;
       return {
         ...model,

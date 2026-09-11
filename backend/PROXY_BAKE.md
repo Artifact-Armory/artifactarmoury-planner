@@ -17,10 +17,14 @@ minutes-long CPU bake so the API stays responsive.
 | `blender/bake_proxy.py` | Headless Blender script: import → decimate → UV unwrap → Cycles bake (normal/AO) → poison pills → GLB + validation renders + `report.json`. |
 | `src/services/proxyBake/config.ts` + `config/proxyBake.defaults.json` | Config schema, defaults, and per-model override merge. |
 | `src/services/proxyBake/bake.ts` | TS wrapper: R2 download, run Blender (hard timeout), `gltf-transform` post-process, comparison PNG, R2 upload. |
+| `src/services/proxyBake/lod.ts` | Derives the **planner LOD** from the same bake output (`gltf-transform` weld + simplify). See below. |
 | `src/services/proxyBake/queue.ts` | DB queue: `enqueueBakeJob`, `claimNextJob` (`FOR UPDATE SKIP LOCKED`), `completeJob`/`failJob`, model-status roll-up. |
 | `src/worker/proxyBakeWorker.ts` | The worker loop (a standalone entrypoint). |
 | `Dockerfile.worker` | Pinned Blender LTS + Node image for the worker service. |
 | `db/migrations/037_proxy_bake_jobs.sql` | The `proxy_bake_jobs` queue + `proxy_bake_config`/`proxy_report` columns. |
+| `db/migrations/064_planner_lod.sql` | `lod_glb_path` on `models` / `model_parts`. |
+| `scripts/measure-planner-lod.ts` | Measures a raw bake's proxy vs LOD candidates — triangles, stored verts, unique positions, texture bytes, boundary loops (`npm run measure:lod -- <proxy_raw.glb>`). |
+| `scripts/backfill-planner-lod.ts` | Queues catalogue **re-bakes** so existing models get an LOD (`npm run backfill:planner-lod`). |
 | `scripts/test-proxy-bake.ts` | End-to-end test against a generated high-poly mesh (`npm run test:proxybake`). |
 
 ## The on/off switch
@@ -111,3 +115,90 @@ remesh used, size near-miss). This feeds a future admin/artist review UI.
 | `bakeTimeoutMinutes` | Hard Blender timeout; the worker kills + fails the job. |
 | `targetMaxFileMb` | Soft size target; over it is reported as a warning. |
 | `planner*CameraDistanceM` | The three validation-render distances (min = the planner's real 0.3 m min zoom). |
+| `proxyCreaseAngleDeg` | Crease-angle shading on the proxy (default **45**). Edges sharper than this stay hard; everything else shades smooth. See below — this is also what makes the planner LOD possible at all. |
+| `plannerLod*` | The planner LOD tier — see below. |
+
+## The planner LOD (migration 064)
+
+The planner draws a whole **table**; the product page draws **one piece**. Until
+this existed both loaded the same proxy, and a real artist showcase measured, in a
+browser against live production:
+
+| | 28 models |
+|---|---|
+| Download | **85.07 MB** (mean 3.04 MB, range 1.96–3.38) |
+| Triangles | **9,116,141** (mean 325,576) |
+| Stored vertices | 26,217,059 — **2.88 per triangle** |
+
+That last row is the whole story. An STL carries no vertex normals, so Blender
+imports it flat-shaded, and a flat-shaded mesh **cannot share a vertex between two
+triangles** — each one needs its own copy carrying the face normal. With every edge
+a seam there is nothing left to collapse, and meshopt refuses to try: asked for 33%
+of a real bake it returned 91–95% of the triangles. That is why previous attempts
+to decimate ran into `proxyDecimationEnabled`'s wall.
+
+`proxyCreaseAngleDeg` is the unlock. Shading smooth with creases restores shared
+edges (2.88 → 0.6–1.4 verts/triangle on real bakes), and `services/proxyBake/lod.ts`
+then simplifies the bake's own output into a third GLB — no Blender, no new queue,
+a couple of seconds on a mesh already in the bake's temp dir.
+
+**Serving.** `GET /api/models/:id/preview.glb?variant=lod`. The planner asks for it
+unconditionally (`plannerMeshUrl` in the frontend's `api/transformers.ts`); the
+server falls back to the proxy whenever a model has no LOD. Owners get the LOD too,
+**deliberately** — their full-fidelity copy (041) is a large part of why an owner's
+table is the heaviest, and at 2–16 m it cannot be told from the proxy. Close
+inspection belongs on the product page, which asks for no variant and so still
+serves an owner their full copy.
+
+**Measured on four real bakes**, shipped config (crease 45, 50k budget, lockBorder,
+normal map capped at 1024):
+
+| source | proxy | LOD | file | triangles |
+|---|---|---|---|---|
+| wall panel (1.2M-tri src) | 196,114 tris / 1,506 KB | 56,390 / 512 KB | **−66%** | −71% |
+| dense architectural | 290,452 / 2,379 KB | 173,236 / 1,080 KB | **−55%** | −40% |
+| organic sandbag stack | 251,377 / 2,542 KB | 49,999 / 952 KB | **−63%** | −80% |
+| louvred shutter | 14,488 / 298 KB | *no LOD — already under budget* | — | — |
+
+**The dense architectural case is the honest ceiling.** It stops at 173k however
+low the budget goes, and the error bound is not what binds — even `error: 1.0`
+(100% of the mesh extent) lands in the same place. The cause is measured, not
+guessed: dropping `TEXCOORD_0` alone still stopped at 148k, dropping `NORMAL` alone
+at 152k, but dropping **both** reached 64k. It is the *union* of the UV-island
+seams and the crease seams that fragments that mesh (thousands of separate roof-tile
+shells) into regions too small to collapse — and neither can be given up, because
+the UVs carry the baked normal map and the creases are what made welding possible.
+Getting past it would take a second unwrap+bake in Blender at the LOD's resolution
+(about +25s per bake, in the most failure-prone part of the pipeline); it is not
+built.
+
+**Anti-theft.** `plannerLodLockBorder` (default on) pins every open boundary through
+the collapse. Those boundaries *are* the non-printability: the embossed logo
+through-holes, the deleted base faces, the stripped interior. With it off the LOD is
+only ~5% smaller and the monogram cut-outs visibly deform into lumpy blobs — verified
+by render, and on the organic source it lost 55% of its boundary loops (751 → 335).
+Leave it on.
+
+**Backfilling is a RE-BAKE, not a re-process** — see the header comment in
+`scripts/backfill-planner-lod.ts`. Existing proxies are flat-shaded and cannot be
+derived from, and a backfill job queues behind live artist uploads, so batch it:
+
+```
+railway run npm run backfill:planner-lod -- --dry-run
+railway run npm run backfill:planner-lod -- --limit 25
+```
+
+| Key | Meaning |
+|---|---|
+| `plannerLodEnabled` | Build the LOD at all. Useless with `proxyCreaseAngleDeg: 0`; the bake report says so rather than shipping a "LOD" as heavy as its input. |
+| `plannerLodTriangleBudget` | Target triangles (default 50000) — picked by rendering candidates at the three planner camera distances, not by rounding. At 2 m, under 0.01% of pixels differ from the proxy by more than 8/255. |
+| `plannerLodSimplifyError` | meshopt error bound. Not usually what binds — see above. |
+| `plannerLodLockBorder` | Keep open boundaries (= the anti-theft cuts) intact. **Anti-theft setting, not a quality one.** |
+| `plannerLodMinReduction` | Below this cut, skip the LOD rather than ship a near-duplicate file. |
+| `plannerLodNormalMapSize` | Upper bound on the LOD's normal map (default 1024; never enlarges). Once geometry collapses the map *is* the file — 1,446 KB of a 1,878 KB LOD on the organic source. |
+
+The LOD also **drops `TANGENT`**, which the proxy keeps: it is 15–38% of the
+finished file through this pipeline, and three.js derives tangents from screen-space
+derivatives without it. Checked in a real browser through the planner's own three.js
+and lighting, closer than its nearest camera preset, including a model that
+previously carried tangents — indistinguishable.

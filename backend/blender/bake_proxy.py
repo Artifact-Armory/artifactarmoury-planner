@@ -3673,6 +3673,47 @@ def strip_metadata(proxy):
     proxy.data.name = "proxy_mesh"
 
 
+def triangulate_for_export(obj):
+    """Convert every n-gon/quad to triangles before the final crease pass + export.
+
+    WHY: glTF stores triangles only, so the exporter triangulates anyway and the
+    shipped geometry is unchanged either way. What is NOT unchanged is the TANGENT
+    attribute. Blender computes export tangents with MikkTSpace, which requires
+    tris/quads, and the emboss cuts leave n-gons behind (the logo style bisects the
+    mesh along the outline, and face deletion leaves whatever polygon the hole's
+    rim happens to be). MikkTSpace then aborts with
+
+        Tangent space can only be computed for tris/quads, aborting
+
+    and the exporter silently drops TANGENT from the WHOLE mesh — not just the
+    offending faces. Observed on two of four real test bakes (the 1.2M-tri wall
+    panel and the dense architectural piece; the organic and thin-shell sources
+    were unaffected), which left those models' baked normal maps shading through
+    three.js's screen-space derivative fallback instead of a real tangent basis.
+
+    Runs BEFORE apply_crease_shading's final pass on purpose: triangulating an
+    n-gon adds interior edges, and letting the crease pass see them means each one
+    is classified by its own real face angle. A former n-gon's interior edges are
+    coplanar, so they come out smooth and the n-gon still shades as one flat
+    surface — whereas triangulating afterwards would leave new edges carrying
+    whatever smooth flag they inherited, with nothing to check them.
+    """
+    import bmesh
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    ngons = [f for f in bm.faces if len(f.verts) > 3]
+    if not ngons:
+        bm.free()
+        REPORT["triangulatedFaces"] = 0
+        return
+    bmesh.ops.triangulate(bm, faces=ngons, quad_method="BEAUTY", ngon_method="BEAUTY")
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    REPORT["triangulatedFaces"] = len(ngons)
+
+
 def export_glb(proxy):
     deselect_all()
     proxy.select_set(True)
@@ -3831,8 +3872,14 @@ def main():
             % ((1 - final_tris / proxy_tris_before_cleanup) * 100, proxy_tris_before_cleanup, final_tris)
         )
 
+    # Triangulate before the final crease pass, so MikkTSpace can actually compute
+    # export tangents (the emboss leaves n-gons, which make it abort and take the
+    # whole mesh's TANGENT attribute with it) — see triangulate_for_export.
+    triangulate_for_export(proxy)
+
     # Re-mark creases: the emboss boolean and the cleanup passes above add faces
-    # that carry no sharp-edge marks of their own.
+    # that carry no sharp-edge marks of their own, and the triangulation just
+    # above adds interior edges that must be classified by their real angle.
     apply_crease_shading(proxy, float(CFG.get("proxyCreaseAngleDeg", 0.0)), "final")
 
     strip_metadata(proxy)
