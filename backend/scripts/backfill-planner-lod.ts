@@ -203,10 +203,16 @@ async function main() {
   console.log(`  no source key:${skippedNoSource}`)
   console.log(`To enqueue:     ${Math.min(todo.length, LIMIT)}`)
   if (todo.length > 0) {
-    const mins = (Math.min(todo.length, LIMIT) * 40) / 60
+    // Divide by the workers actually checked in, not by one. The queue is drained
+    // by every live replica in parallel, so quoting a single-worker figure on a
+    // five-worker cluster overstates the wait five-fold — which is exactly the sort
+    // of number that talks someone into batching a job that would have been over in
+    // a few minutes.
+    const mins = (Math.min(todo.length, LIMIT) * 40) / 60 / Math.max(1, liveWorkers)
     console.log(
-      `\nRough drain time at ~40s/bake on one worker: ${mins.toFixed(0)} minutes. ` +
-        `Artist uploads queue BEHIND these — use --limit and batch it.`,
+      `\nRough drain time at ~40s/bake across ${liveWorkers} live worker(s): ` +
+        `${mins < 1 ? '<1' : mins.toFixed(0)} minute(s). ` +
+        `Artist uploads queue BEHIND these, so on a long run use --limit and batch it.`,
     )
   }
 
