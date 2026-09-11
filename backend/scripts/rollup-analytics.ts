@@ -8,7 +8,7 @@
 //   npm run rollup:analytics -- 30      # last 30 days
 //   npm run rollup:analytics -- 2026-06-01 2026-06-30   # explicit range
 
-import 'dotenv/config';
+import './script-env';
 import { rollupRange } from '../src/services/analyticsRollup';
 import { db } from '../src/db';
 

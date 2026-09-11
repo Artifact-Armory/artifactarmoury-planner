@@ -33,7 +33,7 @@
 // re-run: meshes with an open bake job are skipped, and so are meshes whose
 // proxy_report already records a planner-LOD outcome.
 
-import 'dotenv/config'
+import './script-env'
 import { db, closeDatabase } from '../src/db'
 import { enqueueBakeJob, isBakeWorkerEnabled } from '../src/services/proxyBake/queue'
 

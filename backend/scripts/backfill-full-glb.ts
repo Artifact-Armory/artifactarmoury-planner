@@ -20,7 +20,7 @@
 //
 // Run it linked to the BACKEND service so DATABASE_URL is injected.
 
-import 'dotenv/config'
+import './script-env'
 import { db, closeDatabase } from '../src/db'
 import { enqueueFullGlbJob, isFullGlbEnabled } from '../src/services/fullGlb/queue'
 
