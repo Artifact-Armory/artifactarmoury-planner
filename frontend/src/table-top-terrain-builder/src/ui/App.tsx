@@ -6,6 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
+  Pencil, Loader2,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -63,7 +64,17 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // Loading a shared link gives you an editable copy — you don't own the original
   // until you save it as your own (which flips this true).
   const [isOwner, setIsOwner] = React.useState<boolean>(!shareToken)
+  /**
+   * Does the viewer own the table currently open in READ-ONLY view?
+   * Deliberately separate from `isOwner`, which defaults to TRUE (scratch
+   * mode saves as yours) — reusing it here showed an owner's "Edit" button
+   * to a stranger, and to anyone whose table load hadn't resolved yet.
+   * Defaults to false and is only set once the load confirms the emails match.
+   */
+  const [ownsViewedTable, setOwnsViewedTable] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  /** In-flight guard for "Edit a copy" on a read-only table. */
+  const [copying, setCopying] = React.useState(false)
 
   // Imperial ⇄ metric is purely a display preference (persisted across visits);
   // every real measurement stays in metres underneath — see store/unitsStore.
@@ -412,12 +423,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     // previously-loaded table when navigating /planner/t/:id → /planner, and
     // resets the layout when a different user signs in.
     if (!tableId && !shareToken) {
-      clearInstances()
-      useAppStore.getState().actions.resetTerrain()
-      useAppStore.getState().actions.resetPaint()
+      // resetToScratch, NOT clearInstances + resetTerrain + resetPaint: the
+      // store outlives client-side navigation, and clearInstances is a normal
+      // undoable edit, so that combination left the previous table sitting one
+      // Ctrl+Z away (and its terrain in the baseline snapshot).
+      useAppStore.getState().actions.resetToScratch()
       setSavedTableId(null)
       setSavedTableName(null)
       setIsOwner(false)
+      setOwnsViewedTable(false)
       refreshCollabs(null, false)
       return
     }
@@ -440,6 +454,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           // Own it only if it's yours; otherwise Save makes a copy under your account.
           const owned = !!user?.email && t.userEmail === user.email
           setIsOwner(owned)
+          setOwnsViewedTable(owned)
           refreshCollabs(t.id, owned)
         } else {
           // A shared copy starts with no collaborations of its own; foreign models
@@ -765,6 +780,39 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     window.open(`/models/${selectedModel.id}`, '_blank', 'noopener,noreferrer')
   }
 
+  /**
+   * "Edit a copy" on a community table or artist showcase.
+   *
+   * A published table belongs to someone else, so it opens read-only — but the
+   * whole point of browsing other people's builds is to start from one. This
+   * duplicates it into the viewer's own account (server-side, via
+   * POST /tables/:id/duplicate, which only permits it for a table you can
+   * actually view) and reopens the COPY at /planner/t/:newId, where the normal
+   * owner edit+save path takes over. The original is never touched: the copy is
+   * a separate row with its own id and share token, and is private by default.
+   */
+  async function handleEditCopy() {
+    if (!tableId || copying) return
+    if (!isAuthenticated || !user?.email) {
+      hotToast.error('Log in to make your own copy of this table')
+      navigate('/login')
+      return
+    }
+    setCopying(true)
+    try {
+      const copy = await tablesApi.duplicate(tableId)
+      hotToast.success('Copied to your tables — this one is yours to edit')
+      // Switching tableId AND readOnly re-runs the load effect against the copy,
+      // which resolves as owned (the row carries the caller's email), so Save
+      // updates it in place rather than making yet another copy.
+      navigate(`/planner/t/${copy.id}`)
+    } catch {
+      hotToast.error('Could not copy this table')
+    } finally {
+      setCopying(false)
+    }
+  }
+
   async function handleSave() {
     if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
     if (!isAuthenticated || !user?.email) {
@@ -972,6 +1020,18 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                     <Ungroup size={18} />
                   </button>
                 )}
+                {/* Delete was keyboard-only on desktop (Del/Backspace) — fine if
+                    you know it, invisible if you don't. The touch bar already had
+                    a button; this is its desktop counterpart. No confirm dialog:
+                    it is a single undoable step (Ctrl+Z), and a prompt on every
+                    piece removal would be worse than the mistake it prevents. */}
+                <button
+                  className="tb-icon is-danger"
+                  title={`Delete ${selectedInstanceIds.length > 1 ? `${selectedInstanceIds.length} selected pieces` : 'selection'} (Del)`}
+                  onClick={() => removeInstances(selectedInstanceIds)}
+                >
+                  <Trash2 size={18} />
+                </button>
               </>
             )}
             <div className="tb-sep" />
@@ -1626,6 +1686,32 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               <span className="tb-view-flag"><Eye size={12} /> View only</span>
             </div>
             <div className="tb-view-actions">
+              {/* The reason someone opens a stranger's table: to build from it.
+                  Deliberately a labelled primary button rather than another icon
+                  — it is the one action on this bar that isn't a camera control. */}
+              {ownsViewedTable ? (
+                /* Your own table, just being viewed as the public sees it — go
+                   straight to editing it. Offering "Edit a copy" here would have
+                   an artist duplicating their own showcase to change it. */
+                <button
+                  className="tb-view-copy"
+                  onClick={() => navigate(`/planner/t/${tableId}`)}
+                  title="Edit this table"
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+              ) : (
+                <button
+                  className="tb-view-copy"
+                  disabled={copying}
+                  onClick={handleEditCopy}
+                  title="Copy this table into your account and edit it — the original is unchanged"
+                >
+                  {copying
+                    ? <><Loader2 size={16} className="tb-spin" /> Copying…</>
+                    : <><Pencil size={16} /> Edit a copy</>}
+                </button>
+              )}
               <button className="tb-icon" title="Fit view (F)" onClick={() => fitView()}>
                 <Maximize2 size={18} />
               </button>

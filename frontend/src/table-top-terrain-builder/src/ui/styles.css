@@ -167,6 +167,14 @@
   border-color: var(--tb-accent);
   color: var(--tb-accent-2);
 }
+/* Destructive variant — the delete button reads as destructive on hover rather
+   than at rest, so it doesn't shout for attention in a toolbar of neutral icons
+   while still being unmistakable at the moment you're about to click it. */
+.tb-icon.is-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+}
 /* Labeled variant of tb-icon — used for the Help button so it's discoverable. */
 .tb-help-btn {
   width: auto;
@@ -1017,6 +1025,27 @@
   transition: background 0.15s;
 }
 .tb-view-back:hover { background: #1f2b3c; }
+/* "Edit a copy" — the primary action on a read-only table, so it gets the accent
+   fill rather than the ghost styling the camera controls beside it use. */
+.tb-view-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--tb-accent);
+  background: rgba(77, 163, 255, 0.18);
+  color: var(--tb-accent-2);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.tb-view-copy:hover:not(:disabled) { background: rgba(77, 163, 255, 0.3); }
+.tb-view-copy:disabled { opacity: 0.6; cursor: progress; }
+.tb-spin { animation: tb-spin 0.9s linear infinite; }
+@keyframes tb-spin { to { transform: rotate(360deg); } }
 .tb-view-title { display: flex; flex-direction: column; min-width: 0; }
 .tb-view-name {
   font-size: 14px;

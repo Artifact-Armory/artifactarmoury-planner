@@ -300,6 +300,11 @@ interface AppState {
     removeInstance: (id: string) => void
     removeInstances: (ids: string[]) => void
     clearInstances: () => void
+    /**
+     * Start a brand-new empty table AND wipe the undo timeline.
+     * Distinct from clearInstances (which is a normal undoable edit).
+     */
+    resetToScratch: () => void
     duplicateInstance: (id: string) => void
     duplicateInstances: (ids: string[]) => string[]
     addLayoutToShopCart: () => number
@@ -780,6 +785,53 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedInstanceIds: [],
         ...saveHistory({ ...s, instances: [], selectedInstanceId: null })
       }))
+      get().actions.syncBasketWithTable()
+    },
+
+    /**
+     * Reset to an empty table, timeline included — what /planner (scratch mode)
+     * needs when the store still holds a previously-opened table.
+     *
+     * Why this is not just clearInstances + resetTerrain + resetPaint (which is
+     * what it replaced, and the bug it fixes): the store is module-level, so it
+     * SURVIVES client-side navigation. clearInstances is a normal undoable edit
+     * — it APPENDS to history. So going /planner/t/:id -> /planner left
+     * history = [that table, empty] with the index on `empty`, and one Ctrl+Z
+     * walked the user straight back into the layout of the table they had just
+     * left. Same reason the terrain resets are folded in here: they don't touch
+     * history at all, so running them after clearInstances left the baseline
+     * snapshot holding the PREVIOUS table's heightmap and paint, ready to be
+     * restored by an undo/redo.
+     *
+     * One atomic set, so the single baseline entry snapshots the already-cleared
+     * scene rather than anything left over from before.
+     */
+    resetToScratch: () => {
+      set((s) => {
+        const hm = createHeightmap(s.table)
+        const pm = createPaintMap(s.table)
+        const cleared = {
+          ...s,
+          instances: [] as Instance[],
+          selectedInstanceId: null,
+          heightmap: hm,
+          paint: pm,
+          history: [] as HistoryState[],
+          historyIndex: -1,
+        }
+        return {
+          instances: [],
+          selectedInstanceId: null,
+          selectedInstanceIds: [],
+          heightmap: hm,
+          paint: pm,
+          terrainRev: s.terrainRev + 1,
+          paintRev: s.paintRev + 1,
+          history: [],
+          historyIndex: -1,
+          ...saveHistory(cleared),
+        }
+      })
       get().actions.syncBasketWithTable()
     },
 
