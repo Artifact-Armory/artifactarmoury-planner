@@ -77,12 +77,35 @@ const SOURCE_FORMAT_SQL = (t: string) => `
   END`
 
 async function main() {
-  if (!isBakeWorkerEnabled()) {
+  // Check the CONNECTION before the feature flag. Both failures look identical
+  // from the outside — neither var is set — but only one of them is about this
+  // script: running without `railway run` (or linked to the wrong service) injects
+  // no production env at all, so the flag reads as off AND every query would run
+  // against the local mock and cheerfully report zero models. Blaming the flag
+  // there sends you off to change a Railway setting that was already correct.
+  if (process.env.DB_MOCK === 'true' || !process.env.DATABASE_URL) {
     console.error(
-      'PROXY_BAKE_ENABLED is not "true" — these jobs would sit in the queue forever.\n' +
-        'Set it on the backend service (and confirm the worker is running) before backfilling.',
+      'Not connected to a real database — this is the local DB_MOCK environment.\n\n' +
+        'Run it through Railway, linked to the BACKEND service, so DATABASE_URL and\n' +
+        'PROXY_BAKE_ENABLED are injected:\n\n' +
+        '  railway link          (choose the project, then the backend service)\n' +
+        '  railway run npm run backfill:planner-lod -- --dry-run\n',
     )
     process.exit(1)
+  }
+
+  // A dry run writes nothing, so it is allowed through with a warning: seeing how
+  // big the job is before deciding whether to turn the worker on is a reasonable
+  // thing to want, and refusing it forces the flag to be flipped blind.
+  if (!isBakeWorkerEnabled()) {
+    const msg =
+      'PROXY_BAKE_ENABLED is not "true" — nothing would ever drain these jobs.\n' +
+      'Set it on the backend service, and confirm the worker service is running.'
+    if (!DRY_RUN) {
+      console.error(msg)
+      process.exit(1)
+    }
+    console.warn(`WARNING: ${msg}\nContinuing anyway because this is a --dry-run.\n`)
   }
 
   const { rows: models } = await db.query(
