@@ -845,9 +845,16 @@ just relocated from "in the API server" to "across worker replicas" rather than 
 > (`lod_glb_path` NULL) and turning it back on needs a deploy + a `--force` re-bake — see
 > "Re-enabling" below.** What shipped first, and broke, was a fixed 50,000-triangle budget with a
 > loose 0.01 error bound. What replaces it is an error-led config: `plannerLodSimplifyError`
-> **0.0002** (about 0.05 mm, one resin print layer, on a 250 mm terrain piece) with the triangle
-> budget demoted to a floor it rarely reaches. **The crease-shading half was never at fault and
-> must not be reverted.**
+> **0.00005** (about 12 microns on a 250 mm terrain piece) with `plannerLodNormalMapSize` **0**
+> (map left as baked) and the triangle budget demoted to a floor it never reaches. **The
+> crease-shading half was never at fault and must not be reverted.**
+>
+> **0.0002 was the default for a few hours in between and it was not good enough.** It scored
+> 4.5–10.4% edge loss, passed a rendered side-by-side against the proxy, went live — and the
+> artist immediately spotted softening on carved panelling. Re-tightening to 0.00005 with the
+> full-resolution normal map brought it to **0.6–2.0% across all 28 parts**. The metric ranked
+> candidates correctly and still could not tell "good" from "good enough"; the person who made
+> the models could. Keep that in mind before trusting an edge-loss number on its own.
 
 **What broke, and why it got through.** At `plannerLodTriangleBudget: 50000` the catalogue's dense
 architecture was cut 73–82%: carved wall panels collapsed into lumpy blobs with spikes through
@@ -860,6 +867,25 @@ simplification (290k → 173k), so the aggressive path was never exercised on de
 and its LOD was never rendered. A `--limit 1` smoke test then confirmed the pipeline RAN without
 anyone checking that the output LOOKED right.
 
+- **A PRE-EXISTING PLANNER SCALING BUG surfaced while investigating this, and it affected every
+  buyer, not just the LOD.** `fitToAABB` (frontend `scene/loaders.ts`) scaled each GLB by
+  `target.y / size.y` — normalising to the DB's stored **height**. But the bake's poison pill
+  **deletes the base faces**, so a proxy is legitimately shorter than the model it represents; the
+  loader read that missing base as undersizing and inflated the whole piece. Measured across the
+  28-part set: every **top** scaled ×1.0000 (no base to delete) while every **bottom**/**mid**
+  scaled **×1.044 to ×1.119** — a **12% relative size difference between parts of the same
+  building**. Worse, `surfaceUnits` (`core/elevation.ts`) places the next storey using the TRUE DB
+  height, so a storey drawn ~10% taller pushed straight through the roof above it. **Fixed by
+  scaling from the FOOTPRINT (X/Z), which survive the bake within 0.03% on all 28 parts** — spread
+  drops from 12% to 0.06%, every part landing on ×1.0000.
+  - **Why it only became visible on 2026-09-11:** the owner full GLB (041) is built by pure Node
+    with no poison pills, so it is full height and scaled ×1.0. The artist had been seeing that,
+    and lost it the moment `plannerMeshUrl` started appending `?variant=lod` — which the route's
+    owner-copy branch explicitly excludes. **Buyers had been getting the inflated proxy the whole
+    time the proxy bake has been live.**
+  - **Expect existing saved tables to look different.** They were laid out against the inflated
+    sizes, so pieces nudged flush together may now show small gaps. That is the correct geometry
+    appearing, not a new fault.
 - **`plannerLodSimplifyError` is the quality knob; the triangle budget is not.** meshopt stops at
   whichever limit it reaches first, so the result is **max(triangle target, what the error allows)**.
   A triangle count is one number applied to every model regardless of the detail it carries — which
@@ -867,14 +893,20 @@ anyone checking that the output LOOKED right.
   geometric tolerance and allocates triangles per model on its own. Measured on **32 real catalogue
   parts** rendered against their own proxies in the planner's lighting and 50° lens, scored as the
   proxy edge energy the LOD fails to reproduce inside the silhouette: **0.01 → 19–33% edge loss
-  (melted); 0.0005 → 9–17% (inconsistent); 0.0002 → 4.5–10.4%, mean 7.5%** (1.1–4.5% at 2 m). About
-  3.6 points of that is the 1024 normal-map bound, not geometry: the no-decimation control is 0.1%.
-- **Whole-table result** (the 28-part showcase, every part getting an LOD): **71.27 MB → 31.04 MB
-  (−56.5%)** and **9,116,141 → 6,654,324 triangles (−27.0%)**.
-- **The win is BYTES, not triangles, and that is a real finding.** A no-decimation control — same
-  pipeline, 1% of triangles removed — is already **45–48% smaller**, purely from dropping `TANGENT`
-  and re-quantising through Draco. This asset class cannot give up much geometry without looking
-  wrong, and it does not need to in order for the tier to earn its keep.
+  (melted); 0.0005 → 9–17% (inconsistent); 0.0002 → 4.5–10.4% (shipped briefly, artist saw it);
+  0.0001 → 2.4–3.8%; 0.00005 → 0.6–2.0%** with the map left as baked.
+- **`plannerLodNormalMapSize` is 0 now, and that mattered more than the last error step.** At 1024
+  the map cap, not the mesh, was the dominant remaining error — the no-decimation control measures
+  0.1% with the map untouched but 3.6% with it halved. Capping a normal map softens exactly the
+  carved detail this tier exists to preserve. Costs about 3 MB across the table.
+- **Whole-table result** (the 28-part showcase): **71.27 MB → 38.72 MB (−45.7%)** and
+  **9,116,141 → 8,387,382 triangles (−8.0%)**. 27 of 28 ship; one texture-dominated part comes out
+  24.4% smaller, just under `plannerLodMinReduction`, and correctly keeps serving the proxy.
+- **The win is BYTES, not triangles — the tier is now a download optimisation and little else.**
+  Only 8% of triangles come off. A no-decimation control is already **45–48% smaller** purely from
+  dropping `TANGENT` and re-quantising through Draco, so that is where nearly all of it comes from.
+  **If planner framerate is ever the problem, loosening the error bound will not fix it** — it buys
+  back very little geometry before the loss is visible. This asset class simply cannot give up much.
 - **The crease re-bake alone already paid off, measured not projected:** the showcase table went
   from 85.07 MB / 26,217,059 stored vertices (2.88 per triangle) to **71.27 MB / 8,017,987 (0.88)**,
   with the triangle count **identical to the digit** — 9,116,141 before and after, which is the

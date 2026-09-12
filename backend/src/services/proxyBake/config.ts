@@ -663,14 +663,21 @@ export interface ProxyBakeConfig {
    *  extent. THIS IS THE QUALITY KNOB — the triangle budget above almost never
    *  binds before it does.
    *
-   *  0.0002 of the mesh extent, which on a ~250 mm terrain piece is about 0.05 mm:
-   *  the LOD surface may not move further from the proxy than roughly one resin
-   *  print layer. Stating the tolerance geometrically rather than as a triangle
-   *  count is the whole point — it adapts per model, so a mesh made of thousands of
-   *  separate roof-tile shells keeps the triangles it needs (16-29% cut on the real
-   *  catalogue) while a low-relief walkway gives up 63% of its own, and both land at
-   *  the same visual fidelity. A single triangle count cannot do that, which is
-   *  exactly how the first attempt failed.
+   *  0.00005 of the mesh extent, which on a ~250 mm terrain piece is about 12
+   *  microns: the LOD surface may not move further from the proxy than a fraction
+   *  of a resin print layer. Stating the tolerance geometrically rather than as a
+   *  triangle count is the whole point — it adapts per model, so a mesh made of
+   *  thousands of separate roof-tile shells keeps the triangles it needs while a
+   *  low-relief walkway gives up far more of its own, and both land at the same
+   *  visual fidelity. A single triangle count cannot do that, which is exactly how
+   *  the first attempt failed.
+   *
+   *  KNOW WHAT THIS TIER IS NOW. At 0.00005 the collapse only removes about 7-12%
+   *  of the triangles, so this is very nearly a pure DOWNLOAD optimisation: the
+   *  saving comes from dropping TANGENT and re-quantising through Draco, which is
+   *  45-48% on its own with no decimation at all. If planner framerate rather than
+   *  download weight is ever the problem, loosening this knob is not the answer —
+   *  it buys very little geometry back before it starts being visible.
    *
    *  CHOSEN BY RENDERING, on the real catalogue, not on substitute models: every
    *  part of a 28-piece showcase table plus a second artist's set, rendered against
@@ -680,12 +687,22 @@ export interface ProxyBakeConfig {
    *  difference is the metric that MISSED the first regression, because a melted
    *  roof covers the same pixels at the same average brightness.
    *
-   *    error    0.3 m edge loss (8 parts)   verdict
-   *    0.01     19-33%   (the shipped one)  carved panels and roof tiles melted to
-   *                                         lumpy blobs; unusable
-   *    0.0005    9-17%                      inconsistent — fine on some parts,
-   *                                         visibly soft on others
-   *    0.0002   4.8-9.9%                    indistinguishable from the proxy by eye
+   *    error     0.3 m edge loss   verdict
+   *    0.01      19-33%            carved panels and roof tiles melted to lumpy
+   *                                blobs; unusable. This is what shipped first.
+   *    0.0005     9-17%            inconsistent — fine on some parts, visibly
+   *                                soft on others
+   *    0.0002    4.6-9.5%          scored well and looked right in isolation, but
+   *                                the ARTIST spotted softening on carved panels
+   *                                once it was live. It was briefly the default.
+   *    0.0001    2.4-3.8%          with the normal map left as baked
+   *    0.00005   1.4-2.0%          with the normal map left as baked — current
+   *
+   *  The 0.0002 entry is the one worth remembering. It passed a rendered
+   *  side-by-side against the proxy and still read as soft to the person who made
+   *  the models, on a piece whose detail is carved panelling. An edge-loss figure
+   *  ranks candidates; it does not decide whether the result is good enough, and
+   *  the number that mattered here came back from the artist, not the harness.
    *
    *  Tighter than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR), which is not a
    *  contradiction: that tier simplifies an unbaked mesh whose detail IS its
@@ -733,11 +750,22 @@ export interface ProxyBakeConfig {
    *  that need the resolution least; the crisp architectural pieces that would miss
    *  it compress to a few hundred KB and barely move.
    *
-   *  1024 rather than a guess: rendered at all three planner camera distances
-   *  against the 2048 LOD, halving the map changed nothing at 2 m or 16 m and added
-   *  0.19 percentage points of >8/255 pixels at 0.3 m (0.70% -> 0.89%), on a file
-   *  40% smaller. 512 was also legible but visibly softened the sack seams, so it
-   *  was not taken. */
+   *  DEFAULT IS NOW 0 — leave the map exactly as baked. It was 1024, chosen when
+   *  the geometry was being collapsed hard enough that the map was the cheap half
+   *  of the file and halving it cost 0.19 percentage points of changed pixels.
+   *  Both halves of that reasoning stopped holding once the error bound tightened:
+   *  with the geometry preserved, the map resize became the DOMINANT remaining
+   *  error, and on a normal map it is not a subtle one — it softens exactly the
+   *  carved detail this tier exists to keep. Measured on four real parts at
+   *  plannerLodSimplifyError 0.00005: capping at 1024 gives 3.7-6.0% edge loss at
+   *  0.3 m, leaving it as baked gives 1.4-2.0%, for about 3 MB across a 28-part
+   *  table. The no-decimation control is 0.1% with the map untouched, so at 1024
+   *  essentially the whole residual was the texture, not the mesh.
+   *
+   *  Raise it above 0 again only for a bake whose map is genuinely enormous and
+   *  whose surface is smooth (the organic case that motivated 1024: a 251k proxy
+   *  went to a 50k LOD with 433 KB of geometry against a 1,446 KB normal map). It
+   *  is the wrong trade for crisp architectural work. */
   plannerLodNormalMapSize: number
 }
 

@@ -162,8 +162,8 @@ number applied to every model regardless of how much detail it carries, and that
 precisely the failure: at 50k the dense architecture was cut 73–82% while a louvred
 shutter was left untouched. An error bound is a *geometric tolerance* — the LOD
 surface may not move further than that fraction of the mesh extent — so it allocates
-triangles per model on its own. On a ~250 mm terrain piece the shipped `0.0002` is
-about **0.05 mm, roughly one resin print layer**.
+triangles per model on its own. On a ~250 mm terrain piece the shipped `0.00005` is
+about **12 microns — a fraction of a resin print layer**.
 
 Measured on 32 real catalogue parts (a 28-piece showcase table plus a second
 artist's set), rendered against their own proxies in the planner's own lighting and
@@ -172,31 +172,46 @@ inside the silhouette:
 
 | `plannerLodSimplifyError` | edge loss at 0.3 m | verdict |
 |---|---|---|
-| 0.01 (the shipped one) | 19–33% | melted; unusable |
+| 0.01 | 19–33% | melted; unusable. This is what shipped first. |
 | 0.0005 | 9–17% | inconsistent — fine on some parts, visibly soft on others |
-| **0.0002** | **4.5–10.4%** (mean 7.5%) | indistinguishable from the proxy by eye |
+| 0.0002 | 4.5–10.4% | scored well, looked right in a rendered side-by-side, **and the artist still spotted softening on carved panelling once it was live.** Briefly the default. |
+| 0.0001 | 2.4–3.8% | with the normal map left as baked |
+| **0.00005** | **0.6–2.0%** (28 parts) | current. Indistinguishable, including to the person who made them. |
 
-At 2 m — the distance a table is actually laid out from — 0.0002 lands at 1.1–4.5%.
-About 3.6 points of the 0.3 m figure is the normal-map bound
-(`plannerLodNormalMapSize` 1024 against a 2048 bake), not geometry at all: the
-no-decimation control measures 0.1% with the map left alone.
+At 2 m — the distance a table is actually laid out from — 0.00005 is under 1%
+everywhere.
 
-With 0.0002 the budget almost never binds, so `plannerLodTriangleBudget` is now best
-read as a **floor** — what the LOD would collapse to if the geometry were smooth
-enough to allow it. It is not a ceiling and cannot be used as one.
+**Read the 0.0002 row before touching this knob.** It passed the harness, it passed
+a rendered comparison against the proxy, and it was still wrong. An edge-loss figure
+ranks candidates; it does not decide whether the result is good enough. The number
+that settled it came back from the artist looking at their own models, not from the
+metric — which is the same lesson as the original regression, one level further in.
 
-**Whole-table result** on that 28-part showcase, every part getting an LOD:
+Note also what changed underneath that row: at 0.0002 the **normal-map cap was the
+dominant error**, not the mesh. `plannerLodNormalMapSize` is now 0 (leave the map as
+baked), which is worth more than the last error-bound step — see the knobs table.
+
+With 0.00005 the budget never binds, so `plannerLodTriangleBudget` is now best read
+as a **floor** — what the LOD would collapse to if the geometry were smooth enough
+to allow it. It is not a ceiling and cannot be used as one.
+
+**Whole-table result** on that 28-part showcase, measured through the shipped code:
 
 | | proxy (crease-shaded) | LOD | |
 |---|---|---|---|
-| Download | 71.27 MB | **31.04 MB** | −56.5% |
-| Triangles | 9,116,141 | **6,654,324** | −27.0% |
+| Download | 71.27 MB | **38.72 MB** | −45.7% |
+| Triangles | 9,116,141 | **8,387,382** | −8.0% |
 
-Note the shape of that win: **the bytes, not the triangles.** A no-decimation
-control — same pipeline, 1% of triangles removed — is already 45–48% smaller,
-because dropping `TANGENT` and re-quantising through Draco does that much on its
-own. The triangle reduction is real but modest, because this asset class genuinely
-cannot give up more without looking wrong.
+**This tier is a download optimisation and essentially nothing else.** Only 8% of
+the triangles come off; the saving is almost entirely `TANGENT` removal and the
+re-quantised Draco pass, which are worth 45–48% on their own with no decimation at
+all. Worth stating plainly, because it tells you where not to reach: if planner
+framerate is ever the problem, loosening the error bound will not fix it — it buys
+back very little geometry before the loss becomes visible.
+
+27 of the 28 ship. One part is texture-dominated (183k triangles carrying 1.1 MB of
+normal map) and comes out 24.4% smaller, just under `plannerLodMinReduction`, so it
+keeps serving the proxy — the zero-loss outcome, at a cost of about 0.5 MB.
 
 ### Checking it — `npm run qa:lod`
 
@@ -270,11 +285,11 @@ Verify from outside with no database access at all: a part whose LOD is off answ
 | Key | Meaning |
 |---|---|
 | `plannerLodEnabled` | Build the LOD at all. Useless with `proxyCreaseAngleDeg: 0`; the bake report says so rather than silently shipping a "LOD" as heavy as its input. |
-| `plannerLodSimplifyError` | **The quality knob.** meshopt error bound as a fraction of mesh extent (0.0002 ≈ one print layer on a terrain piece). Adapts per model, which a triangle count cannot. |
+| `plannerLodSimplifyError` | **The quality knob.** meshopt error bound as a fraction of mesh extent (0.00005 is about 12 microns on a terrain piece). Adapts per model, which a triangle count cannot. |
 | `plannerLodTriangleBudget` | A floor the collapse aims for, reached only when the geometry is smooth enough that the error bound allows it. Not a ceiling. |
 | `plannerLodLockBorder` | Keep open boundaries (= the anti-theft cuts) intact. **Security setting, not a quality one.** |
 | `plannerLodMinReduction` | Minimum **byte** saving before the LOD is worth a second file — see below. |
-| `plannerLodNormalMapSize` | Upper bound on the LOD's normal map (default 1024; never enlarges). Worth 3.4 MB across a 32-part catalogue for about 1.3 points of edge loss. |
+| `plannerLodNormalMapSize` | Upper bound on the LOD's normal map, **0 = leave it as baked (the default)**. Was 1024; capping it turned out to be the dominant error source once the geometry stopped being collapsed, and it softens exactly the carved detail this tier keeps. Costs about 3 MB across the table. |
 
 **`plannerLodMinReduction` counts bytes.** It used to count triangles, which is the
 wrong quantity for a tier that exists to make a page download less: once the

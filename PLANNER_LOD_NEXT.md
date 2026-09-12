@@ -1,132 +1,109 @@
-# Planner LOD — retuned, ready to re-enable
+# Planner LOD — live, retuned twice, catalogue backfill outstanding
 
-The retune asked for in the previous version of this file is **done in code**. What
-is left is the part that needs production access: deploy, re-bake one model, look at
-it, then do the rest. Nothing in production has changed yet — the tier is still
-disabled by data.
+The tier is **on in production for the "South East Asian village" model** and off
+(no `lod_glb_path`) for everything else. This file is the current state and what is
+left to do. Full background is in `CLAUDE.md`'s "Planner LOD + crease shading"
+section and `backend/PROXY_BAKE.md`.
 
-Read `CLAUDE.md`'s "Planner LOD + crease shading" section and `backend/PROXY_BAKE.md`
-for the full picture. This file is the runbook for finishing it.
+## How it got here
 
-## What was wrong, and what changed
+1. Shipped at a fixed **50,000-triangle budget** with a loose **0.01** error bound.
+   Destroyed the catalogue — carved panels to lumpy blobs, roof tiles gone. Rolled
+   back by nulling `lod_glb_path`.
+2. Retuned to an **error-led** config at **0.0002**, measured at 4.5–10.4% edge loss
+   on 32 real parts. Deployed, re-baked, went live.
+3. **The artist looked at it and it was still too soft** on carved panelling. Now
+   **0.00005** with the normal map left as baked: **0.6–2.0% across all 28 parts**.
 
-The tier shipped with a fixed **50,000-triangle budget** and a loose **0.01** error
-bound, and that combination destroyed the catalogue. The budget was the wrong kind
-of control: meshopt stops at whichever of its two limits it reaches first, so a
-triangle target is one number applied to every model regardless of how much detail
-it carries. At 50k the dense architecture was cut 73–82% while a louvred shutter was
-left untouched.
+Step 3 is the one to remember. The metric ranked the candidates correctly at every
+stage and still could not tell "scores well" from "good enough". A rendered
+side-by-side against the proxy passed too. What settled it was the person who made
+the models saying it looked wrong.
 
-The fix is to let the **error bound** lead. It is a geometric tolerance — the LOD
-surface may not move further than that fraction of the mesh extent — so it allocates
-triangles per model on its own.
-
-| | was | now |
+| | value | why |
 |---|---|---|
-| `plannerLodSimplifyError` | 0.01 | **0.0002** (≈0.05 mm, one resin print layer, on a 250 mm piece) |
-| `plannerLodTriangleBudget` | 50000, and binding | 50000, now a **floor** the collapse rarely reaches |
-| `plannerLodMinReduction` | 0.25 of **triangles** | 0.25 of **bytes** |
-| LOD `Cache-Control` | `max-age=3600` | `max-age=300` |
+| `plannerLodSimplifyError` | **0.00005** | ~12 microns on a 250 mm piece. A geometric tolerance adapts per model; a triangle count cannot, which is how the first attempt failed. |
+| `plannerLodNormalMapSize` | **0** | Leave the baked map alone. At 1024 the map cap, not the mesh, was the dominant error. |
+| `plannerLodTriangleBudget` | 50000 | A floor the collapse never reaches. Not a ceiling — meshopt returns `max(target, what the error allows)`. |
+| `plannerLodMinReduction` | 0.25 of **bytes** | Was triangles, which is the wrong quantity for a download tier. |
+| LOD `Cache-Control` | `max-age=300` | The cache lifetime is the kill switch's blast radius. |
 
-Plus: the "already under the triangle budget, skip" bail is gone (it was refusing an
-LOD to the single heaviest file in the table, whose weight was in its normal map),
-`backfill-planner-lod.ts` takes `--model <id>`, and there is a new acceptance test.
+**Whole showcase table: 71.27 MB → 38.72 MB (−45.7%), 9,116,141 → 8,387,382
+triangles (−8.0%).** 27 of 28 ship; one texture-dominated part comes out 24.4%
+smaller, just under the gate, and correctly keeps the proxy.
 
-## The evidence
+**The tier is a download optimisation and essentially nothing else** — only 8% of
+triangles come off, and a no-decimation control is already 45–48% smaller from
+dropping `TANGENT` and re-quantising through Draco. If planner framerate is ever the
+problem, loosening the error bound is the wrong lever.
 
-Measured on **32 real production parts** — the whole 28-part "South East Asian
-village" showcase table plus the Gothic church — pulled from the live API, rendered
-against their own proxies at the planner's camera distances in the planner's own
-lighting and 50° lens. Scored as *edge loss*: the share of the proxy's Sobel edge
-energy the LOD fails to reproduce inside the model's silhouette. A flat pixel
-difference is the metric that missed the original regression, because a melted roof
-covers the same pixels at the same average brightness.
+## The scaling bug found alongside it (fixed, unrelated to the LOD)
 
-| `plannerLodSimplifyError` | edge loss at 0.3 m | verdict |
-|---|---|---|
-| 0.01 (shipped, broken) | 19–33% | melted; unusable |
-| 0.0005 | 9–17% | inconsistent — fine on some parts, visibly soft on others |
-| **0.0002** | **4.5–10.4%**, mean 7.5% | indistinguishable from the proxy by eye |
+`fitToAABB` in `frontend/.../scene/loaders.ts` normalised every mesh by **height**,
+against the DB dims. The bake's poison pill **deletes the base faces**, so a proxy is
+legitimately shorter than the model — and the loader inflated it to compensate. Every
+**top** part scaled ×1.0000; every **bottom**/**mid** scaled **×1.044 to ×1.119**. A
+12% size difference between parts of one building, and `surfaceUnits` places the next
+storey at the true DB height, so storeys pushed through the roofs above them.
 
-At 2 m, 0.0002 lands at 1.1–4.5%. About 3.6 points of the 0.3 m number is the 1024
-normal-map bound rather than geometry — a no-decimation control measures 0.1%.
+Fixed by scaling from the **footprint** (X/Z survive the bake within 0.03%). Spread
+drops to 0.06%.
 
-**Whole showcase table, every part getting an LOD: 71.27 MB → 31.04 MB (−56.5%) and
-9,116,141 → 6,654,324 triangles (−27.0%).**
+- **Buyers have had this the whole time the proxy bake has been live.** The artist
+  only saw it on 2026-09-11, because the owner full GLB has no poison pills and so
+  scaled ×1.0 — and the planner stopped serving it the moment `plannerMeshUrl` began
+  appending `?variant=lod`.
+- **Saved tables will look different** after the fix. They were laid out against
+  inflated parts, so pieces nudged flush may now show small gaps. That is the correct
+  geometry appearing.
 
-Note the shape of that: **the win is bytes, not triangles.** A control that removes
-1% of triangles is already 45–48% smaller, purely from dropping `TANGENT` and
-re-quantising through Draco. This asset class cannot give up much geometry without
-looking wrong, and it does not have to.
+## What is left
 
-Two things worth carrying:
-- The Gothic church was hit as hard as the village (18.6–23.8% edge loss at the old
-  config), so the original regression was **catalogue-wide**, not one artist's set.
-- The crease re-bake's own win is now measured rather than projected: the showcase
-  table went 85.07 MB → 71.27 MB and 26,217,059 → 8,017,987 stored vertices, with the
-  triangle count **identical to the digit** (9,116,141 both times) — which is the
-  cleanest confirmation available that crease shading changes shading, never geometry.
+Terminal is Windows `cmd.exe`; `railway run` must be linked to the **Postgres**
+service (the backend's `DATABASE_URL` is a private host that will not resolve).
 
-## Current production state
+**1. Push and let both services redeploy.** The config only reaches the bake through
+the worker image, and the scaling fix only reaches the planner through Cloudflare
+Pages. **Confirm the deploy landed before backfilling** — a re-bake started early
+rebuilds the old settings and, because writing `lod_glb_path` re-enables the tier, it
+silently undoes the kill switch. That has already happened once. The backfill now
+prints the last completed bake's own recorded `simplifyError` next to the local
+config so the mismatch is visible before you enqueue.
 
-- `lod_glb_path` is NULL on both tables, so `?variant=lod` falls back to the proxy.
-  **Verified this session from outside, without database access:** the LOD and
-  preview variants return byte-identical responses and the header
-  `X-Preview-Variant: preview`. That check is worth repeating any time you need to
-  know whether the tier is live.
-- All 42 meshes carry crease-shaded proxies. That stays.
-- The config change is **committed code, not deployed**, and takes effect only
-  through a re-bake.
-
-## Finishing it
-
-Everything below needs your production access. Terminal is Windows `cmd.exe`.
-
-**1. Deploy** the backend and worker (the worker image carries
-`config/proxyBake.defaults.json`). To try it without waiting for a deploy, set
-`PROXY_BAKE_LOD_SIMPLIFY_ERROR=0.0002` on the worker service instead — the env
-override exists for exactly this.
-
-**2. Re-bake ONE model you can recognise.** The SE Asian village is the model that
-broke and the one all the evidence above is about:
+**2. Re-bake the village at the new setting** (it is currently live at the old one):
 
 ```
-railway run npm run backfill:planner-lod -- --model 0385633e-ef61-4843-b6d8-11518ce17028 --force --dry-run
 railway run npm run backfill:planner-lod -- --model 0385633e-ef61-4843-b6d8-11518ce17028 --force
 ```
 
-That is 28 meshes, roughly 4 minutes across 5 workers. Artist uploads queue behind
-it.
+**3. Look at it.** https://artifactarmoury.com/planner/view/0e30e3c2-22f9-4286-b327-80c47092fa34
+— zoom right in on carved panelling and roof tiles.
 
-**3. LOOK AT IT.** Not at the job status — at the model:
+**4. Confirm which settings were actually used**, which is not the same as confirming
+the job ran:
 
 ```
-https://artifactarmoury.com/planner/view/0e30e3c2-22f9-4286-b327-80c47092fa34
+railway run npm run db:query -- "SELECT report->'plannerLod' FROM proxy_bake_jobs WHERE status='succeeded' ORDER BY updated_at DESC LIMIT 1"
 ```
 
-Zoom all the way in on a roof and a carved wall panel. The failure mode to look for
-is tiles and lattice losing their edges and going soft, not anything dramatic. If
-anything looks wrong, the kill switch is below and it is live within five minutes
-now.
-
-**4. Then the rest**, in batches so live uploads are not stuck behind the whole
-catalogue:
+**5. Then the rest of the catalogue**, batched so live uploads are not stuck behind it:
 
 ```
 railway run npm run backfill:planner-lod -- --force --dry-run
 railway run npm run backfill:planner-lod -- --limit 25 --force
 ```
 
-**5. Re-measure honestly.** Load that planner table and compare against the
-**71.27 MB / 9,116,141 triangle** baseline above — not the pre-crease 85.07 MB, which
-would flatter the LOD with a win the re-bake already delivered.
-
-### Kill switch (instant, no deploy)
+### Kill switch (no deploy, live within five minutes)
 
 ```
 railway run npm run db:query -- "UPDATE models SET lod_glb_path = NULL"
 railway run npm run db:query -- "UPDATE model_parts SET lod_glb_path = NULL"
 ```
+
+Verify from outside with no database access: `?variant=lod` answering
+`X-Preview-Variant: preview`. **Note it orphans the LOD objects in R2** — each has a
+random key held only in that column, so nulling it strands the object (~1 MB each,
+unreachable and undeletable). Small, but it accumulates per use.
 
 ## Before changing any `plannerLod*` default again
 
@@ -135,28 +112,27 @@ cd backend
 npm run qa:lod -- --set "South East Asian village"
 ```
 
-It pulls the production proxies, builds candidates with the shipped code, renders
-them against their proxies through Blender at the three planner distances, scores
-edge loss worst-first and exits non-zero over a threshold. Needs Blender
-(`BLENDER_PATH`, or on PATH); without it, it says loudly that nothing was looked at.
+Pulls the production proxies, builds candidates with the shipped code, renders them
+against their proxies at the planner's camera distances, scores edge loss worst-first
+and exits non-zero over a threshold. Needs Blender (`BLENDER_PATH`, or on PATH);
+without it, it says loudly that nothing was looked at.
 
-It prints "NOW OPEN THE IMAGES" for a reason. The number ranks candidates. It does
-not approve them.
+It prints "NOW OPEN THE IMAGES" for a reason, and the 0.0002 episode is the proof:
+it scored fine and was still wrong.
 
-## Still open / not done
+## Still open
 
-- **Nothing has been run against a real Postgres.** Local dev is `DB_MOCK=true`, so
-  the backfill's new `--model` filter is typechecked but unexercised. Run the
-  `--dry-run` first and check the mesh count looks like one model's worth.
-- **The proxy still carries `TANGENT`.** It is 15–38% of the file and the LOD drops it
-  with no visible cost — which raises the obvious question for the product page too.
-  Not tested there, and it is a separate decision: that page is where close
-  inspection actually happens.
-- **A per-model `proxy_bake_config` override was not needed.** The error bound adapts
-  on its own; every one of the 32 parts landed in a 4.5–10.4% band without one. The
-  mechanism is still there (`models.proxy_bake_config`, merged by `loadBakeConfig`)
-  if some future asset class needs it.
-- **Triangle relief is modest (−27%).** If the planner turns out to be GPU-bound
-  rather than download-bound, this config will not fix that, and the honest next step
-  would be the second unwrap+bake at LOD resolution described in `PROXY_BAKE.md` —
-  about +25 s per bake in the most failure-prone part of the pipeline.
+- **The proxy carries `TANGENT`.** 15–38% of its file, dropped by the LOD with no
+  measurable cost (0.1% on the no-decimation control). The product page is where
+  close inspection happens, so it is a separate decision — but it is a large free win
+  sitting there untested.
+- **Owners get the LOD in the planner, deliberately.** Their full-fidelity copy (041)
+  is much of why an owner's table is heaviest. It is also why the artist perceives a
+  bigger drop than any buyer does: they are comparing against the full mesh, not the
+  proxy. Reconsider only as a product call.
+- **`plannerLodMinReduction` at 0.25 now skips one real part** (24.4% smaller). That
+  is the zero-loss outcome and costs ~0.5 MB, so it is left alone; lower the gate if
+  the bytes ever matter more than the simplicity.
+- **Nothing here has been exercised against a real Postgres locally** — dev is
+  `DB_MOCK=true`. The backfill's `--model` filter and drift warning have run in
+  production, but only via `railway run`.
