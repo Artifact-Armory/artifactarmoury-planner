@@ -176,12 +176,42 @@ function baseAlign(root: THREE.Object3D): { x: number; y: number; z: number } {
  * blender/bake_proxy.py emboss_watermark), so Y is the invariant axis: GLB height
  * and DB height match, giving the exact mm→m ratio.
  */
+/**
+ * Rescale an mm-authored GLB to the model's real-world size (`target`, metres).
+ *
+ * DERIVED FROM THE FOOTPRINT, NEVER THE HEIGHT — and that is not a style choice.
+ *
+ * `target` comes from the DB dims, which are measured on the PRINT file. The mesh
+ * being scaled is the baked proxy (or the LOD derived from it), and the bake's
+ * poison pill DELETES THE BASE FACES — that is what makes a ripped preview
+ * unprintable, so it is load-bearing and not going away. The proxy is therefore
+ * genuinely shorter than the model it represents, while its footprint is untouched.
+ *
+ * Normalising by height took that missing base and inflated the whole piece to
+ * cover it. Measured across the 28 parts of a real showcase set: every *top* piece
+ * matched its DB height exactly and scaled x1.0000, while every *bottom* and *mid*
+ * had lost base faces and was scaled up by 4.4% to 11.9% — a 12% relative size
+ * difference between parts of the same building, which is why roofs stopped sitting
+ * on the storeys beneath them. Worse, `surfaceUnits` in core/elevation.ts places the
+ * next storey using the TRUE DB height, so the piece was drawn ~10% taller than the
+ * height the planner had already reserved for it.
+ *
+ * X and Z survive the bake intact (they matched the DB width/depth within 0.03% on
+ * all 28 parts), so they are the honest axes to scale from. Averaging the two rather
+ * than picking one halves the effect of any single-axis noise. Height is kept only
+ * as a fallback for a degenerate footprint, where it is better than nothing.
+ */
 function fitToAABB(root: THREE.Object3D, target: { x: number; y: number; z: number }): void {
   root.updateMatrixWorld(true)
   const size = new THREE.Vector3()
   new THREE.Box3().setFromObject(root).getSize(size)
   if (size.x <= 0 || size.y <= 0 || size.z <= 0) return
-  const s = target.y / size.y
+  const ratios: number[] = []
+  if (target.x > 0) ratios.push(target.x / size.x)
+  if (target.z > 0) ratios.push(target.z / size.z)
+  const s = ratios.length
+    ? ratios.reduce((a, b) => a + b, 0) / ratios.length
+    : target.y / size.y
   if (Number.isFinite(s) && s > 0) {
     root.scale.multiplyScalar(s)
     root.updateMatrixWorld(true)
