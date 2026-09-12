@@ -46,6 +46,7 @@
 import './script-env'
 import { db, closeDatabase } from '../src/db'
 import { enqueueBakeJob } from '../src/services/proxyBake/queue'
+import { loadBakeConfig } from '../src/services/proxyBake/config'
 
 // Same window /admin/queues and the queue alarm use (queueHealth.ts owns the
 // default); read here rather than importing that service into a one-off script.
@@ -156,6 +157,56 @@ async function main() {
     console.log(`${liveWorkers} live bake worker(s).\n`)
   }
 
+  // WHICH CONFIG IS THE WORKER GOING TO BAKE WITH? Not this one.
+  //
+  // `railway run` injects production's env but executes on YOUR machine, so the
+  // config this process can read is the LOCAL config/proxyBake.defaults.json --
+  // the file you just edited. The bake happens inside the worker container against
+  // ITS deployed copy. The two disagree for exactly as long as it takes a push to
+  // reach Railway, and a backfill started inside that window re-bakes the
+  // catalogue with the settings you believe you have already replaced.
+  //
+  // Not hypothetical: the plannerLodSimplifyError retune was backfilled before its
+  // deploy landed. It rebuilt the broken LOD it existed to fix AND re-enabled it,
+  // because writing lod_glb_path undoes the kill switch. Nothing here noticed,
+  // since a dry run only ever counted meshes -- it never said a word about which
+  // settings those meshes were about to be baked with.
+  //
+  // The worker leaves its own answer behind: every bake records the values it used
+  // on the job's report. Show the last one next to the local file.
+  const localCfg = loadBakeConfig()
+  const { rows: lastLod } = await db.query(
+    `SELECT report -> 'plannerLod' ->> 'simplifyError' AS err,
+            report -> 'plannerLod' ->> 'budget'        AS budget,
+            updated_at                                 AS at
+       FROM proxy_bake_jobs
+      WHERE status = 'succeeded' AND report -> 'plannerLod' IS NOT NULL
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+  )
+  const localErr = localCfg.plannerLodSimplifyError
+  const lastErr = lastLod[0]?.err != null ? Number(lastLod[0].err) : null
+  console.log(
+    `Planner LOD settings in THIS checkout: error ${localErr}, budget ${localCfg.plannerLodTriangleBudget}`,
+  )
+  if (lastErr === null) {
+    console.log(
+      '  No completed bake has recorded its LOD settings yet, so there is nothing to\n' +
+        '  compare against and this check cannot tell you what the worker will use.\n' +
+        '  Confirm your deploy has landed before continuing.\n',
+    )
+  } else if (lastErr !== localErr) {
+    console.log(
+      `  The last completed bake used error ${lastErr}, at ${new Date(lastLod[0].at).toISOString()}.\n` +
+        '  THAT DIFFERS FROM THIS CHECKOUT. Fine if you have just changed the config AND\n' +
+        '  the worker service has finished redeploying -- the worker is simply ahead of\n' +
+        '  that record. NOT fine if you have not pushed and waited for that redeploy, in\n' +
+        `  which case this run bakes at ${lastErr} again and silently undoes the rollback.\n`,
+    )
+  } else {
+    console.log(`  The last completed bake used the same error. The worker is in sync.\n`)
+  }
+
   const { rows: models } = await db.query(
     `SELECT m.id AS model_id, NULL::uuid AS part_id,
             ${SOURCE_KEY_SQL('m')} AS source_key,
@@ -263,6 +314,18 @@ async function main() {
   )
   console.log(
     `  railway run npm run db:query -- "SELECT count(*) FILTER (WHERE lod_glb_path IS NOT NULL) AS with_lod, count(*) FROM models WHERE processing_status = 'ready'"`,
+  )
+  // The one check that would have caught the bad re-bake: not "did it run" but
+  // "what did it run with". Read it back off the worker's own report.
+  console.log(`\nThen confirm WHICH SETTINGS the worker actually used:`)
+  console.log(
+    `  railway run npm run db:query -- "SELECT report->'plannerLod' FROM proxy_bake_jobs WHERE status='succeeded' ORDER BY updated_at DESC LIMIT 1"`,
+  )
+  console.log(
+    `  Expect simplifyError ${localErr}. Anything else means the worker had not redeployed,\n` +
+      `  the result is not what you tested, and the kill switch has just been undone:\n` +
+      `    railway run npm run db:query -- "UPDATE models SET lod_glb_path = NULL"\n` +
+      `    railway run npm run db:query -- "UPDATE model_parts SET lod_glb_path = NULL"`,
   )
 }
 
