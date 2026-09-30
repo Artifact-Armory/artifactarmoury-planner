@@ -1443,3 +1443,7 @@
 @media (prefers-reduced-motion: reduce) { .tb-toolbar, .tb-tablesize, .tb-surface { transition: none; } }
 
 .tb-palette-scroll, .tb-filter-rail { color-scheme: dark; }
+
+/* Expanded set/model blocks span the whole grid row; bundles too. */
+.tb-palette-grid > .tb-bundle { grid-column: 1 / -1; margin: 0; }
+.tb-tree.is-nested { background: #0e141c; }

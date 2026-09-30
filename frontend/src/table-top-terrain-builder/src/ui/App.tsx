@@ -842,24 +842,63 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     )
   }
 
-  // One placeable piece inside a set tree. `crumb` (shown while searching) spells
-  // out the path, "Set > Model", since the row may be surfaced out of context.
-  const renderPieceRow = (assetId: string, label: string, crumb?: string, path?: string) => {
+  // One placeable piece inside a set, as a grid tile like the catalogue's. `crumb`
+  // (shown while searching) spells out the path, "Set > Model", since the tile may
+  // be surfaced out of context.
+  const renderPieceRow = (assetId: string, label: string, crumb?: string, path?: string, pill?: string) => {
     const a = assetsById.get(assetId) ?? getAssetById(assetId)
     if (!a) return null
     return (
       <button
         key={assetId}
-        className={`tb-node-row ${selectedAssetId === assetId ? 'is-active' : ''}`}
+        className={`tb-tile ${selectedAssetId === assetId ? 'is-active' : ''}`}
         onClick={() => pickAsset(assetId)}
         title={`Place ${path ?? label}${a.aabb ? ` — ${formatPieceDims(a.aabb, unitSystem)}` : ''}`}
       >
-        <span className="tb-node-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={12} />}</span>
-        <span className="tb-node-text">
-          <span className="tb-node-label">{label}</span>
+        <div className="tb-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={22} />}</div>
+        <div className="tb-tile-name">{label}</div>
+        <div className="tb-tile-meta">
+          <span className="tb-pill bundle">{pill ?? 'PIECE'}</span>
           {crumb && <span className="tb-node-crumb">{crumb}</span>}
-        </span>
+        </div>
       </button>
+    )
+  }
+
+  // A collapsed group (set or model) is a tile in the grid; expanded, it spans the
+  // full row with a header to collapse it and its children as a grid of tiles.
+  const renderGroupNode = (o: {
+    key: string; name: string; thumbnail?: string; pill: string; meta: string
+    open: boolean; force?: boolean; nested?: boolean; children: React.ReactNode
+  }) => {
+    const toggle = () => toggleBundleExpanded(o.key)
+    if (!o.open) {
+      return (
+        <button key={o.key} className="tb-tile" onClick={toggle} title={`Open ${o.name}`}>
+          <div className="tb-thumb">{o.thumbnail ? <img src={o.thumbnail} alt="" /> : <Box size={22} />}</div>
+          <div className="tb-tile-name">{o.name}</div>
+          <div className="tb-tile-meta">
+            <span className="tb-pill bundle">{o.pill}</span>
+            <span>{o.meta}</span>
+          </div>
+        </button>
+      )
+    }
+    return (
+      <div key={o.key} className={`tb-bundle tb-tree${o.nested ? ' is-nested' : ''}`}>
+        <button className="tb-bundle-head" onClick={o.force ? undefined : toggle}>
+          <div className="tb-thumb sm">{o.thumbnail ? <img src={o.thumbnail} alt="" /> : <Box size={16} />}</div>
+          <div className="tb-bundle-info">
+            <div className="tb-tile-name">{o.name}</div>
+            <div className="tb-tile-meta">
+              <span className="tb-pill bundle">{o.pill}</span>
+              <span>{o.meta}</span>
+            </div>
+          </div>
+          {!o.force && <ChevronDown size={16} className="tb-chev is-open" />}
+        </button>
+        <div className="tb-palette-grid" style={{ marginTop: 8 }}>{o.children}</div>
+      </div>
     )
   }
 
@@ -874,55 +913,34 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   ) => {
     const comps = filterSetComponents(set, q)
     if (comps.length === 0) return null
-    const open = !!q || expandedBundles.has(g.key)
     const total = set.components.reduce((n, c) => n + c.pieces.length, 0)
     const flat = set.components.length === 1 && !set.components[0].name
-    return (
-      <div key={g.key} className="tb-bundle tb-tree">
-        <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(g.key)}>
-          <div className="tb-thumb sm">{g.thumbnail ? <img src={g.thumbnail} alt="" /> : <Box size={16} />}</div>
-          <div className="tb-bundle-info">
-            <div className="tb-tile-name">{g.name}</div>
-            <div className="tb-tile-meta">
-              <span className="tb-pill bundle">SET · {flat ? `${total} pieces` : `${set.components.length} models`}</span>
-              <span>{g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`}</span>
-            </div>
-          </div>
-          <ChevronDown size={16} className={`tb-chev ${open ? 'is-open' : ''}`} />
-        </button>
-        {open && (
-          <div className="tb-tree-body">
-            {comps.map((c) => {
-              if (flat) {
-                return c.pieces.map((p) =>
-                  renderPieceRow(p.assetId, p.name, q ? g.name : undefined, `${g.name} › ${p.name}`))
-              }
-              const crumbBase = `${g.name} › ${c.name}`
-              const full = set.components.find((x) => x.key === c.key)!
-              if (full.pieces.length === 1) {
-                return renderPieceRow(c.pieces[0].assetId, c.name!, q ? g.name : undefined, crumbBase)
-              }
-              const cOpen = !!q || expandedBundles.has(c.key)
-              return (
-                <div key={c.key} className="tb-node">
-                  <button className="tb-node-head" onClick={() => toggleBundleExpanded(c.key)}>
-                    <ChevronRight size={13} className={`tb-node-chev ${cOpen ? 'is-open' : ''}`} />
-                    <span className="tb-node-label">{c.name}</span>
-                    <span className="tb-small">{full.pieces.length} pieces</span>
-                  </button>
-                  {cOpen && (
-                    <div className="tb-node-children">
-                      {c.pieces.map((p) =>
-                        renderPieceRow(p.assetId, p.name, q ? crumbBase : undefined, `${crumbBase} › ${p.name}`))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    )
+    const children = comps.flatMap((c) => {
+      if (flat) {
+        return c.pieces.map((p) =>
+          renderPieceRow(p.assetId, p.name, q ? g.name : undefined, `${g.name} › ${p.name}`))
+      }
+      const crumbBase = `${g.name} › ${c.name}`
+      const full = set.components.find((x) => x.key === c.key)!
+      if (full.pieces.length === 1) {
+        return [renderPieceRow(c.pieces[0].assetId, c.name!, q ? g.name : undefined, crumbBase, 'MODEL')]
+      }
+      const first = assetsById.get(c.pieces[0].assetId) ?? getAssetById(c.pieces[0].assetId)
+      return [renderGroupNode({
+        key: c.key, name: c.name!, thumbnail: first?.thumbnail, nested: true,
+        pill: `MODEL · ${full.pieces.length}`, meta: 'pieces',
+        open: !!q || expandedBundles.has(c.key), force: !!q,
+        children: c.pieces.map((p) =>
+          renderPieceRow(p.assetId, p.name, q ? crumbBase : undefined, `${crumbBase} › ${p.name}`)),
+      })]
+    })
+    return renderGroupNode({
+      key: g.key, name: g.name, thumbnail: g.thumbnail,
+      pill: `SET · ${flat ? `${total} pieces` : `${set.components.length} models`}`,
+      meta: g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`,
+      open: !!q || expandedBundles.has(g.key), force: !!q,
+      children,
+    })
   }
 
   // Choosing a model to place. On a narrow screen the palette is a drawer covering
@@ -1709,7 +1727,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   {visibleCatalogueSets.length > 0 && (
                     <div className="tb-palette-section">
                       <div className="tb-palette-cat">Sets</div>
-                      {visibleCatalogueSets.map((g) => renderGroupTile(g, searchQ))}
+                      <div className="tb-palette-grid">
+                        {visibleCatalogueSets.map((g) => renderGroupTile(g, searchQ))}
+                      </div>
                     </div>
                   )}
                   {paletteGroups.map(([cat, items]) => (
@@ -1753,7 +1773,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   </div>
                 )}
 
-                {myItems.groups.map((g) => renderGroupTile(g))}
+                <div className="tb-palette-grid">{myItems.groups.map((g) => renderGroupTile(g))}</div>
 
                 {myItems.displayModels.length > 0 && (
                   <div className="tb-palette-section">
