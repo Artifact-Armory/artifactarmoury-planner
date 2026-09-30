@@ -5,7 +5,8 @@
 import { Router } from 'express'
 import crypto from 'crypto'
 import path from 'path'
-import { authenticate, requireArtist, AuthRequest } from '../middleware/auth'
+import { authenticate, requireArtist, requireVerifiedEmail, requireTwoFactor, AuthRequest } from '../middleware/auth'
+import { presignRateLimit } from '../middleware/security'
 import { asyncHandler, ValidationError } from '../middleware/error'
 import {
   isR2Enabled, presignUpload,
@@ -20,6 +21,27 @@ const router = Router()
 // unguessable keys). Everything else is derived/public asset storage.
 const SAFE_PREFIXES = ['raw', 'models', 'thumbnails', 'images', 'textures', 'maps']
 
+// Sellers only ever upload meshes (raw/) and images; anything else would just be
+// free file hosting on the public CDN.
+const MESH_EXTS = ['.stl', '.obj', '.3mf']
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
+const ALLOWED_EXTS: Record<string, string[]> = {
+  raw: MESH_EXTS,
+  models: [...MESH_EXTS, '.glb', '.gltf'],
+  thumbnails: IMAGE_EXTS,
+  images: IMAGE_EXTS,
+  textures: IMAGE_EXTS,
+  maps: [...IMAGE_EXTS, '.json', '.bin'],
+}
+function assertAllowedExtension(prefix: string, filename: string) {
+  const ext = path.extname(filename).toLowerCase()
+  if (!ALLOWED_EXTS[prefix]?.includes(ext)) {
+    throw new ValidationError(
+      `${ext || 'That'} files can't be uploaded to "${prefix}". Allowed: ${ALLOWED_EXTS[prefix].join(', ')}`,
+    )
+  }
+}
+
 /**
  * POST /api/uploads/presign  { filename, prefix }
  * → { uploadUrl, publicUrl, key, headers } ; client does PUT uploadUrl with the file.
@@ -28,6 +50,9 @@ router.post(
   '/presign',
   authenticate,
   requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  presignRateLimit,
   asyncHandler(async (req: AuthRequest, res) => {
     if (!isR2Enabled()) {
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)')
@@ -40,6 +65,7 @@ router.post(
       throw new ValidationError(`prefix must be one of: ${SAFE_PREFIXES.join(', ')}`)
     }
 
+    assertAllowedExtension(prefix, filename)
     const ext = path.extname(filename).toLowerCase()
     const contentType = contentTypeFor(filename)
     // content-addressed key so objects are immutable and cacheable forever
@@ -75,6 +101,9 @@ router.post(
   '/multipart/create',
   authenticate,
   requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  presignRateLimit,
   asyncHandler(async (req: AuthRequest, res) => {
     if (!isR2Enabled()) {
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)')
@@ -98,6 +127,7 @@ router.post(
       throw new ValidationError(`partCount must be an integer between 1 and ${MAX_PARTS}`)
     }
 
+    assertAllowedExtension(prefix, filename)
     const ext = path.extname(filename).toLowerCase()
     const contentType = contentTypeFor(filename)
     const hash = crypto.randomBytes(16).toString('hex')

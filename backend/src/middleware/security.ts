@@ -217,6 +217,28 @@ export const authRateLimit = rateLimit({
 });
 
 /**
+ * Presigned-URL rate limit. A single grouped listing presigns one URL per file
+ * (up to ~60 parts) plus thumbnails, so this is far looser than uploadRateLimit;
+ * it exists to stop bulk abuse, not to meter normal listings.
+ */
+export const presignRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 300,
+  message: 'Too many upload requests, please try again later',
+  handler: rateLimitHandler,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyGenerator,
+  ...(redisClient && {
+    store: new RedisStore({
+      // @ts-expect-error
+      client: redisClient,
+      prefix: 'rl:presign:'
+    })
+  })
+});
+
+/**
  * File upload rate limit
  * 20 uploads per hour per user
  */

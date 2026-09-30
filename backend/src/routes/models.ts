@@ -90,10 +90,22 @@ function parseTags(tags: unknown): string[] {
 // CREATE MODEL
 // ============================================================================
 
+// RETIRED: the frontend uses the presign -> POST /from-upload path. This legacy
+// multipart route skipped the mandatory-2FA gate and parsed the mesh inside the
+// API process (the OOM risk the ingest worker exists to remove). Rejecting before
+// multer so nothing is written to disk. The handler below is kept only for reference.
 router.post('/',
+  (_req, res) => {
+    res.status(410).json({
+      error: 'GONE',
+      code: 'ENDPOINT_RETIRED',
+      message: 'This upload endpoint has been retired. Use the upload form on the site.',
+    });
+  },
   authenticate,
   requireArtist,
   requireVerifiedEmail,
+  requireTwoFactor,
   uploadRateLimit,
   uploadModelWithThumbnail,
   handleUploadError,

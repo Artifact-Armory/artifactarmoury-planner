@@ -151,6 +151,13 @@ export function errorHandler(
     message = err.message;
     details = err.details;
   } 
+  // A foreign Origin is the client's fault, not ours — 403, so scanner probes
+  // don't register as 5xx crashes in Sentry.
+  else if (err.message === 'Not allowed by CORS') {
+    statusCode = 403;
+    errorCode = 'CORS_FORBIDDEN';
+    message = 'Origin not allowed';
+  }
   // Handle database errors
   else if ((err as any).code) {
     const dbError = handleDatabaseError(err as any);
