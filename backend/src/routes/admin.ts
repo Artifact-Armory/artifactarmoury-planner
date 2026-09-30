@@ -22,6 +22,7 @@ import { getSummary, getProducts } from '../services/artistAnalytics';
 import { ensureRollupsFresh } from '../services/analyticsRollup';
 import { parseRange } from './analytics';
 import { getQueueHealth } from '../services/queueHealth';
+import { rebakeModel, rebakeBatch } from '../services/proxyBake/rebake';
 import { invalidateUserTokens } from '../middleware/auth';
 
 const router = Router();
@@ -2156,6 +2157,37 @@ router.post('/queues/:queue/:jobId/requeue',
 
     logger.info('Admin requeued job', { adminId: (req as any).userId, queue, jobId });
     res.json({ message: 'Job requeued', job: result.rows[0] });
+  })
+);
+
+/** Re-bake a slice of the catalogue, `limit` models from `offset`. Step through with nextOffset. */
+router.post('/models/rebake-batch',
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(String(req.body?.limit ?? 10), 10) || 10, 1), 50);
+    const offset = Math.max(parseInt(String(req.body?.offset ?? 0), 10) || 0, 0);
+    const result = await rebakeBatch(limit, offset);
+    logger.info('Admin queued re-bake batch', { adminId: (req as any).userId, limit, offset });
+    res.json(result);
+  })
+);
+
+/**
+ * Re-bake one model (and its set parts) with the worker's CURRENT config.
+ *
+ * The in-platform alternative to `railway run npm run backfill:planner-lod --
+ * --model <id> --force`, for when reaching the database from a laptop is not an
+ * option. Only queues jobs - the worker does the bake - and refuses to queue when
+ * no worker is alive, since jobs nobody will run just look like success.
+ */
+router.post('/models/:id/rebake',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new ValidationError('That is not a valid model id.');
+    }
+    const result = await rebakeModel(id);
+    logger.info('Admin queued model re-bake', { adminId: (req as any).userId, modelId: id, queued: result.queued.length });
+    res.json(result);
   })
 );
 

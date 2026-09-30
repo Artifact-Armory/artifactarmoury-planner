@@ -49,7 +49,38 @@ export interface QueueHealth {
   stuckModels: StuckModel[]
 }
 
+export interface RebakeBatchResult {
+  models: number
+  queuedMeshes: number
+  skippedOpen: number
+  skippedNoSource: number
+  nextOffset: number
+  totalModels: number
+  liveWorkers: number
+}
+
+export interface RebakeResult {
+  modelId: string
+  modelName: string
+  queued: Array<{ kind: 'model' | 'part'; label: string }>
+  skippedOpen: number
+  skippedNoSource: number
+  liveWorkers: number
+}
+
 export const adminQueuesApi = {
+  /** Queue re-bakes for `limit` models starting at `offset` (oldest first). */
+  async rebakeBatch(limit: number, offset: number): Promise<RebakeBatchResult> {
+    const res = await apiClient.post('/api/admin/models/rebake-batch', { limit, offset })
+    return res.data
+  },
+
+  /** Queue a fresh preview bake for one model and its set parts. */
+  async rebakeModel(modelId: string): Promise<RebakeResult> {
+    const res = await apiClient.post(`/api/admin/models/${modelId}/rebake`)
+    return res.data
+  },
+
   async get(): Promise<QueueHealth> {
     const res = await apiClient.get(BASE_URL)
     return res.data

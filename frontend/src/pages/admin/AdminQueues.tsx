@@ -1,5 +1,5 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Cpu, Clock, RefreshCw } from 'lucide-react'
 import { adminQueuesApi, QueueStats, WorkerInfo } from '../../api/endpoints/adminQueues'
@@ -26,6 +26,134 @@ const QUEUE_NOTE: Record<string, string> = {
   ingest: 'Dedup, mesh checks and the first preview. A backlog here means uploads are not being processed.',
   bake: 'The watermarked, decimated preview shown on the store and planner.',
   full_glb: 'The full-detail mesh shown to people who own the model. A backlog here is not urgent.',
+}
+
+/** Re-bake the whole catalogue in slices, so live uploads are never stuck behind it. */
+const RebakeBatchCard: React.FC = () => {
+  const [limit, setLimit] = React.useState(10)
+  const [offset, setOffset] = React.useState(0)
+  const mutation = useMutation({
+    mutationFn: () => adminQueuesApi.rebakeBatch(limit, offset),
+    onSuccess: (r) => setOffset(r.nextOffset),
+  })
+  const error = mutation.error as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string } | null
+  const errorText =
+    error?.response?.data?.error?.message ?? error?.response?.data?.message ?? error?.message ?? null
+  const r = mutation.data
+  return (
+    <div className="mt-8 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-lg font-semibold text-foreground">Re-bake the catalogue in batches</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Queues re-bakes for the next batch of models, oldest first. Wait for the Preview bake queue below to
+        drain, then run the next batch. The start position advances automatically.
+      </p>
+      <form
+        className="mt-3 flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          mutation.mutate()
+        }}
+      >
+        <label className="text-sm">
+          Batch size
+          <input type="number" min={1} max={50} value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="ml-2 w-20 rounded-lg border border-border bg-background px-2 py-1" />
+        </label>
+        <label className="text-sm">
+          Start at
+          <input type="number" min={0} value={offset}
+            onChange={(e) => setOffset(Number(e.target.value))}
+            className="ml-2 w-24 rounded-lg border border-border bg-background px-2 py-1" />
+        </label>
+        <button type="submit" disabled={mutation.isPending}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+          {mutation.isPending ? 'Queuing...' : 'Queue batch'}
+        </button>
+      </form>
+      {errorText && <p className="mt-3 text-sm text-red-600">{errorText}</p>}
+      {r && (
+        <p className="mt-3 text-sm text-foreground">
+          Queued {r.queuedMeshes} bake{r.queuedMeshes === 1 ? '' : 's'} across {r.models} model{r.models === 1 ? '' : 's'}
+          {' '}({Math.min(r.nextOffset, r.totalModels)} of {r.totalModels} models covered
+          {r.nextOffset >= r.totalModels ? ' - done' : ''}).
+          {r.skippedOpen > 0 && ` ${r.skippedOpen} already queued.`}
+          {r.skippedNoSource > 0 && ` ${r.skippedNoSource} have no source file.`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Re-bake one model with the worker's current config — the fix for "this preview
+ *  looks wrong" once the bake settings have changed and been deployed. */
+const RebakeCard: React.FC = () => {
+  const [modelId, setModelId] = React.useState('')
+  const mutation = useMutation({
+    mutationFn: (id: string) => adminQueuesApi.rebakeModel(id),
+  })
+  const error = mutation.error as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string } | null
+  const errorText =
+    error?.response?.data?.error?.message ?? error?.response?.data?.message ?? error?.message ?? null
+  const result = mutation.data
+
+  return (
+    <div className="mt-8 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-lg font-semibold text-foreground">Re-bake a model</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Rebuilds a model&rsquo;s preview (and its set parts) with the worker&rsquo;s current settings. Paste the
+        model id from its page address. Nothing changes until the bake finishes.
+      </p>
+      <form
+        className="mt-3 flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (modelId.trim()) mutation.mutate(modelId.trim())
+        }}
+      >
+        <input
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value)}
+          placeholder="e.g. 0385633e-ef61-4843-b6d8-11518ce17028"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm"
+          spellCheck={false}
+        />
+        <button
+          type="submit"
+          disabled={mutation.isPending || !modelId.trim()}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {mutation.isPending ? 'Queuing…' : 'Re-bake'}
+        </button>
+      </form>
+      {errorText && <p className="mt-3 text-sm text-red-600">{errorText}</p>}
+      {result && (
+        <div className="mt-3 text-sm text-foreground">
+          <p className="font-medium">
+            {result.queued.length > 0
+              ? `Queued ${result.queued.length} bake${result.queued.length === 1 ? '' : 's'} for “${result.modelName}”.`
+              : `Nothing queued for “${result.modelName}”.`}
+          </p>
+          {result.queued.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+              {result.queued.map((q) => (
+                <li key={q.label}>{q.label}</li>
+              ))}
+            </ul>
+          )}
+          {(result.skippedOpen > 0 || result.skippedNoSource > 0) && (
+            <p className="mt-1 text-muted-foreground">
+              {result.skippedOpen > 0 && `${result.skippedOpen} already queued or running. `}
+              {result.skippedNoSource > 0 && `${result.skippedNoSource} have no source file.`}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            {result.liveWorkers} worker{result.liveWorkers === 1 ? '' : 's'} live. Watch the Preview bake queue below.
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const AdminQueues: React.FC = () => {
@@ -144,6 +272,9 @@ const AdminQueues: React.FC = () => {
           </table>
         </div>
       )}
+
+      <RebakeBatchCard />
+      <RebakeCard />
 
       {/* Queues */}
       <h2 className="mt-8 text-lg font-semibold text-foreground">Queues</h2>
