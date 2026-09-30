@@ -48,7 +48,9 @@
 // plannerLodLockBorder in config.ts for the measurement behind that default.
 
 import { getDracoEncoder, getDracoDecoder } from '../dracoModules'
-import { promises as fsp } from 'fs'
+import { promises as fsp, existsSync } from 'fs'
+import { spawn } from 'child_process'
+import path from 'path'
 import logger from '../../utils/logger'
 import type { ProxyBakeConfig } from './config'
 
@@ -318,4 +320,55 @@ export async function buildPlannerLod(
     proxyBytes: proxyBytes ?? null,
   })
   return { triangles, sourceTriangles, bytes, skipped: false, triangleReduction, byteReduction }
+}
+
+/**
+ * buildPlannerLod in a throwaway child process.
+ *
+ * meshoptimizer's simplifier is a WebAssembly module whose linear memory is
+ * process-global and can only grow: simplify() copies the whole raw (undecompressed,
+ * often multi-million-triangle) mesh into it, so after one dense bake the worker
+ * kept that high-water mark for the rest of its life — ~600-900 MB idle per worker,
+ * appearing only once the LOD tier existed. There is no API to shrink it, so the
+ * only way to hand the memory back is to end the process that owns it. The child
+ * lives for exactly one LOD build.
+ *
+ * Falls back to the in-process build if the child script is not next to this file
+ * (unusual dev setups) — same result, just without the memory isolation.
+ */
+export async function buildPlannerLodIsolated(
+  inGlb: string,
+  outGlb: string,
+  cfg: ProxyBakeConfig,
+  proxyBytes?: number,
+): Promise<PlannerLodResult> {
+  const ext = path.extname(__filename) // '.js' compiled, '.ts' under ts-node
+  const childScript = path.join(__dirname, `lodChild${ext}`)
+  if (!existsSync(childScript)) return buildPlannerLod(inGlb, outGlb, cfg, proxyBytes)
+
+  const inputPath = `${outGlb}.lod-in.json`
+  const resultPath = `${outGlb}.lod-out.json`
+  await fsp.writeFile(inputPath, JSON.stringify({ inGlb, outGlb, cfg, proxyBytes, resultPath }))
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn(process.execPath, [...process.execArgv, childScript, inputPath], {
+        stdio: ['ignore', 'inherit', 'inherit'],
+      })
+      child.on('error', reject)
+      child.on('close', resolve)
+    })
+    let payload: any = null
+    try {
+      payload = JSON.parse(await fsp.readFile(resultPath, 'utf8'))
+    } catch {
+      /* child died before writing (OOM-kill etc.) */
+    }
+    if (!payload?.ok) {
+      throw new Error(payload?.error || `LOD child exited ${code} without a result`)
+    }
+    return payload.result as PlannerLodResult
+  } finally {
+    await fsp.rm(inputPath, { force: true }).catch(() => {})
+    await fsp.rm(resultPath, { force: true }).catch(() => {})
+  }
 }

@@ -20,7 +20,7 @@ import path from 'path'
 import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { loadBakeConfig, type ProxyBakeConfig, type ProxyBakeConfigOverrides } from './config'
-import { buildPlannerLod } from './lod'
+import { buildPlannerLodIsolated } from './lod'
 import { getDracoEncoder, getDracoDecoder, tuneSharp } from '../dracoModules'
 
 // @gltf-transform/* is ESM-only; the CommonJS build must import it dynamically
@@ -318,7 +318,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
         // glbBytes is the FINISHED proxy — the thing the planner would otherwise
         // download — so the LOD's "is this worth a second file" test can weigh
         // bytes against bytes instead of counting triangles.
-        const lod = await buildPlannerLod(rawGlb, lodGlb, cfg, glbBytes)
+        const lod = await buildPlannerLodIsolated(rawGlb, lodGlb, cfg, glbBytes)
         lodBuilt = !lod.skipped
         report.plannerLod = {
           built: lodBuilt,
