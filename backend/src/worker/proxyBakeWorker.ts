@@ -60,6 +60,33 @@ let currentJob: BakeJobRow | null = null
 let jobsCompleted = 0
 
 /**
+ * Run a full garbage collection now. A finished bake leaves behind hundreds of MB
+ * of native memory (sharp/libvips output, Buffers, WASM scratch) owned by tiny JS
+ * wrappers. V8 only collects when the JS heap is under pressure, and an idle worker
+ * allocates nothing — so those wrappers, and the native memory behind them, sat
+ * uncollected indefinitely (heapUsed ~24 MB while external was ~225 MB). Enabled at
+ * runtime so the container's start command needn't carry --expose-gc.
+ */
+let gcFn: (() => void) | null | undefined
+function forceGc(): void {
+  try {
+    if (gcFn === undefined) {
+      const g = (global as any).gc as (() => void) | undefined
+      if (g) {
+        gcFn = g
+      } else {
+        require('v8').setFlagsFromString('--expose-gc')
+        gcFn = require('vm').runInNewContext('gc') as () => void
+      }
+    }
+    gcFn?.()
+    gcFn?.() // second pass frees objects that only became unreachable during the first
+  } catch {
+    gcFn = null // unavailable: give up quietly, this is an optimisation
+  }
+}
+
+/**
  * Where is this worker's memory? Logged after every job so an idle worker sitting
  * at hundreds of MB can be diagnosed from the Railway logs instead of guessed at:
  *  - heapUsed high            -> JS is still referencing something (a real leak)
@@ -70,6 +97,8 @@ let jobsCompleted = 0
 function logMemoryAfterJob(): void {
   try {
     const mb = (n: number) => Math.round(n / 1048576)
+    const rssBeforeGcMb = mb(process.memoryUsage().rss)
+    forceGc()
     const m = process.memoryUsage()
     let topProcesses: string[] | undefined
     try {
@@ -94,6 +123,7 @@ function logMemoryAfterJob(): void {
     }
     logger.info('Worker memory after job', {
       jobsCompleted,
+      rssBeforeGcMb,
       rssMb: mb(m.rss),
       heapUsedMb: mb(m.heapUsed),
       heapTotalMb: mb(m.heapTotal),
