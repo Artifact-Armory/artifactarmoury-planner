@@ -176,7 +176,13 @@ async function main() {
 
     console.log('\n✅ Proxy bake E2E passed.\n')
   } finally {
-    await fsp.rm(work, { recursive: true, force: true }).catch(() => {})
+    // KEEP_BAKE_WORK=1 leaves the temp dir (source OBJ, proxy_raw.glb, proxy.glb,
+    // report.json) on disk. The bake is the one stage whose output cannot be
+    // reproduced from anything in the repo, so when a bake change has to be
+    // measured rather than reasoned about, this is the only way to get a
+    // before/after pair without a production re-bake.
+    if (process.env.KEEP_BAKE_WORK) console.log(`\nwork kept at ${work}`)
+    else await fsp.rm(work, { recursive: true, force: true }).catch(() => {})
   }
 }
 

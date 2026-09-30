@@ -666,6 +666,38 @@ def bake_pass(src, proxy, img, bake_type, samples, cage_extrusion, max_ray_dista
     bpy.ops.object.bake(**kwargs)
 
 
+def sanitize_normal_map(img, min_z=0.3):
+    """Flatten normal-map texels whose decoded tangent-space z is below `min_z`.
+
+    A negative z means the baked normal points into the surface, which happens where
+    a ray reaches the source from behind the proxy; a barely-positive z is nearly
+    edge-on and shades just as black. three.js applies both as-is. Measured on a
+    2.6M-tri source at every budget from 300k to 1.5M: ~1.4% of the atlas is z<0, and
+    flattening exactly those took the share of the model rendering dark-where-the-
+    source-is-lit from 0.87% to 0.12% (300k) and 1.42% to 0.09% (1.5M). A stricter
+    z<0.3 (a further ~0.15% of the atlas) took a 300k bake from 0.099% to 0.040% and
+    removed the last visible cracks; z<0.5 looked identical, so 0.3 is the gentler
+    choice. Unused atlas texels are already (0.5, 0.5, 1) and untouched."""
+    try:
+        import numpy as np
+        w, h = img.size
+        px = np.empty(w * h * 4, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        px = px.reshape(-1, 4)
+        bad = (px[:, 2] * 2.0 - 1.0) < float(min_z)
+        n = int(bad.sum())
+        if n:
+            px[bad, 0] = 0.5
+            px[bad, 1] = 0.5
+            px[bad, 2] = 1.0
+            img.pixels.foreach_set(px.reshape(-1))
+            img.update()
+        REPORT["normalMapInvalidTexels"] = n
+        REPORT["normalMapInvalidTexelPct"] = round(100.0 * n / float(w * h), 4)
+    except Exception as e:
+        warn("Normal-map sanitize failed (keeping raw bake): " + str(e))
+
+
 def save_png(img, name):
     img.file_format = "PNG"
     img.filepath_raw = out_path(name)
@@ -697,6 +729,8 @@ def bake_maps(src, proxy, diag):
     # Normal bakes need only 1 sample; OpenGL/+Y convention matches glTF (Blender default).
     bake_pass(src, proxy, normal_img, "NORMAL", 1, cage, ray,
               extra=dict(normal_space="TANGENT"))
+    if bool(CFG.get("normalMapSanitize", True)):
+        sanitize_normal_map(normal_img, float(CFG.get("normalMapMinZ", 0.3)))
     save_png(normal_img, "normal.png")
 
     ao_img = new_image("proxy_ao", ao_res)
@@ -3875,7 +3909,19 @@ def main():
     # Triangulate before the final crease pass, so MikkTSpace can actually compute
     # export tangents (the emboss leaves n-gons, which make it abort and take the
     # whole mesh's TANGENT attribute with it) — see triangulate_for_export.
-    triangulate_for_export(proxy)
+    #
+    # Behind a flag because it is one of only two bake changes that shipped with the
+    # planner-LOD work, and the other (proxyCreaseAngleDeg) has been ruled out by
+    # measurement as the cause of the surface artefacts reported afterwards. The
+    # exporter triangulates these n-gons either way; what differs is WHICH diagonals
+    # get chosen, and on boolean-cut n-gons that is not always harmless. Turning this
+    # off costs the TANGENT attribute on meshes whose emboss left n-gons (the bug it
+    # was added to fix) — so it is a diagnostic and a fallback, not a better default.
+    if bool(CFG.get("proxyTriangulateForExport", True)):
+        triangulate_for_export(proxy)
+    else:
+        REPORT["triangulatedFaces"] = 0
+        REPORT["triangulateForExportDisabled"] = True
 
     # Re-mark creases: the emboss boolean and the cleanup passes above add faces
     # that carry no sharp-edge marks of their own, and the triangulation just

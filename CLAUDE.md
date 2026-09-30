@@ -995,6 +995,35 @@ anyone checking that the output LOOKED right.
   the backfill's new `--model` filter. Local dev is `DB_MOCK=true`, the same limitation as most of
   this file. Everything about mesh quality above was measured on the real production meshes.
 
+## The planner "static" was the baked NORMAL MAP, not the mesh or the LOD (found 2026-09-30)
+The artist's speckled/torn-looking surfaces (vases, stonework, panelling) were **invalid
+normal-map texels**: ~1.4% of the 2048² atlas decodes to a tangent-space z < 0 (normal
+pointing INTO the surface — rays reaching the source from behind the proxy), and three.js
+shades every one black. `PROXY_DECIMATION_NEXT.md`'s "Blender DECIMATE collapse tears the
+mesh" theory was **wrong for what is visible**: the 300k mesh renders intact in clay and in a
+backface-highlight view; the damage appears only once the normal map is applied.
+- **Fix:** `sanitize_normal_map()` in `bake_proxy.py` flattens texels with decoded z below
+  `normalMapMinZ` (default **0.3**) to (0.5,0.5,1) before `normal.png` is saved; flag
+  `normalMapSanitize` (default true). Verified on the real 2.6M-tri "House 1 bottom" STL through
+  the real bake. z<0 alone (59,984 texels) took the dark-where-the-reference-is-lit share from
+  0.867% → 0.122% (300k) and 1.418% → 0.092% (1.5M) but left a black crack down one jug and a
+  smudge on the ground (barely-positive, edge-on normals shade black too); z<0.3 (66,095 texels,
+  1.58% of the atlas) cleared both — 0.099% → 0.040% on that view; z<0.5 looked identical.
+  **Needs a worker deploy AND a re-bake** — live proxies are unchanged.
+- **Budget is not the knee.** Local bakes at 300k / 600k / 900k / 1.5M / off all showed the
+  black at 0.55–1.42%, non-monotonic in budget, so raising `triangleBudgetCeiling` was never
+  going to fix it. Bake time is also not the constraint it was assumed to be: 1.5M bakes in
+  ~145 s locally (the old "750k never completes" note in `compute_adaptive_budget` is stale).
+- **Ruled out by toggling on the real STL:** poison pills, debris cleanup, emboss (the emboss
+  adds some real speckle of its own but is not the main cause). What's left dark after the fix
+  is the intentional logo through-holes and source seams, which the undecimated reference has too.
+- **Method (reusable):** `render_lod_compare.py` gained `--backface` (flipped faces red, clay
+  otherwise). Comparing a textured render to a clay render of the same GLB is what separates
+  "mesh damage" from "texture damage". Metric: % of the reference's lit pixels that the variant
+  renders >45/255 darker.
+- Blender's glTF importer ignores the AO map for shading, so AO could not explain what the
+  Blender renders showed; the planner's own AO handling was not separately checked.
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

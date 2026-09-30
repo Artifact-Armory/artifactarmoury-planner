@@ -11,7 +11,35 @@ import fs from 'fs'
 import path from 'path'
 
 export interface ProxyBakeConfig {
-  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh). Default
+  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh).
+   *
+   *  !! THIS DOCSTRING SAID "Default false (2026-08-21, final)" WHILE THE SHIPPED
+   *  DEFAULT WAS `true`. It was re-enabled on 2026-08-23 by e77d5dc ("re-enable
+   *  proxy decimation as the preview pipeline") and this comment — including the
+   *  destructiveness evidence below — was never updated. Read the rest of it as a
+   *  standing WARNING about the current default, not as a description of it.
+   *
+   *  What that cost: the evidence below was gathered on a 2.6M-triangle multi-shell
+   *  architectural model and describes DECIMATE(COLLAPSE) tearing holes through
+   *  lattice panels and railings at an 11% retain. A real catalogue model bakes at
+   *  2,628,513 -> 300,000 triangles — an 11.4% retain, the same case — and the
+   *  artist reported exactly that damage once the planner-LOD backfill re-baked the
+   *  catalogue on 2026-09-11 and the setting finally reached the live proxies. The
+   *  flag had been on for nearly three weeks by then without a re-bake to apply it,
+   *  which is why it surfaced as though the LOD work had caused it.
+   *
+   *  Before changing it again, note the trap the 08-21/08-23 flip-flop fell into:
+   *  `false` gives a pristine proxy and an unusably heavy planner, `true` gives a
+   *  fast planner and a torn one. The planner LOD tier (plannerLodEnabled) was
+   *  supposed to break that trade, and it does NOT for this asset class — it can
+   *  only cut 7-12% before the damage is visible, so it cannot rescue an
+   *  undecimated 2.6M-triangle proxy. Anything that actually fixes this needs a
+   *  simplifier that respects thin multi-shell geometry, or a decision to ship much
+   *  heavier proxies for dense models via a per-model override.
+   *
+   *  --- original note, still accurate about the DAMAGE, wrong about the default ---
+   *
+   *  Default
    *  **false** (2026-08-21, final — after a brief detour to `true` the same day).
    *  Sequence: turning this off entirely caused visible planner slowdown (this GLB
    *  IS the file the planner renders, so undecimated = the source's full triangle
@@ -643,6 +671,35 @@ export interface ProxyBakeConfig {
    *  collapse and meshopt refuses to simplify it (asked for 33% of a real bake it
    *  returned 91-95% of the triangles), so with crease shading off this produces
    *  nothing and the planner keeps loading the proxy — no failure, just no win. */
+  /** Triangulate the proxy's n-gons in Blender before the final crease pass and
+   *  export (default true).
+   *
+   *  It exists because MikkTSpace refuses n-gons and the glTF exporter then drops
+   *  TANGENT from the WHOLE mesh, silently — the emboss leaves n-gons behind, and
+   *  that hit two of four real test bakes. glTF is triangles-only, so the exporter
+   *  triangulates regardless; what this changes is WHICH diagonals get chosen, and
+   *  on boolean-cut n-gons that is not guaranteed to be harmless.
+   *
+   *  The flag is here so that can be TESTED rather than argued about. It and
+   *  proxyCreaseAngleDeg are the only two bake changes that shipped with the planner
+   *  LOD, so when surface artefacts were reported afterwards they were the only two
+   *  candidates; crease was ruled out by rendering a flat-normal copy of a live
+   *  proxy against the real one (mean difference 1/255). Set this false on one model
+   *  via proxy_bake_config, re-bake, and compare. Turning it off gives that mesh's
+   *  normal map no real tangent basis, so it is a diagnostic and a fallback rather
+   *  than a better default. */
+  proxyTriangulateForExport: boolean
+  /** Overwrite baked normal-map texels that point into (or nearly along) the
+   *  surface — tangent-space z below `normalMapMinZ` — with a flat normal. On a
+   *  heavily decimated dense source ~1.4% of the atlas is z<0 (rays hit the source
+   *  from behind), and every such texel renders black in the planner: the "static"
+   *  on beams, vases and stonework. Turning it off restores the raw bake; it exists
+   *  only as a diagnostic switch. */
+  normalMapSanitize: boolean
+  /** Decoded-z cut-off for the sanitize pass. 0 catches only inverted normals; 0.3
+   *  also removes near-edge-on ones that still shade black (measured to clear the
+   *  last visible cracks). 0.5 looked identical, so 0.3 is the gentler choice. */
+  normalMapMinZ: number
   plannerLodEnabled: boolean
   /** Triangle target for the LOD — a FLOOR the collapse aims for, not a ceiling it
    *  is held to.

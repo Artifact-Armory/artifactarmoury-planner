@@ -33,7 +33,7 @@ comparable and can be flipped between or differenced.
 usage:
   blender -b -P render_lod_compare.py -- --glb proxy.glb --glb lod.glb --out DIR
           [--px 1600] [--dist 0.3,2.0,16.0] [--engine EEVEE|CYCLES] [--samples 40]
-          [--light planner|bake] [--fov 50] [--az 45] [--el 35] [--clay]
+          [--light planner|bake] [--fov 50] [--az 45] [--el 35] [--clay] [--backface]
 """
 import bpy
 import sys
@@ -63,6 +63,7 @@ fov_deg = float(opt("fov", 50))
 az_deg = float(opt("az", 45))
 el_deg = float(opt("el", 35))
 clay = "--clay" in argv
+backface = "--backface" in argv
 
 if not glbs:
     raise SystemExit("render_lod_compare: need at least one --glb")
@@ -161,7 +162,27 @@ for path in glbs:
                    "meshes": [o for o in new if o.type == "MESH"],
                    "label": os.path.splitext(os.path.basename(path))[0]})
 
-if clay:
+if backface:
+    # Clay, but any face seen from behind is painted red. Tells "faces flipped
+    # inward" (red) apart from "faces missing, interior showing through" (dark).
+    bmat = bpy.data.materials.new("backface_qa")
+    bmat.use_nodes = True
+    bmat.use_backface_culling = False
+    bnt = bmat.node_tree
+    bsdf = bnt.nodes.get("Principled BSDF")
+    geo = bnt.nodes.new("ShaderNodeNewGeometry")
+    mix = bnt.nodes.new("ShaderNodeMixRGB")
+    mix.inputs[1].default_value = (0.62, 0.60, 0.57, 1.0)
+    mix.inputs[2].default_value = (1.0, 0.0, 0.0, 1.0)
+    bnt.links.new(geo.outputs["Backfacing"], mix.inputs[0])
+    bnt.links.new(mix.outputs["Color"], bsdf.inputs["Base Color"])
+    bnt.links.new(mix.outputs["Color"], bsdf.inputs["Emission Color"])
+    bnt.links.new(geo.outputs["Backfacing"], bsdf.inputs["Emission Strength"])
+    for g in groups:
+        for o in g["meshes"]:
+            o.data.materials.clear()
+            o.data.materials.append(bmat)
+elif clay:
     # Strips the baked normal map, leaving raw geometry. Not the acceptance test -
     # buyers see the map - but it isolates whether a difference is geometric.
     mat = bpy.data.materials.new("clay")
@@ -212,7 +233,7 @@ for g in groups:
         cam.location = centre + view_dir * (dm * 1000.0)
         look = (centre - cam.location).normalized()
         cam.rotation_euler = look.to_track_quat("-Z", "Y").to_euler()
-        name = "%s__d%s%s.png" % (g["label"], str(dm).replace(".", "p"), "_clay" if clay else "")
+        name = "%s__d%s%s.png" % (g["label"], str(dm).replace(".", "p"), "_backface" if backface else ("_clay" if clay else ""))
         scene.render.filepath = os.path.join(out_dir, name)
         bpy.ops.render.render(write_still=True)
         manifest.append({"glb": g["path"], "label": g["label"], "distM": dm, "png": name})
