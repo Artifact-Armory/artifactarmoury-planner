@@ -1,4 +1,5 @@
 // backend/src/services/fileProcessor.ts
+import { getDracoEncoder } from './dracoModules'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { readFile, writeFile } from 'fs/promises'
@@ -596,11 +597,9 @@ async function optimizeAndBuildIO(NodeIO: any, doc: any, triangleCount: number):
   )
   doc.createExtension(KHRDracoMeshCompression).setRequired(true)
 
-  const draco3dMod: any = await importESM('draco3dgltf')
-  const draco3d = draco3dMod.default ?? draco3dMod
   return new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
-    .registerDependencies({ 'draco3d.encoder': await draco3d.createEncoderModule() })
+    .registerDependencies({ 'draco3d.encoder': await getDracoEncoder() })
 }
 
 // ============================================================================
@@ -738,11 +737,9 @@ export async function convertSTLtoGLBFull(
       quantizationBits: { POSITION: FULL_GLB_POSITION_BITS, NORMAL: 10, TEX_COORD: 12 },
     })
 
-  const draco3dMod: any = await importESM('draco3dgltf')
-  const draco3d = draco3dMod.default ?? draco3dMod
   const io = new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
-    .registerDependencies({ 'draco3d.encoder': await draco3d.createEncoderModule() })
+    .registerDependencies({ 'draco3d.encoder': await getDracoEncoder() })
 
   const glbBytes = await io.writeBinary(doc)
   await writeFile(outputPath, Buffer.from(glbBytes))

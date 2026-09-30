@@ -21,6 +21,7 @@ import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { loadBakeConfig, type ProxyBakeConfig, type ProxyBakeConfigOverrides } from './config'
 import { buildPlannerLod } from './lod'
+import { getDracoEncoder, getDracoDecoder, tuneSharp } from '../dracoModules'
 
 // @gltf-transform/* is ESM-only; the CommonJS build must import it dynamically
 // (same shim used in services/fileProcessor.ts).
@@ -146,14 +147,13 @@ export async function postProcessGlb(inGlb: string, outGlb: string, cfg: ProxyBa
   )
   const sharpMod: any = await importESM('sharp')
   const sharp = sharpMod.default ?? sharpMod
-  const draco3dMod: any = await importESM('draco3dgltf')
-  const draco3d = draco3dMod.default ?? draco3dMod
+  await tuneSharp(sharp)
 
   const io = new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
     .registerDependencies({
-      'draco3d.encoder': await draco3d.createEncoderModule(),
-      'draco3d.decoder': await draco3d.createDecoderModule(),
+      'draco3d.encoder': await getDracoEncoder(),
+      'draco3d.decoder': await getDracoDecoder(),
     })
 
   const doc = await io.read(inGlb)
@@ -197,6 +197,7 @@ export async function postProcessGlb(inGlb: string, outGlb: string, cfg: ProxyBa
 async function compositeComparison(dir: string, outPng: string, tilePx: number): Promise<string | null> {
   const sharpMod: any = await importESM('sharp')
   const sharp = sharpMod.default ?? sharpMod
+  await tuneSharp(sharp)
 
   const rows = 3
   const pairs: Array<{ src: string; proxy: string }> = []

@@ -47,6 +47,7 @@
 // pinned while the closed interior of the surface collapses. See
 // plannerLodLockBorder in config.ts for the measurement behind that default.
 
+import { getDracoEncoder, getDracoDecoder } from '../dracoModules'
 import { promises as fsp } from 'fs'
 import logger from '../../utils/logger'
 import type { ProxyBakeConfig } from './config'
@@ -125,8 +126,6 @@ export async function buildPlannerLod(
   const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
     '@gltf-transform/extensions',
   )
-  const draco3dMod: any = await importESM('draco3dgltf')
-  const draco3d = draco3dMod.default ?? draco3dMod
   const meshopt: any = await importESM('meshoptimizer')
   const MeshoptSimplifier = meshopt.MeshoptSimplifier ?? meshopt.default?.MeshoptSimplifier
   if (MeshoptSimplifier?.ready) await MeshoptSimplifier.ready
@@ -146,8 +145,8 @@ export async function buildPlannerLod(
   const io = new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
     .registerDependencies({
-      'draco3d.encoder': await draco3d.createEncoderModule(),
-      'draco3d.decoder': await draco3d.createDecoderModule(),
+      'draco3d.encoder': await getDracoEncoder(),
+      'draco3d.decoder': await getDracoDecoder(),
     })
 
   const doc = await io.read(inGlb)
