@@ -49,7 +49,22 @@ export interface QueueHealth {
   stuckModels: StuckModel[]
 }
 
+export interface RebakeResult {
+  modelId: string
+  modelName: string
+  queued: Array<{ kind: 'model' | 'part'; label: string }>
+  skippedOpen: number
+  skippedNoSource: number
+  liveWorkers: number
+}
+
 export const adminQueuesApi = {
+  /** Queue a fresh preview bake for one model and its set parts. */
+  async rebakeModel(modelId: string): Promise<RebakeResult> {
+    const res = await apiClient.post(`/api/admin/models/${modelId}/rebake`)
+    return res.data
+  },
+
   async get(): Promise<QueueHealth> {
     const res = await apiClient.get(BASE_URL)
     return res.data

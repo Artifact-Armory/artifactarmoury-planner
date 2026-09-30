@@ -1023,6 +1023,16 @@ backface-highlight view; the damage appears only once the normal map is applied.
   renders >45/255 darker.
 - Blender's glTF importer ignores the AO map for shading, so AO could not explain what the
   Blender renders showed; the planner's own AO handling was not separately checked.
+- **Re-bake one model without a laptop DB connection (built 2026-09-30):** `POST
+  /api/admin/models/:id/rebake` (card on `/admin/queues`, "Re-bake a model") queues a fresh
+  bake for the model and its set parts. Built because the Railway public TCP proxy stopped
+  accepting connections from the dev machine (raw TCP to `hayabusa.proxy.rlwy.net` timed out
+  on both the old and a freshly recreated proxy, while 443/80 on the same IP answered), which
+  made `railway run npm run backfill:planner-lod` unusable. It shares `SOURCE_KEY_SQL` with the
+  backfill script via `services/proxyBake/rebake.ts`, refuses if no worker has checked in, and
+  skips meshes that already have an open bake. Single model only — the catalogue-wide batch
+  still goes through the script. **Untested against a real Postgres or admin login** (local
+  dev is DB_MOCK); verify on first use.
 
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY

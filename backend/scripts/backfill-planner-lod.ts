@@ -47,6 +47,7 @@ import './script-env'
 import { db, closeDatabase } from '../src/db'
 import { enqueueBakeJob } from '../src/services/proxyBake/queue'
 import { loadBakeConfig } from '../src/services/proxyBake/config'
+import { SOURCE_KEY_SQL, SOURCE_FORMAT_SQL } from '../src/services/proxyBake/rebake'
 
 // Same window /admin/queues and the queue alarm use (queueHealth.ts owns the
 // default); read here rather than importing that service into a one-off script.
@@ -79,23 +80,9 @@ const LIMIT = Number(arg('limit') ?? 0) || Infinity
 // verification step is "open this piece in the planner and look at it".
 const MODEL = arg('model')
 
-// The bake's source is NOT simply stl_file_path. A pre-supported listing
-// (migrations 053/054) previews from its clean display file, and an OBJ upload
-// bakes from the original so its materials survive into the baseColor atlas.
-// This mirrors previewSourceKey in services/modelIngest/process.ts — get it wrong
-// and a re-bake quietly regenerates a presupported model's preview from the file
-// with the support struts still in it.
-const SOURCE_KEY_SQL = (t: string) => `
-  CASE
-    WHEN ${t}.display_stl_path IS NOT NULL THEN ${t}.display_stl_path
-    WHEN ${t}.source_format = 'obj' AND ${t}.source_file_path IS NOT NULL THEN ${t}.source_file_path
-    ELSE ${t}.stl_file_path
-  END`
-const SOURCE_FORMAT_SQL = (t: string) => `
-  CASE
-    WHEN ${t}.display_stl_path IS NULL AND ${t}.source_format = 'obj' THEN 'obj'
-    ELSE 'stl'
-  END`
+// The bake-source selection (pre-supported display file, OBJ original, else the
+// print STL) is shared with the admin "re-bake this model" endpoint — see
+// services/proxyBake/rebake.ts for why getting it wrong is silent and costly.
 
 async function main() {
   // Connection first. Running against the local DB_MOCK would report "0 live
