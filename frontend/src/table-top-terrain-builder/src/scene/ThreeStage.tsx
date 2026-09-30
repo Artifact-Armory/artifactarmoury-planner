@@ -126,6 +126,25 @@ export function ThreeStage() {
       renderRequested = true
       requestAnimationFrame(renderLoop)
     }
+    // The snap grid has ~144x96 minor lines on a 6x4ft table. Zoomed out they pack
+    // tighter than a pixel apart and paint over the whole surface (the table reads
+    // as solid grid-coloured / black), so fade the minor lines out with their
+    // on-screen cell size. Major lines always stay.
+    let gridSnapAmt = 1
+    const fadeMinorGrid = () => {
+      const cell = store().table.gridSize
+      const dist = Math.max(0.05, camera.position.length())
+      const cellPx = (cell / (2 * dist * Math.tan((camera.fov * Math.PI) / 360))) * mount.clientHeight
+      const vis = Math.min(1, Math.max(0, (cellPx - 4) / 10))
+      gridGroup.traverse((o) => {
+        if (!o.userData.minor) return
+        const line = o as THREE.LineSegments
+        const m = line.material as THREE.LineBasicMaterial
+        m.opacity = gridSnapAmt * vis
+        line.visible = m.opacity > 0.01
+      })
+    }
+
     const renderLoop = () => {
       renderRequested = false
       const camMoving = cam.update()
@@ -138,6 +157,7 @@ export function ThreeStage() {
         renderer.setPixelRatio(camMoving ? LOW_DPR : FULL_DPR)
         renderer.setSize(mount.clientWidth, mount.clientHeight, false)
       }
+      fadeMinorGrid()
       renderer.render(scene, camera)
       if (camMoving || sceneAnimating) requestRender()
     }
@@ -426,9 +446,10 @@ export function ThreeStage() {
         const m = (o as THREE.LineSegments).material as THREE.LineBasicMaterial | undefined
         if (m && 'opacity' in m) {
           m.transparent = true
-          m.opacity = snap ? 1 : 0.18
+          if (!o.userData.minor) m.opacity = snap ? 1 : 0.18
         }
       })
+      gridSnapAmt = snap ? 1 : 0.18
       requestRender()
     }
 

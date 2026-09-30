@@ -3,7 +3,7 @@ import * as THREE from 'three'
 
 export function GridHelper(width: number, height: number, cell: number) {
   const group = new THREE.Group()
-  const matMinor = new THREE.LineBasicMaterial({ color: 0x243246 })
+  const matMinor = new THREE.LineBasicMaterial({ color: 0x243246, transparent: true })
   const matMajor = new THREE.LineBasicMaterial({ color: 0x3a4e6a })
 
   const hw = width / 2
@@ -36,6 +36,7 @@ export function GridHelper(width: number, height: number, cell: number) {
   const minorLines = new THREE.LineSegments(minor, matMinor)
   const majorLines = new THREE.LineSegments(major, matMajor)
 
+  minorLines.userData.minor = true // faded by distance in ThreeStage's render loop
   group.add(minorLines, majorLines)
   return group
 }

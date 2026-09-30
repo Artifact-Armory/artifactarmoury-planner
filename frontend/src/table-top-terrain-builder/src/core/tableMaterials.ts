@@ -112,12 +112,21 @@ function clamp(v: number) { return Math.max(0, Math.min(255, v)) }
 // PBR maps every time, which is what caused the lag.
 const pbrLoader = new THREE.TextureLoader(assetLoadingManager)
 const pbrTextureCache = new Map<string, THREE.Texture>()
+const pendingReady = new Map<THREE.Texture, Array<() => void>>()
 
-function loadPbrMap(url: string, srgb: boolean): THREE.Texture {
+function loadPbrMap(url: string, srgb: boolean, onReady?: () => void): THREE.Texture {
   const cached = pbrTextureCache.get(url)
-  if (cached) return cached
+  if (cached) {
+    if (onReady && cached.image) onReady()
+    else if (onReady) pendingReady.set(cached, [...(pendingReady.get(cached) ?? []), onReady])
+    return cached
+  }
 
-  const tex = pbrLoader.load(url)
+  const tex = pbrLoader.load(url, () => {
+    for (const fn of pendingReady.get(tex) ?? []) fn()
+    pendingReady.delete(tex)
+  })
+  if (onReady) pendingReady.set(tex, [onReady])
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   if (srgb) tex.colorSpace = THREE.SRGBColorSpace
   // Crisp texel filtering at grazing table angles; clamped to GPU max on upload.
@@ -156,12 +165,18 @@ export function buildTableMaterial(id: string, table: { width: number; height: n
     mat.map = apply(loadPbrMap(`${dir}/albedo.webp`, true))
     mat.normalMap = apply(loadPbrMap(`${dir}/normal.webp`, false))
     // One ARM map drives three channels: Three.js reads AO=R, Roughness=G, Metalness=B.
-    const arm = apply(loadPbrMap(`${dir}/arm.webp`, false))
+    // The ARM channels only take over once the map has actually arrived: metalness 1
+    // with no map yet (or a failed fetch) is a fully metallic surface with no
+    // environment to reflect, i.e. solid black, and on-demand rendering meant it
+    // could stay that way indefinitely.
+    const arm = apply(loadPbrMap(`${dir}/arm.webp`, false, () => {
+      mat.roughness = 1 // let the ARM green channel fully drive roughness
+      mat.metalness = 1 // …and blue channel drive metalness (≈0 for non-metal surfaces)
+      mat.needsUpdate = true
+    }))
     mat.aoMap = arm
     mat.roughnessMap = arm
     mat.metalnessMap = arm
-    mat.roughness = 1 // let the ARM green channel fully drive roughness
-    mat.metalness = 1 // …and blue channel drive metalness (≈0 for non-metal surfaces)
   } else if (def.id !== 'plain') {
     // Procedural placeholder (albedo only; constant roughness).
     mat.map = apply(makeProceduralTexture(def))
