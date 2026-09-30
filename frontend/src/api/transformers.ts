@@ -32,8 +32,8 @@ export const previewPartGlbUrl = (partId: string): string =>
  * needs no ownership logic at load time — which it could not do anyway, since
  * loadAssetCatalogue registers assets before it fetches entitlements.
  */
-export const plannerMeshUrl = (previewUrl: string): string =>
-  `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}variant=lod`
+// LOD tier switched off: request the default preview so owners get their full copy.
+export const plannerMeshUrl = (previewUrl: string): string => previewUrl
 
 export const mapApiUserToUser = (user: ApiUser): User => ({
   ...user,

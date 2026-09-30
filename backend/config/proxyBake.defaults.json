@@ -92,7 +92,7 @@
   "plannerMinCameraDistanceM": 0.3,
   "plannerTypicalCameraDistanceM": 2.0,
   "plannerFullTableCameraDistanceM": 16.0,
-  "plannerLodEnabled": true,
+  "plannerLodEnabled": false,
   "plannerLodTriangleBudget": 50000,
   "plannerLodSimplifyError": 0.01,
   "plannerLodLockBorder": true,
