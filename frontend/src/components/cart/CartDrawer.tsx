@@ -27,6 +27,11 @@ const CartDrawer: React.FC = () => {
   const taxRate = useTaxStore((s) => s.rate())
   const grossSubtotal = grossFromLines(items.map((i) => i.price), taxRate)
 
+  // Re-price on open so a sale started since the item was added shows up.
+  useEffect(() => {
+    if (isOpen) void useCartStore.getState().syncPrices()
+  }, [isOpen])
+
   useEffect(() => {
     if (isOpen) {
       const originalOverflow = document.body.style.overflow

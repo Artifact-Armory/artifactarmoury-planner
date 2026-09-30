@@ -1,6 +1,7 @@
 // src/store/cartStore.ts
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import apiClient from '../api/client'
 
 // Digital STL sales: you buy each model (or bundle) once, so there are no
 // quantities — an item is either in the cart or it isn't.
@@ -35,6 +36,8 @@ interface CartState {
   closeCart: () => void
   getTotal: () => number
   getItemCount: () => number
+  /** Re-price every line against the server (sales start/end after add-to-cart). */
+  syncPrices: () => Promise<void>
 }
 
 const calculateTotals = (items: CartItem[]) => ({
@@ -83,6 +86,34 @@ export const useCartStore = create<CartState>()(
 
       getTotal: () => get().items.reduce((total, item) => total + item.price, 0),
       getItemCount: () => get().items.length,
+
+      // Lines snapshot their price when added, so a Sale that started afterwards
+      // never reached the cart while the backend charged the sale price. Best-effort:
+      // on failure the cart keeps what it had.
+      syncPrices: async () => {
+        const current = get().items
+        if (!current.length) return
+        try {
+          const res = await apiClient.post('/api/cart/prices', {
+            items: current.map((i) => ({ kind: i.kind, id: i.id })),
+          })
+          const fresh = new Map<string, { price: number; originalPrice?: number }>(
+            (res.data?.prices ?? []).map((p: any) => [cartKey(p.kind, p.id), p]),
+          )
+          set((state) => {
+            let changed = false
+            const items = state.items.map((i) => {
+              const p = fresh.get(cartKey(i.kind, i.id))
+              if (!p || (p.price === i.price && p.originalPrice === i.originalPrice)) return i
+              changed = true
+              return { ...i, price: Number(p.price), originalPrice: p.originalPrice ?? undefined }
+            })
+            return changed ? { items, ...calculateTotals(items) } : state
+          })
+        } catch {
+          /* keep the stored prices */
+        }
+      },
     }),
     {
       name: 'cart-storage',

@@ -312,8 +312,8 @@ export async function sendPasswordChangedEmail(params: { to: string; name?: stri
 
   <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
     <p style="margin: 0; color: #991b1b; font-size: 14px;">
-      <strong>Wasn't you?</strong> Reply to this email or contact
-      support@artifactarmoury.com right away.
+      <strong>Wasn't you?</strong> Email
+      <a href="mailto:${SUPPORT_EMAIL}" style="color: #991b1b;">${SUPPORT_EMAIL}</a> right away.
     </p>
   </div>
 
@@ -427,7 +427,7 @@ export async function sendOrderConfirmation(
     <p style="margin: 0; color: #7c4a12; font-size: 14px;">
       <strong>How to print:</strong> open your STL in your slicer of choice, scale
       to taste, and print. Multi-part sets download as a single ZIP with every part
-      inside. Need help? Just reply to this email.
+      inside. Need help? Email <a href="mailto:${SUPPORT_EMAIL}" style="color: #7c4a12;">${SUPPORT_EMAIL}</a>.
     </p>
   </div>
 

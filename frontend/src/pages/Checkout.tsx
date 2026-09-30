@@ -60,6 +60,12 @@ const Checkout: React.FC = () => {
   const clearCart = useCartStore((s) => s.clearCart)
   const user = useAuthStore((s) => s.user)
 
+  // Cart lines snapshot their price when added; re-sync so checkout shows what the
+  // backend will actually charge (e.g. a sale that started since).
+  React.useEffect(() => {
+    void useCartStore.getState().syncPrices()
+  }, [])
+
   const [phase, setPhase] = React.useState<'review' | 'pay'>('review')
   const [order, setOrder] = React.useState<CreatedOrder | null>(null)
   const [placing, setPlacing] = React.useState(false)

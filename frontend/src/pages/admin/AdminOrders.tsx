@@ -203,8 +203,11 @@ const OrderDetailPanel: React.FC<{ orderId: string; onClose: () => void }> = ({ 
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Refund failed'),
   })
 
-  function runRefund(item: { id: string; model_name: string; total_price: string }) {
-    if (!window.confirm(`Refund "${item.model_name}" (£${Number(item.total_price).toFixed(2)} + its VAT share)? This charges back through Stripe immediately and cannot be undone from here.`)) {
+  function runRefund(item: { id: string; model_name: string; total_price: string; first_downloaded_at?: string | null }) {
+    const dl = item.first_downloaded_at
+      ? `\n\nNote: the buyer already downloaded this on ${new Date(item.first_downloaded_at).toLocaleString()}.`
+      : ''
+    if (!window.confirm(`Refund "${item.model_name}" (£${Number(item.total_price).toFixed(2)} + its VAT share)? This charges back through Stripe immediately and cannot be undone from here.${dl}`)) {
       return
     }
     refund.mutate(item.id)
@@ -272,6 +275,15 @@ const OrderDetailPanel: React.FC<{ orderId: string; onClose: () => void }> = ({ 
                           {item.bundle_name && <span className="ml-1 text-xs text-muted-foreground">({item.bundle_name})</span>}
                         </p>
                         <p className="text-xs text-muted-foreground">{formatPrice(item.total_price)}</p>
+                        <p
+                          className={`text-xs ${
+                            item.first_downloaded_at ? 'font-medium text-amber-700' : 'text-muted-foreground'
+                          }`}
+                        >
+                          {item.first_downloaded_at
+                            ? `Downloaded ${new Date(item.first_downloaded_at).toLocaleString()}`
+                            : 'Not downloaded'}
+                        </p>
                       </div>
                       {isRefunded ? (
                         <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">

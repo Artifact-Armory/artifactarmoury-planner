@@ -48,6 +48,7 @@ import messagesRoutes from './routes/messages';
 import taxRoutes from './routes/tax';
 import contactRoutes from './routes/contact';
 import promoCodesRoutes from './routes/promoCodes';
+import cartRoutes from './routes/cart';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 import { startIntroCommissionScheduler } from './services/introCommission';
@@ -184,6 +185,7 @@ app.use(`${API_PREFIX}/messages`, messagesRoutes);
 app.use(`${API_PREFIX}/tax`, taxRoutes);
 app.use(`${API_PREFIX}/contact`, contactRoutes);
 app.use(`${API_PREFIX}/promo-codes`, promoCodesRoutes);
+app.use(`${API_PREFIX}/cart`, cartRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {

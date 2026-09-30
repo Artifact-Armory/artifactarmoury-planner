@@ -98,6 +98,7 @@ export interface AdminOrderItem {
   refunded_at: string | null
   refunded_by: string | null
   refund_amount: string | null
+  first_downloaded_at: string | null
   created_at: string
 }
 

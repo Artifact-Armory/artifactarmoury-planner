@@ -607,6 +607,10 @@ CREATE TABLE order_items (
     refunded_by UUID REFERENCES users(id) ON DELETE SET NULL,
     refund_amount DECIMAL(10,2), -- gross (net total_price + this line's VAT share)
 
+    -- First time the buyer downloaded this line (migration 065). Set once, never
+    -- overwritten; evidence that performance began, alongside orders.download_consent_at.
+    first_downloaded_at TIMESTAMP,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

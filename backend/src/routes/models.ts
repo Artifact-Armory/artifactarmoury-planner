@@ -2283,7 +2283,7 @@ router.get('/:id/download',
     let orderId = WATERMARK_ZERO_ORDER;
     if (!isArtist) {
       const ent = (await db.query(
-        `SELECT o.id FROM order_items oi
+        `SELECT o.id, oi.id AS item_id FROM order_items oi
          JOIN orders o ON oi.order_id = o.id
          WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
          ORDER BY o.created_at DESC LIMIT 1`,
@@ -2291,6 +2291,15 @@ router.get('/:id/download',
       )).rows[0];
       if (!ent) throw new AuthorizationError('You have not purchased this model');
       orderId = ent.id;
+
+      // Stamp the first download (migration 065) BEFORE streaming: performance has
+      // begun the moment the file starts to flow, even if the transfer is cut short.
+      // First-write-wins, so later downloads never move the timestamp. Best-effort —
+      // a logging failure must not block a buyer from getting what they paid for.
+      await db.query(
+        'UPDATE order_items SET first_downloaded_at = CURRENT_TIMESTAMP WHERE id = $1 AND first_downloaded_at IS NULL',
+        [ent.item_id]
+      ).catch((err) => logger.error('first_downloaded_at stamp failed', { error: err, itemId: ent.item_id }));
     }
 
     const safeName = String(model.name || 'model').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60);
