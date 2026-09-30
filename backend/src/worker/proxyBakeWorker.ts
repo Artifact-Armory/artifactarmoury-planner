@@ -15,6 +15,7 @@
 
 import 'dotenv/config'
 import os from 'os'
+import fs from 'fs'
 import { spawn, type ChildProcess } from 'child_process'
 import logger from '../utils/logger'
 import { db, closeDatabase } from '../db'
@@ -42,6 +43,34 @@ const WORKER_ID = `${os.hostname()}:${process.pid}`
 // the child starts and finds nothing, then idles out.
 const STALE_LOCK_MS = Number(process.env.PROXY_BAKE_STALE_LOCK_MS ?? 3 * 60_000)
 
+/**
+ * What the container is holding, split the way the cgroup counts it. Railway's memory
+ * graph is the cgroup total, which includes page cache (files read/written by Blender,
+ * the R2 downloads, /tmp) - NOT just process memory. If `anonMB` is small and `fileMB`
+ * is big, the graph is showing reclaimable cache, not a leak.
+ */
+function memoryReport(): Record<string, number | string> {
+  const mb = (n: number) => Math.round(n / 1048576)
+  const out: Record<string, number | string> = { supervisorRssMB: mb(process.memoryUsage().rss) }
+  try {
+    const stat = fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8')
+    const get = (k: string) => Number(new RegExp(`^${k} (\d+)`, 'm').exec(stat)?.[1] ?? 0)
+    out.anonMB = mb(get('anon'))
+    out.fileMB = mb(get('file'))
+    out.shmemMB = mb(get('shmem'))
+    out.kernelMB = mb(get('kernel'))
+    out.cgroupMB = mb(Number(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8')))
+  } catch {
+    out.cgroup = 'unavailable'
+  }
+  try {
+    out.tmpEntries = fs.readdirSync(os.tmpdir()).length
+  } catch {
+    /* ignore */
+  }
+  return out
+}
+
 let child: ChildProcess | null = null
 let stopping = false
 
@@ -68,6 +97,7 @@ function startChild(): void {
   child = c
   c.on('exit', (code, signal) => {
     if (child === c) child = null
+    logger.info('Worker memory after job process exit', memoryReport())
     if (code !== 0 && !stopping) {
       logger.error('Worker job process exited abnormally', { code, signal })
     } else {
@@ -82,6 +112,7 @@ function startChild(): void {
 
 async function main(): Promise<void> {
   logger.info('Proxy bake worker supervisor started', { workerId: WORKER_ID, pollMs: POLL_INTERVAL_MS })
+  logger.info('Worker memory at start', memoryReport())
   while (!stopping) {
     try {
       // The child heartbeats too while it runs; this keeps the beacon alive while
