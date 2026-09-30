@@ -20,8 +20,7 @@ import path from 'path'
 import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { loadBakeConfig, type ProxyBakeConfig, type ProxyBakeConfigOverrides } from './config'
-import { buildPlannerLodIsolated } from './lod'
-import { getDracoEncoder, getDracoDecoder, tuneSharp } from '../dracoModules'
+import { buildPlannerLod } from './lod'
 
 // @gltf-transform/* is ESM-only; the CommonJS build must import it dynamically
 // (same shim used in services/fileProcessor.ts).
@@ -147,13 +146,14 @@ export async function postProcessGlb(inGlb: string, outGlb: string, cfg: ProxyBa
   )
   const sharpMod: any = await importESM('sharp')
   const sharp = sharpMod.default ?? sharpMod
-  await tuneSharp(sharp)
+  const draco3dMod: any = await importESM('draco3dgltf')
+  const draco3d = draco3dMod.default ?? draco3dMod
 
   const io = new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
     .registerDependencies({
-      'draco3d.encoder': await getDracoEncoder(),
-      'draco3d.decoder': await getDracoDecoder(),
+      'draco3d.encoder': await draco3d.createEncoderModule(),
+      'draco3d.decoder': await draco3d.createDecoderModule(),
     })
 
   const doc = await io.read(inGlb)
@@ -197,7 +197,6 @@ export async function postProcessGlb(inGlb: string, outGlb: string, cfg: ProxyBa
 async function compositeComparison(dir: string, outPng: string, tilePx: number): Promise<string | null> {
   const sharpMod: any = await importESM('sharp')
   const sharp = sharpMod.default ?? sharpMod
-  await tuneSharp(sharp)
 
   const rows = 3
   const pairs: Array<{ src: string; proxy: string }> = []
@@ -315,10 +314,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
     let lodBuilt = false
     if (cfg.plannerLodEnabled) {
       try {
-        // glbBytes is the FINISHED proxy — the thing the planner would otherwise
-        // download — so the LOD's "is this worth a second file" test can weigh
-        // bytes against bytes instead of counting triangles.
-        const lod = await buildPlannerLodIsolated(rawGlb, lodGlb, cfg, glbBytes)
+        const lod = await buildPlannerLod(rawGlb, lodGlb, cfg)
         lodBuilt = !lod.skipped
         report.plannerLod = {
           built: lodBuilt,
@@ -326,23 +322,13 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
           proxyTriangles: lod.sourceTriangles,
           fileMb: lod.bytes ? Number((lod.bytes / (1024 * 1024)).toFixed(3)) : 0,
           budget: cfg.plannerLodTriangleBudget,
-          simplifyError: cfg.plannerLodSimplifyError,
           lockBorder: cfg.plannerLodLockBorder,
-          trianglesCutPct: Number((lod.triangleReduction * 100).toFixed(1)),
-          bytesSavedPct:
-            lod.byteReduction >= 0 ? Number((lod.byteReduction * 100).toFixed(1)) : null,
           note: lod.note,
         }
-        // A flat-shaded source is now visible as a near-zero TRIANGLE cut rather
-        // than as a missing LOD: with the gate on bytes, such a mesh still ships a
-        // usefully smaller file (the TANGENT drop alone does that), it just never
-        // got the geometry win this tier was built for, and the report should say
-        // so either way.
-        if (cfg.proxyCreaseAngleDeg <= 0) {
+        if (!lodBuilt && cfg.proxyCreaseAngleDeg <= 0) {
           report.warnings = report.warnings || []
           report.warnings.push(
-            `Planner LOD collapsed only ${(lod.triangleReduction * 100).toFixed(1)}% of triangles: ` +
-              'proxyCreaseAngleDeg is 0, so the flat-shaded proxy has no shared edges to collapse',
+            'No planner LOD: proxyCreaseAngleDeg is 0, so the flat-shaded proxy has no shared edges to collapse',
           )
         }
       } catch (err) {

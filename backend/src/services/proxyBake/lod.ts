@@ -47,10 +47,7 @@
 // pinned while the closed interior of the surface collapses. See
 // plannerLodLockBorder in config.ts for the measurement behind that default.
 
-import { getDracoEncoder, getDracoDecoder } from '../dracoModules'
-import { promises as fsp, existsSync } from 'fs'
-import { spawn } from 'child_process'
-import path from 'path'
+import { promises as fsp } from 'fs'
 import logger from '../../utils/logger'
 import type { ProxyBakeConfig } from './config'
 
@@ -69,13 +66,6 @@ export interface PlannerLodResult {
   bytes: number
   /** True when no LOD was written, and the planner should keep using the proxy. */
   skipped: boolean
-  /** Fraction of the proxy's TRIANGLES the collapse removed. Kept separately from
-   *  the byte saving because it is the flat-shading diagnostic: a value near zero
-   *  means weld() found nothing to merge, i.e. proxyCreaseAngleDeg was 0. */
-  triangleReduction: number
-  /** Fraction of the proxy's BYTES this LOD saves. -1 when the caller did not say
-   *  how big the proxy ended up, so no byte comparison was possible. */
-  byteReduction: number
   /** Why it was skipped, or anything else worth recording on the bake report. */
   note?: string
 }
@@ -104,19 +94,15 @@ function countTriangles(doc: any): number {
  * inherit the LOD's decimation. A second parse of a local temp file is noise next
  * to the bake that produced it.
  *
- * Returns `skipped: true` (having deleted anything it wrote) when the result would
- * not be meaningfully lighter than the proxy it was derived from — see the byte
- * test at the end. The planner then falls back to the proxy, which is the pre-LOD
- * behaviour — never a failure.
+ * Returns `skipped: true` (having written nothing) when there is no point: the
+ * proxy is already at or under the budget, or the simplifier could not get
+ * meaningfully below it. In both cases the planner falls back to the proxy, which
+ * is the pre-LOD behaviour — never a failure.
  */
 export async function buildPlannerLod(
   inGlb: string,
   outGlb: string,
   cfg: ProxyBakeConfig,
-  /** Size of the FINISHED proxy (post-process + Draco), for the worth-shipping
-   *  test below. Omit it and that test falls back to counting triangles, which is
-   *  the wrong quantity — see plannerLodMinReduction in config.ts. */
-  proxyBytes?: number,
 ): Promise<PlannerLodResult> {
   const log = logger.child('PROXY_BAKE')
   const budget = Math.max(1, Math.floor(cfg.plannerLodTriangleBudget))
@@ -128,6 +114,8 @@ export async function buildPlannerLod(
   const { KHRDracoMeshCompression } = await importESM<typeof import('@gltf-transform/extensions')>(
     '@gltf-transform/extensions',
   )
+  const draco3dMod: any = await importESM('draco3dgltf')
+  const draco3d = draco3dMod.default ?? draco3dMod
   const meshopt: any = await importESM('meshoptimizer')
   const MeshoptSimplifier = meshopt.MeshoptSimplifier ?? meshopt.default?.MeshoptSimplifier
   if (MeshoptSimplifier?.ready) await MeshoptSimplifier.ready
@@ -138,8 +126,6 @@ export async function buildPlannerLod(
       sourceTriangles: 0,
       bytes: 0,
       skipped: true,
-      triangleReduction: 0,
-      byteReduction: -1,
       note: 'meshoptimizer unavailable',
     }
   }
@@ -147,37 +133,23 @@ export async function buildPlannerLod(
   const io = new NodeIO()
     .registerExtensions([KHRDracoMeshCompression])
     .registerDependencies({
-      'draco3d.encoder': await getDracoEncoder(),
-      'draco3d.decoder': await getDracoDecoder(),
+      'draco3d.encoder': await draco3d.createEncoderModule(),
+      'draco3d.decoder': await draco3d.createDecoderModule(),
     })
 
   const doc = await io.read(inGlb)
   const sourceTriangles = countTriangles(doc)
 
-  // Nothing to derive from. Only reachable if the bake produced a GLB with no
-  // triangle primitives at all, which is a broken bake rather than a small model —
-  // bail before the reduction arithmetic divides by it.
-  if (sourceTriangles <= 0) {
+  if (sourceTriangles <= budget) {
     return {
-      triangles: 0,
-      sourceTriangles: 0,
+      triangles: sourceTriangles,
+      sourceTriangles,
       bytes: 0,
       skipped: true,
-      triangleReduction: 0,
-      byteReduction: -1,
-      note: 'source GLB has no triangles',
+      note: `proxy already at/under the ${budget}-triangle budget`,
     }
   }
 
-  // NOTE there is deliberately no "already under the triangle budget, skip" bail
-  // here any more. It cost real wins: a proxy can be under budget on triangles and
-  // still be one of the heaviest files in a table, because its weight is in the
-  // baked normal map rather than its geometry (measured: a 183k-triangle piece
-  // shipping 2,180 KB, of which 1,157 KB was texture — the single biggest file in
-  // the showcase table, and the old bail gave it no LOD at all). Simplify is a
-  // no-op at ratio 1, so an under-budget mesh simply passes through the weld,
-  // TANGENT drop and texture bounds, and the byte test at the end decides whether
-  // the result was worth writing.
   // weld() is what turns Blender's exported corners back into a shared-vertex
   // mesh. On a crease-shaded proxy it merges the smooth interior and leaves the
   // crease and UV seams split; on a FLAT-shaded one it merges essentially nothing,
@@ -193,7 +165,7 @@ export async function buildPlannerLod(
     weld(),
     simplify({
       simplifier: MeshoptSimplifier,
-      ratio: Math.min(1, budget / sourceTriangles),
+      ratio: budget / sourceTriangles,
       error: cfg.plannerLodSimplifyError,
       // Open boundaries on this mesh ARE the anti-theft cuts — the embossed logo
       // through-holes, the removed base, the stripped interior. Locking them means
@@ -232,7 +204,24 @@ export async function buildPlannerLod(
   await doc.transform(prune())
 
   const triangles = countTriangles(doc)
-  const triangleReduction = 1 - triangles / sourceTriangles
+  // A mesh that barely moved is either the flat-shaded case (nothing to collapse)
+  // or one so boundary-dominated that lockBorder pinned it. Either way, shipping a
+  // second near-identical file would cost storage, bandwidth and a cache entry to
+  // save nothing — decline, and let the planner use the proxy.
+  const reduction = 1 - triangles / sourceTriangles
+  if (reduction < cfg.plannerLodMinReduction) {
+    return {
+      triangles,
+      sourceTriangles,
+      bytes: 0,
+      skipped: true,
+      note:
+        `simplify only reached ${triangles} of ${sourceTriangles} triangles ` +
+        `(${(reduction * 100).toFixed(1)}% cut, under the required ` +
+        `${(cfg.plannerLodMinReduction * 100).toFixed(0)}%) — expected when ` +
+        `proxyCreaseAngleDeg is 0, since a flat-shaded mesh has no shared edges to collapse`,
+    }
+  }
 
   // Now the textures, which are what is LEFT once the geometry collapses — on an
   // organic bake the 50k LOD's geometry came to 433 KB against a normal map of
@@ -271,104 +260,6 @@ export async function buildPlannerLod(
 
   await io.write(outGlb, doc)
   const bytes = (await fsp.stat(outGlb)).size
-
-  // IS THIS WORTH SHIPPING? — measured in BYTES, not triangles.
-  //
-  // It used to be triangles, and that is how the retune nearly lost its own win:
-  // once the collapse is bounded by a geometric error rather than a flat triangle
-  // target, a detailed mesh legitimately keeps most of its triangles (16-29% cut on
-  // real catalogue parts) while still producing a file 55% smaller, because the
-  // TANGENT drop and the re-quantised Draco pass do that much on their own. A
-  // triangle gate threw exactly those parts away — the heaviest ones in the table —
-  // for failing a test of the wrong quantity. What this tier exists to reduce is
-  // what the planner downloads, so that is what has to clear the bar.
-  //
-  // Triangle reduction is still reported: near zero means weld() found nothing to
-  // merge, which is the proxyCreaseAngleDeg-is-0 signature and worth seeing on the
-  // report even when the file did shrink.
-  const byteReduction = proxyBytes && proxyBytes > 0 ? 1 - bytes / proxyBytes : -1
-  const measured = byteReduction >= 0 ? byteReduction : triangleReduction
-  if (measured < cfg.plannerLodMinReduction) {
-    await fsp.rm(outGlb, { force: true })
-    return {
-      triangles,
-      sourceTriangles,
-      bytes: 0,
-      skipped: true,
-      triangleReduction,
-      byteReduction,
-      note:
-        (byteReduction >= 0
-          ? `LOD is ${(bytes / 1024).toFixed(0)} KB against a ${(proxyBytes! / 1024).toFixed(0)} KB proxy ` +
-            `(${(byteReduction * 100).toFixed(1)}% smaller`
-          : `simplify only reached ${triangles} of ${sourceTriangles} triangles ` +
-            `(${(triangleReduction * 100).toFixed(1)}% cut`) +
-        `, under the required ${(cfg.plannerLodMinReduction * 100).toFixed(0)}%) — ` +
-        `not worth a second file` +
-        (triangleReduction < 0.05
-          ? `. The collapse removed only ${(triangleReduction * 100).toFixed(1)}% of the ` +
-            `triangles, which is what proxyCreaseAngleDeg: 0 looks like — a flat-shaded ` +
-            `mesh has no shared edges to collapse`
-          : ''),
-    }
-  }
-
-  log.info('Planner LOD built', {
-    sourceTriangles,
-    triangles,
-    bytes,
-    proxyBytes: proxyBytes ?? null,
-  })
-  return { triangles, sourceTriangles, bytes, skipped: false, triangleReduction, byteReduction }
-}
-
-/**
- * buildPlannerLod in a throwaway child process.
- *
- * meshoptimizer's simplifier is a WebAssembly module whose linear memory is
- * process-global and can only grow: simplify() copies the whole raw (undecompressed,
- * often multi-million-triangle) mesh into it, so after one dense bake the worker
- * kept that high-water mark for the rest of its life — ~600-900 MB idle per worker,
- * appearing only once the LOD tier existed. There is no API to shrink it, so the
- * only way to hand the memory back is to end the process that owns it. The child
- * lives for exactly one LOD build.
- *
- * Falls back to the in-process build if the child script is not next to this file
- * (unusual dev setups) — same result, just without the memory isolation.
- */
-export async function buildPlannerLodIsolated(
-  inGlb: string,
-  outGlb: string,
-  cfg: ProxyBakeConfig,
-  proxyBytes?: number,
-): Promise<PlannerLodResult> {
-  const ext = path.extname(__filename) // '.js' compiled, '.ts' under ts-node
-  const childScript = path.join(__dirname, `lodChild${ext}`)
-  if (!existsSync(childScript)) return buildPlannerLod(inGlb, outGlb, cfg, proxyBytes)
-
-  const inputPath = `${outGlb}.lod-in.json`
-  const resultPath = `${outGlb}.lod-out.json`
-  await fsp.writeFile(inputPath, JSON.stringify({ inGlb, outGlb, cfg, proxyBytes, resultPath }))
-  try {
-    const code = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(process.execPath, [...process.execArgv, childScript, inputPath], {
-        stdio: ['ignore', 'inherit', 'inherit'],
-      })
-      child.on('error', reject)
-      child.on('close', resolve)
-    })
-    let payload: any = null
-    try {
-      payload = JSON.parse(await fsp.readFile(resultPath, 'utf8'))
-    } catch {
-      /* child died before writing (OOM-kill etc.) */
-    }
-    if (!payload?.ok) {
-      throw new Error(payload?.error || `LOD child exited ${code} without a result`)
-    }
-    return payload.result as PlannerLodResult
-  } finally {
-    await fsp.rm(inputPath, { force: true }).catch(() => {})
-    await fsp.rm(resultPath, { force: true }).catch(() => {})
-  }
+  log.info('Planner LOD built', { sourceTriangles, triangles, bytes })
+  return { triangles, sourceTriangles, bytes, skipped: false }
 }

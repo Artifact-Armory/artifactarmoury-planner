@@ -1,5 +1,5 @@
 import React from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Cpu, Clock, RefreshCw } from 'lucide-react'
 import { adminQueuesApi, QueueStats, WorkerInfo } from '../../api/endpoints/adminQueues'
@@ -26,77 +26,6 @@ const QUEUE_NOTE: Record<string, string> = {
   ingest: 'Dedup, mesh checks and the first preview. A backlog here means uploads are not being processed.',
   bake: 'The watermarked, decimated preview shown on the store and planner.',
   full_glb: 'The full-detail mesh shown to people who own the model. A backlog here is not urgent.',
-}
-
-/** Re-bake one model with the worker's current config — the fix for "this preview
- *  looks wrong" once the bake settings have changed and been deployed. */
-const RebakeCard: React.FC = () => {
-  const [modelId, setModelId] = React.useState('')
-  const mutation = useMutation({
-    mutationFn: (id: string) => adminQueuesApi.rebakeModel(id),
-  })
-  const error = mutation.error as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string } | null
-  const errorText =
-    error?.response?.data?.error?.message ?? error?.response?.data?.message ?? error?.message ?? null
-  const result = mutation.data
-
-  return (
-    <div className="mt-8 rounded-xl border border-border bg-card p-4">
-      <h2 className="text-lg font-semibold text-foreground">Re-bake a model</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Rebuilds a model&rsquo;s preview (and its set parts) with the worker&rsquo;s current settings. Paste the
-        model id from its page address. Nothing changes until the bake finishes.
-      </p>
-      <form
-        className="mt-3 flex flex-wrap gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (modelId.trim()) mutation.mutate(modelId.trim())
-        }}
-      >
-        <input
-          value={modelId}
-          onChange={(e) => setModelId(e.target.value)}
-          placeholder="e.g. 0385633e-ef61-4843-b6d8-11518ce17028"
-          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm"
-          spellCheck={false}
-        />
-        <button
-          type="submit"
-          disabled={mutation.isPending || !modelId.trim()}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          {mutation.isPending ? 'Queuing…' : 'Re-bake'}
-        </button>
-      </form>
-      {errorText && <p className="mt-3 text-sm text-red-600">{errorText}</p>}
-      {result && (
-        <div className="mt-3 text-sm text-foreground">
-          <p className="font-medium">
-            {result.queued.length > 0
-              ? `Queued ${result.queued.length} bake${result.queued.length === 1 ? '' : 's'} for “${result.modelName}”.`
-              : `Nothing queued for “${result.modelName}”.`}
-          </p>
-          {result.queued.length > 0 && (
-            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-              {result.queued.map((q) => (
-                <li key={q.label}>{q.label}</li>
-              ))}
-            </ul>
-          )}
-          {(result.skippedOpen > 0 || result.skippedNoSource > 0) && (
-            <p className="mt-1 text-muted-foreground">
-              {result.skippedOpen > 0 && `${result.skippedOpen} already queued or running. `}
-              {result.skippedNoSource > 0 && `${result.skippedNoSource} have no source file.`}
-            </p>
-          )}
-          <p className="mt-1 text-xs text-muted-foreground">
-            {result.liveWorkers} worker{result.liveWorkers === 1 ? '' : 's'} live. Watch the Preview bake queue below.
-          </p>
-        </div>
-      )}
-    </div>
-  )
 }
 
 const AdminQueues: React.FC = () => {
@@ -215,8 +144,6 @@ const AdminQueues: React.FC = () => {
           </table>
         </div>
       )}
-
-      <RebakeCard />
 
       {/* Queues */}
       <h2 className="mt-8 text-lg font-semibold text-foreground">Queues</h2>

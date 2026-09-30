@@ -6,9 +6,6 @@
   "weldMergeDistanceMm": 0.05,
   "proxySmoothIterations": 0,
   "proxyCreaseAngleDeg": 45,
-  "proxyTriangulateForExport": true,
-  "normalMapSanitize": true,
-  "normalMapMinZ": 0.3,
   "proxySmoothFactor": 0.5,
   "proxySmoothVolumePreserve": true,
   "proxySmoothLambda": 0.4,
@@ -97,8 +94,8 @@
   "plannerFullTableCameraDistanceM": 16.0,
   "plannerLodEnabled": true,
   "plannerLodTriangleBudget": 50000,
-  "plannerLodSimplifyError": 0.00005,
+  "plannerLodSimplifyError": 0.01,
   "plannerLodLockBorder": true,
   "plannerLodMinReduction": 0.25,
-  "plannerLodNormalMapSize": 0
+  "plannerLodNormalMapSize": 1024
 }

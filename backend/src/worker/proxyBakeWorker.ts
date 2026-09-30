@@ -59,83 +59,6 @@ let currentJob: BakeJobRow | null = null
  *  can distinguish a worker that is working from one that is merely spinning. */
 let jobsCompleted = 0
 
-/**
- * Run a full garbage collection now. A finished bake leaves behind hundreds of MB
- * of native memory (sharp/libvips output, Buffers, WASM scratch) owned by tiny JS
- * wrappers. V8 only collects when the JS heap is under pressure, and an idle worker
- * allocates nothing — so those wrappers, and the native memory behind them, sat
- * uncollected indefinitely (heapUsed ~24 MB while external was ~225 MB). Enabled at
- * runtime so the container's start command needn't carry --expose-gc.
- */
-let gcFn: (() => void) | null | undefined
-function forceGc(): void {
-  try {
-    if (gcFn === undefined) {
-      const g = (global as any).gc as (() => void) | undefined
-      if (g) {
-        gcFn = g
-      } else {
-        require('v8').setFlagsFromString('--expose-gc')
-        gcFn = require('vm').runInNewContext('gc') as () => void
-      }
-    }
-    gcFn?.()
-    gcFn?.() // second pass frees objects that only became unreachable during the first
-  } catch {
-    gcFn = null // unavailable: give up quietly, this is an optimisation
-  }
-}
-
-/**
- * Where is this worker's memory? Logged after every job so an idle worker sitting
- * at hundreds of MB can be diagnosed from the Railway logs instead of guessed at:
- *  - heapUsed high            -> JS is still referencing something (a real leak)
- *  - rss high, the rest low   -> native memory: WASM heaps, sharp/libvips, malloc
- *  - a non-worker process     -> something (e.g. Blender) is still running
- * `topProcesses` reads /proc directly (procps isn't in the slim image). Linux only.
- */
-function logMemoryAfterJob(): void {
-  try {
-    const mb = (n: number) => Math.round(n / 1048576)
-    const rssBeforeGcMb = mb(process.memoryUsage().rss)
-    forceGc()
-    const m = process.memoryUsage()
-    let topProcesses: string[] | undefined
-    try {
-      const fs = require('fs') as typeof import('fs')
-      const rows: Array<{ pid: string; comm: string; rssMb: number }> = []
-      for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
-        try {
-          const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8')
-          const comm = /^Name:\s+(.+)$/m.exec(status)?.[1] ?? '?'
-          const kb = Number(/^VmRSS:\s+(\d+)/m.exec(status)?.[1] ?? 0)
-          if (kb > 0) rows.push({ pid, comm, rssMb: Math.round(kb / 1024) })
-        } catch {
-          /* process exited mid-scan */
-        }
-      }
-      topProcesses = rows
-        .sort((a, b) => b.rssMb - a.rssMb)
-        .slice(0, 5)
-        .map((r) => `${r.comm}[${r.pid}] ${r.rssMb}MB`)
-    } catch {
-      /* not Linux */
-    }
-    logger.info('Worker memory after job', {
-      jobsCompleted,
-      rssBeforeGcMb,
-      rssMb: mb(m.rss),
-      heapUsedMb: mb(m.heapUsed),
-      heapTotalMb: mb(m.heapTotal),
-      externalMb: mb(m.external),
-      arrayBuffersMb: mb(m.arrayBuffers),
-      topProcesses,
-    })
-  } catch {
-    /* diagnostics must never affect the worker */
-  }
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
@@ -239,10 +162,7 @@ async function main(): Promise<void> {
       // silently it means a worker can spin failing forever with nothing said.
       captureException(err, { kind: 'workerLoop', workerId: WORKER_ID })
     }
-    if (didWork) {
-      jobsCompleted++
-      logMemoryAfterJob()
-    }
+    if (didWork) jobsCompleted++
     if (draining) break // finished the in-flight job during shutdown
     if (!didWork) await sleep(POLL_INTERVAL_MS)
   }

@@ -25,9 +25,7 @@ FROM node:20-bookworm-slim AS runtime
 ARG BLENDER_VERSION=4.2.3
 ARG BLENDER_SERIES=4.2
 ENV BLENDER_PATH=/opt/blender/blender \
-    NODE_ENV=production \
-    MALLOC_ARENA_MAX=2 \
-    MALLOC_TRIM_THRESHOLD_=131072
+    NODE_ENV=production
 
 # Headless Blender still dlopen()s a handful of X/GL libs even with `-b`; install
 # the minimal set plus xz to unpack the release tarball.

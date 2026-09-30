@@ -28,12 +28,6 @@
 //   railway run npm run backfill:planner-lod -- --limit 25
 //   railway run npm run backfill:planner-lod
 //   railway run npm run backfill:planner-lod -- --force      # re-bake even ones already done
-//   railway run npm run backfill:planner-lod -- --model <id> --force   # one model + its parts
-//
-// AFTER CHANGING A plannerLod* DEFAULT, START WITH --model. The config only takes
-// effect through a re-bake, and the thing that has to be checked is not that the
-// job ran but that the result LOOKS right in the planner — so re-bake one model you
-// can recognise, open it, and only then do the rest.
 //
 // Run it linked to the **Postgres** service, not the backend one: `railway run`
 // injects production's env but executes on your machine, and the backend's
@@ -46,8 +40,6 @@
 import './script-env'
 import { db, closeDatabase } from '../src/db'
 import { enqueueBakeJob } from '../src/services/proxyBake/queue'
-import { loadBakeConfig } from '../src/services/proxyBake/config'
-import { SOURCE_KEY_SQL, SOURCE_FORMAT_SQL } from '../src/services/proxyBake/rebake'
 
 // Same window /admin/queues and the queue alarm use (queueHealth.ts owns the
 // default); read here rather than importing that service into a one-off script.
@@ -73,16 +65,24 @@ function arg(name: string): string | undefined {
 const DRY_RUN = process.argv.includes('--dry-run')
 const FORCE = process.argv.includes('--force')
 const LIMIT = Number(arg('limit') ?? 0) || Infinity
-// Restrict to ONE model and its parts. `--limit 1` picks whichever mesh sorts
-// first, which is how a smoke test can confirm the pipeline RAN without anyone
-// being able to go and look at a model they recognise — the exact gap that let a
-// visibly broken LOD reach the whole catalogue. Naming the model means the
-// verification step is "open this piece in the planner and look at it".
-const MODEL = arg('model')
 
-// The bake-source selection (pre-supported display file, OBJ original, else the
-// print STL) is shared with the admin "re-bake this model" endpoint — see
-// services/proxyBake/rebake.ts for why getting it wrong is silent and costly.
+// The bake's source is NOT simply stl_file_path. A pre-supported listing
+// (migrations 053/054) previews from its clean display file, and an OBJ upload
+// bakes from the original so its materials survive into the baseColor atlas.
+// This mirrors previewSourceKey in services/modelIngest/process.ts — get it wrong
+// and a re-bake quietly regenerates a presupported model's preview from the file
+// with the support struts still in it.
+const SOURCE_KEY_SQL = (t: string) => `
+  CASE
+    WHEN ${t}.display_stl_path IS NOT NULL THEN ${t}.display_stl_path
+    WHEN ${t}.source_format = 'obj' AND ${t}.source_file_path IS NOT NULL THEN ${t}.source_file_path
+    ELSE ${t}.stl_file_path
+  END`
+const SOURCE_FORMAT_SQL = (t: string) => `
+  CASE
+    WHEN ${t}.display_stl_path IS NULL AND ${t}.source_format = 'obj' THEN 'obj'
+    ELSE 'stl'
+  END`
 
 async function main() {
   // Connection first. Running against the local DB_MOCK would report "0 live
@@ -144,56 +144,6 @@ async function main() {
     console.log(`${liveWorkers} live bake worker(s).\n`)
   }
 
-  // WHICH CONFIG IS THE WORKER GOING TO BAKE WITH? Not this one.
-  //
-  // `railway run` injects production's env but executes on YOUR machine, so the
-  // config this process can read is the LOCAL config/proxyBake.defaults.json --
-  // the file you just edited. The bake happens inside the worker container against
-  // ITS deployed copy. The two disagree for exactly as long as it takes a push to
-  // reach Railway, and a backfill started inside that window re-bakes the
-  // catalogue with the settings you believe you have already replaced.
-  //
-  // Not hypothetical: the plannerLodSimplifyError retune was backfilled before its
-  // deploy landed. It rebuilt the broken LOD it existed to fix AND re-enabled it,
-  // because writing lod_glb_path undoes the kill switch. Nothing here noticed,
-  // since a dry run only ever counted meshes -- it never said a word about which
-  // settings those meshes were about to be baked with.
-  //
-  // The worker leaves its own answer behind: every bake records the values it used
-  // on the job's report. Show the last one next to the local file.
-  const localCfg = loadBakeConfig()
-  const { rows: lastLod } = await db.query(
-    `SELECT report -> 'plannerLod' ->> 'simplifyError' AS err,
-            report -> 'plannerLod' ->> 'budget'        AS budget,
-            updated_at                                 AS at
-       FROM proxy_bake_jobs
-      WHERE status = 'succeeded' AND report -> 'plannerLod' IS NOT NULL
-      ORDER BY updated_at DESC
-      LIMIT 1`,
-  )
-  const localErr = localCfg.plannerLodSimplifyError
-  const lastErr = lastLod[0]?.err != null ? Number(lastLod[0].err) : null
-  console.log(
-    `Planner LOD settings in THIS checkout: error ${localErr}, budget ${localCfg.plannerLodTriangleBudget}`,
-  )
-  if (lastErr === null) {
-    console.log(
-      '  No completed bake has recorded its LOD settings yet, so there is nothing to\n' +
-        '  compare against and this check cannot tell you what the worker will use.\n' +
-        '  Confirm your deploy has landed before continuing.\n',
-    )
-  } else if (lastErr !== localErr) {
-    console.log(
-      `  The last completed bake used error ${lastErr}, at ${new Date(lastLod[0].at).toISOString()}.\n` +
-        '  THAT DIFFERS FROM THIS CHECKOUT. Fine if you have just changed the config AND\n' +
-        '  the worker service has finished redeploying -- the worker is simply ahead of\n' +
-        '  that record. NOT fine if you have not pushed and waited for that redeploy, in\n' +
-        `  which case this run bakes at ${lastErr} again and silently undoes the rollback.\n`,
-    )
-  } else {
-    console.log(`  The last completed bake used the same error. The worker is in sync.\n`)
-  }
-
   const { rows: models } = await db.query(
     `SELECT m.id AS model_id, NULL::uuid AS part_id,
             ${SOURCE_KEY_SQL('m')} AS source_key,
@@ -209,9 +159,7 @@ async function main() {
        FROM models m
       WHERE m.processing_status = 'ready'
         AND m.status <> 'archived'
-        AND ($1::uuid IS NULL OR m.id = $1::uuid)
       ORDER BY m.sale_count DESC NULLS LAST, m.created_at DESC`,
-    [MODEL ?? null],
   )
 
   const { rows: parts } = await db.query(
@@ -233,9 +181,7 @@ async function main() {
        JOIN models m ON m.id = p.model_id
       WHERE p.processing_status = 'ready'
         AND m.status <> 'archived'
-        AND ($1::uuid IS NULL OR p.model_id = $1::uuid)
       ORDER BY m.sale_count DESC NULLS LAST, m.created_at DESC`,
-    [MODEL ?? null],
   )
 
   // Most-sold first, so a partly-drained queue has still re-baked the models
@@ -251,11 +197,7 @@ async function main() {
   const skippedOpen = all.filter((m) => m.source_key && m.open_job).length
   const alreadyDone = all.filter((m) => m.done).length
 
-  if (MODEL) console.log(`Restricted to model ${MODEL} (--model)`)
   console.log(`Meshes found:   ${all.length} (${models.length} models, ${parts.length} set parts)`)
-  if (MODEL && all.length === 0) {
-    console.log('Nothing matched that model id — check it against GET /api/models/sets.')
-  }
   console.log(`  already done: ${alreadyDone}${FORCE ? ' (ignored — --force)' : ''}`)
   console.log(`  bake in queue:${skippedOpen}`)
   console.log(`  no source key:${skippedNoSource}`)
@@ -297,22 +239,10 @@ async function main() {
   console.log(`\nQueued ${queued} re-bake(s). Watch it drain:`)
   console.log(`  /admin/queues`)
   console.log(
-    `  railway run npm run db:query -- "SELECT status, count(*) FROM proxy_bake_jobs GROUP BY status"`,
+    `  npm run db:query -- "SELECT status, count(*) FROM proxy_bake_jobs GROUP BY status"`,
   )
   console.log(
-    `  railway run npm run db:query -- "SELECT count(*) FILTER (WHERE lod_glb_path IS NOT NULL) AS with_lod, count(*) FROM models WHERE processing_status = 'ready'"`,
-  )
-  // The one check that would have caught the bad re-bake: not "did it run" but
-  // "what did it run with". Read it back off the worker's own report.
-  console.log(`\nThen confirm WHICH SETTINGS the worker actually used:`)
-  console.log(
-    `  railway run npm run db:query -- "SELECT report->'plannerLod' FROM proxy_bake_jobs WHERE status='succeeded' ORDER BY updated_at DESC LIMIT 1"`,
-  )
-  console.log(
-    `  Expect simplifyError ${localErr}. Anything else means the worker had not redeployed,\n` +
-      `  the result is not what you tested, and the kill switch has just been undone:\n` +
-      `    railway run npm run db:query -- "UPDATE models SET lod_glb_path = NULL"\n` +
-      `    railway run npm run db:query -- "UPDATE model_parts SET lod_glb_path = NULL"`,
+    `  npm run db:query -- "SELECT count(*) FILTER (WHERE lod_glb_path IS NOT NULL) AS with_lod, count(*) FROM models WHERE processing_status = 'ready'"`,
   )
 }
 

@@ -11,35 +11,7 @@ import fs from 'fs'
 import path from 'path'
 
 export interface ProxyBakeConfig {
-  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh).
-   *
-   *  !! THIS DOCSTRING SAID "Default false (2026-08-21, final)" WHILE THE SHIPPED
-   *  DEFAULT WAS `true`. It was re-enabled on 2026-08-23 by e77d5dc ("re-enable
-   *  proxy decimation as the preview pipeline") and this comment — including the
-   *  destructiveness evidence below — was never updated. Read the rest of it as a
-   *  standing WARNING about the current default, not as a description of it.
-   *
-   *  What that cost: the evidence below was gathered on a 2.6M-triangle multi-shell
-   *  architectural model and describes DECIMATE(COLLAPSE) tearing holes through
-   *  lattice panels and railings at an 11% retain. A real catalogue model bakes at
-   *  2,628,513 -> 300,000 triangles — an 11.4% retain, the same case — and the
-   *  artist reported exactly that damage once the planner-LOD backfill re-baked the
-   *  catalogue on 2026-09-11 and the setting finally reached the live proxies. The
-   *  flag had been on for nearly three weeks by then without a re-bake to apply it,
-   *  which is why it surfaced as though the LOD work had caused it.
-   *
-   *  Before changing it again, note the trap the 08-21/08-23 flip-flop fell into:
-   *  `false` gives a pristine proxy and an unusably heavy planner, `true` gives a
-   *  fast planner and a torn one. The planner LOD tier (plannerLodEnabled) was
-   *  supposed to break that trade, and it does NOT for this asset class — it can
-   *  only cut 7-12% before the damage is visible, so it cannot rescue an
-   *  undecimated 2.6M-triangle proxy. Anything that actually fixes this needs a
-   *  simplifier that respects thin multi-shell geometry, or a decision to ship much
-   *  heavier proxies for dense models via a per-model override.
-   *
-   *  --- original note, still accurate about the DAMAGE, wrong about the default ---
-   *
-   *  Default
+  /** Master toggle for proxy triangle decimation (COLLAPSE/voxel remesh). Default
    *  **false** (2026-08-21, final — after a brief detour to `true` the same day).
    *  Sequence: turning this off entirely caused visible planner slowdown (this GLB
    *  IS the file the planner renders, so undecimated = the source's full triangle
@@ -671,100 +643,22 @@ export interface ProxyBakeConfig {
    *  collapse and meshopt refuses to simplify it (asked for 33% of a real bake it
    *  returned 91-95% of the triangles), so with crease shading off this produces
    *  nothing and the planner keeps loading the proxy — no failure, just no win. */
-  /** Triangulate the proxy's n-gons in Blender before the final crease pass and
-   *  export (default true).
-   *
-   *  It exists because MikkTSpace refuses n-gons and the glTF exporter then drops
-   *  TANGENT from the WHOLE mesh, silently — the emboss leaves n-gons behind, and
-   *  that hit two of four real test bakes. glTF is triangles-only, so the exporter
-   *  triangulates regardless; what this changes is WHICH diagonals get chosen, and
-   *  on boolean-cut n-gons that is not guaranteed to be harmless.
-   *
-   *  The flag is here so that can be TESTED rather than argued about. It and
-   *  proxyCreaseAngleDeg are the only two bake changes that shipped with the planner
-   *  LOD, so when surface artefacts were reported afterwards they were the only two
-   *  candidates; crease was ruled out by rendering a flat-normal copy of a live
-   *  proxy against the real one (mean difference 1/255). Set this false on one model
-   *  via proxy_bake_config, re-bake, and compare. Turning it off gives that mesh's
-   *  normal map no real tangent basis, so it is a diagnostic and a fallback rather
-   *  than a better default. */
-  proxyTriangulateForExport: boolean
-  /** Overwrite baked normal-map texels that point into (or nearly along) the
-   *  surface — tangent-space z below `normalMapMinZ` — with a flat normal. On a
-   *  heavily decimated dense source ~1.4% of the atlas is z<0 (rays hit the source
-   *  from behind), and every such texel renders black in the planner: the "static"
-   *  on beams, vases and stonework. Turning it off restores the raw bake; it exists
-   *  only as a diagnostic switch. */
-  normalMapSanitize: boolean
-  /** Decoded-z cut-off for the sanitize pass. 0 catches only inverted normals; 0.3
-   *  also removes near-edge-on ones that still shade black (measured to clear the
-   *  last visible cracks). 0.5 looked identical, so 0.3 is the gentler choice. */
-  normalMapMinZ: number
   plannerLodEnabled: boolean
-  /** Triangle target for the LOD — a FLOOR the collapse aims for, not a ceiling it
-   *  is held to.
+  /** Triangle target for the LOD.
    *
-   *  meshopt stops at whichever of the two limits it reaches first, so the result
-   *  is max(this target, what plannerLodSimplifyError permits). Since the error is
-   *  the tighter of the two on every real bake measured, this number normally never
-   *  binds: it is what the LOD would collapse to IF the geometry were smooth enough
-   *  to allow it (a flat panel can lose almost every triangle at zero error), and a
-   *  safety floor on the very simplest meshes. Read plannerLodSimplifyError first —
-   *  that is the knob that decides quality.
-   *
-   *  IT WAS NOT ALWAYS A FLOOR. Shipped at 50,000 with a loose error bound, it WAS
-   *  the binding constraint, and it visibly destroyed the catalogue — see the error
-   *  bound below for what that looked like and how the replacement was chosen. */
+   *  Chosen by rendering candidates at the three planner camera distances above and
+   *  comparing them to the proxy, not by picking a round number: at 2 m — the
+   *  distance a table is actually laid out from — a 50k LOD of a 276k proxy was
+   *  indistinguishable, because the baked normal map carries the surface detail and
+   *  only the silhouette depends on triangles. The cost lands at the 0.3 m
+   *  inspection distance, where the LOD is visibly the coarser mesh; that is the
+   *  accepted trade, and the product page (which serves the proxy or, for an owner,
+   *  the full-fidelity copy) is where close inspection belongs. */
   plannerLodTriangleBudget: number
   /** Error bound handed to meshopt for the LOD collapse, as a fraction of the mesh
-   *  extent. THIS IS THE QUALITY KNOB — the triangle budget above almost never
-   *  binds before it does.
-   *
-   *  0.00005 of the mesh extent, which on a ~250 mm terrain piece is about 12
-   *  microns: the LOD surface may not move further from the proxy than a fraction
-   *  of a resin print layer. Stating the tolerance geometrically rather than as a
-   *  triangle count is the whole point — it adapts per model, so a mesh made of
-   *  thousands of separate roof-tile shells keeps the triangles it needs while a
-   *  low-relief walkway gives up far more of its own, and both land at the same
-   *  visual fidelity. A single triangle count cannot do that, which is exactly how
-   *  the first attempt failed.
-   *
-   *  KNOW WHAT THIS TIER IS NOW. At 0.00005 the collapse only removes about 7-12%
-   *  of the triangles, so this is very nearly a pure DOWNLOAD optimisation: the
-   *  saving comes from dropping TANGENT and re-quantising through Draco, which is
-   *  45-48% on its own with no decimation at all. If planner framerate rather than
-   *  download weight is ever the problem, loosening this knob is not the answer —
-   *  it buys very little geometry back before it starts being visible.
-   *
-   *  CHOSEN BY RENDERING, on the real catalogue, not on substitute models: every
-   *  part of a 28-piece showcase table plus a second artist's set, rendered against
-   *  its own proxy at all three planner camera distances through the planner's own
-   *  lighting and 50-degree camera. Measured as the share of the proxy's Sobel edge
-   *  energy the LOD fails to reproduce inside the model's silhouette — a flat pixel
-   *  difference is the metric that MISSED the first regression, because a melted
-   *  roof covers the same pixels at the same average brightness.
-   *
-   *    error     0.3 m edge loss   verdict
-   *    0.01      19-33%            carved panels and roof tiles melted to lumpy
-   *                                blobs; unusable. This is what shipped first.
-   *    0.0005     9-17%            inconsistent — fine on some parts, visibly
-   *                                soft on others
-   *    0.0002    4.6-9.5%          scored well and looked right in isolation, but
-   *                                the ARTIST spotted softening on carved panels
-   *                                once it was live. It was briefly the default.
-   *    0.0001    2.4-3.8%          with the normal map left as baked
-   *    0.00005   1.4-2.0%          with the normal map left as baked — current
-   *
-   *  The 0.0002 entry is the one worth remembering. It passed a rendered
-   *  side-by-side against the proxy and still read as soft to the person who made
-   *  the models, on a piece whose detail is carved panelling. An edge-loss figure
-   *  ranks candidates; it does not decide whether the result is good enough, and
-   *  the number that mattered here came back from the artist, not the harness.
-   *
-   *  Tighter than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR), which is not a
-   *  contradiction: that tier simplifies an unbaked mesh whose detail IS its
-   *  triangles, while this one is already standing on a proxy that has had its
-   *  detail baked down into a normal map once. There is far less left to give. */
+   *  extent. Looser than the owner tier's 0.001 (FULL_GLB_SIMPLIFY_ERROR) because
+   *  this tier is explicitly allowed to move the surface — it just must not be
+   *  allowed to do so without limit, or thin members drift into each other. */
   plannerLodSimplifyError: number
   /** Keep every open boundary pinned through the collapse.
    *
@@ -777,24 +671,11 @@ export interface ProxyBakeConfig {
    *  its budget and every hole's boundary loop survived intact — so the default is
    *  on and should stay on unless a specific model cannot reach its budget with it. */
   plannerLodLockBorder: boolean
-  /** Minimum fraction of the proxy's DOWNLOAD SIZE the LOD must save before it is
-   *  worth writing. Below this, shipping a second almost-identical file would cost
-   *  storage, bandwidth and a cache entry to save nothing — so it is skipped and the
-   *  planner uses the proxy, which is the pre-LOD behaviour.
-   *
-   *  BYTES, NOT TRIANGLES — it used to count triangles, and that is the wrong
-   *  quantity for a tier that exists to make a page download less. Once the collapse
-   *  is bounded by a geometric error rather than a flat triangle target, a detailed
-   *  mesh legitimately keeps most of its triangles while still producing a file
-   *  55% smaller, because dropping TANGENT and re-quantising through Draco does that
-   *  much on its own. Measured on the real catalogue, a triangle gate at 0.25 threw
-   *  away roughly a third of the LODs — including the heaviest parts in the table,
-   *  and including one whose weight was in its normal map rather than its geometry —
-   *  for failing a test of something the tier was not trying to reduce.
-   *
-   *  The triangle reduction is still reported (proxy_report.plannerLod.trianglesCutPct):
-   *  near zero there is the proxyCreaseAngleDeg-is-0 signature, worth seeing even
-   *  when the file did shrink. */
+  /** Minimum fraction of triangles the collapse must actually remove before the LOD
+   *  is worth writing. Below this the result is near-identical to the proxy (the
+   *  flat-shaded case, or a mesh so boundary-dominated that lockBorder pinned it),
+   *  and shipping a second almost-identical file would cost storage, bandwidth and
+   *  a cache entry to save nothing — so it is skipped and the planner uses the proxy. */
   plannerLodMinReduction: number
   /** Maximum normal-map edge length on the LOD, in pixels (0 keeps it as baked).
    *  Only ever SHRINKS a map — gltf-transform treats this as an upper bound — so a
@@ -807,22 +688,11 @@ export interface ProxyBakeConfig {
    *  that need the resolution least; the crisp architectural pieces that would miss
    *  it compress to a few hundred KB and barely move.
    *
-   *  DEFAULT IS NOW 0 — leave the map exactly as baked. It was 1024, chosen when
-   *  the geometry was being collapsed hard enough that the map was the cheap half
-   *  of the file and halving it cost 0.19 percentage points of changed pixels.
-   *  Both halves of that reasoning stopped holding once the error bound tightened:
-   *  with the geometry preserved, the map resize became the DOMINANT remaining
-   *  error, and on a normal map it is not a subtle one — it softens exactly the
-   *  carved detail this tier exists to keep. Measured on four real parts at
-   *  plannerLodSimplifyError 0.00005: capping at 1024 gives 3.7-6.0% edge loss at
-   *  0.3 m, leaving it as baked gives 1.4-2.0%, for about 3 MB across a 28-part
-   *  table. The no-decimation control is 0.1% with the map untouched, so at 1024
-   *  essentially the whole residual was the texture, not the mesh.
-   *
-   *  Raise it above 0 again only for a bake whose map is genuinely enormous and
-   *  whose surface is smooth (the organic case that motivated 1024: a 251k proxy
-   *  went to a 50k LOD with 433 KB of geometry against a 1,446 KB normal map). It
-   *  is the wrong trade for crisp architectural work. */
+   *  1024 rather than a guess: rendered at all three planner camera distances
+   *  against the 2048 LOD, halving the map changed nothing at 2 m or 16 m and added
+   *  0.19 percentage points of >8/255 pixels at 0.3 m (0.70% -> 0.89%), on a file
+   *  40% smaller. 512 was also legible but visibly softened the sack seams, so it
+   *  was not taken. */
   plannerLodNormalMapSize: number
 }
 
