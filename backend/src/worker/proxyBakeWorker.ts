@@ -54,7 +54,7 @@ function memoryReport(): Record<string, number | string> {
   const out: Record<string, number | string> = { supervisorRssMB: mb(process.memoryUsage().rss) }
   try {
     const stat = fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8')
-    const get = (k: string) => Number(new RegExp(`^${k} (\d+)`, 'm').exec(stat)?.[1] ?? 0)
+    const get = (k: string) => Number(new RegExp(`^${k} ([0-9]+)`, 'm').exec(stat)?.[1] ?? 0)
     out.anonMB = mb(get('anon'))
     out.fileMB = mb(get('file'))
     out.shmemMB = mb(get('shmem'))
