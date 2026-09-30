@@ -6,7 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2, AlertTriangle,
+  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -20,7 +20,7 @@ import { assetUrl } from '@/api/transformers'
 import { collaborationsApi, type TableCollaboration } from '@/api/endpoints/collaborations'
 import CollabRequestModal from './CollabRequestModal'
 import { serializeLayout, deserializeLayout } from '@state/tableMapping'
-import { resolveAssetsByIds, getAssetById } from '@core/assets'
+import { resolveAssetsByIds, getAssetById, type PlannerSetData, type PlannerSetComponent } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
 import { ensureTemplate, subscribeGlbBytes, glbUnitsSince, glbBytesFor } from '@scene/loaders'
@@ -84,6 +84,21 @@ const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '6×4', w: 6, h: 4 },
   { label: '6×3', w: 6, h: 3 },
 ]
+
+
+// Keep only the components/pieces of a set that match a search term. A hit on the
+// set name or a model name keeps everything beneath it; a piece hit keeps just it.
+function filterSetComponents(set: PlannerSetData, q: string): PlannerSetComponent[] {
+  if (!q) return set.components
+  if (set.name.toLowerCase().includes(q)) return set.components
+  const out: PlannerSetComponent[] = []
+  for (const c of set.components) {
+    if (c.name && c.name.toLowerCase().includes(q)) { out.push(c); continue }
+    const pieces = c.pieces.filter((p) => p.name.toLowerCase().includes(q))
+    if (pieces.length) out.push({ ...c, pieces })
+  }
+  return out
+}
 
 export default function App({ tableId, shareToken, readOnly = false }: { tableId?: string; shareToken?: string; readOnly?: boolean } = {}) {
   const navigate = useNavigate()
@@ -302,6 +317,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const coarse = useCoarsePointer()
   const compact = useCompactLayout()
   const [paletteOpen, setPaletteOpen] = React.useState(false)
+  // Enlarged browse mode for the model palette (wide panel, multi-column grid).
+  const [paletteWide, setPaletteWide] = React.useState(false)
   const [bomOpen, setBomOpen] = React.useState(false)
   // Only one drawer at a time on a narrow screen — together they'd cover the table.
   const openPalette = (open: boolean) => { setPaletteOpen(open); if (open) setBomOpen(false) }
@@ -323,7 +340,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const filterRailFacets = React.useMemo(
     () =>
       catalogueFacets.filter(
-        (f) => f.slug !== MODEL_CLASS_SLUG && f.terms.length > 0 && facetAppliesTo(f, catalogueClass),
+        (f) =>
+          f.slug !== MODEL_CLASS_SLUG && f.terms.length > 0 &&
+          // "All" = every category: show class-scoped facets too, not just the universal ones.
+          (!catalogueClass || facetAppliesTo(f, catalogueClass)),
       ),
     [catalogueFacets, catalogueClass],
   )
@@ -691,6 +711,19 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     [sets, ownedModelIds],
   )
 
+  // Client-side search over the Set > Model > Piece hierarchy. Sets aren't part of
+  // the backend browse query, so the search box has to filter them itself. A hit on
+  // a set or model name keeps everything beneath it; a hit on a piece keeps just
+  // that piece (and its ancestors, so the path is still readable).
+  const searchQ = query.trim().toLowerCase()
+  const visibleCatalogueSets = React.useMemo(() => {
+    if (!searchQ) return catalogueSetGroups
+    return catalogueSetGroups.filter((g) => {
+      const set = sets.find((x) => x.id === g.id)
+      return set ? filterSetComponents(set, searchQ).length > 0 : false
+    })
+  }, [catalogueSetGroups, sets, searchQ])
+
   // Part assets (from "set" models) are resolvable for tiles but kept OFF the
   // flat catalogue — merge them here only for lookups.
   const assetsById = React.useMemo(
@@ -779,7 +812,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const renderGroupTile = (g: {
     key: string; kind: 'set' | 'bundle'; id: string; name: string
     thumbnail?: string; price: number; owned: boolean; memberIds: string[]
-  }) => {
+  }, q = '') => {
+    if (g.kind === 'set') {
+      const set = sets.find((x) => x.id === g.id)
+      if (set) return renderSetTree(g, set, q)
+    }
     const expanded = expandedBundles.has(g.key)
     return (
       <div key={g.key} className="tb-bundle">
@@ -799,6 +836,89 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         {expanded && (
           <div className="tb-palette-grid" style={{ marginTop: 8 }}>
             {g.memberIds.map((id) => renderModelTile(id, g.owned))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // One placeable piece inside a set tree. `crumb` (shown while searching) spells
+  // out the path, "Set > Model", since the row may be surfaced out of context.
+  const renderPieceRow = (assetId: string, label: string, crumb?: string, path?: string) => {
+    const a = assetsById.get(assetId) ?? getAssetById(assetId)
+    if (!a) return null
+    return (
+      <button
+        key={assetId}
+        className={`tb-node-row ${selectedAssetId === assetId ? 'is-active' : ''}`}
+        onClick={() => pickAsset(assetId)}
+        title={`Place ${path ?? label}${a.aabb ? ` — ${formatPieceDims(a.aabb, unitSystem)}` : ''}`}
+      >
+        <span className="tb-node-thumb">{a.thumbnail ? <img src={a.thumbnail} alt="" /> : <Box size={12} />}</span>
+        <span className="tb-node-text">
+          <span className="tb-node-label">{label}</span>
+          {crumb && <span className="tb-node-crumb">{crumb}</span>}
+        </span>
+      </button>
+    )
+  }
+
+  // A set as a flow: Set > Model > Pieces. Rules:
+  //  - ungrouped set (one unnamed component)  -> Set > Pieces  ("Gothic church: Top, Middle, Bottom")
+  //  - grouped set, component with 1 piece    -> Set > Model   (the model IS the piece)
+  //  - grouped set, component with N pieces   -> Set > Model > Pieces
+  const renderSetTree = (
+    g: { key: string; name: string; thumbnail?: string; price: number; owned: boolean },
+    set: PlannerSetData,
+    q: string,
+  ) => {
+    const comps = filterSetComponents(set, q)
+    if (comps.length === 0) return null
+    const open = !!q || expandedBundles.has(g.key)
+    const total = set.components.reduce((n, c) => n + c.pieces.length, 0)
+    const flat = set.components.length === 1 && !set.components[0].name
+    return (
+      <div key={g.key} className="tb-bundle tb-tree">
+        <button className="tb-bundle-head" onClick={() => toggleBundleExpanded(g.key)}>
+          <div className="tb-thumb sm">{g.thumbnail ? <img src={g.thumbnail} alt="" /> : <Box size={16} />}</div>
+          <div className="tb-bundle-info">
+            <div className="tb-tile-name">{g.name}</div>
+            <div className="tb-tile-meta">
+              <span className="tb-pill bundle">SET · {flat ? `${total} pieces` : `${set.components.length} models`}</span>
+              <span>{g.owned ? 'Owned' : `£${grossPrice(g.price).toFixed(2)}`}</span>
+            </div>
+          </div>
+          <ChevronDown size={16} className={`tb-chev ${open ? 'is-open' : ''}`} />
+        </button>
+        {open && (
+          <div className="tb-tree-body">
+            {comps.map((c) => {
+              if (flat) {
+                return c.pieces.map((p) =>
+                  renderPieceRow(p.assetId, p.name, q ? g.name : undefined, `${g.name} › ${p.name}`))
+              }
+              const crumbBase = `${g.name} › ${c.name}`
+              const full = set.components.find((x) => x.key === c.key)!
+              if (full.pieces.length === 1) {
+                return renderPieceRow(c.pieces[0].assetId, c.name!, q ? g.name : undefined, crumbBase)
+              }
+              const cOpen = !!q || expandedBundles.has(c.key)
+              return (
+                <div key={c.key} className="tb-node">
+                  <button className="tb-node-head" onClick={() => toggleBundleExpanded(c.key)}>
+                    <ChevronRight size={13} className={`tb-node-chev ${cOpen ? 'is-open' : ''}`} />
+                    <span className="tb-node-label">{c.name}</span>
+                    <span className="tb-small">{full.pieces.length} pieces</span>
+                  </button>
+                  {cOpen && (
+                    <div className="tb-node-children">
+                      {c.pieces.map((p) =>
+                        renderPieceRow(p.assetId, p.name, q ? crumbBase : undefined, `${crumbBase} › ${p.name}`))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -1063,7 +1183,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }
 
   return (
-    <div className={`tb-fs${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}`}>
+    <div className={`tb-fs${paletteWide && !compact ? ' is-pal-wide' : ''}${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}`}>
       <ThreeStage />
 
       {/* Loading gate — blocks interaction until the table, its textures AND
@@ -1457,15 +1577,25 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
 
           {/* Catalogue / palette */}
           <aside
-            className={`tb-palette${compact && !paletteOpen ? ' is-stowed' : ''}`}
+            className={`tb-palette${compact && !paletteOpen ? ' is-stowed' : ''}${paletteWide && !compact ? ' is-wide' : ''}`}
             data-tour="planner-palette"
           >
+            {!compact && (
+              <button
+                className="tb-palette-handle"
+                onClick={() => setPaletteWide((v) => !v)}
+                title={paletteWide ? 'Shrink the model browser' : 'Enlarge the model browser'}
+                aria-label={paletteWide ? 'Shrink the model browser' : 'Enlarge the model browser'}
+              >
+                {paletteWide ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+              </button>
+            )}
             <div className="tb-palette-tabs" data-tour="planner-tabs">
               <button
                 className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('catalogue')}
               >
-                Catalogue <span className="tb-small">{filtered.length + catalogueSetGroups.length}</span>
+                Catalogue <span className="tb-small">{filtered.length + visibleCatalogueSets.length}</span>
               </button>
               <button
                 className={`tb-tab ${paletteTab === 'mine' ? 'is-active' : ''}`}
@@ -1576,10 +1706,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 )}
 
                 <div className="tb-palette-scroll">
-                  {catalogueSetGroups.length > 0 && (
+                  {visibleCatalogueSets.length > 0 && (
                     <div className="tb-palette-section">
                       <div className="tb-palette-cat">Sets</div>
-                      {catalogueSetGroups.map(renderGroupTile)}
+                      {visibleCatalogueSets.map((g) => renderGroupTile(g, searchQ))}
                     </div>
                   )}
                   {paletteGroups.map(([cat, items]) => (
@@ -1608,7 +1738,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                       </div>
                     </div>
                   ))}
-                  {filtered.length === 0 && catalogueSetGroups.length === 0 && (
+                  {filtered.length === 0 && visibleCatalogueSets.length === 0 && (
                     <div className="tb-small" style={{ padding: 8 }}>
                       {catalogueLoading ? 'Loading…' : 'No models match your filters.'}
                     </div>
@@ -1623,7 +1753,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   </div>
                 )}
 
-                {myItems.groups.map(renderGroupTile)}
+                {myItems.groups.map((g) => renderGroupTile(g))}
 
                 {myItems.displayModels.length > 0 && (
                   <div className="tb-palette-section">

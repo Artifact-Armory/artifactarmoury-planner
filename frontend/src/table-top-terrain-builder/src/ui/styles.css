@@ -135,7 +135,8 @@
   position: absolute;
   top: 14px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + var(--tb-pal-extra, 0px) / 2));
+  transition: transform 0.18s ease;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -233,7 +234,6 @@
   border-radius: 14px;
   backdrop-filter: blur(8px);
   z-index: 18;
-  overflow: hidden;
 }
 .tb-palette-head,
 .tb-bom-head {
@@ -416,15 +416,23 @@
 .tb-filter-rail {
   margin: 0 10px 8px;
   padding: 8px 10px;
-  background: #fff;
+  background: transparent;
+  border: 1px solid var(--tb-border);
   border-radius: 8px;
   max-height: 340px;
   overflow: auto;
+  /* Re-theme the shared FacetRail's site tokens to the planner's dark panel. */
+  --foreground: var(--tb-text);
+  --muted-foreground: var(--tb-muted);
+  --border: var(--tb-border);
+  --accent: #1a2431;
+  --primary: var(--tb-accent);
+  color: var(--tb-text);
 }
 /* Sort + price controls sit above the FacetRail inside the same light card. */
 .tb-filter-group {
   padding: 6px 2px 10px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--tb-border);
   margin-bottom: 8px;
 }
 .tb-filter-group:last-of-type { border-bottom: none; margin-bottom: 4px; }
@@ -432,7 +440,7 @@
   display: block;
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--tb-muted);
   margin-bottom: 5px;
 }
 .tb-filter-select {
@@ -440,15 +448,15 @@
   font-size: 12px;
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #111827;
+  border: 1px solid var(--tb-border);
+  background: #0e141c;
+  color: var(--tb-text);
 }
 .tb-filter-price-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #6b7280;
+  color: var(--tb-muted);
 }
 .tb-filter-price-row input {
   width: 0;
@@ -456,9 +464,9 @@
   font-size: 12px;
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #111827;
+  border: 1px solid var(--tb-border);
+  background: #0e141c;
+  color: var(--tb-text);
 }
 
 /* Bundle group tile (expandable) */
@@ -548,7 +556,8 @@
 /* Table size (bottom-left, above the surface picker) */
 .tb-tablesize {
   position: absolute;
-  left: 278px;
+  left: calc(278px + var(--tb-pal-extra, 0px));
+  transition: left 0.18s ease;
   bottom: 60px;
   display: flex;
   flex-direction: column;
@@ -610,7 +619,8 @@
 /* Table surface picker (bottom-left) */
 .tb-surface {
   position: absolute;
-  left: 278px;
+  left: calc(278px + var(--tb-pal-extra, 0px));
+  transition: left 0.18s ease;
   bottom: 14px;
   display: flex;
   align-items: center;
@@ -1393,3 +1403,43 @@
   }
   .tb-fs.is-compact .tb-bom.tb-view-basket { left: 14px; right: 14px; }
 }
+
+/* Set > Model > Piece tree in the model browser */
+.tb-tree-body { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--tb-border); margin-left: 10px; padding-left: 8px; }
+.tb-node-head, .tb-node-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 5px 6px; background: transparent; border: 1px solid transparent;
+  border-radius: 7px; color: var(--tb-text); cursor: pointer; text-align: left; font: inherit; font-size: 12px;
+}
+.tb-node-head:hover, .tb-node-row:hover { background: #131b26; }
+.tb-node-row.is-active { border-color: var(--tb-accent, #3b82f6); background: #131b26; }
+.tb-node-head .tb-small { margin-left: auto; }
+.tb-node-chev { color: var(--tb-muted); transition: transform 0.15s; flex: none; }
+.tb-node-chev.is-open { transform: rotate(90deg); }
+.tb-node-children { margin-left: 7px; padding-left: 8px; border-left: 1px solid var(--tb-border); display: flex; flex-direction: column; gap: 2px; }
+.tb-node-thumb { width: 22px; height: 22px; flex: none; border-radius: 5px; overflow: hidden; display: grid; place-items: center; background: #0e141c; color: var(--tb-muted); }
+.tb-node-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.tb-node-text { display: flex; flex-direction: column; min-width: 0; }
+.tb-node-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-node-crumb { font-size: 10px; color: var(--tb-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Enlarge / shrink handle: sits on the palette's right edge, halfway down */
+.tb-palette-handle {
+  position: absolute; top: 50%; right: -14px; transform: translateY(-50%);
+  width: 22px; height: 56px; z-index: 2;
+  display: grid; place-items: center;
+  background: var(--tb-panel); border: 1px solid var(--tb-border); border-radius: 0 10px 10px 0;
+  color: var(--tb-muted); cursor: pointer; padding: 0;
+}
+.tb-palette-handle:hover { color: var(--tb-text); border-color: var(--tb-accent); }
+.tb-palette { transition: width 0.18s ease; }
+.tb-palette.is-wide { width: max(250px, min(880px, calc(100vw - 830px))); }  /* leaves room for the toolbar + basket */
+.tb-palette.is-wide .tb-palette-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.tb-palette.is-wide .tb-tree-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; }
+@media (prefers-reduced-motion: reduce) { .tb-palette { transition: none; } }
+
+/* Enlarged model browser: push the neighbouring panels over by however much it grew. */
+.tb-fs.is-pal-wide { --tb-pal-extra: max(0px, calc(min(880px, 100vw - 830px) - 250px)); }
+@media (prefers-reduced-motion: reduce) { .tb-toolbar, .tb-tablesize, .tb-surface { transition: none; } }
+
+.tb-palette-scroll, .tb-filter-rail { color-scheme: dark; }

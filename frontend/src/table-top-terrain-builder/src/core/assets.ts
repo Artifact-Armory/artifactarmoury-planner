@@ -296,6 +296,14 @@ export interface PlannerSetData {
   price: number
   artistId: string
   partAssetIds: string[]
+  /** Named models inside the set → their pieces. `name` is null for an ungrouped set. */
+  components: PlannerSetComponent[]
+}
+
+export interface PlannerSetComponent {
+  key: string
+  name: string | null
+  pieces: { assetId: string; name: string }[]
 }
 
 /**
@@ -311,6 +319,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
 
     for (const s of apiSets) {
       const partAssetIds: string[] = []
+      const componentMap = new Map<number, PlannerSetComponent>()
       for (const part of s.parts) {
         if (!part.hasGlb) continue
         // The primary part's asset id IS the model id; extras get a namespaced id.
@@ -345,6 +354,13 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           defaultPitchDeg: s.defaultPitchDeg || undefined,
         } satisfies Asset)
         partAssetIds.push(assetId)
+        const gi = part.groupIndex ?? 0
+        let comp = componentMap.get(gi)
+        if (!comp) {
+          comp = { key: `${s.id}:${gi}`, name: componentName || null, pieces: [] }
+          componentMap.set(gi, comp)
+        }
+        comp.pieces.push({ assetId, name: part.name })
       }
       if (partAssetIds.length === 0) continue
       sets.push({
@@ -354,6 +370,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
         price: s.price,
         artistId: s.artistId,
         partAssetIds,
+        components: [...componentMap.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c),
       })
     }
 
