@@ -41,7 +41,7 @@ import { notifyFollowersOfRelease, notifyAdminsOfMeshOverride } from '../service
 import { maybeStartIntroOffer } from '../services/introCommission';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import { findGeometryDuplicate, safeDeleteObject } from '../services/modelIngest/process';
-import { dispatchIngestUpload, dispatchIngestVersionUpdate, dispatchPartPreviewAttach, dispatchNewComponentIngest } from '../services/modelIngest/queue';
+import { dispatchIngestUpload, dispatchIngestVersionUpdate, dispatchPartPreviewAttach, dispatchNewComponentIngest, dispatchPrimaryPreviewUpdate } from '../services/modelIngest/queue';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
 
@@ -306,7 +306,7 @@ router.post('/from-upload',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
 
-    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, primaryThumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys } = req.body ?? {};
+    const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, primaryThumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys, keepPartsPlaceable } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -428,6 +428,7 @@ router.post('/from-upload',
     const extraParts: Array<{
       rawKey: string; filename?: string; name?: string; groupIndex: number; groupName: string | null;
       isPresupported: boolean; displayRawKey: string | null; thumbnailKey: string | null;
+      keepPartsPlaceable: boolean; previewSkipped?: boolean;
     }> = [];
     if (parts != null) {
       if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
@@ -498,9 +499,21 @@ router.post('/from-upload',
         extraParts.push({
           rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName,
           isPresupported: partPresupported, displayRawKey: partDisplayRawKey, thumbnailKey: partThumbnailKey,
+          keepPartsPlaceable: p.keepPartsPlaceable === true || p.keepPartsPlaceable === 'true',
         });
       }
     }
+    // A named model with a preview file is placed in the planner as that ONE
+    // asset, so its other part files are download-only (migration 067) — no bake,
+    // no GLBs, not placeable — unless the artist opted to keep them placeable too.
+    // Group 0's preview rides on the listing itself; a later component's rides on
+    // its first part, which is the one part of that component that is NOT skipped.
+    const skipGroups = new Set<number>();
+    if (cleanDisplayRawKey && !(keepPartsPlaceable === true || keepPartsPlaceable === 'true')) skipGroups.add(0);
+    for (const p of extraParts) {
+      if (p.displayRawKey && !p.keepPartsPlaceable) skipGroups.add(p.groupIndex);
+    }
+    for (const p of extraParts) p.previewSkipped = skipGroups.has(p.groupIndex) && !p.displayRawKey;
     const partCount = 1 + extraParts.length;
     // Name of the component owning the primary file (NULL when the listing isn't
     // split into named models).
@@ -578,12 +591,12 @@ router.post('/from-upload',
       const nth = (seenInGroup.get(p.groupIndex) ?? (p.groupIndex === 0 ? 1 : 0)) + 1;
       seenInGroup.set(p.groupIndex, nth);
       await db.query(
-        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, is_presupported, display_stl_path, thumbnail_path, processing_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'processing')`,
+        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, is_presupported, display_stl_path, thumbnail_path, preview_skipped, processing_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'processing')`,
         // display_stl_path starts as the raw uploaded key — same "starts raw,
         // finalized in place" convention stl_file_path uses — and is turned
         // into a canonical path by processModelParts, same as the print file.
-        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey, p.thumbnailKey]
+        [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey, p.thumbnailKey, !!p.previewSkipped]
       );
     }
 
@@ -706,7 +719,7 @@ router.post('/:id/parts/:partId/preview',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
     const { id, partId } = req.params;
-    const { rawKey, filename } = req.body ?? {};
+    const { rawKey, filename, skipOtherParts } = req.body ?? {};
 
     if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
       throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -725,10 +738,26 @@ router.post('/:id/parts/:partId/preview',
     }
 
     const part = (await db.query(
-      `SELECT id, display_stl_path FROM model_parts WHERE id = $1 AND model_id = $2`,
+      `SELECT id, display_stl_path, group_index FROM model_parts WHERE id = $1 AND model_id = $2`,
       [partId, id],
     )).rows[0];
     if (!part) throw new NotFoundError('Part');
+
+    // The preview is the assembled stand-in for its WHOLE named model, so the other
+    // part files of that model become download-only (migration 067). Only honoured
+    // on the component's first part — the carrier — never on a lone dense part.
+    if (skipOtherParts === true || skipOtherParts === 'true') {
+      const first = (await db.query(
+        `SELECT id FROM model_parts WHERE model_id = $1 AND group_index = $2 ORDER BY display_order ASC LIMIT 1`,
+        [id, part.group_index],
+      )).rows[0];
+      if (first?.id === partId) {
+        await db.query(
+          `UPDATE model_parts SET preview_skipped = true WHERE model_id = $1 AND group_index = $2 AND id <> $3`,
+          [id, part.group_index, partId],
+        );
+      }
+    }
 
     // Replacing an existing companion — the old one is now orphaned.
     if (part.display_stl_path) {
@@ -748,8 +777,130 @@ router.post('/:id/parts/:partId/preview',
   })
 );
 
+// Validate one already-uploaded raw/ object (exists, right type, under the size cap)
+// and return its byte size. Deletes an oversize object, like the other upload routes.
+async function checkRawUpload(key: unknown, filename: unknown, what: string): Promise<number> {
+  if (!key || typeof key !== 'string' || !key.startsWith('raw/')) {
+    throw new ValidationError(`${what} needs an uploaded raw/ object`);
+  }
+  if (!meshFormatFromName((typeof filename === 'string' && filename) || key)) {
+    throw new ValidationError(`${what} must be an STL, OBJ or 3MF file`);
+  }
+  const bytes = await objectSize(key);
+  if (bytes == null) {
+    throw new ValidationError(`${what} was not found in storage — retry the upload`);
+  }
+  if (bytes > MAX_MODEL_FILE_BYTES) {
+    await safeDeleteObject(key);
+    throw new ValidationError(`${what} is too large (${(bytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`);
+  }
+  return bytes;
+}
+
+/**
+ * Shared by "add a named model" and "replace a named model's files". Inserts the
+ * new part rows (status 'processing') and hands them to the ingest job.
+ *
+ * Preview rules (migration 067): a named model with a preview file is placed in the
+ * planner as that one asset, so its other part files are download-only
+ * (`preview_skipped`) unless `keepPartsPlaceable`. When REPLACING and no new preview
+ * is given, the existing one carries over to the new first part — the artist only
+ * re-uploads what changed.
+ */
+async function acceptComponentFiles(opts: {
+  modelId: string;
+  groupIndex: number | null; // null = a brand-new component appended after the last one
+  groupName?: unknown;
+  parts: unknown;
+  displayRawKey?: unknown;
+  displayFilename?: unknown;
+  keepPartsPlaceable?: unknown;
+  notes?: unknown;
+}): Promise<{ groupIndex: number; partIds: string[] }> {
+  const { modelId, parts } = opts;
+  const replacing = opts.groupIndex !== null;
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new ValidationError('At least one file is required');
+  }
+  if (parts.length > MAX_EXTRA_PARTS) {
+    throw new ValidationError(`A component can have at most ${MAX_EXTRA_PARTS} files`);
+  }
+
+  let totalBytes = 0;
+  for (const p of parts) totalBytes += await checkRawUpload(p?.rawKey, p?.filename, 'Each file');
+  const newDisplayKey = typeof opts.displayRawKey === 'string' && opts.displayRawKey ? opts.displayRawKey : null;
+  if (newDisplayKey) totalBytes += await checkRawUpload(newDisplayKey, opts.displayFilename, 'The preview file');
+
+  const { rows: existing } = await db.query(
+    `SELECT COALESCE(MAX(group_index), 0) AS max_group, COALESCE(MAX(display_order), 0) AS max_order
+       FROM model_parts WHERE model_id = $1`,
+    [modelId],
+  );
+  const groupIndex = replacing ? (opts.groupIndex as number) : Number(existing[0]?.max_group ?? 0) + 1;
+  let displayOrder = Number(existing[0]?.max_order ?? 0);
+
+  const oldRows = replacing
+    ? (await db.query(
+        `SELECT id, group_name, display_stl_path, preview_skipped, thumbnail_path
+           FROM model_parts WHERE model_id = $1 AND group_index = $2 ORDER BY display_order ASC`,
+        [modelId, groupIndex],
+      )).rows
+    : [];
+  if (replacing && groupIndex > 0 && oldRows.length === 0) throw new NotFoundError('Component');
+
+  const modelRow = (await db.query(
+    'SELECT display_stl_path, primary_group_name FROM models WHERE id = $1', [modelId],
+  )).rows[0];
+
+  // Which preview stands in for this named model, if any.
+  //  - later components: carried by the first part (new file, else carried over)
+  //  - the listing's own component: carried by the model row itself
+  const carriedPreview: string | null =
+    groupIndex === 0 ? null : (newDisplayKey ?? oldRows.find((r: any) => r.display_stl_path)?.display_stl_path ?? null);
+  const hasPreview = groupIndex === 0 ? !!modelRow?.display_stl_path : !!carriedPreview;
+  const explicitKeep = opts.keepPartsPlaceable === true || opts.keepPartsPlaceable === 'true'
+    ? true
+    : opts.keepPartsPlaceable === false || opts.keepPartsPlaceable === 'false' ? false : null;
+  const previousKeep = oldRows.length > 1 && oldRows.slice(1).some((r: any) => !r.preview_skipped);
+  const keep = explicitKeep ?? (newDisplayKey ? false : previousKeep);
+  const carrierThumb = oldRows[0]?.thumbnail_path ?? null;
+
+  const cleanGroupName = typeof opts.groupName === 'string' && opts.groupName.trim()
+    ? opts.groupName.trim().slice(0, 255)
+    : (oldRows[0]?.group_name ?? (groupIndex === 0 ? modelRow?.primary_group_name ?? null : null));
+
+  const insertedIds: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    displayOrder += 1;
+    const carrier = groupIndex > 0 && i === 0 && !!carriedPreview;
+    const skipped = hasPreview && !keep && !carrier;
+    const nth = (groupIndex === 0 ? 1 : 0) + i + 1;
+    const row = (await db.query(
+      `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name,
+                                is_presupported, display_stl_path, thumbnail_path, preview_skipped, processing_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'processing') RETURNING id`,
+      [modelId, p.name || `Part ${nth}`, p.rawKey, displayOrder, groupIndex, cleanGroupName,
+       carrier, carrier ? carriedPreview : null, groupIndex > 0 && i === 0 ? carrierThumb : null, skipped],
+    )).rows[0];
+    insertedIds.push(row.id);
+  }
+
+  await db.query(`UPDATE models SET part_count = part_count + $2 WHERE id = $1`, [modelId, insertedIds.length]);
+  const cleanNotes = typeof opts.notes === 'string' ? opts.notes.trim().slice(0, 1000) || null : null;
+  await dispatchNewComponentIngest({
+    modelId,
+    partIds: insertedIds,
+    replacePartIds: replacing ? oldRows.map((r: any) => r.id) : undefined,
+    notes: cleanNotes,
+    rawBytes: totalBytes,
+  });
+  return { groupIndex, partIds: insertedIds };
+}
+
 // Add a new named component to an existing listing — same shape as a
-// component in POST /from-upload's `parts`, just appended after the fact.
+// component in POST /from-upload's `parts`, just appended after the fact. May
+// carry its own preview file (displayRawKey) like an upload does.
 router.post('/:id/parts',
   authenticate,
   requireArtist,
@@ -762,53 +913,81 @@ router.post('/:id/parts',
       throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
     }
     const { id } = req.params;
-    const { groupName, parts } = req.body ?? {};
-    if (!Array.isArray(parts) || parts.length === 0) {
-      throw new ValidationError('At least one file is required');
-    }
-    if (parts.length > MAX_EXTRA_PARTS) {
-      throw new ValidationError(`A component can have at most ${MAX_EXTRA_PARTS} files`);
-    }
+    const { groupName, parts, displayRawKey, displayFilename, keepPartsPlaceable } = req.body ?? {};
+    const out = await acceptComponentFiles({
+      modelId: id, groupIndex: null, groupName, parts, displayRawKey, displayFilename, keepPartsPlaceable,
+    });
+    logger.info('New component accepted for processing', { userId: (req as any).userId, modelId: id, groupIndex: out.groupIndex, partIds: out.partIds });
+    res.status(202).json({ message: 'New model received — processing', groupIndex: out.groupIndex, partIds: out.partIds });
+  })
+);
 
-    const { rows: existing } = await db.query(
-      `SELECT COALESCE(MAX(group_index), 0) AS max_group, COALESCE(MAX(display_order), 0) AS max_order
-         FROM model_parts WHERE model_id = $1`,
+// Replace the files of one named model (every part sharing its group_index) — the
+// ZIP contents — and optionally its preview. Group 0 replaces the listing's EXTRA
+// files only; its main file goes through POST /:id/new-version. The old files stay
+// live until the new ones have processed, so a rejected replacement changes
+// nothing. Owners are notified (new version) once it lands.
+router.put('/:id/components/:groupIndex',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+    const { id } = req.params;
+    const gi = Number(req.params.groupIndex);
+    if (!Number.isInteger(gi) || gi < 0 || gi > MAX_COMPONENTS) throw new ValidationError('Invalid component');
+    const { groupName, parts, displayRawKey, displayFilename, keepPartsPlaceable, notes } = req.body ?? {};
+
+    const cur = await db.query('SELECT processing_status FROM models WHERE id = $1', [id]);
+    if (cur.rows.length === 0) throw new NotFoundError('Model');
+    if (cur.rows[0].processing_status === 'processing') {
+      throw new ValidationError('This model is still processing — please try again shortly');
+    }
+    const out = await acceptComponentFiles({
+      modelId: id, groupIndex: gi, groupName, parts, displayRawKey, displayFilename, keepPartsPlaceable, notes,
+    });
+    logger.info('Component replacement accepted for processing', { userId: (req as any).userId, modelId: id, groupIndex: gi, partIds: out.partIds });
+    res.status(202).json({ message: 'New files received — processing', groupIndex: gi, partIds: out.partIds });
+  })
+);
+
+// Replace the listing's OWN preview file (first named model). Print files and the
+// buyers' download are untouched; see processPrimaryPreviewUpdate. `skipOtherParts`
+// makes the first model's other part files download-only (migration 067).
+router.post('/:id/preview',
+  authenticate,
+  requireArtist,
+  requireVerifiedEmail,
+  requireTwoFactor,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    if (!isR2Enabled()) {
+      throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
+    }
+    const { id } = req.params;
+    const { rawKey, filename, skipOtherParts } = req.body ?? {};
+    const rawBytes = await checkRawUpload(rawKey, filename, 'The preview file');
+
+    const cur = await db.query('SELECT processing_status FROM models WHERE id = $1', [id]);
+    if (cur.rows.length === 0) throw new NotFoundError('Model');
+    if (cur.rows[0].processing_status === 'processing') {
+      throw new ValidationError('This model is still processing — please try again shortly');
+    }
+    await db.query(
+      `UPDATE models SET processing_status = 'processing', processing_error = NULL, updated_at = NOW() WHERE id = $1`,
       [id],
     );
-    const newGroupIndex = Number(existing[0]?.max_group ?? 0) + 1;
-    let displayOrder = Number(existing[0]?.max_order ?? 0);
-    const cleanGroupName = typeof groupName === 'string' && groupName.trim() ? groupName.trim().slice(0, 255) : null;
-
-    const insertedIds: string[] = [];
-    for (const p of parts) {
-      if (!p?.rawKey || typeof p.rawKey !== 'string' || !p.rawKey.startsWith('raw/')) {
-        throw new ValidationError('Each file needs an uploaded raw/ object');
-      }
-      if (!meshFormatFromName(p.filename || p.rawKey)) {
-        throw new ValidationError('Each file must be an STL, OBJ or 3MF file');
-      }
-      const partBytes = await objectSize(p.rawKey);
-      if (partBytes == null) {
-        throw new ValidationError('A file was not found in storage — retry the upload');
-      }
-      if (partBytes > MAX_MODEL_FILE_BYTES) {
-        await safeDeleteObject(p.rawKey);
-        throw new ValidationError(`A file is too large (${(partBytes / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB.`);
-      }
-      displayOrder += 1;
-      const row = (await db.query(
-        `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name, processing_status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'processing') RETURNING id`,
-        [id, p.name || `Part ${insertedIds.length + 1}`, p.rawKey, displayOrder, newGroupIndex, cleanGroupName],
-      )).rows[0];
-      insertedIds.push(row.id);
-    }
-
-    await db.query(`UPDATE models SET part_count = part_count + $2 WHERE id = $1`, [id, insertedIds.length]);
-    await dispatchNewComponentIngest({ modelId: id, partIds: insertedIds });
-
-    logger.info('New component accepted for processing', { userId: (req as any).userId, modelId: id, groupIndex: newGroupIndex, partIds: insertedIds });
-    res.status(202).json({ message: 'New model received — processing', groupIndex: newGroupIndex, partIds: insertedIds });
+    await dispatchPrimaryPreviewUpdate({
+      modelId: id, rawKey, filename, skipOtherParts: skipOtherParts === true || skipOtherParts === 'true', rawBytes,
+    });
+    logger.info('Primary preview replacement accepted', { userId: (req as any).userId, modelId: id });
+    res.status(202).json({ message: 'Preview received — processing', modelId: id, processingStatus: 'processing' });
   })
 );
 
@@ -1177,7 +1356,7 @@ router.get('/sets',
         `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name,
                 thumbnail_path, processing_status
          FROM model_parts
-         WHERE model_id = $1
+         WHERE model_id = $1 AND preview_skipped = false
          ORDER BY group_index ASC, display_order ASC`,
         [m.id]
       )).rows;
@@ -1418,7 +1597,8 @@ router.get('/:id',
     if ((model.part_count ?? 1) > 1) {
       parts = (await db.query(
         `SELECT id, name, glb_file_path, width, depth, height, processing_status, processing_error, display_order,
-                group_index, group_name, thumbnail_path, stl_file_path, source_format, source_file_path
+                group_index, group_name, thumbnail_path, stl_file_path, source_format, source_file_path,
+                preview_skipped, (display_stl_path IS NOT NULL) AS has_preview
          FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;
@@ -1474,6 +1654,7 @@ router.get('/:id',
       display_order: p.display_order,
       group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
       has_glb: !!p.glb_file_path,
+      preview_skipped: !!p.preview_skipped, has_preview: !!p.has_preview,
     }));
 
     res.json({

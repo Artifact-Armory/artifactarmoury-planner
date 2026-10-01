@@ -113,7 +113,7 @@ export async function rebakeModel(modelId: string): Promise<RebakeResult> {
             ) AS open_job
        FROM model_parts p
        JOIN models m ON m.id = p.model_id
-      WHERE p.model_id = $1 AND p.processing_status = 'ready'
+      WHERE p.model_id = $1 AND p.processing_status = 'ready' AND p.preview_skipped = false
       ORDER BY p.display_order NULLS LAST, p.created_at`,
     [modelId],
   )

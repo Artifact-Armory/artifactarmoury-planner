@@ -70,6 +70,12 @@ export const modelsApi = {
     /** The clean preview file's original filename (drives its format detection). */
     displayFilename?: string
     /**
+     * Opt-out for the first named model: by default, when a preview file is
+     * attached, that model's other part files are download-only (not baked, not
+     * placeable in the planner). True keeps them placeable as well.
+     */
+    keepPartsPlaceable?: boolean
+    /**
      * Extra STL parts for a multi-part "set" model (primary is the main rawKey).
      * `groupIndex`/`groupName` place a part inside a named component — group 0 is
      * the primary file's component, 1..N are the ones added after it.
@@ -87,6 +93,8 @@ export const modelsApi = {
       isPresupported?: boolean
       /** The clean preview file's raw/ key — required when isPresupported is true. */
       displayRawKey?: string
+      /** Same opt-out as the top-level keepPartsPlaceable, for this component. */
+      keepPartsPlaceable?: boolean
       /** Per-component planner thumbnail (only meaningful on a component's first/primary part). */
       thumbnailKey?: string
     }>
@@ -124,7 +132,7 @@ export const modelsApi = {
   attachPartPreview: async (
     modelId: string,
     partId: string,
-    data: { rawKey: string; filename: string },
+    data: { rawKey: string; filename: string; skipOtherParts?: boolean },
   ): Promise<{ partId: string; processingStatus: string }> => {
     const response = await apiClient.post(`${BASE_URL}/${modelId}/parts/${partId}/preview`, data, { timeout: 60_000 })
     return response.data
@@ -133,9 +141,46 @@ export const modelsApi = {
   /** Add a new named model (one or more files) to an already-published listing. */
   addComponent: async (
     modelId: string,
-    data: { groupName?: string; parts: Array<{ rawKey: string; filename: string; name?: string }> },
+    data: {
+      groupName?: string
+      parts: Array<{ rawKey: string; filename: string; name?: string }>
+      /** Optional preview file standing in for this model on the planner. */
+      displayRawKey?: string
+      displayFilename?: string
+      /** Keep the separate part files placeable too (default: download-only when a preview is given). */
+      keepPartsPlaceable?: boolean
+    },
   ): Promise<{ groupIndex: number; partIds: string[] }> => {
     const response = await apiClient.post(`${BASE_URL}/${modelId}/parts`, data, { timeout: 60_000 })
+    return response.data
+  },
+
+  /**
+   * Replace the files (the ZIP contents) of one named model, optionally with a new
+   * preview. Omitting the preview keeps the current one. Old files stay live until
+   * the new ones process; owners are notified they can re-download free.
+   */
+  replaceComponent: async (
+    modelId: string,
+    groupIndex: number,
+    data: {
+      parts: Array<{ rawKey: string; filename: string; name?: string }>
+      displayRawKey?: string
+      displayFilename?: string
+      keepPartsPlaceable?: boolean
+      notes?: string
+    },
+  ): Promise<{ groupIndex: number; partIds: string[] }> => {
+    const response = await apiClient.put(`${BASE_URL}/${modelId}/components/${groupIndex}`, data, { timeout: 60_000 })
+    return response.data
+  },
+
+  /** Replace the listing's own preview model (first named model). Print files untouched. */
+  replacePrimaryPreview: async (
+    modelId: string,
+    data: { rawKey: string; filename: string; skipOtherParts?: boolean },
+  ): Promise<{ modelId: string; processingStatus: string }> => {
+    const response = await apiClient.post(`${BASE_URL}/${modelId}/preview`, data, { timeout: 60_000 })
     return response.data
   },
 

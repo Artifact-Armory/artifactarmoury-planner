@@ -56,7 +56,7 @@
 
 import { db } from '../../db';
 import logger from '../../utils/logger';
-import { processUploadedModel, processModelVersionUpdate, processPartPreviewAttach, processNewComponent } from './process';
+import { processUploadedModel, processModelVersionUpdate, processPartPreviewAttach, processNewComponent, processPrimaryPreviewUpdate } from './process';
 
 const log = logger.child('MODEL_INGEST');
 
@@ -84,7 +84,7 @@ const LARGE_JOB_BYTES = Number(process.env.MODEL_INGEST_LARGE_BYTES ?? 150 * 102
 /** Fixed arbitrary key for the cluster-wide "one large ingest job at a time" lock. */
 const LARGE_JOB_LOCK_KEY = 834127001;
 
-export type IngestJobType = 'upload' | 'version' | 'part_preview' | 'new_component';
+export type IngestJobType = 'upload' | 'version' | 'part_preview' | 'new_component' | 'primary_preview';
 
 export interface UploadPayload {
   rawKey: string;
@@ -111,6 +111,18 @@ export interface PartPreviewPayload {
 /** An artist adding a new named component to an already-published listing (2026-09-04). */
 export interface NewComponentPayload {
   partIds: string[];
+  /** Set when this REPLACES an existing named model's files: the rows to retire once the new ones succeed. */
+  replacePartIds?: string[] | null;
+  /** Changelog note recorded when a replacement bumps the file version. */
+  notes?: string | null;
+  rawBytes?: number | null;
+}
+
+/** An artist replacing the listing's own preview file (2026-10-01). */
+export interface PrimaryPreviewPayload {
+  rawKey: string;
+  filename?: string | null;
+  skipOtherParts?: boolean;
   rawBytes?: number | null;
 }
 
@@ -118,7 +130,7 @@ export interface IngestJobRow {
   id: string;
   model_id: string;
   job_type: IngestJobType;
-  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload;
+  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload | PrimaryPreviewPayload;
   status: string;
   attempts: number;
   max_attempts: number;
@@ -188,7 +200,7 @@ export async function isLargeJobLockHeld(): Promise<boolean> {
 async function enqueueIngestJob(input: {
   modelId: string;
   jobType: IngestJobType;
-  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload;
+  payload: UploadPayload | VersionPayload | PartPreviewPayload | NewComponentPayload | PrimaryPreviewPayload;
 }): Promise<string | null> {
   const { rows } = await db.query(
     `INSERT INTO model_ingest_jobs (model_id, job_type, payload, status)
@@ -285,18 +297,51 @@ export async function dispatchPartPreviewAttach(input: {
 export async function dispatchNewComponentIngest(input: {
   modelId: string;
   partIds: string[];
+  replacePartIds?: string[];
+  notes?: string | null;
   rawBytes?: number | null;
 }): Promise<void> {
   if (isIngestWorkerEnabled()) {
     await enqueueIngestJob({
       modelId: input.modelId,
       jobType: 'new_component',
-      payload: { partIds: input.partIds, rawBytes: input.rawBytes ?? null },
+      payload: {
+        partIds: input.partIds,
+        replacePartIds: input.replacePartIds ?? null,
+        notes: input.notes ?? null,
+        rawBytes: input.rawBytes ?? null,
+      },
     });
     return;
   }
-  processNewComponent(input.modelId, input.partIds).catch((err) =>
+  processNewComponent(input.modelId, input.partIds, { replacePartIds: input.replacePartIds, notes: input.notes }).catch((err) =>
     logger.error('processNewComponent crashed', { error: err, modelId: input.modelId, partIds: input.partIds }),
+  );
+}
+
+/** Called from the replace-preview route. Same worker/in-process split as above. */
+export async function dispatchPrimaryPreviewUpdate(input: {
+  modelId: string;
+  rawKey: string;
+  filename?: string;
+  skipOtherParts?: boolean;
+  rawBytes?: number | null;
+}): Promise<void> {
+  if (isIngestWorkerEnabled()) {
+    await enqueueIngestJob({
+      modelId: input.modelId,
+      jobType: 'primary_preview',
+      payload: {
+        rawKey: input.rawKey,
+        filename: input.filename ?? null,
+        skipOtherParts: !!input.skipOtherParts,
+        rawBytes: input.rawBytes ?? null,
+      },
+    });
+    return;
+  }
+  processPrimaryPreviewUpdate(input.modelId, input.rawKey, input.filename, !!input.skipOtherParts).catch((err) =>
+    logger.error('processPrimaryPreviewUpdate crashed', { error: err, modelId: input.modelId }),
   );
 }
 

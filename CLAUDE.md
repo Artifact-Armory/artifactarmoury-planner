@@ -759,6 +759,38 @@ client-side fail before wasting an upload — must match) updated to match.
   worker restart, not a site outage. Still unprofiled — watch worker memory on the first real upload
   near 5M.
 
+## Preview file replaces a named model's part files in the planner (built 2026-10-01, migration 067)
+The preview upload in `CreateModel.tsx` is no longer tied to "has supports" — it's an optional field on
+every named model (pre-assembled one-piece model, or a support-free copy). When one is attached, that
+model is placed in the planner as that single asset and its OTHER print files are **download-only**:
+`model_parts.preview_skipped = true`, set at insert time in `POST /from-upload`. `processOnePart` still
+runs the full anti-theft dedup + hash/fingerprint on them (and canonicalises non-STL files for the ZIP)
+but builds no GLB and enqueues no bake or owner-GLB job; `/sets`, `rebake.ts` and both backfill scripts
+ignore them. Opt-out per model: `keepPartsPlaceable` (checkbox shown only with a preview + >1 file) keeps
+the old behaviour. For group 0 with skipped siblings the listing's `width/depth/height` come from the
+**preview** (the planner scales the GLB to them; part 1's dims would squash the assembled model).
+Not built: making the preview mandatory. Both projects typecheck clean; **untested against a real Postgres
+or a real upload** (DB_MOCK limitation).
+
+**Updating a live listing (built 2026-10-01, no new migration).** `EditModel.tsx` now lets an artist change
+the ZIP files and/or the preview:
+- `PUT /:id/components/:groupIndex` replaces a named model's part files (group 0 = its extra files only),
+  optionally with a new preview; omitting the preview **carries the current one over**. Reuses the
+  `new_component` ingest job (`processNewComponent(..., {replacePartIds, notes})`): old rows/files are retired
+  only after the new ones succeed, then the file version is bumped and owners notified. A rejected replacement
+  deletes the new rows, leaves the old ones and restores `processing_status` (the dedup path calls
+  `markModelFailed` on the whole listing, which must not stick on a live one).
+- `POST /:id/preview` (new `primary_preview` job, `processPrimaryPreviewUpdate`) swaps the listing's own
+  preview only: no version bump, owners not notified. Component 1..N preview-only goes through the existing
+  `POST /:id/parts/:partId/preview`, now taking `skipOtherParts`.
+- `POST /:id/parts` (add a model) also accepts a preview + `keepPartsPlaceable`.
+- `processModelVersionUpdate` now keeps drawing the preview from an existing `display_stl_path` instead of
+  regenerating it from the new print file (which would have brought supports/split parts back).
+- Replacing group 0's extras so they become download-only re-measures the preview and stores its size as the
+  listing's dimensions (`syncPlannerDimsToPreviewIfSkipped`), so the planner doesn't squash the assembled model.
+- Limits: flipping `keepPartsPlaceable` to true is only possible by re-uploading the files (replace); no
+  single-file replace (a whole named model's files are replaced together).
+
 ## Model ingest moved to the worker queue (built 2026-09-03, migration 057)
 Upload processing — download from R2, file-hash + geometry-fingerprint dedup, `parseSTL`
 (the triangle-capped parse above), mesh QA, dims, the pure-Node preview-GLB fallback — ran

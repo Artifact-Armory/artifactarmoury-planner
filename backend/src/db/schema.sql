@@ -333,6 +333,9 @@ CREATE TABLE model_parts (
     -- Per-component planner thumbnail (migration 058). Only meaningful on a
     -- component's first/primary part — see that migration's comment.
     thumbnail_path VARCHAR(500),
+    -- Download-only part (migration 067): a sibling preview file stands in for its
+    -- whole named model on the planner, so no GLB/bake is built for this one.
+    preview_skipped BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

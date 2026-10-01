@@ -64,6 +64,7 @@ async function main() {
        FROM model_parts p
        JOIN models m ON m.id = p.model_id
       WHERE p.processing_status = 'ready'
+        AND p.preview_skipped = false
         AND p.stl_file_path IS NOT NULL
         AND m.status <> 'archived'
       ORDER BY m.created_at DESC`,

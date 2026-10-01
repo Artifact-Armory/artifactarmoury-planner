@@ -108,6 +108,23 @@ const EditModel: React.FC = () => {
   const [showAddComponent, setShowAddComponent] = React.useState(false)
   const [newComponentName, setNewComponentName] = React.useState('')
   const [newComponentFiles, setNewComponentFiles] = React.useState<File[]>([])
+  const [newComponentPreview, setNewComponentPreview] = React.useState<File | null>(null)
+  const [newComponentKeep, setNewComponentKeep] = React.useState(false)
+
+  // "Update files" for one named model: new part files for the ZIP and/or a new
+  // preview model. One form open at a time, keyed by the model's group index.
+  const [updGroup, setUpdGroup] = React.useState<number | null>(null)
+  const [updFiles, setUpdFiles] = React.useState<File[]>([])
+  const [updPreview, setUpdPreview] = React.useState<File | null>(null)
+  const [updKeep, setUpdKeep] = React.useState(false)
+  const [updNotes, setUpdNotes] = React.useState('')
+  const [updBusy, setUpdBusy] = React.useState(false)
+  const [updMsg, setUpdMsg] = React.useState<string | null>(null)
+  const [updErr, setUpdErr] = React.useState<string | null>(null)
+
+  // File version form: a new main print file and/or a new preview model.
+  const [versionPreview, setVersionPreview] = React.useState<File | null>(null)
+  const [versionSkipOthers, setVersionSkipOthers] = React.useState(true)
 
   const load = React.useCallback(async () => {
     if (!id) return
@@ -291,6 +308,83 @@ const EditModel: React.FC = () => {
     }
   }
 
+  /** Wait until the model and all of its parts have stopped processing. */
+  async function pollUntilSettled(modelId: string): Promise<TerrainModel | null> {
+    let last: TerrainModel | null = null
+    for (let i = 0; i < 150; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      last = await modelsApi.getModelById(modelId)
+      setModel(last)
+      if (last.processingStatus !== 'processing' && !(last.parts ?? []).some((p) => p.processingStatus === 'processing')) break
+    }
+    return last
+  }
+
+  function openUpdateForm(groupIndex: number, previewHasSiblings: boolean) {
+    setUpdGroup(groupIndex)
+    setUpdFiles([])
+    setUpdPreview(null)
+    setUpdKeep(previewHasSiblings)
+    setUpdNotes('')
+    setUpdMsg(null)
+    setUpdErr(null)
+  }
+
+  /**
+   * Update one named model: new part files for the download ZIP and/or a new
+   * preview model. Anything left out keeps its current version.
+   */
+  async function handleUpdateComponent(e: React.FormEvent, groupIndex: number, firstPartId: string | null) {
+    e.preventDefault()
+    if (!id || (updFiles.length === 0 && !updPreview)) return
+    setUpdErr(null)
+    setUpdMsg(null)
+    setUpdBusy(true)
+    try {
+      let previewKey: string | undefined
+      if (updPreview) previewKey = (await uploadsApi.uploadDirect(updPreview, 'raw')).key
+
+      if (updFiles.length > 0) {
+        const parts = []
+        for (const file of updFiles) {
+          const { key } = await uploadsApi.uploadDirect(file, 'raw')
+          parts.push({ rawKey: key, filename: file.name })
+        }
+        await modelsApi.replaceComponent(id, groupIndex, {
+          parts,
+          displayRawKey: previewKey,
+          displayFilename: updPreview?.name,
+          keepPartsPlaceable: previewKey ? updKeep : undefined,
+          notes: updNotes.trim() || undefined,
+        })
+      } else if (previewKey && updPreview) {
+        // Preview only: the print files (and the buyers' download) don't change.
+        if (groupIndex === 0) {
+          await modelsApi.replacePrimaryPreview(id, { rawKey: previewKey, filename: updPreview.name, skipOtherParts: !updKeep })
+        } else if (firstPartId) {
+          await modelsApi.attachPartPreview(id, firstPartId, { rawKey: previewKey, filename: updPreview.name, skipOtherParts: !updKeep })
+        }
+      }
+      const settled = await pollUntilSettled(id)
+      if (settled?.processingError) {
+        setUpdErr(settled.processingError)
+      } else {
+        setUpdMsg(updFiles.length > 0
+          ? 'Updated. Owners have been notified and can re-download the new files free.'
+          : 'Preview updated.')
+        setUpdGroup(null)
+        setUpdFiles([])
+        setUpdPreview(null)
+        setUpdNotes('')
+      }
+      await load()
+    } catch (err) {
+      setUpdErr(errMessage(err, 'Could not update this model'))
+    } finally {
+      setUpdBusy(false)
+    }
+  }
+
   async function handleAddComponent(e: React.FormEvent) {
     e.preventDefault()
     if (!id || newComponentFiles.length === 0) return
@@ -302,9 +396,21 @@ const EditModel: React.FC = () => {
         const { key } = await uploadsApi.uploadDirect(file, 'raw')
         parts.push({ rawKey: key, filename: file.name })
       }
-      await modelsApi.addComponent(id, { groupName: newComponentName.trim() || undefined, parts })
+      let displayRawKey: string | undefined
+      if (newComponentPreview) {
+        displayRawKey = (await uploadsApi.uploadDirect(newComponentPreview, 'raw')).key
+      }
+      await modelsApi.addComponent(id, {
+        groupName: newComponentName.trim() || undefined,
+        parts,
+        displayRawKey,
+        displayFilename: newComponentPreview?.name,
+        keepPartsPlaceable: displayRawKey ? newComponentKeep : undefined,
+      })
       setNewComponentName('')
       setNewComponentFiles([])
+      setNewComponentPreview(null)
+      setNewComponentKeep(false)
       setShowAddComponent(false)
       await load()
     } catch (err) {
@@ -384,28 +490,44 @@ const EditModel: React.FC = () => {
 
   async function handleNewVersion(e: React.FormEvent) {
     e.preventDefault()
-    if (!id || !versionFile) return
+    if (!id || (!versionFile && !versionPreview)) return
     setVersionErr(null)
     setVersionMsg(null)
     setVersionBusy(true)
     try {
-      const { key } = await uploadsApi.uploadDirect(versionFile, 'raw')
-      await modelsApi.uploadNewVersion(id, {
-        rawKey: key,
-        filename: versionFile.name,
-        notes: versionNotes.trim() || undefined,
-      })
-      await pollProcessing(id)
-      // A dedup/geometry rejection is recorded as processing_error but leaves the
-      // model 'ready' with the OLD file — surface it rather than claiming success.
-      const refreshed = await modelsApi.getModelById(id)
-      const rejected = refreshed.processingError
+      let rejected: string | null | undefined = null
+      if (versionFile) {
+        const { key } = await uploadsApi.uploadDirect(versionFile, 'raw')
+        await modelsApi.uploadNewVersion(id, {
+          rawKey: key,
+          filename: versionFile.name,
+          notes: versionNotes.trim() || undefined,
+        })
+        await pollProcessing(id)
+        // A dedup/geometry rejection is recorded as processing_error but leaves the
+        // model 'ready' with the OLD file — surface it rather than claiming success.
+        rejected = (await modelsApi.getModelById(id)).processingError
+      }
+      if (versionPreview && !rejected) {
+        const { key } = await uploadsApi.uploadDirect(versionPreview, 'raw')
+        await modelsApi.replacePrimaryPreview(id, {
+          rawKey: key,
+          filename: versionPreview.name,
+          skipOtherParts: (model?.partCount ?? 1) > 1 && versionSkipOthers,
+        })
+        await pollProcessing(id)
+        rejected = (await modelsApi.getModelById(id)).processingError
+      }
+      const sentFile = !!versionFile
       setVersionFile(null)
+      setVersionPreview(null)
       setVersionNotes('')
       if (rejected) {
         setVersionErr(rejected)
       } else {
-        setVersionMsg('New version published. Owners have been notified and can re-download it free.')
+        setVersionMsg(sentFile
+          ? 'New version published. Owners have been notified and can re-download it free.'
+          : 'Preview updated.')
       }
       await load()
     } catch (err) {
@@ -894,6 +1016,88 @@ const EditModel: React.FC = () => {
                     </div>
                   ))}
                 </div>
+
+                {/* Update this model: new part files for the download ZIP and/or a new
+                    preview model. Whatever is left out keeps its current version. */}
+                <div className="mt-3 border-t border-border pt-3">
+                  {updGroup !== g.index ? (
+                    <button
+                      type="button"
+                      onClick={() => openUpdateForm(g.index, g.rows.length > 1)}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                    >
+                      <Upload size={13} /> Update files or preview
+                    </button>
+                  ) : (
+                    <form onSubmit={(e) => handleUpdateComponent(e, g.index, g.index === 0 ? null : (g.rows[0]?.id ?? null))} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">Update {g.name || (g.index === 0 ? 'Model 1' : `Model ${g.index + 1}`)}</p>
+                        <button type="button" onClick={() => setUpdGroup(null)} className="text-muted-foreground hover:text-foreground" disabled={updBusy}>
+                          <X size={16} />
+                        </button>
+                      </div>
+                      {(g.index > 0 || g.rows.length > 1) && (
+                        <div>
+                          <label className="block text-xs font-medium mb-1">
+                            New print files for the download ZIP <span className="font-normal text-muted-foreground">(optional)</span>
+                          </label>
+                          <p className="text-xs text-muted-foreground mb-1.5">
+                            {g.index === 0
+                              ? "Replaces this model's extra files (its main file is replaced under File version below)."
+                              : "Replaces all of this model's current files — choose every file it should now contain."}
+                          </p>
+                          <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent ${updBusy ? 'pointer-events-none opacity-50' : ''}`}>
+                            <Upload size={15} />
+                            {updFiles.length > 0 ? `${updFiles.length} file${updFiles.length === 1 ? '' : 's'} selected` : 'Choose file(s)…'}
+                            <input type="file" accept=".stl,.obj,.3mf" multiple className="hidden" disabled={updBusy}
+                              onChange={(e) => setUpdFiles(Array.from(e.target.files ?? []))} />
+                          </label>
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          New preview model <span className="font-normal text-muted-foreground">(optional)</span>
+                        </label>
+                        <p className="text-xs text-muted-foreground mb-1.5">
+                          Upload this if the model changed so the preview still matches — ideally pre-assembled, in one piece.
+                          Leave it out to keep the current preview.
+                        </p>
+                        <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent ${updBusy ? 'pointer-events-none opacity-50' : ''}`}>
+                          <Upload size={15} />
+                          {updPreview ? updPreview.name : 'Choose file…'}
+                          <input type="file" accept=".stl,.obj,.3mf" className="hidden" disabled={updBusy}
+                            onChange={(e) => setUpdPreview(e.target.files?.[0] ?? null)} />
+                        </label>
+                      </div>
+                      {updPreview && (g.index > 0 || g.rows.length > 1) && (
+                        <label className="flex items-start gap-2 text-sm">
+                          <input type="checkbox" className="mt-0.5" checked={updKeep} disabled={updBusy}
+                            onChange={(e) => setUpdKeep(e.target.checked)} />
+                          <span>
+                            <span className="font-medium block">Also let buyers place the separate part files in the planner</span>
+                            <span className="text-xs text-muted-foreground">
+                              Off: buyers get your preview as one piece on the table and still download every file.
+                            </span>
+                          </span>
+                        </label>
+                      )}
+                      {updFiles.length > 0 && (
+                        <div>
+                          <label className="block text-xs font-medium mb-1">What changed? <span className="font-normal text-muted-foreground">(optional, shown to buyers)</span></label>
+                          <textarea className="w-full border rounded-sm px-3 py-2 text-sm" rows={2} maxLength={1000}
+                            value={updNotes} onChange={(e) => setUpdNotes(e.target.value)} disabled={updBusy} />
+                        </div>
+                      )}
+                      {updMsg && <p className="text-sm text-green-700">{updMsg}</p>}
+                      {updErr && <p className="text-sm text-red-600">{updErr}</p>}
+                      <button type="submit" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground text-sm disabled:opacity-50"
+                        disabled={updBusy || (updFiles.length === 0 && !updPreview)}>
+                        {updBusy ? 'Updating…' : 'Update'}
+                      </button>
+                    </form>
+                  )}
+                  {updGroup !== g.index && updMsg && <p className="mt-2 text-xs text-green-700">{updMsg}</p>}
+                </div>
               </div>
             ))}
           </div>
@@ -948,6 +1152,33 @@ const EditModel: React.FC = () => {
                     />
                   </label>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">
+                    Preview model <span className="font-normal text-muted-foreground">(optional)</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground mb-1.5">
+                    Buyers prefer previews that show the finished model pre-assembled, in one piece. If your
+                    print files are split up, upload your pre-built model here.
+                  </p>
+                  <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent ${addingComponent ? 'pointer-events-none opacity-50' : ''}`}>
+                    <Upload size={15} />
+                    {newComponentPreview ? newComponentPreview.name : 'Choose file…'}
+                    <input type="file" accept=".stl,.obj,.3mf" className="hidden" disabled={addingComponent}
+                      onChange={(e) => setNewComponentPreview(e.target.files?.[0] ?? null)} />
+                  </label>
+                </div>
+                {newComponentPreview && newComponentFiles.length > 1 && (
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-0.5" checked={newComponentKeep} disabled={addingComponent}
+                      onChange={(e) => setNewComponentKeep(e.target.checked)} />
+                    <span>
+                      <span className="font-medium block">Also let buyers place the separate part files in the planner</span>
+                      <span className="text-xs text-muted-foreground">
+                        Off: buyers get your preview as one piece on the table and still download every file.
+                      </span>
+                    </span>
+                  </label>
+                )}
                 <button
                   type="submit"
                   className="px-4 py-2 rounded-sm bg-primary text-primary-foreground text-sm disabled:opacity-50"
@@ -970,7 +1201,8 @@ const EditModel: React.FC = () => {
           {model?.filesUpdatedAt && (
             <> · updated {new Date(model.filesUpdatedAt).toLocaleDateString()}</>
           )}
-          . Upload a fixed or improved file and everyone who owns this model can re-download it free.
+          . Upload a fixed or improved file and everyone who owns this model can re-download it free. If the
+          model changed, upload a new preview model too so the marketplace and planner still match it.
         </p>
 
         <form onSubmit={handleNewVersion} className="mt-4 space-y-3">
@@ -985,6 +1217,36 @@ const EditModel: React.FC = () => {
               onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
             />
           </label>
+          <div>
+            <label className="block text-sm mb-1">New preview model <span className="font-normal text-muted-foreground">(optional)</span></label>
+            <p className="text-xs text-muted-foreground mb-1.5">
+              Buyers prefer previews that show the finished model pre-assembled, in one piece. Leave it out to keep the
+              current preview. Buyers don't receive this file.
+            </p>
+            <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${versionBusy ? 'pointer-events-none opacity-50' : ''}`}>
+              <Upload size={16} />
+              {versionPreview ? versionPreview.name : 'Choose file…'}
+              <input
+                type="file"
+                accept=".stl,.obj,.3mf"
+                className="hidden"
+                disabled={versionBusy}
+                onChange={(e) => setVersionPreview(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {versionPreview && (model?.partCount ?? 1) > 1 && (
+              <label className="mt-2 flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={versionSkipOthers} disabled={versionBusy}
+                  onChange={(e) => setVersionSkipOthers(e.target.checked)} />
+                <span>
+                  <span className="font-medium block">Use it instead of this model's other part files in the planner</span>
+                  <span className="text-xs text-muted-foreground">
+                    Untick to keep those part files placeable separately as well.
+                  </span>
+                </span>
+              </label>
+            )}
+          </div>
           <div>
             <label className="block text-sm mb-1">What changed? <span className="font-normal text-muted-foreground">(optional, shown to buyers)</span></label>
             <textarea
@@ -1002,9 +1264,9 @@ const EditModel: React.FC = () => {
           <button
             type="submit"
             className="px-4 py-2 rounded-sm border border-border text-foreground hover:bg-accent disabled:opacity-50"
-            disabled={versionBusy || !versionFile}
+            disabled={versionBusy || (!versionFile && !versionPreview)}
           >
-            {versionBusy ? 'Publishing new version…' : 'Publish new version'}
+            {versionBusy ? 'Publishing…' : versionFile ? 'Publish new version' : 'Update preview'}
           </button>
         </form>
       </div>

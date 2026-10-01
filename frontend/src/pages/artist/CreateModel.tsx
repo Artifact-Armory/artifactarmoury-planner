@@ -66,13 +66,19 @@ type Component = {
   key: string
   name: string
   files: File[]
-  // Pre-supported print file for THIS component: when its primary file already
-  // has supports built in, isPresupported reveals a per-component upload for a
-  // support-free version used only to render that component's preview. One per
-  // named model, not one for the whole listing — a grouped listing otherwise
-  // has no way to say which of its several models needs this.
-  isPresupported: boolean
+  // Optional clean preview for THIS component — a pre-assembled one-piece model
+  // when its print files are split up, or a support-free copy when its print
+  // file has supports built in. Used only to render that component's preview.
+  // One per named model, not one for the whole listing — a grouped listing
+  // otherwise has no way to say which of its several models needs this. Sent to
+  // the API as isPresupported + displayRawKey (the backend's name for "this
+  // model's preview comes from a separate file").
   previewFile: File | null
+  // Only meaningful with a preview file and more than one print file. By default
+  // the preview is the ONLY thing placed in the planner for this model and its
+  // print files are download-only (never baked); ticking this keeps each print
+  // file placeable separately as well.
+  keepPartsPlaceable: boolean
   // Optional thumbnail shown in the planner palette so a buyer can tell this
   // named model apart from the rest of the set — only offered for components
   // after the first (component 0 already has the listing's own required
@@ -82,7 +88,7 @@ type Component = {
 
 let componentKeySeq = 0
 const newComponent = (): Component => ({
-  key: `c${componentKeySeq++}`, name: '', files: [], isPresupported: false, previewFile: null, thumbnailFile: null,
+  key: `c${componentKeySeq++}`, name: '', files: [], previewFile: null, keepPartsPlaceable: false, thumbnailFile: null,
 })
 
 const CreateModel: React.FC = () => {
@@ -258,10 +264,6 @@ const CreateModel: React.FC = () => {
     }
     for (let ci = 0; ci < components.length; ci++) {
       const c = components[ci]
-      if (c.isPresupported && !c.previewFile) {
-        setError(`Upload a support-free preview model for ${componentLabel(ci)}, or untick "pre-supported"`)
-        return
-      }
       if (c.previewFile && !MESH_FILE_RE.test(c.previewFile.name)) {
         setError(`The preview model for ${componentLabel(ci)} must be an .stl, .obj or .3mf`)
         return
@@ -294,7 +296,7 @@ const CreateModel: React.FC = () => {
       // thumbnail also fills a gallery-photo slot (see derivedGalleryKeys
       // below) rather than being uploaded twice, so only whatever's left of
       // the gallery cap after those actually gets uploaded here.
-      const previewFileCount = components.filter((c) => c.isPresupported && c.previewFile).length
+      const previewFileCount = components.filter((c) => c.previewFile).length
       const galleryUploadCount = Math.min(galleryFiles.length, gallerySlotsAvailable)
       const totalUploads = allFiles.length + 1 + galleryUploadCount + previewFileCount + componentThumbCount
       let uploadsDone = 0
@@ -329,7 +331,7 @@ const CreateModel: React.FC = () => {
         uploadsDone++
         derivedGalleryKeys.push(primaryThumbnailKey)
       }
-      if (primaryComp.isPresupported && primaryComp.previewFile) {
+      if (primaryComp.previewFile) {
         startFile(primaryComp.previewFile.name)
         displayRawKey = (await uploadsApi.uploadDirect(primaryComp.previewFile, 'raw', bump)).key
         uploadsDone++
@@ -341,7 +343,7 @@ const CreateModel: React.FC = () => {
       //    that's the component's primary file, same idea as component 0 above.
       const parts: Array<{
         rawKey: string; filename: string; name: string; groupIndex: number; groupName?: string
-        isPresupported?: boolean; displayRawKey?: string; thumbnailKey?: string
+        isPresupported?: boolean; displayRawKey?: string; thumbnailKey?: string; keepPartsPlaceable?: boolean
       }> = []
       for (let ci = 0; ci < components.length; ci++) {
         const comp = components[ci]
@@ -353,7 +355,7 @@ const CreateModel: React.FC = () => {
           let partDisplayRawKey: string | undefined
           let partThumbnailKey: string | undefined
           const isComponentPrimary = ci > 0 && fi === 0
-          if (isComponentPrimary && comp.isPresupported && comp.previewFile) {
+          if (isComponentPrimary && comp.previewFile) {
             startFile(comp.previewFile.name)
             partDisplayRawKey = (await uploadsApi.uploadDirect(comp.previewFile, 'raw', bump)).key
             uploadsDone++
@@ -373,7 +375,8 @@ const CreateModel: React.FC = () => {
             name: baseName(f.name),
             groupIndex: ci,
             groupName: comp.name.trim() || undefined,
-            isPresupported: isComponentPrimary && comp.isPresupported ? true : undefined,
+            isPresupported: partDisplayRawKey ? true : undefined,
+            keepPartsPlaceable: partDisplayRawKey && comp.keepPartsPlaceable ? true : undefined,
             displayRawKey: partDisplayRawKey,
             thumbnailKey: partThumbnailKey,
           })
@@ -415,7 +418,8 @@ const CreateModel: React.FC = () => {
         primaryThumbnailKey,
         galleryKeys: galleryKeys.length ? galleryKeys : undefined,
         showInPlanner,
-        isPresupported: primaryComp.isPresupported,
+        isPresupported: displayRawKey ? true : undefined,
+        keepPartsPlaceable: displayRawKey && primaryComp.keepPartsPlaceable ? true : undefined,
         displayRawKey,
         parts: parts.length ? parts : undefined,
         // Names the primary file's component — only meaningful once the listing is
@@ -721,60 +725,57 @@ const CreateModel: React.FC = () => {
                 )}
 
                 <div className="mt-3 border-t border-border/70 pt-3">
-                  <label className="flex items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={comp.isPresupported}
-                      onChange={(e) =>
-                        patchComponent(ci, {
-                          isPresupported: e.target.checked,
-                          previewFile: e.target.checked ? comp.previewFile : null,
-                        })
-                      }
-                      disabled={busy}
-                    />
-                    <span>
-                      <span className="font-medium block">
-                        {componentLabel(ci)}'s print file already has supports
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        If this model's main file is pre-supported (common for resin models), the
-                        marketplace and 3D planner preview would otherwise be built from all those
-                        support struts. Tick this and upload a separate, support-free version
-                        below — it's used only to render this model's preview. Buyers still
-                        download your actual print file, supports included.
-                      </span>
-                    </span>
+                  <div className="mb-2 rounded-sm border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+                    <span className="font-medium">Tip:</span> buyers prefer previews that show the
+                    finished model pre-assembled, in one piece. If your print files are split up,
+                    upload your pre-built model as the preview.
+                  </div>
+                  <label className="block text-sm font-medium mb-1">
+                    Preview model <span className="text-xs font-normal text-muted-foreground">(optional)</span>
                   </label>
-
-                  {comp.isPresupported && (
-                    <div className="mt-2">
-                      <label className="block text-sm font-medium mb-1">
-                        Preview model (no supports) <span className="text-red-500">*</span>
-                      </label>
-                      <p className="text-xs text-muted-foreground mb-2">
-                        A clean version of this model — ideally the whole thing assembled in one
-                        file, even if its print files are split into separate parts. Only used to
-                        build the preview; never given to buyers.
-                      </p>
-                      <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-                        <Upload size={16} />
-                        {comp.previewFile ? 'Change file…' : 'Choose file…'}
-                        <input
-                          type="file"
-                          accept=".stl,.obj,.3mf"
-                          className="hidden"
-                          disabled={busy}
-                          onChange={(e) => patchComponent(ci, { previewFile: e.target.files?.[0] ?? null })}
-                        />
-                      </label>
-                      {comp.previewFile && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {comp.previewFile.name} · {(comp.previewFile.size / 1_048_576).toFixed(1)} MB
-                        </p>
-                      )}
-                    </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    A separate file used only to render {componentLabel(ci)}'s marketplace and 3D
+                    planner preview — never given to buyers, who still download your actual print
+                    files. Use it for a pre-assembled version of split-up print files, or a
+                    support-free version if your print file already has supports built in (common
+                    for resin models; the preview would otherwise show every strut).
+                  </p>
+                  <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                    <Upload size={16} />
+                    {comp.previewFile ? 'Change file…' : 'Choose file…'}
+                    <input
+                      type="file"
+                      accept=".stl,.obj,.3mf"
+                      className="hidden"
+                      disabled={busy}
+                      onChange={(e) => patchComponent(ci, { previewFile: e.target.files?.[0] ?? null })}
+                    />
+                  </label>
+                  {comp.previewFile && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {comp.previewFile.name} · {(comp.previewFile.size / 1_048_576).toFixed(1)} MB
+                    </p>
+                  )}
+                  {comp.previewFile && comp.files.length > 1 && (
+                    <label className="mt-2 flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={comp.keepPartsPlaceable}
+                        onChange={(e) => patchComponent(ci, { keepPartsPlaceable: e.target.checked })}
+                        disabled={busy}
+                      />
+                      <span>
+                        <span className="font-medium block">
+                          Also let buyers place {componentLabel(ci)}'s separate part files in the planner
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Off by default: buyers get your preview as one piece on the table and still
+                          download every part file. Tick this only if the parts are meant to be
+                          arranged individually (e.g. floors or wall sections).
+                        </span>
+                      </span>
+                    </label>
                   )}
                 </div>
 

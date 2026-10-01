@@ -8,7 +8,7 @@
 
 import os from 'os';
 import logger from '../../utils/logger';
-import { processUploadedModel, processModelVersionUpdate, processPartPreviewAttach, processNewComponent } from './process';
+import { processUploadedModel, processModelVersionUpdate, processPartPreviewAttach, processNewComponent, processPrimaryPreviewUpdate } from './process';
 import {
   claimNextIngestJob,
   completeIngestJob,
@@ -24,6 +24,7 @@ import {
   type VersionPayload,
   type PartPreviewPayload,
   type NewComponentPayload,
+  type PrimaryPreviewPayload,
 } from './queue';
 
 const log = logger.child('MODEL_INGEST');
@@ -100,9 +101,12 @@ export async function runOneIngestJob(workerId = MODEL_INGEST_WORKER_ID): Promis
     } else if (job.job_type === 'part_preview') {
       const p = job.payload as PartPreviewPayload;
       await processPartPreviewAttach(job.model_id, p.partId);
+    } else if (job.job_type === 'primary_preview') {
+      const p = job.payload as PrimaryPreviewPayload;
+      await processPrimaryPreviewUpdate(job.model_id, p.rawKey, p.filename ?? undefined, !!p.skipOtherParts);
     } else {
       const p = job.payload as NewComponentPayload;
-      await processNewComponent(job.model_id, p.partIds);
+      await processNewComponent(job.model_id, p.partIds, { replacePartIds: p.replacePartIds ?? undefined, notes: p.notes ?? null });
     }
     await completeIngestJob(job);
   } catch (err) {

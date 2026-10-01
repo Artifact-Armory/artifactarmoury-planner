@@ -214,6 +214,27 @@ export async function processUploadedModel(
       return;
     }
     const stlData = analysis.stlData;
+    // When the listing's own preview file stands in for the whole first named
+    // model (its other part files are download-only, migration 067), the preview
+    // is the assembled model and the planner scales its GLB to these dimensions,
+    // so they must come from the preview, not from part 1 of the print files
+    // (which would squash the assembled model into part 1's footprint). The
+    // print-time/volume figures below still read the print file.
+    let planDims = stlData.dimensions;
+    if (displayStlPathForDb) {
+      const skippedSiblings = await db.query(
+        'SELECT 1 FROM model_parts WHERE model_id = $1 AND group_index = 0 AND preview_skipped LIMIT 1', [modelId],
+      );
+      if (skippedSiblings.rows.length > 0) {
+        const previewAnalysis = await isolatedStlAnalysis(previewSourceLocalPath, { includeMeshQA: false });
+        if (isIsolatedFailure(previewAnalysis)) {
+          await markModelFailed(modelId, `Preview file: ${previewAnalysis.reason}`);
+          await safeDeleteObject(rawKey);
+          return;
+        }
+        planDims = previewAnalysis.stlData.dimensions;
+      }
+    }
     // Advisory mesh QA (watertight/manifold). Never blocks the upload.
     const meshQA = analysis.meshQA!;
     const bakeEnabled = isBakeWorkerEnabled();
@@ -281,7 +302,7 @@ export async function processUploadedModel(
        WHERE id = $20`,
       [
         glbStoragePath,
-        stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
+        planDims.x, planDims.y, planDims.z,
         Math.round(printEstimate.estimated_time_hours * 60),
         Number(printEstimate.total_cost.toFixed(2)),
         stlData.needsSupports,
@@ -385,8 +406,16 @@ export async function processModelVersionUpdate(
     // model is still theft). Self is excluded, so re-uploading a tweak is fine.
     // As above: only a clash with ANOTHER artist blocks. Replacing a model's file
     // with one the artist already uses elsewhere is their business.
-    const ownerId: string | null =
-      (await db.query('SELECT artist_id FROM models WHERE id = $1', [modelId])).rows[0]?.artist_id ?? null;
+    const existingRow = (
+      await db.query('SELECT artist_id, display_stl_path, width, depth, height FROM models WHERE id = $1', [modelId])
+    ).rows[0];
+    const ownerId: string | null = existingRow?.artist_id ?? null;
+    // A listing that already has a separate preview file (pre-assembled and/or
+    // support-free) keeps drawing its preview from THAT file. Rebuilding the
+    // preview from the new print file here would bring supports or split parts
+    // straight back into the marketplace card and the planner. The artist swaps
+    // the preview itself through POST /:id/preview.
+    const existingDisplay: string | null = existingRow?.display_stl_path ?? null;
 
     const fileHash = computeFileHash(stlBuffer);
     const dup = await db.query(
@@ -421,11 +450,22 @@ export async function processModelVersionUpdate(
     }
     const stlData = analysis.stlData;
     const meshQA = analysis.meshQA!;
+    // Planner dimensions follow the preview when its sibling part files are
+    // download-only (see processUploadedModel), so keep the stored ones then.
+    let dims = stlData.dimensions;
+    if (existingDisplay && existingRow?.width != null) {
+      const skipped = await db.query(
+        'SELECT 1 FROM model_parts WHERE model_id = $1 AND group_index = 0 AND preview_skipped LIMIT 1', [modelId],
+      );
+      if (skipped.rows.length > 0) {
+        dims = { x: Number(existingRow.width), y: Number(existingRow.depth), z: Number(existingRow.height) } as typeof dims;
+      }
+    }
     const bakeEnabled = isBakeWorkerEnabled();
     // Preview GLB: baked out-of-process by the worker, or the pure-Node fallback.
     // When baking we keep the OLD preview via COALESCE until the new bake lands.
     let glbStoragePath: string | null = null;
-    if (!bakeEnabled) {
+    if (!bakeEnabled && !existingDisplay) {
       const glbPath = await generateGLB(stlTmp);
       glbStoragePath = await uploadToStorage(glbPath, 'previews');
     }
@@ -472,7 +512,7 @@ export async function processModelVersionUpdate(
        RETURNING file_version`,
       [
         glbStoragePath,
-        stlData.dimensions.x, stlData.dimensions.y, stlData.dimensions.z,
+        dims.x, dims.y, dims.z,
         Math.round(printEstimate.estimated_time_hours * 60),
         Number(printEstimate.total_cost.toFixed(2)),
         stlData.needsSupports,
@@ -487,14 +527,14 @@ export async function processModelVersionUpdate(
         modelId,
         // Baking keeps the model 'processing' until the new proxy is ready; the
         // pure-Node path already wrote the new preview so it's ready immediately.
-        bakeEnabled ? 'processing' : 'ready',
+        bakeEnabled && !existingDisplay ? 'processing' : 'ready',
       ]
     );
 
     const newVersion: number = updated.rows[0]?.file_version ?? 2;
 
     // Re-bake the preview for the new primary mesh (worker flips it back to ready).
-    if (bakeEnabled) {
+    if (bakeEnabled && !existingDisplay) {
       const bakeSourceKey = format === 'obj' ? rawKey : newStlPath;
       const bakeSourceFormat = format === 'obj' ? 'obj' : 'stl';
       await enqueueBakeJob({ modelId, partId: null, sourceKey: bakeSourceKey, sourceFormat: bakeSourceFormat });
@@ -504,7 +544,9 @@ export async function processModelVersionUpdate(
     // free, so what they see in the planner has to follow the file too. The old
     // full GLB keeps serving until the rebuild lands, then completeFullGlbJob
     // deletes it — a buyer never gets a broken model mid-rebuild.
-    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: newStlPath });
+    if (!existingDisplay) {
+      await enqueueFullGlbJob({ modelId, partId: null, sourceKey: newStlPath });
+    }
 
     // Record the changelog entry, then notify owners they can re-download free.
     await db.query(
@@ -543,6 +585,7 @@ interface PartRow {
   id: string; name: string; stl_file_path: string;
   is_presupported: boolean; display_stl_path: string | null;
   group_index: number; group_name: string | null;
+  preview_skipped: boolean;
 }
 type PartOutcome = { outcome: 'ready' } | { outcome: 'no_preview'; reason: string };
 
@@ -606,6 +649,31 @@ async function processOnePart(
       if (geoDup.own && selfMatches && !selfMatches.includes(geoDup.own.name)) {
         selfMatches.push(geoDup.own.name);
       }
+    }
+
+    // Download-only part (migration 067): a sibling preview file stands in for
+    // this named model on the planner, so there is nothing to bake or place.
+    // Dedup above still ran (anti-theft is unchanged); keep the hash/fingerprint
+    // for later dedup scans and make sure a non-STL file's canonical STL exists
+    // for the ZIP, then stop: no analysis, GLB, bake job or owner-GLB job.
+    if (part.preview_skipped) {
+      let skippedCanonicalPath: string | null = null;
+      let skippedSourcePath: string | null = null;
+      if (format !== 'stl') {
+        const canonTmp = path.join(tmpDir, 'canonical.stl');
+        await fsp.writeFile(canonTmp, stlBuffer);
+        skippedCanonicalPath = await uploadToStorage(canonTmp, 'models');
+        skippedSourcePath = part.stl_file_path;
+      }
+      await db.query(
+        `UPDATE model_parts SET file_hash = $1, geometry_fingerprint = $2,
+                source_format = $3, source_file_path = $4,
+                stl_file_path = COALESCE($5, stl_file_path),
+                processing_status = 'ready', processing_error = NULL
+          WHERE id = $6`,
+        [fileHash, fingerprint ? JSON.stringify(fingerprint) : null, format, skippedSourcePath, skippedCanonicalPath, part.id],
+      );
+      return { outcome: 'ready' };
     }
 
     const noPreview = async (reason: string): Promise<PartOutcome> => {
@@ -770,7 +838,7 @@ async function processModelParts(
   selfMatches?: string[],
 ): Promise<void> {
   const { rows: parts } = await db.query(
-    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name, preview_skipped
        FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
     [modelId]
   );
@@ -818,7 +886,7 @@ async function processModelParts(
  */
 export async function processPartPreviewAttach(modelId: string, partId: string): Promise<void> {
   const { rows } = await db.query(
-    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name, preview_skipped
        FROM model_parts WHERE id = $1 AND model_id = $2`,
     [partId, modelId],
   );
@@ -883,9 +951,20 @@ export async function processPartPreviewAttach(modelId: string, partId: string):
  * unlike the initial-upload path, there's no "whole listing" to protect here;
  * everything else this model sells is untouched either way.
  */
-export async function processNewComponent(modelId: string, partIds: string[]): Promise<void> {
+export async function processNewComponent(
+  modelId: string,
+  partIds: string[],
+  opts: { replacePartIds?: string[]; notes?: string | null } = {},
+): Promise<void> {
+  const replacePartIds = opts.replacePartIds ?? [];
+  const replacing = replacePartIds.length > 0;
+  // A dedup/theft rejection below runs markModelFailed on the WHOLE listing; for
+  // an edit to a live listing that must not leave it 'failed', so remember where
+  // it was and put it back.
+  const prevStatus: string | null =
+    (await db.query('SELECT processing_status FROM models WHERE id = $1', [modelId])).rows[0]?.processing_status ?? null;
   const { rows } = await db.query(
-    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name
+    `SELECT id, name, stl_file_path, is_presupported, display_stl_path, group_index, group_name, preview_skipped
        FROM model_parts WHERE id = ANY($1) AND model_id = $2`,
     [partIds, modelId],
   );
@@ -912,20 +991,38 @@ export async function processNewComponent(modelId: string, partIds: string[]): P
     );
     for (const p of remaining) {
       await safeDeleteObject(p.stl_file_path);
-      if (p.display_stl_path) await safeDeleteObject(p.display_stl_path);
+      // A replacement can reuse the previous preview file (artist didn't upload a
+      // new one); never delete a preview the live rows still point at.
+      if (p.display_stl_path && !(await displayPathStillUsed(p.display_stl_path, partIds))) {
+        await safeDeleteObject(p.display_stl_path);
+      }
     }
     await db.query(`DELETE FROM model_parts WHERE id = ANY($1) AND model_id = $2`, [partIds, modelId]);
     await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [modelId, partIds.length]);
+    if (prevStatus === 'ready') {
+      await db.query(
+        `UPDATE models SET processing_status = 'ready', processing_error = $2 WHERE id = $1`,
+        [modelId, replacing ? 'The replacement files were rejected — your existing files are unchanged.' : null],
+      ).catch(() => {});
+    }
     logger.warn('processNewComponent: rejected, component removed', { modelId, partIds, error: err });
     return;
   }
+
+  // Replacement succeeded: only now retire the old files, and tell owners (their
+  // download ZIP just changed, so they can re-download it free).
+  if (replacing) await finalizeComponentReplace(modelId, replacePartIds, opts.notes ?? null);
+  // The listing's own named model just got download-only part files: its preview is
+  // now the whole model, so the planner dimensions must describe the preview.
+  await syncPlannerDimsToPreviewIfSkipped(modelId, partIds);
+  const verb = replacing ? 'Updated' : 'Added';
 
   if (needsPreview.length > 0 && uploaderId) {
     const plural = needsPreview.length > 1;
     await createNotification({
       userId: uploaderId,
       type: 'model.part_needs_preview',
-      title: `Added "${groupName ?? 'new model'}" — needs a preview`,
+      title: `${verb} "${groupName ?? 'new model'}" — needs a preview`,
       body:
         `${needsPreview.map((p) => `"${p.name}"`).join(', ')} ${plural ? 'are' : 'is'} too dense to safely preview on the planner. ` +
         `Attach a decimated version from My Models to add ${plural ? 'their' : 'its'} planner preview.`,
@@ -936,8 +1033,10 @@ export async function processNewComponent(modelId: string, partIds: string[]): P
     await createNotification({
       userId: uploaderId,
       type: 'model.part_preview_attached',
-      title: `Added "${groupName ?? 'new model'}" to your listing`,
-      body: `The new model is live and placeable in the planner.`,
+      title: `${verb} "${groupName ?? 'new model'}" on your listing`,
+      body: replacing
+        ? `The new files are live. Owners were notified that they can re-download for free.`
+        : `The new model is live and placeable in the planner.`,
       link: '/artist/models',
       modelId,
     });
@@ -1043,4 +1142,197 @@ async function markModelFailed(modelId: string, reason: string): Promise<void> {
 
 export async function safeDeleteObject(key: string): Promise<void> {
   try { await deleteObject(key); } catch (err) { logger.warn('Failed to delete quarantined object', { error: err, key }); }
+}
+
+/** Is this preview-file key still referenced by a part row outside `excludeIds`? */
+async function displayPathStillUsed(key: string, excludeIds: string[]): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM model_parts WHERE display_stl_path = $1 AND id <> ALL($2::uuid[]) LIMIT 1`,
+    [key, excludeIds],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Bump the listing's file version, record the changelog entry and tell every owner
+ * they can re-download free. Shared by the replace-files paths (the primary-file
+ * path in processModelVersionUpdate predates this and does the same inline).
+ */
+async function bumpFileVersionAndNotify(modelId: string, notes: string | null): Promise<void> {
+  const updated = await db.query(
+    `UPDATE models SET file_version = file_version + 1, version_notes = $2, files_updated_at = NOW(), updated_at = NOW()
+      WHERE id = $1 RETURNING file_version`,
+    [modelId, notes],
+  );
+  const newVersion: number = updated.rows[0]?.file_version ?? 2;
+  await db.query(
+    `INSERT INTO model_versions (model_id, version, notes) VALUES ($1, $2, $3)
+     ON CONFLICT (model_id, version) DO NOTHING`,
+    [modelId, newVersion, notes],
+  );
+  await notifyOwnersOfModelUpdate(modelId, newVersion, notes);
+}
+
+/**
+ * The replacement component's files all processed — retire the files it replaces.
+ * Order matters: the old rows stay live until the new ones have succeeded, so a
+ * rejected replacement leaves the listing exactly as it was.
+ */
+async function finalizeComponentReplace(modelId: string, oldIds: string[], notes: string | null): Promise<void> {
+  const { rows: old } = await db.query(
+    `SELECT id, stl_file_path, source_file_path, display_stl_path FROM model_parts WHERE model_id = $1 AND id = ANY($2::uuid[])`,
+    [modelId, oldIds],
+  );
+  await db.query(`DELETE FROM model_parts WHERE model_id = $1 AND id = ANY($2::uuid[])`, [modelId, oldIds]);
+  await db.query(`UPDATE models SET part_count = GREATEST(part_count - $2, 1) WHERE id = $1`, [modelId, old.length]);
+  for (const o of old) {
+    await safeDeleteObject(o.stl_file_path);
+    if (o.source_file_path) await safeDeleteObject(o.source_file_path);
+    // The new carrier may point at the very same preview file (carried over).
+    if (o.display_stl_path && !(await displayPathStillUsed(o.display_stl_path, oldIds))) {
+      await safeDeleteObject(o.display_stl_path);
+    }
+  }
+  await bumpFileVersionAndNotify(modelId, notes);
+}
+
+/**
+ * Replace the listing's OWN preview file (the one that stands in for its first
+ * named model on the planner and product page). The print files — what buyers
+ * download — are untouched, so no new version is recorded and owners aren't
+ * notified. Same dedup as any other upload; on rejection the old preview stays.
+ */
+export async function processPrimaryPreviewUpdate(
+  modelId: string,
+  displayRawKey: string,
+  displayFilename: string | undefined,
+  skipOtherParts: boolean,
+): Promise<void> {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-prev-'));
+  try {
+    const row = (await db.query('SELECT artist_id, display_stl_path FROM models WHERE id = $1', [modelId])).rows[0];
+    if (!row) { await safeDeleteObject(displayRawKey); return; }
+    const uploaderId: string | null = row.artist_id ?? null;
+    const oldDisplay: string | null = row.display_stl_path ?? null;
+
+    const displayFormat: MeshFormat = meshFormatFromName(displayFilename || displayRawKey) ?? 'stl';
+    const displayStlTmp = path.join(tmpDir, 'display.stl');
+    const displayStlBuffer = convertToStl(await downloadObject(displayRawKey), displayFormat);
+    await fsp.writeFile(displayStlTmp, displayStlBuffer);
+
+    const hashDup = await db.query(
+      'SELECT id, name, artist_id FROM models WHERE file_hash = $1 AND id <> $2',
+      [computeFileHash(displayStlBuffer), modelId],
+    );
+    if (hashDup.rows.some((r: any) => r.artist_id !== uploaderId)) {
+      await failVersionUpdate(modelId, duplicateMessage('file', 'preview model') + ' Your existing preview is unchanged.');
+      await safeDeleteObject(displayRawKey);
+      return;
+    }
+    const fpResult = await isolatedFingerprint(displayStlTmp);
+    if (isIsolatedFailure(fpResult)) {
+      await failVersionUpdate(modelId, `Preview file: ${fpResult.reason}`);
+      await safeDeleteObject(displayRawKey);
+      return;
+    }
+    const geoDup = await findGeometryDuplicate(fpResult.fingerprint, modelId, uploaderId);
+    if (geoDup.foreign) {
+      await failVersionUpdate(modelId, duplicateMessage('geometry', 'preview model') + ' Your existing preview is unchanged.');
+      await safeDeleteObject(displayRawKey);
+      return;
+    }
+
+    let displayStlPathForDb = displayRawKey;
+    if (displayFormat !== 'stl') {
+      const canonTmp = path.join(tmpDir, 'display-canonical.stl');
+      await fsp.writeFile(canonTmp, displayStlBuffer);
+      displayStlPathForDb = await uploadToStorage(canonTmp, 'models');
+    }
+
+    // The planner scales the preview GLB to the listing's dimensions, so when the
+    // other part files are download-only the dimensions must describe the preview.
+    if (skipOtherParts) {
+      await db.query(`UPDATE model_parts SET preview_skipped = true WHERE model_id = $1 AND group_index = 0`, [modelId]);
+    }
+    const hasSkipped = (await db.query(
+      'SELECT 1 FROM model_parts WHERE model_id = $1 AND group_index = 0 AND preview_skipped LIMIT 1', [modelId],
+    )).rows.length > 0;
+    let dimsX: number | null = null, dimsY: number | null = null, dimsZ: number | null = null;
+    if (hasSkipped) {
+      const analysis = await isolatedStlAnalysis(displayStlTmp, { includeMeshQA: false });
+      if (isIsolatedFailure(analysis)) {
+        await failVersionUpdate(modelId, `Preview file: ${analysis.reason}`);
+        await safeDeleteObject(displayRawKey);
+        return;
+      }
+      dimsX = analysis.stlData.dimensions.x; dimsY = analysis.stlData.dimensions.y; dimsZ = analysis.stlData.dimensions.z;
+    }
+
+    const bakeEnabled = isBakeWorkerEnabled();
+    let glbStoragePath: string | null = null;
+    if (!bakeEnabled) {
+      glbStoragePath = await uploadToStorage(await generateGLB(displayStlTmp), 'previews');
+    }
+
+    await db.query(
+      `UPDATE models SET
+         display_stl_path = $1, is_presupported = true,
+         glb_file_path = COALESCE($2, glb_file_path),
+         width = COALESCE($3, width), depth = COALESCE($4, depth), height = COALESCE($5, height),
+         processing_status = $6, processing_error = NULL, updated_at = NOW()
+       WHERE id = $7`,
+      [displayStlPathForDb, glbStoragePath, dimsX, dimsY, dimsZ, bakeEnabled ? 'processing' : 'ready', modelId],
+    );
+    if (bakeEnabled) {
+      await enqueueBakeJob({ modelId, partId: null, sourceKey: displayStlPathForDb, sourceFormat: 'stl' });
+    }
+    await enqueueFullGlbJob({ modelId, partId: null, sourceKey: displayStlPathForDb });
+
+    if (oldDisplay && oldDisplay !== displayStlPathForDb) await safeDeleteObject(oldDisplay);
+    logger.info('Primary preview replaced', { modelId, bakeEnabled });
+  } catch (error) {
+    logger.error('Primary preview update failed', { error, modelId });
+    await failVersionUpdate(modelId, (error as Error)?.message?.slice(0, 300) || 'Preview update failed');
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * If any of `partIds` is a download-only part of the listing's own named model
+ * (group 0) and the listing has a preview file, re-measure that preview and store
+ * its size as the listing's dimensions. The planner scales the preview GLB to
+ * these, so leaving the print file's (part 1 only) would squash the assembled model.
+ * Never fails the job — on any problem the previous dimensions simply stay.
+ */
+async function syncPlannerDimsToPreviewIfSkipped(modelId: string, partIds: string[]): Promise<void> {
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aa-dims-'));
+  try {
+    const skipped = await db.query(
+      `SELECT 1 FROM model_parts WHERE id = ANY($1::uuid[]) AND group_index = 0 AND preview_skipped LIMIT 1`,
+      [partIds],
+    );
+    if (skipped.rows.length === 0) return;
+    const displayPath: string | null =
+      (await db.query('SELECT display_stl_path FROM models WHERE id = $1', [modelId])).rows[0]?.display_stl_path ?? null;
+    if (!displayPath) return;
+
+    const format: MeshFormat = meshFormatFromName(displayPath) ?? 'stl';
+    const stlTmp = path.join(tmpDir, 'preview.stl');
+    await fsp.writeFile(stlTmp, convertToStl(await downloadObject(displayPath), format));
+    const analysis = await isolatedStlAnalysis(stlTmp, { includeMeshQA: false });
+    if (isIsolatedFailure(analysis)) {
+      logger.warn('Could not re-measure preview for planner dimensions', { modelId, reason: analysis.reason });
+      return;
+    }
+    const d = analysis.stlData.dimensions;
+    await db.query(
+      `UPDATE models SET width = $1, depth = $2, height = $3, updated_at = NOW() WHERE id = $4`,
+      [d.x, d.y, d.z, modelId],
+    );
+  } catch (err) {
+    logger.warn('syncPlannerDimsToPreviewIfSkipped failed — dimensions left as they were', { modelId, error: err });
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 }

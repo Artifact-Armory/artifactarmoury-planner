@@ -181,6 +181,10 @@ export interface TerrainModel {
     /** Component ("included model") this part belongs to — 0 is the primary's. */
     groupIndex?: number
     groupName?: string | null
+    /** Download-only: a sibling preview file stands in for this part's named model on the planner. */
+    previewSkipped?: boolean
+    /** This part carries its own separate preview file. */
+    hasPreview?: boolean
   }>
   /**
    * Name of the component that owns the primary file, when the listing groups its

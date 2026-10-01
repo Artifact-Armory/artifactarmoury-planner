@@ -205,6 +205,8 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     processingError: p.processing_error ?? p.processingError ?? undefined,
     groupIndex: Number(p.group_index ?? p.groupIndex ?? 0),
     groupName: p.group_name ?? p.groupName ?? null,
+    previewSkipped: !!(p.preview_skipped ?? p.previewSkipped),
+    hasPreview: !!(p.has_preview ?? p.hasPreview),
   })),
   primaryGroupName: model.primary_group_name ?? model.primaryGroupName ?? null,
   featuredInTables:
