@@ -79,13 +79,44 @@ export interface SendEmailParams {
   replyTo?: string
   /** Overrides FROM_EMAIL (the generic noreply@ sender) — e.g. support@ for a support reply. */
   from?: string
+  /** Add the logo header + light colour scheme. Default true; off for plain person-to-person mail. */
+  brand?: boolean
+}
+
+// Logo hosted with the storefront (frontend/public/email/logo.png) — a flat PNG,
+// because Gmail and Outlook won't render SVG. Override the base for staging.
+const EMAIL_ASSET_BASE = (process.env.EMAIL_ASSET_BASE || FRONTEND_URL).replace(/\/$/, '')
+
+const LOGO_HEADER = `
+  <div style="text-align: center; padding: 8px 0 24px 0; margin-bottom: 24px; border-bottom: 1px solid #e5e7eb;">
+    <a href="${FRONTEND_URL}" style="text-decoration: none;">
+      <img src="${EMAIL_ASSET_BASE}/email/logo.png" width="150" alt="Artifact Armoury" style="display: inline-block; width: 150px; max-width: 60%; height: auto; border: 0;">
+    </a>
+  </div>`
+
+/**
+ * Give an HTML email the site's look: white page, logo header on top, and a
+ * "light only" colour-scheme hint so dark-mode clients don't invert the logo's
+ * white tile into a muddle. Templates that have no <body> (plain internal
+ * alerts) are returned untouched.
+ */
+function brandHtml(html: string): string {
+  if (!/<body[^>]*>/i.test(html)) return html
+  return html
+    .replace(
+      /<head>/i,
+      '<head>\n  <meta name="color-scheme" content="light only">\n  <meta name="supported-color-schemes" content="light only">',
+    )
+    .replace(/<body style="/i, '<body style="background: #ffffff; ')
+    .replace(/(<body[^>]*>)/i, `$1${LOGO_HEADER}`)
 }
 
 /**
  * Send email via Resend or log if not configured
  */
 export async function sendEmail(params: SendEmailParams): Promise<void> {
-  const { to, subject, html, text, replyTo, from } = params
+  const { to, subject, text, replyTo, from, brand = true } = params
+  const html = brand ? brandHtml(params.html) : params.html
 
   try {
     if (!resend) {
@@ -149,7 +180,7 @@ export async function sendEmailBatch(messages: BatchMessage[]): Promise<void> {
           from: FROM_EMAIL,
           to: [m.to],
           subject: m.subject,
-          html: m.html,
+          html: brandHtml(m.html),
           text: stripHtml(m.html),
           ...(m.headers ? { headers: m.headers } : {}),
         })),
@@ -404,7 +435,7 @@ export async function sendOrderConfirmation(
 
   const itemsHtml = items.map(item => {
     const downloadLink = item.modelId
-      ? `<a href="${FRONTEND_URL}/models/${item.modelId}" style="color: #bf6a15; font-weight: 600; font-size: 14px; text-decoration: none;">Download &rarr;</a>`
+      ? `<a href="${FRONTEND_URL}/models/${item.modelId}" style="color: #2563eb; font-weight: 600; font-size: 14px; text-decoration: none;">Download &rarr;</a>`
       : `<span style="color: #9ca3af; font-size: 14px;">Available in your account</span>`
     return `
     <tr>
@@ -454,8 +485,7 @@ export async function sendOrderConfirmation(
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
 
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="color: #111827; font-size: 28px; margin: 0;">Artifact Armoury</h1>
-    <p style="color: #6b7280; margin-top: 8px;">Order confirmation</p>
+    <h1 style="color: #111827; font-size: 28px; margin: 0;">Order confirmation</h1>
   </div>
 
   <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
@@ -492,11 +522,11 @@ export async function sendOrderConfirmation(
     </table>
   </div>
 
-  <div style="background: #fbf3e8; border: 1px solid #e7c79a; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-    <p style="margin: 0; color: #7c4a12; font-size: 14px;">
+  <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <p style="margin: 0; color: #1e40af; font-size: 14px;">
       <strong>How to print:</strong> open your STL in your slicer of choice, scale
       to taste, and print. Multi-part sets download as a single ZIP with every part
-      inside. Need help? Email <a href="mailto:${SUPPORT_EMAIL}" style="color: #7c4a12;">${SUPPORT_EMAIL}</a>.
+      inside. Need help? Email <a href="mailto:${SUPPORT_EMAIL}" style="color: #1e40af;">${SUPPORT_EMAIL}</a>.
     </p>
   </div>
 
@@ -784,7 +814,8 @@ export async function sendContactMessageToSupport(params: ContactMessageParams):
     to: SUPPORT_EMAIL,
     subject: `[Contact] ${subject}`,
     html,
-    replyTo: email
+    replyTo: email,
+    brand: false
   })
 }
 
@@ -881,6 +912,7 @@ export async function sendContactReply(params: ContactReplyParams): Promise<void
     html,
     from: SUPPORT_EMAIL,
     replyTo: SUPPORT_EMAIL,
+    brand: false,
   })
 }
 
