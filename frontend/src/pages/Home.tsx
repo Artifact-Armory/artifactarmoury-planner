@@ -21,13 +21,13 @@ const FEATURES = [
   },
   {
     icon: RefreshCcw,
-    title: 'Buy the STL once, print it forever',
-    body: 'One purchase per model, no per-print fee. Print one copy or twenty for a full table of scenery.',
+    title: 'Pay once, print as many as you like',
+    body: 'Every model is yours to keep with no per-print fees. Print one piece or fill the whole table.',
   },
   {
     icon: ShieldCheck,
-    title: 'Every upload is mesh-checked',
-    body: 'We run each STL through automated watertight and manifold checks before it lists, so what you download prints cleanly instead of arriving as a broken mesh.',
+    title: 'Quality you can trust',
+    body: 'We pride ourselves on making sure customers get high quality models and our artists get the protection their work deserves.',
   },
 ] as const
 
