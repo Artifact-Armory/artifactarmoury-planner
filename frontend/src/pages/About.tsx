@@ -23,8 +23,8 @@ const About: React.FC = () => {
         <h2 className="text-lg font-semibold">For players &amp; hobbyists</h2>
         <ul className="mt-3 space-y-2 text-muted-foreground leading-relaxed list-disc pl-5">
           <li>
-            Browse a growing catalogue of buildings, scatter, nature and complete
-            sets, filtered by type, era, scale and condition.
+            Browse a growing catalogue of terrain, vehicles and characters,
+            filtered by type, era, scale, condition and more.
           </li>
           <li>
             Design your battlefield in the{' '}
@@ -45,12 +45,12 @@ const About: React.FC = () => {
         <h2 className="text-lg font-semibold">For artists</h2>
         <ul className="mt-3 space-y-2 text-muted-foreground leading-relaxed list-disc pl-5">
           <li>
-            Upload your STLs and we generate a 3D preview and print estimate
-            automatically — no manual conversion needed.
+            Upload your STL, OBJ or 3MF files and we generate a 3D preview and
+            print estimate automatically — no manual conversion needed.
           </li>
           <li>
             Group related models into <strong>bundles</strong> at a single price,
-            and sell multi-part sets as one listing.
+            or sell several named models and multi-part sets as one listing.
           </li>
           <li>
             Track sales and engagement from your artist dashboard.
