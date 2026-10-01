@@ -5,6 +5,14 @@ terrain models; a full-screen planner lets them lay out a table and push the
 whole build into the cart. Sellers ("artists") upload STLs that are processed,
 watermarked on download, and protected against re-upload.
 
+## Working rules
+- If my request is ambiguous, ask one clarifying question before doing anything.
+- Preplan your tool calls, and group them in batches where it makes sense; wait for
+  them all to return before reading any.
+- Don't trust assumptions when verifiable information exists. Assess confidence
+  before acting.
+- Do not apologize — just fix it and tell me what changed.
+
 ## Stack (the real one — ignore any Ruby/Rails mentions in old docs)
 - **Frontend:** React 18 + Vite 5 + TypeScript + Tailwind. 3D planner uses
   **Three.js 0.160 (vanilla, no R3F)** + Zustand, at
