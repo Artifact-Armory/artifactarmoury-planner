@@ -19,7 +19,7 @@ export const artistTourSteps: TourStep[] = [
   {
     target: 'nav-upload',
     title: 'Upload a model',
-    body: 'Add an STL here. We generate the 3D preview and print estimate for you, and watermark every download to protect your work.',
+    body: 'Add an STL here. We generate the 3D preview for you, and watermark every download to protect your work.',
   },
   {
     target: 'nav-models',

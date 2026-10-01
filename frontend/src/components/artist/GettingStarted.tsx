@@ -93,7 +93,7 @@ const GettingStarted: React.FC = () => {
       title: 'Upload your first model',
       body: (
         <>
-          Drop in your file and we will make the 3D preview and print estimate for you.
+          Drop in your file and we will make the 3D preview for you.
           <span className="mt-1.5 block">
             While we are at it: people browsing the site never receive your actual file —
             they see a low-detail stand-in that cannot be printed. Each buyer&apos;s

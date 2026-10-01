@@ -19,7 +19,7 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
     test: (p) => p === '/artist/models/new',
     entry: {
       title: 'Uploading a model',
-      intro: 'Add an STL and we do the rest — 3D preview, print estimate, and a per-buyer watermark on every download.',
+      intro: 'Add an STL and we do the rest — 3D preview and a per-buyer watermark on every download.',
       sections: [
         { heading: 'Classification', body: 'The four starred dropdowns (type, era, scale, condition) are required — they decide which searches your model appears in. Tick everything that applies; use the search box in each list to find a term fast.' },
         { heading: 'Extra parts', body: 'If your piece comes as several STLs (e.g. separate floors), add them as extra parts. Buyers pay once, download all parts as a ZIP, and can place each part in the planner.' },
@@ -115,7 +115,7 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
       sections: [
         { heading: 'Date range', body: 'Every tile compares the selected range against the previous one — the % chip shows the trend. Click a tile to drill into sales, product funnels, ratings or buyer searches.' },
         { heading: 'Sales ledger', body: 'The table below the tiles lists every completed sale — item, buyer, order and what you earned (net of the 15% marketplace fee).' },
-        { heading: 'Upload models', body: 'Use “Upload New Model” to add an STL — we generate the preview and print estimate automatically.' },
+        { heading: 'Upload models', body: 'Use “Upload New Model” to add an STL — we generate the preview automatically.' },
       ],
       showTour: true,
     },

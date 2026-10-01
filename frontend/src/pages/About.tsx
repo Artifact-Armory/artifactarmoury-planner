@@ -45,8 +45,8 @@ const About: React.FC = () => {
         <h2 className="text-lg font-semibold">For artists</h2>
         <ul className="mt-3 space-y-2 text-muted-foreground leading-relaxed list-disc pl-5">
           <li>
-            Upload your STL, OBJ or 3MF files and we generate a 3D preview and
-            print estimate automatically — no manual conversion needed.
+            Upload your STL, OBJ or 3MF files and we generate the 3D preview
+            automatically — no manual conversion needed.
           </li>
           <li>
             Group related models into <strong>bundles</strong> at a single price,

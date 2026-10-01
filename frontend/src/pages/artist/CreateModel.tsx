@@ -473,7 +473,7 @@ const CreateModel: React.FC = () => {
       <h1 className="text-xl font-semibold">Create Model</h1>
       <p className="text-muted-foreground mt-1">
         Upload your files and details — one model, a multi-part piece, or a whole group like a
-        “Small Village” sold as one product. We’ll generate the 3D previews and print estimate for you.
+        “Small Village” sold as one product. We’ll generate the 3D previews for you.
       </p>
       <p className="text-muted-foreground mt-2 text-sm">
         Visitors never receive your real file, and each buyer’s download is prepared just for
