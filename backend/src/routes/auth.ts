@@ -17,7 +17,26 @@ import {
 import { authRateLimit, emailRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, ConflictError, AuthenticationError } from '../middleware/error';
-import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordChangedEmail } from '../services/email';
+import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordChangedEmail, sendNoticeEmail } from '../services/email';
+
+/** Security notice when 2FA is switched on/off, so a hijacked session can't do it silently. Best-effort. */
+function emailTwoFactorChange(userId: string, enabled: boolean): void {
+  db.query('SELECT email FROM users WHERE id = $1', [userId])
+    .then((r) => {
+      const to = r.rows[0]?.email;
+      if (!to) return;
+      return sendNoticeEmail({
+        to,
+        subject: enabled ? 'Two-factor authentication turned on' : 'Two-factor authentication turned off',
+        heading: enabled ? 'Two-factor authentication is on' : 'Two-factor authentication is off',
+        paragraphs: enabled
+          ? ['Two-factor authentication was just turned on for your Artifact Armoury account. You\'ll be asked for a code from your authenticator app when you sign in.']
+          : ['Two-factor authentication was just turned off for your Artifact Armoury account. Anyone with your password can now sign in without a code.'],
+        warning: "Wasn't you?",
+      });
+    })
+    .catch((err) => logger.error('2FA change email failed', { error: err, userId }));
+}
 import {
   generateTotpSecret,
   buildOtpauthUrl,
@@ -30,7 +49,7 @@ import {
 import crypto from 'crypto';
 import {
   SELLER_TERMS_VERSION, checkInvite, assertInviteUsable,
-  validateArtistName, assertTermsAccepted,
+  validateArtistName, assertTermsAccepted, sendWelcomeToNewArtist,
 } from '../services/artistOnboarding';
 import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
@@ -123,7 +142,7 @@ async function issueVerificationEmail(user: {
 // ============================================================================
 
 router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
-  const { email, password, displayName } = req.body;
+  const { email, password, displayName, marketingEmails } = req.body;
 
   // Validate input
   if (!email || !password || !displayName) {
@@ -153,10 +172,12 @@ router.post('/register', authRateLimit, asyncHandler(async (req, res) => {
 
   // Create user
   const result = await db.query(
-    `INSERT INTO users (email, password_hash, display_name, role)
-     VALUES ($1, $2, $3, 'customer')
+    // marketingEmails is the optional, unticked-by-default sign-up box: consent to
+    // emails about artists they follow. Only an explicit true counts.
+    `INSERT INTO users (email, password_hash, display_name, role, email_follow_updates, marketing_consent_at)
+     VALUES ($1, $2, $3, 'customer', $4, CASE WHEN $4 THEN CURRENT_TIMESTAMP END)
      RETURNING id, email, display_name, role, created_at`,
-    [email.toLowerCase(), passwordHash, sanitizeString(displayName)]
+    [email.toLowerCase(), passwordHash, sanitizeString(displayName), marketingEmails === true]
   );
 
   const user = result.rows[0];
@@ -280,6 +301,8 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
     const refreshToken = generateRefreshToken(user);
 
     logger.info('Artist registered', { userId: user.id, email: user.email, artistName: user.artist_name });
+
+    void sendWelcomeToNewArtist(user.id);
 
     // Send the email-verification link (the user row is committed at this point).
     await issueVerificationEmail(user);
@@ -843,6 +866,8 @@ router.post('/upgrade-to-artist', authenticate, asyncHandler(async (req: any, re
 
     logger.info('Account upgraded to artist', { userId, artistName: user.artist_name });
 
+    void sendWelcomeToNewArtist(userId);
+
     res.json({
       message: 'Your account is now an artist account.',
       user: {
@@ -969,6 +994,7 @@ router.post('/2fa/enable', authenticate, asyncHandler(async (req, res) => {
     [userId, req.ip]
   );
   logger.info('2FA enabled', { userId });
+  emailTwoFactorChange(userId, true);
 
   res.json({ message: 'Two-factor authentication is on.', backupCodes: plain });
 }));
@@ -1008,6 +1034,7 @@ router.post('/2fa/disable', authenticate, asyncHandler(async (req, res) => {
     [userId, req.ip]
   );
   logger.info('2FA disabled', { userId });
+  emailTwoFactorChange(userId, false);
 
   res.json({ message: 'Two-factor authentication has been turned off.' });
 }));

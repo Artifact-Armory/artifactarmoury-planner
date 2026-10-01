@@ -9,6 +9,7 @@ import ModelGrid from '../components/models/ModelGrid'
 import ModelCard from '../components/models/ModelCard'
 import { artistsApi } from '../api/endpoints/artists'
 import { messagesApi } from '../api/endpoints/messages'
+import { emailPrefsApi } from '../api/endpoints/emailPrefs'
 import { ArtistShowcase } from '../api/types'
 import { useAuthStore } from '../store/authStore'
 import Seo from '../components/common/Seo'
@@ -30,6 +31,10 @@ const ArtistProfile: React.FC = () => {
   const [following, setFollowing] = useState(false)
   const [followerCount, setFollowerCount] = useState(0)
   const [followBusy, setFollowBusy] = useState(false)
+  // Shown right after a follow, only to people who haven't opted in to emails about
+  // followed artists. "No thanks" is remembered so we don't re-ask on every follow.
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false)
+  const [promptBusy, setPromptBusy] = useState(false)
   const [messageBusy, setMessageBusy] = useState(false)
 
   const artistQuery = useQuery({
@@ -74,6 +79,36 @@ const ArtistProfile: React.FC = () => {
     }
   }, [artist])
 
+  const PROMPT_DECLINED_KEY = 'aa_follow_email_prompt_declined_v1'
+
+  const maybeAskAboutEmails = async () => {
+    try {
+      if (localStorage.getItem(PROMPT_DECLINED_KEY)) return
+    } catch { /* storage unavailable — fall through and ask */ }
+    try {
+      const prefs = await emailPrefsApi.get()
+      if (!prefs.followUpdates) setShowEmailPrompt(true)
+    } catch { /* can't tell — don't nag */ }
+  }
+
+  const acceptEmails = async () => {
+    setPromptBusy(true)
+    try {
+      await emailPrefsApi.setFollowUpdates(true)
+      toast.success("You'll get an email when artists you follow release or start a sale")
+      setShowEmailPrompt(false)
+    } catch {
+      toast.error('Could not save your preference')
+    } finally {
+      setPromptBusy(false)
+    }
+  }
+
+  const declineEmails = () => {
+    try { localStorage.setItem(PROMPT_DECLINED_KEY, '1') } catch { /* ignore */ }
+    setShowEmailPrompt(false)
+  }
+
   const toggleFollow = async () => {
     if (!id) return
     if (!isAuthenticated) {
@@ -89,6 +124,8 @@ const ArtistProfile: React.FC = () => {
       const res = following ? await artistsApi.unfollow(id) : await artistsApi.follow(id)
       setFollowing(res.following)
       setFollowerCount(res.followerCount)
+      if (!following && res.following) void maybeAskAboutEmails()
+      else setShowEmailPrompt(false)
     } catch {
       setFollowing(prev.following)
       setFollowerCount(prev.followerCount)
@@ -233,6 +270,23 @@ const ArtistProfile: React.FC = () => {
                   </>
                 )}
               </div>
+              {showEmailPrompt && (
+                <div className="mt-4 max-w-md rounded-xl border border-border bg-card p-4 text-sm shadow-xs">
+                  <p className="font-medium text-foreground">Want an email when they post something new?</p>
+                  <p className="mt-1 text-muted-foreground">
+                    We'll email you when artists you follow release a new model or start a sale. You can
+                    turn this off any time in your account settings.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={acceptEmails} loading={promptBusy}>
+                      Yes, email me
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={declineEmails} disabled={promptBusy}>
+                      No thanks
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-8 text-sm text-muted-foreground">
               <div>

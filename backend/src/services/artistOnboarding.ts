@@ -91,3 +91,25 @@ export const ARTIST_GRANT_COLUMNS = `
   artist_terms_version = $3,
   became_artist_at = COALESCE(became_artist_at, CURRENT_TIMESTAMP)
 `
+
+/**
+ * Send the welcome email to a newly-minted artist. Reads the artist's real share
+ * (users.commission_rate) and the payout hold rather than hard-coding either, so
+ * the email can't disagree with what they'll actually be paid. Best-effort.
+ */
+export async function sendWelcomeToNewArtist(userId: string): Promise<void> {
+  try {
+    const { db } = await import('../db')
+    const { sendArtistWelcome } = await import('./email')
+    const { PAYOUT_HOLD_DAYS } = await import('./earnings')
+    const row = (await db.query(
+      `SELECT email, COALESCE(NULLIF(artist_name, ''), display_name) AS name, commission_rate
+       FROM users WHERE id = $1`,
+      [userId],
+    )).rows[0]
+    if (!row) return
+    await sendArtistWelcome({ email: row.email, name: row.name }, Number(row.commission_rate) || 85, PAYOUT_HOLD_DAYS)
+  } catch {
+    /* never block onboarding on an email */
+  }
+}

@@ -10,6 +10,8 @@ interface OrderLike {
   user_email?: string
   pricing?: any
   shipping_address?: any
+  /** Buyer agreed at checkout that the download starts now (waives the 14-day right to cancel). */
+  downloadConsent?: boolean
 }
 
 interface ArtistLike {
@@ -33,6 +35,8 @@ interface AssetLike {
  * names were being interpolated raw into the order-confirmation email, and contact-
  * form fields raw into the support-notification email.
  */
+const money = (n: unknown) => `£${Number(n ?? 0).toFixed(2)}`
+
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -49,6 +53,7 @@ function escapeHtml(value: unknown): string {
 const RESEND_API_KEY = process.env.RESEND_API_KEY
 const FROM_EMAIL = process.env.EMAIL_FROM || process.env.FROM_EMAIL || 'noreply@artifactarmoury.com'
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@artifactarmoury.com'
 
 let resend: Resend | null = null
 
@@ -113,6 +118,46 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       subject
     })
     // Don't throw - email failures shouldn't break the application
+  }
+}
+
+export interface BatchMessage {
+  to: string
+  subject: string
+  html: string
+  /** Extra headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>
+}
+
+/**
+ * Send many individually-addressed emails via Resend's batch endpoint (100 per
+ * request) instead of one request each — a follower fan-out can be hundreds. Each
+ * message is its own email to one recipient (never a shared To/CC). Like
+ * sendEmail, it never throws.
+ */
+export async function sendEmailBatch(messages: BatchMessage[]): Promise<void> {
+  if (!messages.length) return
+  if (!resend) {
+    emailLogger.warn('Batch email not sent (Resend not configured)', { count: messages.length })
+    return
+  }
+  for (let i = 0; i < messages.length; i += 100) {
+    const chunk = messages.slice(i, i + 100)
+    try {
+      await resend.batch.send(
+        chunk.map((m) => ({
+          from: FROM_EMAIL,
+          to: [m.to],
+          subject: m.subject,
+          html: m.html,
+          text: stripHtml(m.html),
+          ...(m.headers ? { headers: m.headers } : {}),
+        })),
+      )
+      emailLogger.info('Batch email sent', { count: chunk.length, subject: chunk[0].subject })
+    } catch (error) {
+      emailLogger.error('Failed to send batch email', { error, count: chunk.length })
+    }
   }
 }
 
@@ -368,13 +413,36 @@ export async function sendOrderConfirmation(
         <span style="color: #6b7280; font-size: 13px;">Digital STL &middot; download any time</span>
       </td>
       <td style="padding: 14px 16px; text-align: right; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
-        £${Number(item.asset.base_price).toFixed(2)}<br>
+        ${money(item.asset.base_price)}<br>
         ${downloadLink}
       </td>
     </tr>`
   }).join('')
 
   const total = Number(order.pricing?.total ?? 0)
+  const subtotal = order.pricing?.subtotal != null ? Number(order.pricing.subtotal) : null
+  const tax = Number(order.pricing?.tax ?? 0)
+  const taxRate = Number(order.pricing?.taxRate ?? 0)
+  const summaryRow = (label: string, value: string) => `
+      <tr>
+        <td style="padding: 8px 16px; color: #6b7280; font-size: 14px;">${label}</td>
+        <td style="padding: 8px 16px; text-align: right; color: #6b7280; font-size: 14px;">${value}</td>
+      </tr>`
+  // Line prices above are NET of VAT; these rows make the lines add up to the total.
+  const breakdownHtml = subtotal != null
+    ? summaryRow('Subtotal (excl. VAT)', money(subtotal)) +
+      summaryRow(taxRate > 0 ? `VAT (${taxRate}%)` : 'VAT', money(tax))
+    : ''
+  const consentHtml = order.downloadConsent
+    ? `<div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <p style="margin: 0; color: #4b5563; font-size: 13px;">
+      <strong>Your right to cancel:</strong> when you placed this order you asked for your
+      downloads to start immediately and agreed that, once a download begins, you lose the
+      14-day right to cancel that digital file. This doesn't affect your rights if a file is
+      faulty or not as described &mdash; email ${SUPPORT_EMAIL} and we'll put it right.
+    </p>
+  </div>`
+    : ''
 
   const html = `
 <!DOCTYPE html>
@@ -416,6 +484,7 @@ export async function sendOrderConfirmation(
     <h3 style="font-size: 16px; color: #111827; margin-bottom: 12px;">Your downloads</h3>
     <table style="width: 100%; border-collapse: collapse; background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       ${itemsHtml}
+      ${breakdownHtml}
       <tr style="background: #f9fafb;">
         <td style="padding: 14px 16px; font-weight: 600; font-size: 18px;">Total paid</td>
         <td style="padding: 14px 16px; text-align: right; font-weight: 600; font-size: 18px;">£${total.toFixed(2)}</td>
@@ -431,8 +500,10 @@ export async function sendOrderConfirmation(
     </p>
   </div>
 
+  ${consentHtml}
+
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0 0 8px 0;">Questions about your order? Contact us at support@artifactarmoury.com</p>
+    <p style="margin: 0 0 8px 0;">Questions about your order? Contact us at ${SUPPORT_EMAIL}</p>
     <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
   </div>
 
@@ -464,7 +535,12 @@ export async function sendShippingNotification(
   params: ShippingNotificationParams
 ): Promise<void> {
   const { order, trackingNumber, carrier = 'Royal Mail' } = params
-  
+  // Digital orders have no shipping address; there is nothing to notify about.
+  if (!order.shipping_address) {
+    emailLogger.warn('Shipping notification skipped: order has no shipping address', { orderId: order.id })
+    return
+  }
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -521,8 +597,8 @@ export async function sendShippingNotification(
   </div>
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0 0 8px 0;">Questions? Contact us at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
+    <p style="margin: 0 0 8px 0;">Questions? Contact us at ${SUPPORT_EMAIL}</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
   </div>
   
 </body>
@@ -544,9 +620,11 @@ export interface ArtistSaleNotificationParams {
   artist: ArtistLike
   order: OrderLike
   earnings: number
+  /** Days earnings are held before payout (earnings.ts PAYOUT_HOLD_DAYS). */
+  holdDays?: number
   items: Array<{
     asset: AssetLike
-    quantity: number
+    quantity?: number
   }>
 }
 
@@ -556,11 +634,11 @@ export interface ArtistSaleNotificationParams {
 export async function sendArtistSaleNotification(
   params: ArtistSaleNotificationParams
 ): Promise<void> {
-  const { artist, order, earnings, items } = params
+  const { artist, order, earnings, items, holdDays = 21 } = params
   
   const itemsList = items.map(item => `
     <li style="margin-bottom: 8px;">
-      <strong>${escapeHtml(item.asset.name)}</strong> × ${item.quantity}
+      <strong>${escapeHtml(item.asset.name)}</strong>
     </li>
   `).join('')
   
@@ -608,7 +686,7 @@ export async function sendArtistSaleNotification(
       <strong>💰 Payout Information:</strong>
     </p>
     <p style="margin: 0; color: #1e40af; font-size: 14px;">
-      Your earnings will be automatically transferred to your Stripe account within 2-3 business days.
+      Earnings are held for ${holdDays} days to cover the buyer&rsquo;s cancellation window, then paid out automatically to your connected Stripe account.
     </p>
   </div>
   
@@ -619,13 +697,13 @@ export async function sendArtistSaleNotification(
   </div>
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
   </div>
-  
+
 </body>
 </html>
   `
-  
+
   await sendEmail({
     to: artist.email,
     subject: `You made a sale! - ${order.order_number}`,
@@ -636,8 +714,6 @@ export async function sendArtistSaleNotification(
 // ============================================================================
 // CONTACT FORM
 // ============================================================================
-
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@artifactarmoury.com'
 
 export interface ContactMessageParams {
   name: string
@@ -815,7 +891,12 @@ export async function sendContactReply(params: ContactReplyParams): Promise<void
 /**
  * Send welcome email to new artist
  */
-export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
+export async function sendArtistWelcome(
+  artist: ArtistLike,
+  /** The artist's share of each sale, from users.commission_rate. */
+  sharePercent = 85,
+  holdDays = 21,
+): Promise<void> {
   const html = `
 <!DOCTYPE html>
 <html>
@@ -826,8 +907,8 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
   
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="color: #111827; font-size: 32px; margin: 0;">Welcome to Artifact Planner!</h1>
-    <p style="color: #6b7280; margin-top: 8px; font-size: 18px;">We're excited to have you, ${artist.name}!</p>
+    <h1 style="color: #111827; font-size: 32px; margin: 0;">Welcome to Artifact Armoury!</h1>
+    <p style="color: #6b7280; margin-top: 8px; font-size: 18px;">We're excited to have you${artist.name ? `, ${escapeHtml(artist.name)}` : ''}!</p>
   </div>
   
   <div style="background: #f0fdf4; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
@@ -843,7 +924,7 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
       <li style="margin-bottom: 12px;"><strong>Complete Stripe Setup:</strong> Connect your Stripe account to receive payouts</li>
       <li style="margin-bottom: 12px;"><strong>Upload Models:</strong> Upload your STL files with descriptions and pricing</li>
       <li style="margin-bottom: 12px;"><strong>Create Examples:</strong> Build example tables to showcase your work</li>
-      <li style="margin-bottom: 12px;"><strong>Start Earning:</strong> You keep 80% of all sales!</li>
+      <li style="margin-bottom: 12px;"><strong>Start Earning:</strong> You keep ${sharePercent}% of every sale (before VAT), paid out after a ${holdDays}-day hold</li>
     </ol>
   </div>
   
@@ -860,8 +941,8 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
   </div>
   
   <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-    <p style="margin: 0 0 8px 0;">Need help? We're here for you at support@artifactarmoury.com</p>
-    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Planner. All rights reserved.</p>
+    <p style="margin: 0 0 8px 0;">Need help? We're here for you at ${SUPPORT_EMAIL}</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
   </div>
   
 </body>
@@ -870,8 +951,131 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
   
   await sendEmail({
     to: artist.email,
-    subject: 'Welcome to Artifact Planner! 🎉',
+    subject: 'Welcome to Artifact Armoury! 🎉',
     html
+  })
+}
+
+// ============================================================================
+// GENERIC NOTICE EMAIL
+// ============================================================================
+
+export interface NoticeEmailParams {
+  to: string
+  subject: string
+  heading: string
+  /** Plain-text paragraphs; escaped here. */
+  paragraphs: string[]
+  /** Optional button; `path` is relative to the frontend (e.g. '/artist/models'). */
+  cta?: { label: string; path: string }
+  /** Red "if this wasn't you" style box, plain text. */
+  warning?: string
+}
+
+/**
+ * One shared layout for the short transactional notices (payment processing,
+ * payout sent, upload failed, 2FA changed) so each doesn't carry its own copy of
+ * the boilerplate. All caller-supplied text is escaped.
+ */
+export async function sendNoticeEmail(params: NoticeEmailParams): Promise<void> {
+  const { to, subject, heading, paragraphs, cta, warning } = params
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 26px; margin: 0;">${escapeHtml(heading)}</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    ${paragraphs.map((p, i) => `<p style="margin: ${i === paragraphs.length - 1 ? '0' : '0 0 12px 0'}; color: #4b5563;">${escapeHtml(p)}</p>`).join('\n    ')}
+  </div>
+
+  ${cta ? `<div style="text-align: center; margin-bottom: 24px;">
+    <a href="${FRONTEND_URL}${cta.path}" style="display: inline-block; padding: 14px 28px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">${escapeHtml(cta.label)}</a>
+  </div>` : ''}
+
+  ${warning ? `<div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <p style="margin: 0; color: #991b1b; font-size: 14px;">${escapeHtml(warning)} Email <a href="mailto:${SUPPORT_EMAIL}" style="color: #991b1b;">${SUPPORT_EMAIL}</a> right away.</p>
+  </div>` : ''}
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0 0 8px 0;">Questions? Email ${SUPPORT_EMAIL}</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({ to, subject, html })
+}
+
+// ============================================================================
+// REFUND EMAIL
+// ============================================================================
+
+export interface RefundNotificationParams {
+  to: string
+  orderNumber: string
+  itemName: string
+  /** Gross amount refunded (net + VAT share). */
+  amount: number
+  /** Why — shown to the buyer, e.g. "following a moderation review". */
+  reason?: string
+}
+
+/**
+ * Tell a buyer a refund has been issued for one item. Until this existed a
+ * refund only produced an in-app bell notification, so a buyer who wasn't
+ * signed in saw nothing and had only their bank statement to go on.
+ */
+export async function sendRefundNotification(params: RefundNotificationParams): Promise<void> {
+  const { to, orderNumber, itemName, amount, reason } = params
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 26px; margin: 0;">Your refund has been issued</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 12px 0; color: #4b5563;">
+      We've refunded <strong>${money(amount)}</strong> for <strong>${escapeHtml(itemName)}</strong>
+      from order ${escapeHtml(orderNumber)}${reason ? ` ${escapeHtml(reason)}` : ''}.
+    </p>
+    <p style="margin: 0; color: #4b5563;">
+      The money goes back to the payment method you used and usually appears within 5&ndash;10
+      working days, depending on your bank. Access to that file has been removed from your account.
+    </p>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0 0 8px 0;">Questions? Email ${SUPPORT_EMAIL}</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({
+    to,
+    subject: `Refund issued - order ${orderNumber}`,
+    html,
   })
 }
 
@@ -880,6 +1084,8 @@ export async function sendArtistWelcome(artist: ArtistLike): Promise<void> {
 // ============================================================================
 
 export default {
+  sendNoticeEmail,
+  sendRefundNotification,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,

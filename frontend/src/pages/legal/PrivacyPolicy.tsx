@@ -4,7 +4,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
 
 const PrivacyPolicy: React.FC = () => {
   return (
-    <LegalLayout title="Privacy Policy" updated="31 August 2026" reviewed>
+    <LegalLayout title="Privacy Policy" updated="1 October 2026" reviewed>
       <LegalSection heading="1. Who we are">
         <p>
           Artifact Armoury (“we”, “us”, “our”) operates the Artifact Armoury marketplace
@@ -28,7 +28,8 @@ const PrivacyPolicy: React.FC = () => {
           <li>
             <strong>Account data</strong> — your email address, display name, password
             (stored hashed, never in plain text), account role (buyer/artist), and email
-            verification status.
+            verification status, and your marketing-email preference (and when you gave
+            consent).
           </li>
           <li>
             <strong>Order and billing data</strong> — the models or bundles you buy, order
@@ -80,10 +81,26 @@ const PrivacyPolicy: React.FC = () => {
           downloads, calculate and charge the correct tax, prevent fraud and piracy,
           moderate uploads and disputes, provide customer support, send service
           communications (order confirmations, download links, security notices) and,
-          where you have opted in, marketing emails, and to meet our legal and tax
-          obligations. You can opt out of marketing emails at any time via the unsubscribe
-          link in the email or your account settings — this does not affect service
-          emails, which we send regardless.
+          where you have opted in, marketing emails (see below), and to meet our legal and
+          tax obligations. You can opt out of marketing emails at any time via the
+          unsubscribe link in the email or your account settings — this does not affect
+          service emails, which we send regardless.
+        </p>
+        <p>
+          <strong>Emails about artists you follow.</strong> If you tick the optional
+          “email me when artists I follow release new models or start sales” box when you
+          create your account, or later switch on “Artists I follow” under email
+          notifications in your account settings, we will email you when an artist you
+          follow <strong>releases a new model</strong> or <strong>starts a sale</strong>.
+          This is optional and is never pre-ticked, and we do not send these emails to
+          anyone who has not opted in. Our lawful basis is your <strong>consent</strong>,
+          which we record (including when you gave it). You can withdraw it at any time
+          using the unsubscribe link in any of these emails or the setting in your account
+          settings; withdrawing does not affect anything we sent before. To avoid flooding
+          your inbox, we send at most one such email per artist every few hours, even if
+          they publish several models at once. Separately, you will always see these
+          updates as in-site notifications while signed in — those are not emails and are
+          not affected by this setting.
         </p>
       </LegalSection>
 
@@ -141,8 +158,9 @@ const PrivacyPolicy: React.FC = () => {
             <strong>Stripe</strong> — to take payment, calculate tax, and pay artists (§6).
           </li>
           <li>
-            <strong>Resend</strong> — our transactional email provider, to send order
-            confirmations, account and support emails.
+            <strong>Resend</strong> — our email provider, to send order confirmations,
+            account and support emails and, where you have opted in, emails about artists
+            you follow.
           </li>
           <li>
             <strong>Railway and Cloudflare</strong> — our hosting, database and file-storage

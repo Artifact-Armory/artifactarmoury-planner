@@ -5,6 +5,8 @@
 
 import { db } from '../db';
 import logger from '../utils/logger';
+import { sendNoticeEmail } from './email';
+import { emailFollowersOfRelease, emailFollowersOfSale } from './followerEmails';
 
 const log = logger.child('NOTIFY');
 
@@ -18,6 +20,16 @@ interface NotificationInput {
   modelId?: string | null;
 }
 
+/**
+ * Notification types that are ALSO emailed: money events the recipient shouldn't
+ * miss. Deliberately NOT upload/preview failures — those live in the in-app bell
+ * (and My Models) only. The bell row is written first, so a failed email never
+ * loses the in-app copy.
+ */
+const EMAIL_MIRRORED: Record<string, { cta: string }> = {
+  'payout_paid': { cta: 'View payouts' },
+};
+
 export async function createNotification(n: NotificationInput): Promise<void> {
   try {
     await db.query(
@@ -27,6 +39,24 @@ export async function createNotification(n: NotificationInput): Promise<void> {
     );
   } catch (err) {
     log.error('createNotification failed', { error: err, type: n.type, userId: n.userId });
+    return;
+  }
+
+  const mirror = EMAIL_MIRRORED[n.type];
+  if (!mirror) return;
+  try {
+    const u = await db.query('SELECT email FROM users WHERE id = $1', [n.userId]);
+    const to = u.rows[0]?.email;
+    if (!to) return;
+    await sendNoticeEmail({
+      to,
+      subject: n.title,
+      heading: n.title,
+      paragraphs: [n.body || n.title],
+      cta: n.link ? { label: mirror.cta, path: n.link } : undefined,
+    });
+  } catch (err) {
+    log.error('notification email failed', { error: err, type: n.type, userId: n.userId });
   }
 }
 
@@ -58,8 +88,77 @@ export async function notifyFollowersOfRelease(artistId: string, modelId: string
       ],
     );
     log.info('Release notifications fanned out', { artistId, modelId, recipients: result.rowCount });
+    await emailFollowersOfRelease({ artistId, artistName, modelId, modelName });
   } catch (err) {
     log.error('notifyFollowersOfRelease failed', { error: err, artistId, modelId });
+  }
+}
+
+/**
+ * Notify every follower of the artist that a sale has started. One INSERT … SELECT
+ * fans out to all followers, like notifyFollowersOfRelease. Sales always start at
+ * creation (routes/sales.ts inserts starts_at = NOW()), so this is called once from
+ * there. Followers who already own the discounted model are skipped — telling them
+ * about a discount on something they've bought is noise. Best-effort.
+ */
+export async function notifyFollowersOfSale(sale: {
+  artist_id: string;
+  scope: 'model' | 'bundle' | 'portfolio';
+  target_id: string | null;
+  discount_percent: number;
+  ends_at: string | Date;
+}): Promise<void> {
+  try {
+    const artist = await db.query(
+      `SELECT COALESCE(NULLIF(artist_name, ''), display_name) AS name FROM users WHERE id = $1`,
+      [sale.artist_id],
+    );
+    const artistName = artist.rows[0]?.name ?? 'An artist you follow';
+
+    let what = 'their whole catalogue';
+    let link = `/artists/${sale.artist_id}`;
+    let modelId: string | null = null;
+    if (sale.scope === 'model' && sale.target_id) {
+      const m = await db.query('SELECT name FROM models WHERE id = $1', [sale.target_id]);
+      what = `“${m.rows[0]?.name ?? 'a model'}”`;
+      link = `/models/${sale.target_id}`;
+      modelId = sale.target_id;
+    } else if (sale.scope === 'bundle' && sale.target_id) {
+      const b = await db.query('SELECT name FROM bundles WHERE id = $1', [sale.target_id]);
+      what = `the “${b.rows[0]?.name ?? 'a'}” bundle`;
+      link = `/bundles/${sale.target_id}`;
+    }
+
+    const endsOn = new Date(sale.ends_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+    const result = await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, link, actor_id, model_id)
+       SELECT f.follower_id, 'new_sale', $2, $3, $4, $1, $5
+       FROM follows f
+       WHERE f.artist_id = $1
+         AND ($5::uuid IS NULL OR NOT EXISTS (
+               SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+               WHERE oi.model_id = $5 AND o.user_id = f.follower_id
+                 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL))`,
+      [
+        sale.artist_id,
+        `${artistName} started a sale`,
+        `${sale.discount_percent}% off ${what} — ends ${endsOn}.`,
+        link,
+        modelId,
+      ],
+    );
+    log.info('Sale notifications fanned out', { artistId: sale.artist_id, scope: sale.scope, recipients: result.rowCount });
+    await emailFollowersOfSale({
+      artistId: sale.artist_id,
+      artistName,
+      what,
+      percent: sale.discount_percent,
+      endsOn,
+      ctaPath: link,
+      modelId,
+    });
+  } catch (err) {
+    log.error('notifyFollowersOfSale failed', { error: err, artistId: sale.artist_id });
   }
 }
 

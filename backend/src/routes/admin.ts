@@ -12,7 +12,7 @@ import { deleteFromStorage } from '../services/storage';
 import { reverseEarningsForModel, reverseEarningsForOrderItem } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
-import { sendContactReply } from '../services/email';
+import { sendContactReply, sendRefundNotification } from '../services/email';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
@@ -1129,7 +1129,7 @@ async function resolveReport(id: string, action: string, summary: string, adminI
           // void artist earnings and archive the model so downloads stop.
           const affected = await db.query(
             `SELECT oi.id AS order_item_id, o.id AS order_id, o.payment_intent_id,
-                    o.user_id, o.tax_rate, oi.total_price
+                    o.user_id, o.tax_rate, oi.total_price, o.customer_email, o.order_number
              FROM orders o JOIN order_items oi ON oi.order_id = o.id
              WHERE oi.model_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
             [modelId],
@@ -1162,6 +1162,15 @@ async function resolveReport(id: string, action: string, summary: string, adminI
                   body: `We've refunded £${grossAmount.toFixed(2)} for this model following a moderation review.`,
                   link: '/dashboard/purchases',
                 });
+              }
+              if (row.customer_email) {
+                sendRefundNotification({
+                  to: row.customer_email,
+                  orderNumber: row.order_number,
+                  itemName: report.model_name,
+                  amount: grossAmount,
+                  reason: 'following a moderation review',
+                }).catch((err) => logger.error('Failed to send refund email', { error: err, orderId: row.order_id }));
               }
             } catch (err) {
               logger.error('Refund failed during moderation', { error: err, orderId: row.order_id, modelId });
@@ -1509,6 +1518,14 @@ router.post('/orders/:orderId/items/:itemId/refund',
         body: `We've refunded £${grossAmount.toFixed(2)} for this item from order ${order.order_number}.`,
         link: '/dashboard/purchases',
       });
+    }
+    if (order.customer_email) {
+      sendRefundNotification({
+        to: order.customer_email,
+        orderNumber: order.order_number,
+        itemName: item.model_name,
+        amount: grossAmount,
+      }).catch((err) => logger.error('Failed to send refund email', { error: err, orderId }));
     }
 
     logger.warn('Order item refunded', {

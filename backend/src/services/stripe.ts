@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import logger from '../utils/logger'
 import { db } from '../db'
 import { accrueEarningsForOrder } from './earnings'
+import { runOrderPaidSideEffects } from './orderEmails'
 import { recordTaxTransaction } from './stripeTax'
 
 // ============================================================================
@@ -683,6 +684,12 @@ async function handlePaymentIntentSucceeded(
     await accrueEarningsForOrder(orderId).catch(err =>
       stripeLogger.error('Failed to accrue earnings from webhook', { error: err, orderId })
     )
+
+    // Receipt + artist emails + sale counts, only if the webhook (not the confirm
+    // route) is the one that actually marked the order paid — e.g. async PayPal.
+    if (firstConfirm) {
+      void runOrderPaidSideEffects(orderId)
+    }
 
     stripeLogger.info('Order updated to paid', { orderId })
   }

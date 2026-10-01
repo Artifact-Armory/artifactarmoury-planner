@@ -41,6 +41,10 @@ CREATE TABLE users (
 
     -- Account status
     email_verified BOOLEAN DEFAULT false,
+    -- Consent for emails about followed artists' new models / sales (migration 066).
+    -- Default OFF: only users who opted in (sign-up box or profile toggle) get them.
+    email_follow_updates BOOLEAN NOT NULL DEFAULT false,
+    marketing_consent_at TIMESTAMP,
     -- Email verification + password reset: only the SHA-256 HASH of the token is
     -- stored, never the raw token. See migration 024.
     email_verification_token VARCHAR(64),
@@ -1142,3 +1146,15 @@ COMMENT ON TABLE invite_codes IS 'Invitation codes for artist registration';
 COMMENT ON TABLE reviews IS 'Customer reviews and ratings for models';
 COMMENT ON TABLE favorites IS 'User wishlists/favorites';
 COMMENT ON TABLE activity_log IS 'Audit trail of all system actions';
+
+-- Throttle + audit for follower emails (migration 066): one email per
+-- (follower, artist, kind) per window, however many models the artist publishes.
+CREATE TABLE IF NOT EXISTS follower_email_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    artist_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('release', 'sale')),
+    sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_follower_email_log_lookup
+    ON follower_email_log (follower_id, artist_id, kind, sent_at DESC);

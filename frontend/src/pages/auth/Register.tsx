@@ -16,6 +16,7 @@ type FormValues = {
   email: string
   password: string
   confirmPassword: string
+  marketingEmails: boolean
 }
 
 // Must mirror the backend rules (validatePassword): 8+ chars, one upper, one
@@ -39,6 +40,7 @@ const Register: React.FC = () => {
         email: values.email,
         password: values.password,
         displayName: values.displayName,
+        marketingEmails: !!values.marketingEmails,
       })
       setAuth({ user: res.user, token: res.accessToken, refreshToken: res.refreshToken })
       toast.success('Account created — check your email to verify your address.')
@@ -101,6 +103,13 @@ const Register: React.FC = () => {
                 validate: (value) => value === password || 'Passwords do not match',
               })}
             />
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" className="mt-0.5" {...register('marketingEmails')} />
+              <span>
+                Email me when artists I follow release new models or start sales (optional — you can
+                change this any time in your account settings).
+              </span>
+            </label>
             <Button type="submit" className="w-full" loading={isSubmitting}>
               Create account
             </Button>

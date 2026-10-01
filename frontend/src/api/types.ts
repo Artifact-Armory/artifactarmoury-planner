@@ -39,6 +39,8 @@ export interface RegisterRequest {
   displayName: string
   artistName?: string
   inviteCode?: string
+  /** Optional sign-up box: consent to emails about artists the user follows. */
+  marketingEmails?: boolean
 }
 
 export interface AuthResponse {

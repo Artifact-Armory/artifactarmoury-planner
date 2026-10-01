@@ -16,8 +16,7 @@ import {
   type OrderPaymentMethod,
 } from '../services/stripe';
 import { accrueEarningsForOrder } from '../services/earnings';
-import { sendOrderConfirmation } from '../services/email';
-import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
+import { runOrderPaidSideEffects } from '../services/orderEmails';import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
 import { getDownloadBytesForModels } from '../services/downloadSize';
 import {
   findActiveCode,
@@ -611,38 +610,12 @@ router.post('/:id/confirm',
       logger.error('Failed to accrue earnings on confirm', { error: err, orderId: id })
     );
 
-    // Get order items (for the confirmation email + sale counts)
-    const itemsResult = await db.query(
-      `SELECT * FROM order_items WHERE order_id = $1`,
-      [id]
-    );
-
-    // Send confirmation email (digital STL order — no shipping, files ready now).
-    // Only the request that actually claimed the order does this, so a reloaded
-    // PayPal return page can't send a second receipt or double-count the sale.
+    // Receipt, artist sale emails and sale counts (digital STL order — no shipping,
+    // files ready now). Only the request that actually claimed the order does this, so
+    // a reloaded PayPal return page can't send a second receipt or double-count the sale.
+    // Fire-and-forget: it logs its own failures and must never delay the response.
     if (firstConfirm) {
-      sendOrderConfirmation({
-        order: {
-          id: order.id,
-          order_number: order.order_number,
-          created_at: order.created_at,
-          user_email: order.customer_email,
-          pricing: { total: Number(order.total) },
-        } as any,
-        items: itemsResult.rows.map((r: any) => ({
-          asset: { name: r.model_name, base_price: Number(r.unit_price) } as any,
-          quantity: Number(r.quantity),
-          modelId: r.model_id,
-        }))
-      }).catch(err => logger.error('Failed to send confirmation email', { error: err }));
-
-      // Increment model sale counts
-      for (const item of itemsResult.rows) {
-        db.query(
-          'UPDATE models SET sale_count = sale_count + $1 WHERE id = $2',
-          [item.quantity, item.model_id]
-        ).catch(err => logger.error('Failed to update sale count', { error: err }));
-      }
+      void runOrderPaidSideEffects(id);
     }
 
     logger.info('Order confirmed', { orderId: id, orderNumber: order.order_number });

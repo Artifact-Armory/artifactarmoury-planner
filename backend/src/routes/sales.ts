@@ -9,6 +9,7 @@ import { db } from '../db'
 import logger from '../utils/logger'
 import { authenticate, requireArtist, requireVerifiedEmail, requireTwoFactor, AuthRequest } from '../middleware/auth'
 import { asyncHandler, ValidationError, NotFoundError } from '../middleware/error'
+import { notifyFollowersOfSale } from '../services/notifications'
 import {
   SALE_MAX_DAYS,
   SALE_COOLDOWN_DAYS,
@@ -186,6 +187,8 @@ router.post(
         [artistId, scope, normTarget, percent, endsAt],
       )
       logger.info('Sale started', { artistId, scope, targetId: normTarget, percent, days })
+      // Tell the artist's followers (in-app bell). Fire-and-forget; never blocks the response.
+      void notifyFollowersOfSale(rows[0])
       res.status(201).json({ sale: rows[0] })
     } catch (err: any) {
       if (err?.code === '23505') {
