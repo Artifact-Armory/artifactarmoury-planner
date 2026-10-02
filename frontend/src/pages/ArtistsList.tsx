@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
@@ -54,8 +55,17 @@ const ArtistsList: React.FC = () => {
 
   const featuredQuery = useQuery({
     queryKey: ['featured-artists'],
-    queryFn: () => artistsApi.getFeaturedArtists(4),
+    queryFn: () => artistsApi.getFeaturedArtists(8),
   })
+  const featured = featuredQuery.data ?? []
+  const carouselRef = useRef<HTMLDivElement>(null)
+
+  const scrollCarousel = (direction: 'prev' | 'next') => {
+    const el = carouselRef.current
+    if (!el) return
+    const step = el.clientWidth * 0.8
+    el.scrollBy({ left: direction === 'prev' ? -step : step, behavior: 'smooth' })
+  }
 
   const data = listQuery.data
   const artists = data?.artists ?? []
@@ -107,15 +117,6 @@ const ArtistsList: React.FC = () => {
           Discover creators crafting terrain for tabletop adventures. Follow artists to stay up to date with their latest
           releases.
         </p>
-        {featuredQuery.data && featuredQuery.data.length > 0 && (
-          <div className="mt-6 flex flex-wrap gap-3">
-            {featuredQuery.data.map((artist) => (
-              <span key={artist.id} className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white">
-                {artist.name}
-              </span>
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="mt-10 flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 shadow-xs lg:flex-row lg:items-end lg:justify-between">
@@ -153,7 +154,50 @@ const ArtistsList: React.FC = () => {
         </div>
       </section>
 
+      {!data?.isSearch && featured.length > 0 && (
+        <section className="mt-10">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-xl font-semibold text-foreground">Featured artists</h2>
+            {featured.length > 1 && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Previous featured artists"
+                  onClick={() => scrollCarousel('prev')}
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Next featured artists"
+                  onClick={() => scrollCarousel('next')}
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
+            )}
+          </div>
+          <div
+            ref={carouselRef}
+            className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto pb-2"
+          >
+            {featured.map((artist) => (
+              <div key={artist.id} className="w-72 shrink-0 snap-start">
+                <ArtistCard artist={artist} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="mt-10">
+        {!data?.isSearch && featured.length > 0 && (
+          <h2 className="mb-4 text-xl font-semibold text-foreground">All artists</h2>
+        )}
         {listQuery.isLoading ? (
           <div className="flex justify-center py-16">
             <Spinner size="lg" />
