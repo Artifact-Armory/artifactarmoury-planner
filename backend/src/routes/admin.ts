@@ -12,7 +12,7 @@ import { deleteFromStorage } from '../services/storage';
 import { reverseEarningsForModel, reverseEarningsForOrderItem } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
-import { sendContactReply, sendRefundNotification } from '../services/email';
+import { sendContactReply, sendRefundNotification, sendApplicationApproved, sendApplicationRejected } from '../services/email';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
@@ -2365,6 +2365,181 @@ router.patch('/contact/:id/status',
     if (result.rows.length === 0) throw new NotFoundError('Message');
 
     res.json({ message: result.rows[0] });
+  }),
+);
+
+// ============================================================================
+// ARTIST APPLICATIONS (migration 068): review what applicants submitted through
+// /apply-artist. Approving mints a single-use invite code and emails it; rejecting
+// emails the reason. Both decisions are final for that application (the applicant
+// can submit a new one), and the reason is stored as the record of what we said.
+// ============================================================================
+
+const APPLICATION_INVITE_DAYS = 30;
+
+router.get('/artist-applications',
+  asyncHandler(async (req, res) => {
+    const status = typeof req.query.status === 'string' ? req.query.status : 'pending';
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      throw new ValidationError('status must be pending, approved or rejected');
+    }
+
+    const result = await db.query(
+      `SELECT a.id, a.status, a.artist_name, a.applicant_name, a.applicant_email,
+              a.created_at, a.reviewed_at,
+              (SELECT COUNT(*) FROM artist_application_images i WHERE i.application_id = a.id) AS image_count
+         FROM artist_applications a
+        WHERE a.status = $1
+        ORDER BY a.created_at ${status === 'pending' ? 'ASC' : 'DESC'}
+        LIMIT 200`,
+      [status],
+    );
+    const pending = await db.query(`SELECT COUNT(*) FROM artist_applications WHERE status = 'pending'`);
+
+    res.json({ applications: result.rows, pendingCount: parseInt(pending.rows[0].count) });
+  }),
+);
+
+router.get('/artist-applications/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const result = await db.query(
+      `SELECT a.*, u.role AS user_role, rv.display_name AS reviewed_by_name, ic.code AS invite_code
+         FROM artist_applications a
+         LEFT JOIN users u ON u.id = a.user_id
+         LEFT JOIN users rv ON rv.id = a.reviewed_by
+         LEFT JOIN invite_codes ic ON ic.id = a.invite_code_id
+        WHERE a.id = $1`,
+      [id],
+    );
+    if (result.rows.length === 0) throw new NotFoundError('Application');
+
+    const images = await db.query(
+      `SELECT id, file_path, file_name, content_type
+         FROM artist_application_images WHERE application_id = $1 ORDER BY created_at ASC`,
+      [id],
+    );
+
+    res.json({
+      application: result.rows[0],
+      images: images.rows.map((i: any) => ({ ...i, url: publicUrl(i.file_path) })),
+    });
+  }),
+);
+
+router.post('/artist-applications/:id/approve',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const adminId = (req as any).userId as string;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim().slice(0, 2000) : '';
+
+    const client = await db.connect();
+    let application: any;
+    let code: string;
+    try {
+      await client.query('BEGIN');
+
+      // Claim atomically so two admins clicking at once can't mint two codes.
+      const claimed = await client.query(
+        `UPDATE artist_applications
+            SET status = 'approved', decision_reason = $2, reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND status = 'pending'
+          RETURNING id, user_id, applicant_name, applicant_email, artist_name`,
+        [id, message || null, adminId],
+      );
+      if (claimed.rows.length === 0) {
+        const exists = await client.query('SELECT status FROM artist_applications WHERE id = $1', [id]);
+        if (exists.rows.length === 0) throw new NotFoundError('Application');
+        throw new ValidationError(`This application was already ${exists.rows[0].status}`);
+      }
+      application = claimed.rows[0];
+
+      code = generateInviteCode();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + APPLICATION_INVITE_DAYS);
+      const invite = await client.query(
+        `INSERT INTO invite_codes (code, created_by, max_uses, expires_at)
+         VALUES ($1, $2, 1, $3) RETURNING id`,
+        [code, adminId, expiresAt],
+      );
+      await client.query(
+        `UPDATE artist_applications SET invite_code_id = $2 WHERE id = $1`,
+        [id, invite.rows[0].id],
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Best-effort: the decision is saved, and the code is also shown to the
+    // applicant on /apply-artist, so a failed email never strands them.
+    await sendApplicationApproved({
+      to: application.applicant_email,
+      name: application.applicant_name,
+      code,
+      expiresInDays: APPLICATION_INVITE_DAYS,
+      message: message || undefined,
+    }).catch((err) => logger.error('Failed to send application approval email', { error: err, applicationId: id }));
+
+    await createNotification({
+      userId: application.user_id,
+      type: 'artist_application.approved',
+      title: 'Your artist application was approved',
+      body: 'Check your email for your invite code, or enter it on the artist page.',
+      link: '/apply-artist',
+      actorId: adminId,
+    });
+
+    logger.info('Artist application approved', { applicationId: id, adminId });
+    res.json({ message: 'Application approved and invite code emailed', code });
+  }),
+);
+
+router.post('/artist-applications/:id/reject',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const adminId = (req as any).userId as string;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 10) {
+      throw new ValidationError('Please give the applicant a reason (at least 10 characters)');
+    }
+    const trimmedReason = reason.slice(0, 2000);
+
+    const claimed = await db.query(
+      `UPDATE artist_applications
+          SET status = 'rejected', decision_reason = $2, reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND status = 'pending'
+        RETURNING user_id, applicant_name, applicant_email`,
+      [id, trimmedReason, adminId],
+    );
+    if (claimed.rows.length === 0) {
+      const exists = await db.query('SELECT status FROM artist_applications WHERE id = $1', [id]);
+      if (exists.rows.length === 0) throw new NotFoundError('Application');
+      throw new ValidationError(`This application was already ${exists.rows[0].status}`);
+    }
+    const application = claimed.rows[0];
+
+    await sendApplicationRejected({
+      to: application.applicant_email,
+      name: application.applicant_name,
+      reason: trimmedReason,
+    }).catch((err) => logger.error('Failed to send application rejection email', { error: err, applicationId: id }));
+
+    await createNotification({
+      userId: application.user_id,
+      type: 'artist_application.rejected',
+      title: 'An update on your artist application',
+      body: trimmedReason,
+      link: '/apply-artist',
+      actorId: adminId,
+    });
+
+    logger.info('Artist application rejected', { applicationId: id, adminId });
+    res.json({ message: 'Application rejected and applicant emailed' });
   }),
 );
 

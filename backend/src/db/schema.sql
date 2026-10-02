@@ -1161,3 +1161,42 @@ CREATE TABLE IF NOT EXISTS follower_email_log (
 );
 CREATE INDEX IF NOT EXISTS idx_follower_email_log_lookup
     ON follower_email_log (follower_id, artist_id, kind, sent_at DESC);
+
+-- In-app artist applications (migration 068). An admin approves (mints a
+-- single-use invite code and emails it) or rejects (emails the reason).
+CREATE TABLE IF NOT EXISTS artist_applications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    applicant_name VARCHAR(200) NOT NULL,
+    applicant_email VARCHAR(255) NOT NULL,
+    artist_name VARCHAR(80) NOT NULL,
+    about TEXT NOT NULL,
+    what_you_make TEXT NOT NULL,
+    website_url VARCHAR(500),
+    social_links JSONB NOT NULL DEFAULT '[]'::jsonb,
+    sells_elsewhere TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected')),
+    decision_reason TEXT,
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMP,
+    invite_code_id UUID REFERENCES invite_codes(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_artist_applications_status
+    ON artist_applications (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artist_applications_user
+    ON artist_applications (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_artist_applications_one_pending
+    ON artist_applications (user_id) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS artist_application_images (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    application_id UUID NOT NULL REFERENCES artist_applications(id) ON DELETE CASCADE,
+    file_path VARCHAR(500) NOT NULL,
+    file_name VARCHAR(255),
+    content_type VARCHAR(100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_artist_application_images_app
+    ON artist_application_images (application_id);

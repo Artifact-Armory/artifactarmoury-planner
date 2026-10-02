@@ -1236,6 +1236,28 @@ was a dead end and every artist still had to be created by hand-run SQL. Fixed:
   everything else here. Verify on first deploy by minting a code and redeeming it on a customer
   account.
 
+## In-app artist applications (built 2026-10-02, migration 068)
+Applying to sell used to mean emailing a portfolio to `artists@`, with nothing recorded. A signed-in
+customer now applies on `/apply-artist` (`ArtistApplicationForm.tsx`): store name, about, what they make,
+website, up to 5 social links, "sells elsewhere", and **3 to 10 portfolio images** (PNG/JPG/WebP, 10MB each,
+presigned straight to R2 under `applications/`, same pattern as the Contact page).
+- **Tables:** `artist_applications` + `artist_application_images`. A partial unique index allows only ONE
+  `pending` application per user; re-applying after a rejection is fine. The decision reason is stored,
+  since it is what the applicant was told.
+- **Backend:** `routes/artistApplications.ts` (`/api/artist-applications`: `presign-image`, `mine`, submit).
+  Admin review lives in `routes/admin.ts` (`/api/admin/artist-applications`, list/detail/`approve`/`reject`).
+  Both decisions claim the row atomically (`WHERE status='pending'`) so two admins can't double-decide.
+- **Approve** mints a single-use invite code (valid 30 days) in the same transaction and emails it
+  (`sendApplicationApproved`); the code is also returned by `/mine` so the applicant's page pre-fills the
+  existing redeem form. **Reject requires a reason** (10+ chars), emailed to the applicant. Both also create an
+  in-app notification. Emails are best-effort (`sendEmail` never throws), so the decision is saved regardless.
+- **Admin UI:** `/admin/artist-applications` now has an **Applications** tab (review queue + detail panel
+  with image lightbox) and the old **Invite codes** tab for hand-made codes.
+- The invite code is NOT locked to the applicant's email: it is a normal single-use code.
+- **Untested against a real Postgres, real R2 uploads or real emails** (DB_MOCK limitation). Verify on the
+  first deploy after migration 068: submit as a customer, approve as admin, redeem the code.
+- Privacy Policy should mention that application details and portfolio images are collected and reviewed.
+
 ## Error tracking: Sentry (built 2026-09-09)
 Previously a production 500 existed only as a Railway log line, so a crash affecting real users
 was invisible unless one of them complained. `@sentry/node` (backend + worker) and

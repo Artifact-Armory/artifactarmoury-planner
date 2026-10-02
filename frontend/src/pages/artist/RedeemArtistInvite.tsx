@@ -17,13 +17,16 @@ import Input from '../../components/ui/Input'
  * because users.email is UNIQUE: a buyer who starts selling would otherwise have
  * to abandon the account holding their purchases, downloads and saved tables.
  */
-const RedeemArtistInvite: React.FC = () => {
+const RedeemArtistInvite: React.FC<{ initialCode?: string; initialArtistName?: string }> = ({
+  initialCode = '',
+  initialArtistName = '',
+}) => {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const setAuth = useAuthStore((s) => s.setAuth)
 
-  const [inviteCode, setInviteCode] = useState('')
-  const [artistName, setArtistName] = useState('')
+  const [inviteCode, setInviteCode] = useState(initialCode)
+  const [artistName, setArtistName] = useState(initialArtistName)
   const [accepted, setAccepted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')

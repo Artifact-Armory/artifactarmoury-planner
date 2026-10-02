@@ -1112,6 +1112,111 @@ export async function sendRefundNotification(params: RefundNotificationParams): 
 }
 
 // ============================================================================
+// ARTIST APPLICATION EMAILS (migration 068)
+// ============================================================================
+
+/** Courtesy "we've got your application" to the applicant. */
+export async function sendApplicationReceived(params: { to: string; name: string }): Promise<void> {
+  await sendNoticeEmail({
+    to: params.to,
+    subject: 'We received your artist application',
+    heading: 'Application received',
+    paragraphs: [
+      `Hi ${params.name}, thanks for applying to sell on Artifact Armoury.`,
+      'Our team will review your portfolio and email you with a decision. We will explain our reasoning either way.',
+    ],
+  })
+}
+
+/** Heads-up to support that a new application is waiting in the admin panel. */
+export async function sendApplicationToSupport(params: {
+  applicantName: string
+  applicantEmail: string
+  artistName: string
+  imageCount: number
+}): Promise<void> {
+  await sendEmail({
+    to: SUPPORT_EMAIL,
+    subject: `New artist application: ${params.artistName}`,
+    html: `
+<p>${escapeHtml(params.applicantName)} &lt;${escapeHtml(params.applicantEmail)}&gt; has applied to sell as
+<strong>${escapeHtml(params.artistName)}</strong> (${params.imageCount} portfolio image${params.imageCount === 1 ? '' : 's'}).</p>
+<p><a href="${FRONTEND_URL}/admin/artist-applications">Review it in the admin panel</a></p>`,
+    brand: false,
+  })
+}
+
+/** Approval: carries the single-use invite code and the reviewer's message. */
+export async function sendApplicationApproved(params: {
+  to: string
+  name: string
+  code: string
+  expiresInDays: number
+  message?: string
+}): Promise<void> {
+  const { to, name, code, expiresInDays, message } = params
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="color: #111827; font-size: 26px; margin: 0;">You're in, welcome to Artifact Armoury</h1>
+  </div>
+
+  <div style="background: #f9fafb; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+    <p style="margin: 0 0 12px 0; color: #4b5563;">Hi ${escapeHtml(name)}, we've reviewed your portfolio and we'd love to have you selling with us.</p>
+    ${message ? `<p style="margin: 0 0 12px 0; color: #4b5563; white-space: pre-wrap;">${escapeHtml(message)}</p>` : ''}
+    <p style="margin: 0; color: #4b5563;">Your invite code is below. Enter it on the artist page while signed in to the account you applied with.</p>
+  </div>
+
+  <div style="text-align: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+    <p style="margin: 0 0 6px 0; color: #1e40af; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">Your invite code</p>
+    <p style="margin: 0; font-family: monospace; font-size: 28px; font-weight: 700; color: #1e3a8a; letter-spacing: 0.1em;">${escapeHtml(code)}</p>
+    <p style="margin: 8px 0 0 0; color: #1e40af; font-size: 13px;">Single use. Valid for ${expiresInDays} days.</p>
+  </div>
+
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="${FRONTEND_URL}/apply-artist" style="display: inline-block; padding: 14px 28px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">Redeem your code</a>
+  </div>
+
+  <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+    <p style="margin: 0 0 8px 0;">Questions? Email ${SUPPORT_EMAIL}</p>
+    <p style="margin: 0;">&copy; ${new Date().getFullYear()} Artifact Armoury. All rights reserved.</p>
+  </div>
+
+</body>
+</html>
+  `
+
+  await sendEmail({ to, subject: 'Your Artifact Armoury artist application was approved', html })
+}
+
+/** Rejection: always carries the reviewer's reason. */
+export async function sendApplicationRejected(params: {
+  to: string
+  name: string
+  reason: string
+}): Promise<void> {
+  await sendNoticeEmail({
+    to: params.to,
+    subject: 'Your Artifact Armoury artist application',
+    heading: 'About your application',
+    paragraphs: [
+      `Hi ${params.name}, thank you for applying to sell on Artifact Armoury and for the time you put into your application.`,
+      'After reviewing your portfolio we are not able to offer you a place right now.',
+      `Our reasoning: ${params.reason}`,
+      `You are welcome to apply again in the future. If you would like to talk it through, reply to ${SUPPORT_EMAIL}.`,
+    ],
+  })
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 

@@ -4,12 +4,42 @@ import toast from 'react-hot-toast'
 import { Copy, Trash2, Plus } from 'lucide-react'
 import { adminApi, AdminInvite } from '../../api/endpoints/admin'
 import Button from '../../components/ui/Button'
+import AdminApplicationsReview from './AdminApplicationsReview'
 
 /**
- * Artist onboarding is invite-code based (there's no "application" table).
- * This page manages invite codes: create, share, and revoke them.
+ * Artist onboarding: applicants submit through /apply-artist and are reviewed on
+ * the "Applications" tab (approving mints and emails an invite code). The "Invite
+ * codes" tab is still here for creating a code by hand, e.g. for someone you've
+ * invited directly.
  */
 const AdminArtistApplications: React.FC = () => {
+  const [tab, setTab] = useState<'applications' | 'codes'>('applications')
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-foreground">Artist applications</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review portfolios, then approve or reject. The applicant is emailed the decision and the reason either way.
+        </p>
+      </div>
+      <div className="flex gap-2 border-b border-border">
+        {([['applications', 'Applications'], ['codes', 'Invite codes']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'applications' ? <AdminApplicationsReview /> : <InviteCodesPanel />}
+    </div>
+  )
+}
+
+const InviteCodesPanel: React.FC = () => {
   const qc = useQueryClient()
   const [maxUses, setMaxUses] = useState(1)
   const [expiresInDays, setExpiresInDays] = useState<number | ''>('')
@@ -54,12 +84,9 @@ const AdminArtistApplications: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Artist Invites</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Artists join via invite code. Create a code and share it with a creator to onboard them.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Create a code by hand and share it with someone you want to onboard directly. Approved applications get theirs automatically.
+      </p>
 
       {/* Create */}
       <div className="bg-card border border-border rounded-lg p-5">
