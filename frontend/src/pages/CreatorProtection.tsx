@@ -62,7 +62,7 @@ const CreatorProtection: React.FC = () => {
       <p className="mt-4 text-base leading-relaxed text-muted-foreground">
         Handing your files to a marketplace is an act of trust. This page explains exactly
         what {SITE_NAME} does with them, in enough detail that you can judge it for
-        yourself — including the things our protections deliberately do <em>not</em> try
+        yourself, including the things our protections deliberately do <em>not</em> try
         to do.
       </p>
 
@@ -75,11 +75,12 @@ const CreatorProtection: React.FC = () => {
           </li>
           <li>
             • The 3D preview a browser receives is a separate, deliberately unprintable
-            stand-in. Your real print geometry is never sent to a visitor.
+            stand-in. Your real print geometry is never sent to anyone who has not bought
+            the model.
           </li>
           <li>
-            • We fingerprint the <em>shape</em> of every upload, so nobody can re-list your
-            model by rotating, rescaling or re-exporting it.
+            • We fingerprint the <em>shape</em> of every upload, so rotating, rescaling or
+            re-exporting your model does not let someone re-list it.
           </li>
           <li>• Your files download only to accounts that actually bought them.</li>
         </ul>
@@ -97,9 +98,14 @@ const CreatorProtection: React.FC = () => {
           </p>
           <p>
             It is written into a region of the file that slicers ignore, so it adds no
-            bytes and changes no geometry — <strong>the printed result is identical</strong>.
+            bytes and changes no geometry, so <strong>the printed result is identical</strong>.
             The payload is authenticated: a forged or edited mark fails verification rather
             than pointing at an innocent buyer.
+          </p>
+          <p>
+            That is how STL files are marked. If you upload an OBJ or 3MF, buyers also
+            receive your original file, and its mark is a simpler tag that is easier to
+            strip, so treat it as a deterrent for casual leaks rather than proof.
           </p>
           <p>
             If your model turns up somewhere it should not, send us the file and we can
@@ -109,15 +115,22 @@ const CreatorProtection: React.FC = () => {
 
         <Measure icon={<EyeOff className="h-5 w-5" />} title="The preview is not your model">
           <p>
-            Anything a browser can display, a determined person can capture — so we never
-            send the real thing. The model shown on the site and in the planner is a
+            Anything a browser can display, a determined person can capture, so we do not
+            send the real thing to people who have not bought it. The model shown to
+            visitors on the site and in the planner is a
             separate proxy we generate: heavily simplified, with surface detail baked into
             texture maps rather than present as geometry, and with interior and underside
             faces removed so it is not a closed, watertight solid.
           </p>
           <p>
             Pulled out of the browser and dropped into a slicer, it fails. It looks right
-            on screen and is worthless as a print — which is the point.
+            on screen and is worthless as a print, which is the point.
+          </p>
+          <p>
+            Once someone has bought a model, the planner shows them a full-detail copy
+            instead, because they already hold the file and have nothing left to be
+            protected from. That copy is only ever served to the buyer, the artist or an
+            admin.
           </p>
         </Measure>
 
@@ -129,12 +142,15 @@ const CreatorProtection: React.FC = () => {
             Every upload is measured into a fingerprint of its geometry that does not change
             when a file is rotated, rescaled, re-exported from other software, or has its
             triangles reordered. Renaming or re-saving a stolen file does not disguise it.
+            It is a similarity check, not magic: someone who substantially remodels a
+            file can change its shape enough to pass, which is why it works alongside the
+            watermark rather than instead of it.
           </p>
           <p>
             New uploads are checked against every model <em>and every part of every set</em>{' '}
             already on the marketplace, and a match against another artist&apos;s work is
             rejected before it can be listed. You can still upload your own file as many
-            times as you like — sold on its own and inside a set, for instance — because the
+            times as you like (sold on its own and inside a set, for instance) because the
             check only blocks matches against <em>other</em> accounts.
           </p>
         </Measure>
@@ -147,7 +163,7 @@ const CreatorProtection: React.FC = () => {
           </p>
           <p>
             The storage locations of your original files never appear in any page, API
-            response or preview — not even in a buyer&apos;s own purchase history.
+            response or preview, not even in a buyer&apos;s own purchase history.
           </p>
         </Measure>
 
@@ -163,7 +179,7 @@ const CreatorProtection: React.FC = () => {
         <Measure icon={<KeyRound className="h-5 w-5" />} title="Your selling account is locked down">
           <p>
             A seller account holds your catalogue and your earnings, so two-factor
-            authentication is <strong>required</strong> — not merely offered — before you can
+            authentication is <strong>required</strong>, not merely offered, before you can
             upload a model, publish a bundle or connect payouts. It is enforced on our
             servers on every one of those actions, so someone who gets hold of your password
             still cannot list, alter or redirect anything.
@@ -172,8 +188,11 @@ const CreatorProtection: React.FC = () => {
 
         <Measure icon={<LifeBuoy className="h-5 w-5" />} title="If something does leak">
           <p>
-            Send us the file — or a link to where it is being shared — through your artist
-            dashboard. We identify the source purchase where the mark survives, act on the
+            Send us the file, or a link to where it is being shared, through the{' '}
+            <Link to="/contact" className="text-primary hover:underline">
+              contact form
+            </Link>
+            . We identify the source purchase where the mark survives, act on the
             account involved, and support your takedown with what we find. If the mark has
             been stripped, the geometry fingerprint still shows the model is yours.
           </p>
@@ -193,7 +212,7 @@ const CreatorProtection: React.FC = () => {
             So, plainly: we do not block right-clicking or try to disable browser developer
             tools. Those stop nobody who knows what they are doing, and get in the way of
             honest customers. Watermarking does not prevent a determined buyer from leaking a
-            file — it removes their anonymity when they do. And nobody can stop someone
+            file, but it removes their anonymity when they do. And nobody can stop someone
             sculpting their own copy from photographs.
           </p>
           <p>
@@ -214,9 +233,11 @@ const CreatorProtection: React.FC = () => {
             <div className="mt-2 space-y-3 text-sm leading-relaxed text-muted-foreground">
               <p>
                 You keep ownership of your designs. You set your prices and the licence
-                buyers get, and you can unpublish or delete a listing at any time. We take
+                buyers get, and you can unpublish or delete a listing at any time. Deleting
+                removes it from the store, but people who already bought it keep their
+                downloads. We take
                 only the limited rights needed to host, process, protect and deliver your
-                files to the people who buy them — the detail is in the{' '}
+                files to the people who buy them. The detail is in the{' '}
                 <Link to="/terms-of-service" className="text-primary hover:underline">
                   Terms of Service
                 </Link>
@@ -227,8 +248,8 @@ const CreatorProtection: React.FC = () => {
                 you upload?{' '}
                 <Link to="/contact" className="text-primary hover:underline">
                   Talk to us
-                </Link>{' '}
-                — we would rather answer them first.
+                </Link>
+                . We would rather answer them first.
               </p>
             </div>
           </div>

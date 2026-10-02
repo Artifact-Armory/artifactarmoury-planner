@@ -55,7 +55,9 @@ const TermsOfService: React.FC = () => {
           does not affect the printed result, but it means a file that is leaked or shared
           in breach of these terms can be traced back to the account that downloaded it.
           Removing, tampering with or attempting to defeat the watermark is a breach of
-          these terms. See our{' '}
+          these terms. If we find that you have shared, uploaded, resold or otherwise
+          distributed files you bought, we may suspend or permanently close your account
+          and remove your access to your purchases. See our{' '}
           <Link to="/privacy-policy" className="text-primary underline">Privacy Policy</Link>{' '}
           for how this data is handled.
         </p>
