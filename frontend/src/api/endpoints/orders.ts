@@ -77,13 +77,14 @@ export const ordersApi = {
 
   /**
    * Create a digital order from cart items (models and/or bundles). The download
-   * unlocks immediately on payment; the buyer keeps their statutory 14-day right to
-   * cancel for a refund (we no longer collect a waiver for it — see
-   * PAYOUT_HOLD_DAYS in services/earnings.ts, which holds the artist's cut for that
-   * same window so a refund doesn't claw back money already paid out).
+   * unlocks immediately on payment. The buyer gives express consent to that, and
+   * acknowledges losing the 14-day right to cancel, via a separate checkbox
+   * (`downloadConsent`); the artist's cut is held for PAYOUT_HOLD_DAYS
+   * (services/earnings.ts) so a refund doesn't claw back money already paid out.
    *
    * `termsAccepted` records the buyer agreeing to the Terms of Service (and thereby
-   * the per-model licence terms) — the backend rejects the order without it.
+   * the per-model licence terms). The backend rejects the order without it, and
+   * without `downloadConsent`.
    */
   async createOrder(
     items: OrderItemInput[],
@@ -111,9 +112,11 @@ export const ordersApi = {
      * discount amount.
      */
     promoCode?: string | null,
+    /** Separate checkbox: express consent to immediate supply + loss of the 14-day cancellation right. */
+    downloadConsent = false,
   ): Promise<CreatedOrder> {
     const response = await apiClient.post(BASE_URL, {
-      items, customerEmail, termsAccepted, paymentMethod, taxCountry, billingAddress, promoCode,
+      items, customerEmail, termsAccepted, paymentMethod, taxCountry, billingAddress, promoCode, downloadConsent,
     })
     const o = response.data?.order ?? response.data
     return {

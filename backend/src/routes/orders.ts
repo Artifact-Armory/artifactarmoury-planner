@@ -57,14 +57,15 @@ router.post('/',
       // longer change what they're charged by picking a different country in the
       // storefront-wide picker, because that picker no longer feeds the charge.
       billingAddress,
-      // Buyer ticked the single checkout checkbox agreeing to the Terms of Service.
-      // As of migration 042 that one checkbox covers two distinct things — the
-      // per-model licence terms (personal vs. commercial use, no redistribution) AND
-      // the immediate-download / 14-day-cancellation-waiver (UK CCRs 2013 reg. 37 /
-      // EU CRD art. 16(m)) — the checkbox copy in Checkout.tsx spells out the waiver
-      // explicitly rather than relying solely on the linked document, since the
-      // regulation requires clear, informed consent to that specific point.
+      // Buyer ticked the checkbox agreeing to the Terms of Service (and thereby the
+      // per-model licence terms).
       termsAccepted,
+      // A SEPARATE, unticked-by-default checkbox: express consent to immediate supply
+      // and acknowledgement that the 14-day right to cancel is lost once supply begins
+      // (UK CCRs 2013 reg. 37 / reg. 16; EU CRD art. 16(m)). General acceptance of the
+      // terms must not double as this consent, so it is never inferred from
+      // termsAccepted.
+      downloadConsent,
       // A promo code the buyer entered at checkout (validated first via
       // POST /api/promo-codes/validate, but re-resolved and re-applied here
       // authoritatively — the preview is never trusted as the actual charge).
@@ -93,6 +94,9 @@ router.post('/',
 
     if (!termsAccepted) {
       throw new ValidationError('Please agree to the Terms of Service before purchasing');
+    }
+    if (downloadConsent !== true) {
+      throw new ValidationError('Please confirm you want your download to start immediately and that you lose your 14-day right to cancel once it begins');
     }
 
     // Validate items
@@ -388,10 +392,9 @@ router.post('/',
         total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
       }
 
-      // Create order (no shipping address for digital STLs). Both terms_accepted_at
-      // and download_consent_at are stamped from the one termsAccepted checkbox
-      // checked above — its on-screen copy covers both the licence terms and the
-      // immediate-download/cancellation-waiver explicitly.
+      // Create order (no shipping address for digital STLs). terms_accepted_at comes
+      // from the terms checkbox; download_consent_at from the separate
+      // immediate-supply consent checkbox (both validated above).
       const orderResult = await client.query(
         `INSERT INTO orders (
           user_id, customer_email,

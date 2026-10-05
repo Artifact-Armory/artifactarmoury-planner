@@ -73,6 +73,7 @@ const Checkout: React.FC = () => {
   const [done, setDone] = React.useState(false)
   const [pending, setPending] = React.useState(false)
   const [termsAccepted, setTermsAccepted] = React.useState(false)
+  const [downloadConsent, setDownloadConsent] = React.useState(false)
   const [method, setMethod] = React.useState<PaymentMethodChoice>('stripe')
   // Real billing address, collected via Stripe's AddressElement in live checkout only
   // (see BillingAddressCapture below). This — not the storefront-wide country picker
@@ -213,6 +214,7 @@ const Checkout: React.FC = () => {
     if (!user) { navigate('/login'); return }
     if (items.length === 0) return
     if (!termsAccepted) { setError('Please agree to the Terms of Service before purchasing.'); return }
+    if (!downloadConsent) { setError('Please confirm the immediate-download consent before purchasing.'); return }
     // Live checkout charges from the real billing address, not the storefront
     // country picker — so it can't proceed without one. Test/mock checkout never hits
     // this (billingAddress stays null, and the backend falls back to taxCountry).
@@ -226,6 +228,7 @@ const Checkout: React.FC = () => {
       const created = await ordersApi.createOrder(
         orderItems, user.email, termsAccepted, method, taxCountry, billingAddress,
         appliedPromo?.code.code,
+        downloadConsent,
       )
       setOrder(created)
 
@@ -532,8 +535,22 @@ const Checkout: React.FC = () => {
                     </Link>
                     , including the licence terms for each item in my cart (I will not use a
                     model beyond what its licence permits, e.g. selling prints of a
-                    personal-use-only model). I want my download to start immediately and I
-                    understand this means I lose my 14-day right to cancel once it begins.
+                    personal-use-only model).
+                  </span>
+                </label>
+
+                <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={downloadConsent}
+                    onChange={(e) => setDownloadConsent(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I expressly consent to immediate supply of the digital content before the
+                    end of the 14-day cancellation period. I understand that I lose my right
+                    to cancel once supply begins. This does not affect my statutory rights if
+                    the content is faulty or not as described.
                   </span>
                 </label>
 
@@ -541,7 +558,7 @@ const Checkout: React.FC = () => {
                 <Button
                   className="mt-4 w-full"
                   onClick={handleContinue}
-                  disabled={placing || !termsAccepted || (!testMode && !billingAddress)}
+                  disabled={placing || !termsAccepted || !downloadConsent || (!testMode && !billingAddress)}
                 >
                   {placing
                     ? 'Processing…'

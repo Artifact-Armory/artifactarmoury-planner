@@ -7,11 +7,13 @@ const PrivacyPolicy: React.FC = () => {
     <LegalLayout title="Privacy Policy" updated="5 October 2026" reviewed>
       <LegalSection heading="1. Who we are">
         <p>
-          Artifact Armoury (“we”, “us”, “our”) operates the Artifact Armoury marketplace
-          and 3D table planner. This policy explains what personal data we collect from
-          buyers and artists who use the site, why we collect it, who we share it with,
-          and the rights you have over it. We are the <strong>data controller</strong> for
-          the personal data described here.
+          Artifact Armoury (“we”, “us”, “our”) is the trading name of{' '}
+          <strong>Artifact Armoury Ltd</strong>, registered at Unit A, 82 James Carter
+          Road, Mildenhall, IP28 7DE. We operate the Artifact Armoury marketplace and 3D
+          table planner. This policy explains what personal data we collect from buyers and
+          artists who use the site, why we collect it, who we share it with, and the rights
+          you have over it. Artifact Armoury Ltd is the <strong>data controller</strong>{' '}
+          for the personal data described here.
         </p>
         <p>
           Questions, requests, or complaints about this policy or your data should go to{' '}
@@ -62,6 +64,13 @@ const PrivacyPolicy: React.FC = () => {
             (e.g. view and sale counts) — never your individual identity.
           </li>
           <li>
+            <strong>Table planner data</strong> — the layouts you save (the pieces on your
+            table, terrain settings and the name you give it), whether you have made a table
+            shareable and its share link, and your planner preferences. Layouts you save are
+            linked to your account; a table shared by link can be opened by anyone who has
+            the link. We do not store files you have not uploaded as a seller.
+          </li>
+          <li>
             <strong>Technical data</strong> — IP address and basic request metadata,
             collected automatically for security, fraud prevention, and to enforce fair-use
             limits on uploads, contact form submissions, and similar actions.
@@ -71,15 +80,44 @@ const PrivacyPolicy: React.FC = () => {
 
       <LegalSection heading="3. Cookies and local storage">
         <p>
-          We use a small number of <strong>strictly necessary</strong> cookies and
-          browser-storage entries to keep you signed in, remember your cart, your chosen
-          country (for VAT), and similar preferences on your own device. We do not run
-          third-party advertising or tracking cookies, and we do not sell or share your
-          data with ad networks. If you pay by card or PayPal, Stripe (see below) may set
-          its own cookies during checkout as part of its fraud-prevention systems — this is
-          governed by Stripe’s own privacy policy, not ours. You can control or clear
-          cookies and site storage through your browser at any time; doing so may sign you
-          out or reset your cart.
+          We use your browser’s local storage, and a small number of cookies, in these ways:
+        </p>
+        <ul className="ml-5 list-disc space-y-1">
+          <li>
+            <strong>Needed to provide what you asked for</strong> — your sign-in token, your
+            cart, your chosen country (so prices include the right VAT), a note that you
+            have seen a one-off notice, and your planner preferences. These stay on your
+            device until you clear them or sign out, and need no consent.
+          </li>
+          <li>
+            <strong>Usage analytics</strong> — a random session identifier kept in your
+            browser’s session storage (it is removed when you close the tab) so we can group
+            the pages and listings viewed in one visit. It is not shared with advertisers or
+            third-party analytics companies, and artists only see aggregate counts. Because
+            analytics is not strictly necessary, you can switch it off by blocking site
+            storage in your browser, and the site will work as normal.
+          </li>
+          <li>
+            <strong>Stripe at checkout</strong> — when you pay by card or PayPal, Stripe’s
+            embedded payment form may set cookies or similar technology for fraud prevention
+            and to complete the payment. These are needed to take your payment securely. We
+            choose to use Stripe, so we are responsible for telling you; Stripe describes
+            its own use in its{' '}
+            <a
+              href="https://stripe.com/cookies-policy/legal"
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline"
+            >
+              cookies policy
+            </a>
+            .
+          </li>
+        </ul>
+        <p>
+          We do not run advertising or cross-site tracking cookies, and we do not sell or
+          share your data with ad networks. You can clear cookies and site storage through
+          your browser at any time; doing so may sign you out or empty your cart.
         </p>
       </LegalSection>
 
@@ -120,20 +158,57 @@ const PrivacyPolicy: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="5. Download watermarking (important)">
+      <LegalSection heading="5. Why we use your data, and our lawful basis">
         <p>
-          To protect artists against piracy, <strong>every model file you download is
-          personalised with an invisible, encrypted watermark that encodes an identifier
-          tied to your account and the specific order</strong>. This lets a leaked or
-          unlawfully shared file be traced back to the account that downloaded it.
+          Under UK data-protection law we need a lawful basis for each use. These are the
+          ones we rely on:
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="py-2 pr-4 font-semibold">What we do</th>
+                <th className="py-2 font-semibold">Lawful basis</th>
+              </tr>
+            </thead>
+            <tbody className="align-top">
+              <tr className="border-b"><td className="py-2 pr-4">Create and run your account, sign you in</td><td className="py-2">Contract</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Take payment, deliver downloads, support and refunds</td><td className="py-2">Contract</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Keep tax, VAT and accounting records</td><td className="py-2">Legal obligation</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Messages between buyers and artists, and with support</td><td className="py-2">Contract, and legitimate interests in resolving disputes</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Security, fraud prevention and rate limits (IP address, request metadata)</td><td className="py-2">Legitimate interests in keeping the service secure</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Usage analytics and improving the service</td><td className="py-2">Legitimate interests in understanding and improving the service</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Anti-piracy watermarking and re-upload detection</td><td className="py-2">Legitimate interests (see below)</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Saving and sharing your table planner layouts</td><td className="py-2">Contract</td></tr>
+              <tr className="border-b"><td className="py-2 pr-4">Reviewing artist applications</td><td className="py-2">Steps at your request before entering a contract</td></tr>
+              <tr><td className="py-2 pr-4">Marketing emails about artists you follow</td><td className="py-2">Consent, which you can withdraw at any time</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Where we rely on legitimate interests you can object to that processing (see
+          “Your rights” below) and we will stop unless we have compelling grounds.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="6. Anti-piracy watermarking (important)">
+        <p>
+          To protect artists against piracy, <strong>files we deliver are personalised with
+          an invisible, encrypted watermark that encodes an identifier tied to your account
+          and the specific order</strong>. Because we can link that identifier back to you,
+          it is personal data in our hands. If a file is leaked or unlawfully shared, the
+          watermark shows which download it came from; that starts an investigation and does
+          not by itself prove who leaked it.
         </p>
         <p>
-          The watermark is embedded in a part of the file that does not change the printed
-          object. We process this data on the basis of our <strong>legitimate interests</strong>{' '}
-          (and those of our artists) in preventing intellectual-property theft, and to
-          perform our contract with you. We only decode a watermark when investigating a
-          suspected leak or infringement, and we retain the information for as long as
-          needed for that purpose.
+          The watermark is stored in a part of the file that is not used when printing. Our
+          lawful basis is our <strong>legitimate interests</strong>, and those of our
+          artists, in preventing intellectual-property theft. We have weighed that against
+          your interests: the identifier reveals nothing to anyone who finds it without our
+          key, and we only decode one when investigating a suspected leak or infringement.
+          You can object to this processing at any time by contacting us. We keep watermark
+          records for as long as the order exists and for up to six years afterwards, which
+          matches the time limit for legal claims and covers our tax record-keeping.
         </p>
         <p>
           Separately, we compare the underlying geometry of newly uploaded files against
@@ -144,13 +219,13 @@ const PrivacyPolicy: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="6. Payments and billing">
+      <LegalSection heading="7. Payments and billing">
         <p>
           Payments are processed by <strong>Stripe</strong>, including card payments and
           PayPal (accepted through Stripe). We never see or store your full card number.
-          Stripe uses your billing address and country to calculate tax and to run its own
-          fraud checks, and acts as an independent data controller for that processing —
-          see{' '}
+          Stripe acts as a processor for us when it takes your payment and calculates tax
+          on our behalf, and as an independent controller for its own fraud prevention and
+          legal compliance, which is why we also point you to{' '}
           <a
             href="https://stripe.com/privacy"
             target="_blank"
@@ -161,17 +236,18 @@ const PrivacyPolicy: React.FC = () => {
           </a>
           . Artists are paid out via Stripe Connect, which separately collects the
           identity and bank details Stripe needs to verify a payout account and meet
-          anti-money-laundering law; we do not hold your bank details ourselves.
+          anti-money-laundering law; we do not hold your bank details ourselves. We receive
+          from Stripe only your verification status and payout records.
         </p>
       </LegalSection>
 
-      <LegalSection heading="7. Who we share it with">
+      <LegalSection heading="8. Who we share it with">
         <p>
           We share personal data only as needed to run the service:
         </p>
         <ul className="ml-5 list-disc space-y-1">
           <li>
-            <strong>Stripe</strong> — to take payment, calculate tax, and pay artists (§6).
+            <strong>Stripe</strong> — to take payment, calculate tax, and pay artists (section 7).
           </li>
           <li>
             <strong>Resend</strong> — our email provider, to send order confirmations,
@@ -204,46 +280,55 @@ const PrivacyPolicy: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="8. International transfers">
+      <LegalSection heading="9. International transfers">
         <p>
-          Our hosting and payment providers may process data on servers outside the UK and
-          EEA. Where they do, we rely on the safeguards those providers offer for
-          international transfers (such as the EU Standard Contractual Clauses or the UK
-          International Data Transfer Addendum). Contact us if you would like more detail
-          on the safeguards that apply to a particular provider.
+          Some of the providers in section 8 are based in, or process data in, the United
+          States and other countries outside the UK. We only transfer personal data there
+          where the UK GDPR allows it. <strong>Stripe, Cloudflare and Resend</strong> are
+          certified under the UK Extension to the EU–US Data Privacy Framework (the “UK–US
+          Data Bridge”), and their data-processing terms also include standard contractual
+          clauses with the UK International Data Transfer Addendum as a fallback.{' '}
+          <strong>Railway</strong> (our hosting and database provider) transfers under the
+          standard contractual clauses and UK Addendum in its data-processing addendum.
+          Email us at support@artifactarmoury.com if you would like a copy of the relevant
+          safeguards.
         </p>
       </LegalSection>
 
-      <LegalSection heading="9. Retention">
+      <LegalSection heading="10. Retention">
+        <ul className="ml-5 list-disc space-y-1">
+          <li><strong>Account data</strong> — while your account is open. If you close it we delete or anonymise it within 30 days, except the records below.</li>
+          <li><strong>Orders, invoices and VAT records</strong> — 6 years from the end of the financial year of the sale, which tax law requires. This includes the order’s buyer identifier and consent record, and cannot be deleted on request while the law requires us to keep it.</li>
+          <li><strong>Watermark records</strong> — as long as the order exists (6 years, as above) because a leak can be discovered long after a sale.</li>
+          <li><strong>Messages</strong> — while both accounts exist, or until a dispute about them is resolved, then deleted with the account.</li>
+          <li><strong>Contact-form messages and attachments</strong> — 2 years from your last message to us.</li>
+          <li><strong>Security logs and rate-limit data</strong> — up to 90 days, longer only if tied to an investigation.</li>
+          <li><strong>Usage analytics</strong> — event-level data for up to 13 months, then only aggregate counts with no link to you.</li>
+          <li><strong>Saved table layouts</strong> — until you delete them or close your account.</li>
+          <li><strong>Artist applications</strong> — kept for as long as your artist account exists if approved; if unsuccessful, 12 months from our decision (to answer follow-ups and recognise repeat applications), then deleted along with your portfolio images.</li>
+        </ul>
         <p>
-          We keep account and order data for as long as your account is active and, after
-          that, for as long as required for tax, accounting and legal purposes. Messages
-          are kept for as long as the account they belong to exists, or as needed to resolve
-          a dispute. Watermark-tracing data is kept for as long as needed to protect against
-          and investigate infringement. When an artist deletes a model listing, it is
-          removed from the store but we keep its file hash and shape fingerprint, so the
-          design stays protected against re-upload by someone else. The artist who
-          uploaded it is never blocked from uploading their own file again.
-        </p>
-        <p>
-          If your artist application is approved, we keep it for as long as your artist
-          account exists. If it is unsuccessful, we keep it for a limited period after our
-          decision so we can respond to any follow-up and recognise repeat applications,
-          then delete it, including the images you uploaded.
-        </p>
-      </LegalSection>
-
-      <LegalSection heading="10. Security">
-        <p>
-          We use industry-standard measures to protect your data, including encryption of
-          passwords and payment data in transit, access controls on our systems, and the
-          per-download watermarking described in §5 to trace leaked files. No system is
-          completely secure, and we cannot guarantee absolute security of information you
-          transmit to us.
+          <strong>Artists’ files after closure.</strong> When an artist deletes a listing or
+          closes their account, the listing leaves the store, but buyers keep their downloads
+          (see our Terms of Service for the exception for files we cannot lawfully supply),
+          so we keep the files those buyers purchased and their per-buyer watermark records.
+          We also keep each deleted file’s hash and shape fingerprint so the design stays
+          protected against re-upload by someone else; neither identifies a person. The
+          artist who uploaded a file is never blocked from uploading it again.
         </p>
       </LegalSection>
 
-      <LegalSection heading="11. Your rights">
+      <LegalSection heading="11. Security">
+        <p>
+          We use industry-standard measures to protect your data, including hashing of
+          passwords, encryption of data in transit, and access controls on our systems. (The
+          watermarking described in section 6 protects artists’ files, not your data.) No
+          system is completely secure, and we cannot guarantee absolute security of
+          information you transmit to us.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="12. Your rights">
         <p>
           Subject to law, you can request access to, correction or deletion of your personal
           data, object to or restrict certain processing, and request a copy of your data in
@@ -265,7 +350,7 @@ const PrivacyPolicy: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="12. Children">
+      <LegalSection heading="13. Children">
         <p>
           Artifact Armoury is not directed at children, and we do not knowingly collect
           personal data from anyone under 16. If you believe a child has given us personal
@@ -277,15 +362,15 @@ const PrivacyPolicy: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="13. Changes to this policy">
+      <LegalSection heading="14. Changes to this policy">
         <p>
           We may update this policy from time to time. If we make a material change, we
-          will update the “Last updated” date above and, where appropriate, notify you
+          will update the “Last updated” date at the top of this page and, where appropriate, notify you
           through the site or by email.
         </p>
       </LegalSection>
 
-      <LegalSection heading="14. Contact">
+      <LegalSection heading="15. Contact">
         <p>
           If you have any questions or queries about this policy or how we handle your
           data, please contact us at{' '}

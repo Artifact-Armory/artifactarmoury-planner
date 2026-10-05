@@ -18,7 +18,7 @@ import { ValidationError } from '../middleware/error'
  * WHICH agreement each artist actually accepted — a bare timestamp stops being
  * evidence the moment the text is edited.
  */
-export const SELLER_TERMS_VERSION = '2026-10-05'
+export const SELLER_TERMS_VERSION = '2026-10-05-v2'
 
 export interface InviteRow {
   id: string

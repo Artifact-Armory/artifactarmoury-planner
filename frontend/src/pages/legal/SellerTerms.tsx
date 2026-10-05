@@ -13,7 +13,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
  */
 const SellerTerms: React.FC = () => {
   return (
-    <LegalLayout title="Seller Terms" updated="5 October 2026">
+    <LegalLayout title="Seller Terms" updated="5 October 2026 (v2)">
       <LegalSection heading="1. Who we are and what you are agreeing to">
         <p>
           Artifact Armoury (“we”, “us”) is operated by Artifact Armoury Ltd, registered at
@@ -25,6 +25,13 @@ const SellerTerms: React.FC = () => {
           If they conflict, these Seller Terms win for anything to do with selling.
         </p>
         <p>
+          <strong>Who sells to the buyer.</strong> Buyers buy from Artifact Armoury Ltd: we
+          set the buyer terms, take payment, deliver the files and decide refunds and
+          complaints. You supply the design and, through us, grant the buyer the licence
+          shown on your listing. Statutory remedies owed to buyers are ours to deal with;
+          section 7 explains how that affects your earnings.
+        </p>
+        <p>
           Selling is by invitation. An invite code is single use and cannot be transferred.
           By redeeming one and creating a seller account you agree to these terms.
         </p>
@@ -34,8 +41,11 @@ const SellerTerms: React.FC = () => {
         <p>
           You must give accurate information, keep it up to date, and keep your login
           secure. Two-factor authentication is required before you can upload a model,
-          publish a bundle or connect payouts. You are responsible for everything done
-          through your account.
+          publish a bundle or connect payouts. You are responsible for activity on your
+          account unless it happened without your permission and despite you keeping your
+          login secure. Tell us straight away if you think your account has been
+          compromised, and we will not hold you responsible for what a third party did
+          after you told us.
         </p>
       </LegalSection>
 
@@ -83,17 +93,34 @@ const SellerTerms: React.FC = () => {
           between you and us in proportion to our shares of the sale price. If you create a
           promo code, <strong>the whole cost of the discount comes out of your share, not
           ours.</strong> A discount can never take an item below the minimum price we set
-          for it.
+          for it (currently 50p for a promo-code discount).
+        </p>
+        <p>
+          <strong>Worked example</strong> (a £10.00 listing, before VAT, at the standard 85%
+          share): with no discount you earn £8.50 and we keep £1.50. With a £2.00 public
+          sale the buyer pays £8.00 before VAT, and you earn 85% of that, £6.80. With a
+          £2.00 promo code the buyer also pays £8.00 before VAT, but we still keep our
+          normal £1.50, so you earn £6.50. A promo code is applied after any public sale,
+          and amounts are calculated in pence and rounded to the nearest penny. Our share
+          covers the cost of taking the buyer’s payment; we do not deduct card or PayPal
+          processing fees from your share.
         </p>
       </LegalSection>
 
       <LegalSection heading="6. Getting paid">
         <p>
           Payouts are made through Stripe Connect, so you must complete Stripe’s
-          verification to be paid. Earnings become eligible for payout after a holding
-          period, currently <strong>21 days</strong>, and we pay out once your eligible
-          balance reaches the minimum, currently <strong>£10</strong>. Stripe may charge its
-          own fees or hold funds under its own rules, and we are not responsible for
+          verification to be paid. The holding period, currently <strong>21 days</strong>,
+          starts on the day the buyer’s payment is confirmed, and covers refunds and
+          disputes. Once an earning has cleared that period it is paid out in our weekly
+          payout run, provided your eligible balance has reached the minimum, currently{' '}
+          <strong>£10</strong>; a smaller balance rolls forward to the next run. If your
+          account closes with less than £10 owing, we will still pay it to your connected
+          Stripe account where we are able to. If we withhold payouts to investigate a
+          suspected breach (section 12), we will tell you why and aim to finish within 30
+          days, and we will release whatever is not in doubt. We do not charge you a fee to
+          pay you. Stripe may charge fees on your own Stripe account or hold funds under
+          its own rules; those are between you and Stripe, and we are not responsible for
           Stripe’s decisions. You are responsible for your own tax, including declaring and
           paying tax on what you earn.
         </p>
@@ -101,10 +128,23 @@ const SellerTerms: React.FC = () => {
 
       <LegalSection heading="7. Refunds and disputes">
         <p>
-          If a buyer is refunded, the refunded amount comes out of your earnings for that
-          sale. If that money has not been paid out to you yet, we simply do not pay it. We
-          may refund a buyer where a file is faulty, corrupt or not as described, or where a
-          listing is removed for breaching these terms. We will tell you when we do.
+          When a buyer is refunded for an item, they get back what they paid, including VAT.
+          <strong> You lose only your own share of that item</strong> (in the example above,
+          £8.50 of a £10.00 sale, or whatever you actually earned after any discount). We
+          bear our share, and the VAT is returned from the VAT we collected, so neither
+          comes out of your earnings. If your share has not been paid out yet, we do not pay
+          it. If it has, we may set it off against your future earnings; we will not ask
+          you to repay it in cash unless the refund resulted from your breach of these
+          terms, for example an infringing or misrepresented listing.
+        </p>
+        <p>
+          We decide refunds. We must give buyers the remedies consumer law requires where a
+          file is faulty, corrupt or not as described, and your share is reduced as above
+          when we do. We may also refund as goodwill; where we do that on a sale that was
+          not your fault, we will bear the cost ourselves rather than reduce your earnings.
+          A payment dispute or chargeback is treated like a refund of that item, and any
+          dispute fee charged to us is ours unless the dispute arose from your breach. We
+          will tell you when we refund one of your sales.
         </p>
       </LegalSection>
 
@@ -134,8 +174,10 @@ const SellerTerms: React.FC = () => {
         <p>
           You can unpublish or delete a listing at any time. Deleting removes it from the
           store, but <strong>people who already bought it keep their access to download
-          it.</strong> We keep the file hash and shape fingerprint of deleted listings so
-          the design stays protected.
+          it</strong>, unless we cannot lawfully keep supplying that file (for example
+          because it infringes someone’s rights), in which case we refund those buyers and
+          section 7 applies. We keep the file hash and shape fingerprint of deleted
+          listings so the design stays protected.
         </p>
       </LegalSection>
 
@@ -154,7 +196,12 @@ const SellerTerms: React.FC = () => {
           We may unpublish or remove any listing, refuse or reverse a sale, withhold
           payouts while we investigate, suspend or close an account, and report matters to
           the authorities, where we reasonably believe you have broken these terms, the law,
-          or someone else’s rights. Where we reasonably can, we will tell you why.
+          or someone else’s rights. When we restrict, suspend or terminate any part of your
+          selling, we will email you a statement of reasons at or before the time, and you
+          can reply to ask us to review the decision. We may skip advance reasons only where
+          the law allows, for example where we are legally prevented from giving them.
+          Complaints about our decisions are handled by replying to that email or writing to
+          support@artifactarmoury.com; we will respond within 14 days.
         </p>
       </LegalSection>
 
@@ -162,8 +209,12 @@ const SellerTerms: React.FC = () => {
         <p>
           You can close your seller account at any time. Buyers keep their downloads. We
           will pay out any earnings you are owed, less anything we are entitled to keep
-          under these terms. We can end your access with notice, or immediately for serious
-          breach.
+          under these terms, once the holding period in section 6 has passed. We can end
+          your seller account by giving you at least 30 days’ notice with our reasons. We
+          can end it sooner, or suspend it immediately, only where you have seriously
+          breached these terms or the law, where the law requires it, or where we reasonably
+          need to protect buyers, other artists or the marketplace; we will then email you
+          the reasons straight away. Buyers’ rights under section 10 are not affected.
         </p>
       </LegalSection>
 
@@ -172,16 +223,21 @@ const SellerTerms: React.FC = () => {
           We provide the marketplace “as is”. We do not guarantee any level of sales.
           Nothing in these terms limits liability that cannot lawfully be limited, including
           for death or personal injury caused by negligence, or for fraud. Subject to that,
-          our total liability to you is limited to the amount we paid or owed to you in the
-          12 months before the claim.
+          our total liability to you for loss arising from your use of the marketplace is
+          limited to the greater of £1,000 and the amount we paid or owed to you in the 12
+          months before the claim. This cap never limits our obligation to pay you the
+          earnings you have properly earned under section 6.
         </p>
       </LegalSection>
 
       <LegalSection heading="15. Changes, law and contact">
         <p>
-          We may update these terms. If we make a material change we will tell you through
-          the site or by email, and you will be asked to accept the new version before you
-          carry on selling. These terms are governed by the laws of England and Wales, and
+          We may update these terms, for example for legal, security or safety reasons, or to
+          reflect changes to the marketplace. We will email you the new version at least 15
+          days before it takes effect (sooner only if the law requires it, or if you agree).
+          Changes do not apply to sales already made. If you do not accept a change you can
+          close your seller account before it takes effect and we will pay out what you
+          are owed. These terms are governed by the laws of England and Wales, and
           the courts of England and Wales have jurisdiction. Questions:{' '}
           <a href="mailto:support@artifactarmoury.com" className="text-primary underline">
             support@artifactarmoury.com
