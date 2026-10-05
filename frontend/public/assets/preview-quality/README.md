@@ -9,7 +9,11 @@ why the mesh on the table isn't what the buyer prints.
 | `planner-preview.png` | The model as the planner draws it — decimated to `TARGET_PREVIEW_TRIS`. |
 | `stl-detail.png` | The **same** model at full fidelity, no watermark — what the downloaded STL holds. |
 
-## How the current pair was generated (2026-08-30)
+## Current pair (2026-10-05): Gothic sci-fi ruin, corner-1-bottom-A.stl
+
+705,838-triangle source. `planner-preview.png` = the real production baked proxy of Gothic church (watermark emboss + decimation + stripped faces), fetched unauthenticated from `/api/models/<id>/preview.glb?variant=preview`; camera level (0° elevation), square to one wall so the chevron emboss cut-outs show; `stl-detail.png` = `convertSTLtoGLBFull`, the **owner** copy (240k tris, decimated from 705k by `OWNER_GLB_TARGET_TRIS`, so it is not the raw STL). Rendered with ThreeStage's lighting, identical camera, 1200x900 at DPR 2. The notes below describe the earlier (2026-08-30) pair but the method is the same.
+
+## How the earlier pair was generated (2026-08-30)
 
 Both come from the **real production converters**, not a mock-up — the claim on that
 popup has to be literally true of what the pipeline does, same standard as the
