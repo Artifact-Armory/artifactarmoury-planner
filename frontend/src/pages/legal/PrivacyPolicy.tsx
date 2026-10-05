@@ -4,7 +4,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
 
 const PrivacyPolicy: React.FC = () => {
   return (
-    <LegalLayout title="Privacy Policy" updated="5 October 2026" reviewed>
+    <LegalLayout title="Privacy Policy" updated="5 October 2026">
       <LegalSection heading="1. Who we are">
         <p>
           Artifact Armoury (“we”, “us”, “our”) is the trading name of{' '}
