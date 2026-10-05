@@ -4,7 +4,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
 
 const PrivacyPolicy: React.FC = () => {
   return (
-    <LegalLayout title="Privacy Policy" updated="1 October 2026" reviewed>
+    <LegalLayout title="Privacy Policy" updated="5 October 2026" reviewed>
       <LegalSection heading="1. Who we are">
         <p>
           Artifact Armoury (“we”, “us”, “our”) operates the Artifact Armoury marketplace
@@ -40,6 +40,14 @@ const PrivacyPolicy: React.FC = () => {
           <li>
             <strong>Content you upload</strong> — for artists, the model files, images,
             names, descriptions, prices and licence terms you list.
+          </li>
+          <li>
+            <strong>Artist application data</strong> — if you apply to sell on Artifact
+            Armoury, we collect what you put in the application: your store name, a
+            description of yourself and your work, any website and social media links you
+            choose to give, details of where else you sell, and the portfolio images you
+            upload. We also keep our decision on your application and the reason we gave
+            you.
           </li>
           <li>
             <strong>Messages</strong> — if you message an artist or buyer through the site,
@@ -101,6 +109,14 @@ const PrivacyPolicy: React.FC = () => {
           they publish several models at once. Separately, you will always see these
           updates as in-site notifications while signed in — those are not emails and are
           not affected by this setting.
+        </p>
+        <p>
+          <strong>Artist applications.</strong> We use application data to review your
+          application, to decide whether to invite you to sell, to email you our decision
+          and reasoning, and to send an invite code if you are approved. Our lawful basis
+          is taking steps at your request before entering a contract with you. Our team
+          reviews applications by hand. We do not use automated decision-making to accept
+          or reject them.
         </p>
       </LegalSection>
 
@@ -175,6 +191,11 @@ const PrivacyPolicy: React.FC = () => {
           </li>
         </ul>
         <p>
+          Application details and portfolio images are visible only to our administrators,
+          and are stored with the same hosting and file-storage providers listed above. We
+          do not share them with other artists or buyers.
+        </p>
+        <p>
           Artists otherwise receive only aggregate, non-identifying analytics about their
           own listings — never an individual buyer’s identity. We do not sell your personal
           data, and we only disclose it beyond the above where required by law, to enforce
@@ -199,9 +220,16 @@ const PrivacyPolicy: React.FC = () => {
           that, for as long as required for tax, accounting and legal purposes. Messages
           are kept for as long as the account they belong to exists, or as needed to resolve
           a dispute. Watermark-tracing data is kept for as long as needed to protect against
-          and investigate infringement. When you delete a model listing, we also delete its
-          associated fingerprint data, which allows that exact design to be uploaded again
-          without being flagged as a duplicate.
+          and investigate infringement. When an artist deletes a model listing, it is
+          removed from the store but we keep its file hash and shape fingerprint, so the
+          design stays protected against re-upload by someone else. The artist who
+          uploaded it is never blocked from uploading their own file again.
+        </p>
+        <p>
+          If your artist application is approved, we keep it for as long as your artist
+          account exists. If it is unsuccessful, we keep it for a limited period after our
+          decision so we can respond to any follow-up and recognise repeat applications,
+          then delete it, including the images you uploaded.
         </p>
       </LegalSection>
 

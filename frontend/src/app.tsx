@@ -36,6 +36,7 @@ import CreatorProtection from './pages/CreatorProtection';
 import NotFound from './pages/NotFound';
 import PrivacyPolicy from './pages/legal/PrivacyPolicy';
 import TermsOfService from './pages/legal/TermsOfService';
+import SellerTerms from './pages/legal/SellerTerms';
 import Checkout from './pages/Checkout';
 import GlobalLibrary from './pages/GlobalLibrary';
 import TableLibrary from './pages/TableLibrary';
@@ -215,6 +216,7 @@ function App() {
               <Route path="creator-protection" element={<CreatorProtection />} />
               <Route path="privacy-policy" element={<PrivacyPolicy />} />
               <Route path="terms-of-service" element={<TermsOfService />} />
+              <Route path="seller-terms" element={<SellerTerms />} />
               
               {/* Auth Routes */}
               <Route path="login" element={<Login />} />

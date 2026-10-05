@@ -82,7 +82,12 @@ const TermsOfService: React.FC = () => {
       </LegalSection>
 
       <LegalSection heading="6. Selling on Artifact Armoury">
-        <p>By listing a model as an artist you confirm that:</p>
+        <p>
+          Selling is also governed by our{' '}
+          <Link to="/seller-terms" className="text-primary underline">Seller Terms</Link>,
+          which cover fees, payouts and your responsibilities as an artist. By listing a
+          model as an artist you confirm that:
+        </p>
         <ul className="ml-5 list-disc space-y-1">
           <li>you own or have the rights to sell the design, and it does not infringe anyone else’s intellectual property;</li>
           <li>the files are your own work and are not re-uploads of another creator’s model;</li>

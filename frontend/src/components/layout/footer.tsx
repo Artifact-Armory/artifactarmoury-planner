@@ -32,6 +32,9 @@ const Footer: React.FC = () => {
           <Link to="/terms-of-service" className="hover:text-foreground">
             Terms of Service
           </Link>
+          <Link to="/seller-terms" className="hover:text-foreground">
+            Seller Terms
+          </Link>
         </div>
 
         <p className="text-sm text-muted-foreground sm:text-right">
