@@ -32,8 +32,13 @@ export const browseApi = {
     return buildSearchResponse(response.data)
   },
 
-  getFeaturedModels: async (limit = 8): Promise<TerrainModel[]> => {
-    const response = await apiClient.get(`${BASE_URL}/featured`, { params: { limit } })
+  getFeaturedModels: async (
+    limit = 8,
+    modelClass?: 'terrain' | 'vehicles' | 'characters',
+  ): Promise<TerrainModel[]> => {
+    const response = await apiClient.get(`${BASE_URL}/featured`, {
+      params: { limit, class: modelClass },
+    })
     return parseModelList(response.data?.featured)
   },
 

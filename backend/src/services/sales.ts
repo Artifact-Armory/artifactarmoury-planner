@@ -132,6 +132,20 @@ function applySale(row: any, base: number, percent: number, endsAt: any) {
 }
 
 /**
+ * SQL expression for the price a buyer actually pays for model alias `m`
+ * (base price less the best active model/portfolio sale). Keep in step with
+ * `annotateModelsWithSales` — sorting must agree with the displayed price.
+ */
+export const effectiveModelPriceSql = (alias = 'm') => `(
+  ${alias}.base_price * (100 - COALESCE((
+    SELECT MAX(s.discount_percent) FROM sales s
+    WHERE s.artist_id = ${alias}.artist_id AND s.canceled_at IS NULL
+      AND NOW() >= s.starts_at AND NOW() < s.ends_at
+      AND (s.scope = 'portfolio' OR (s.scope = 'model' AND s.target_id = ${alias}.id))
+  ), 0)) / 100.0
+)`
+
+/**
  * Annotate model rows (needing `id`, `artist_id`, `base_price`) with sale pricing
  * using a single query across the involved artists. Mutates the rows in place.
  */

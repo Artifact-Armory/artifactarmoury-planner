@@ -6,6 +6,7 @@
 
 import * as THREE from 'three'
 import type { Asset } from '@core/assets'
+import { groundOffset, tiltQuaternion } from '@core/orientation'
 import { ensureTemplate, getResolvedTemplate } from './loaders'
 
 const VALID = new THREE.Color(0x44d07a)
@@ -77,14 +78,11 @@ export class Ghost {
     // the same as the placed piece — matches InstancedScene.composeMatrix. Yaw is
     // applied to the whole group (setTransform); pitch tilts the clone within it.
     const pitchDeg = this.asset?.defaultPitchDeg ?? 0
-    if (pitchDeg) {
-      clone.rotation.x = THREE.MathUtils.degToRad(pitchDeg)
+    const rollDeg = this.asset?.defaultRollDeg ?? 0
+    if (pitchDeg || rollDeg) {
+      tiltQuaternion(pitchDeg, rollDeg, clone.quaternion)
       const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
-      if (aabb) {
-        const th = THREE.MathUtils.degToRad(pitchDeg)
-        const minY = Math.min(0, aabb.y * Math.cos(th)) - (aabb.z / 2) * Math.abs(Math.sin(th))
-        clone.position.y = -minY
-      }
+      if (aabb) clone.position.y = groundOffset(clone.quaternion, aabb)
     }
     this.group.add(clone)
   }

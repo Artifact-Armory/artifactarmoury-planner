@@ -10,7 +10,7 @@ import { asyncHandler } from '../middleware/error';
 import { ValidationError } from '../middleware/error';
 import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
 import { logSearch } from '../services/analytics';
-import { annotateModelsWithSales } from '../services/sales';
+import { annotateModelsWithSales, effectiveModelPriceSql } from '../services/sales';
 
 const router = Router();
 
@@ -108,10 +108,10 @@ router.get('/',
         orderBy = 'average_rating DESC NULLS LAST';
         break;
       case 'price_low':
-        orderBy = 'm.base_price ASC';
+        orderBy = `${effectiveModelPriceSql('m')} ASC, m.created_at DESC`;
         break;
       case 'price_high':
-        orderBy = 'm.base_price DESC';
+        orderBy = `${effectiveModelPriceSql('m')} DESC, m.created_at DESC`;
         break;
       case 'name':
         orderBy = 'm.name ASC';
@@ -144,7 +144,7 @@ router.get('/',
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.print_price, m.print_consent,
-        m.width, m.height, m.depth, m.part_count, m.default_pitch_deg, m.show_in_planner,
+        m.width, m.height, m.depth, m.part_count, m.default_pitch_deg, m.default_roll_deg, m.show_in_planner,
         m.view_count, m.sale_count,
         m.published_at,
         m.artist_id,
@@ -243,6 +243,11 @@ router.get('/featured',
   optionalAuth,
   asyncHandler(async (req, res) => {
     const { limit = 12 } = req.query;
+    // Optional model-class filter (terrain | vehicles | characters). Whitelisted,
+    // and passed as a bind parameter either way.
+    const modelClass = ['terrain', 'vehicles', 'characters'].includes(String(req.query.class))
+      ? String(req.query.class)
+      : null;
 
     // Featured models = highest rated + most sales in last 30 days
     const result = await db.query(
@@ -263,11 +268,18 @@ router.get('/featured',
        WHERE m.status = 'published' 
          AND m.visibility = 'public'
          AND m.published_at > CURRENT_DATE - INTERVAL '90 days'
+         AND ($3::text IS NULL OR EXISTS (
+           SELECT 1 FROM model_terms mt
+           JOIN terms t ON t.id = mt.term_id
+           JOIN facets fc ON fc.id = t.facet_id
+           WHERE mt.model_id = m.id AND fc.slug = 'model-class'
+             AND t.path = $3 AND t.is_active = true
+         ))
        GROUP BY m.id, u.artist_name, u.artist_url
        HAVING COUNT(DISTINCT r.id) >= 3 AND AVG(r.rating) >= 4.0
        ORDER BY (AVG(r.rating) * 0.6 + (m.sale_count / 100.0) * 0.4) DESC
        LIMIT $2`,
-      [(req as any).userId || null, Number(limit)]
+      [(req as any).userId || null, Number(limit), modelClass]
     );
 
     await annotateModelsWithSales(result.rows);
@@ -433,16 +445,16 @@ router.get('/:id/related',
     // Find related models by category and overlapping tags
     const result = await db.query(
       `SELECT 
-        m.id, m.name, m.description, m.category,
+        m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price, m.fulfillment_type,
         u.artist_name, u.artist_url,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
-          SELECT 1 FROM favorites f 
+          SELECT 1 FROM favorites f
           WHERE f.model_id = m.id AND f.user_id = $1
         ) as is_favorited,
-        CASE 
+        CASE
           WHEN m.category = $2 THEN 2
           ELSE 0
         END +
@@ -463,6 +475,7 @@ router.get('/:id/related',
       [(req as any).userId || null, category, tags || [], id, Number(limit)]
     );
 
+    await annotateModelsWithSales(result.rows);
     res.json({
       related: result.rows
     });

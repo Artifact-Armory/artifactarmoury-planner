@@ -51,12 +51,78 @@ export default function Planner({ readOnly = false }: { readOnly?: boolean }) {
     )
   }
 
+  // Without WebGL (blocked hardware acceleration, exhausted contexts, some
+  // privacy browsers) the stage throws on mount and the visitor is left with a
+  // dead page. Say so and point them at the shop instead.
+  if (!hasWebGL()) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 10 }}>
+        {seo}
+        <PlannerNoWebGL />
+      </div>
+    )
+  }
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 10 }}>
       {seo}
-      <Suspense fallback={<PlannerLoading />}>
-        <PlannerApp tableId={id} shareToken={token} readOnly={readOnly} />
-      </Suspense>
+      <PlannerErrorBoundary>
+        <Suspense fallback={<PlannerLoading />}>
+          <PlannerApp tableId={id} shareToken={token} readOnly={readOnly} />
+        </Suspense>
+      </PlannerErrorBoundary>
+    </div>
+  )
+}
+
+function hasWebGL(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+    // Hand the context straight back so this probe doesn't count against the
+    // browser's limit of live contexts.
+    ;(gl as WebGLRenderingContext | null)?.getExtension('WEBGL_lose_context')?.loseContext()
+    return Boolean(gl)
+  } catch {
+    return false
+  }
+}
+
+class PlannerErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(error: unknown) {
+    console.error('Planner failed to start', error)
+  }
+  render() {
+    return this.state.failed ? <PlannerNoWebGL /> : this.props.children
+  }
+}
+
+function PlannerNoWebGL() {
+  return (
+    <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center bg-background">
+      <h2 className="text-2xl font-semibold mb-2">The 3D planner couldn't start</h2>
+      <p className="text-muted-foreground max-w-md mb-6">
+        Your browser couldn't create a 3D view. Check that hardware acceleration is switched on,
+        close other tabs using 3D, then reload. The shop works without it.
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          onClick={() => window.location.reload()}
+          className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-accent"
+        >
+          Reload
+        </button>
+        <Link
+          to="/browse"
+          className="inline-flex items-center rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/80"
+        >
+          Return to shop →
+        </Link>
+      </div>
     </div>
   )
 }

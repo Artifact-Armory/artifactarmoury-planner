@@ -31,12 +31,40 @@ const FEATURES = [
   },
 ] as const
 
-const Home: React.FC = () => {
-  const { data: featuredModels, isLoading: loadingFeatured } = useQuery({
-    queryKey: ['featured-models'],
-    queryFn: () => browseApi.getFeaturedModels(8),
+type ModelClass = 'terrain' | 'vehicles' | 'characters'
+
+/**
+ * One "Featured …" row per model class. The backend only returns models that meet
+ * the featured bar, so until one does the row renders nothing at all (not even a
+ * heading or spinner) — an empty merchandising block reads as a thin shop.
+ */
+const FeaturedRow: React.FC<{ modelClass: ModelClass; title: string }> = ({ modelClass, title }) => {
+  const { data: models } = useQuery({
+    queryKey: ['featured-models', modelClass],
+    queryFn: () => browseApi.getFeaturedModels(8, modelClass),
   })
 
+  if (!models || models.length === 0) return null
+
+  return (
+    <section className="mt-12">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold text-foreground">{title}</h2>
+        <Link
+          to={`/browse?terms=${encodeURIComponent(`model-class:${modelClass}`)}`}
+          className="text-sm font-medium text-primary hover:text-primary/80"
+        >
+          View all
+        </Link>
+      </div>
+      <div className="mt-6">
+        <ModelGrid models={models} />
+      </div>
+    </section>
+  )
+}
+
+const Home: React.FC = () => {
   const { data: trendingModels, isLoading: loadingTrending } = useQuery({
     queryKey: ['trending-models'],
     queryFn: () => browseApi.getTrendingModels(8),
@@ -80,6 +108,9 @@ const Home: React.FC = () => {
           <p className="mt-4 text-white/80">
             {SITE_TAGLINE} Browse artist-made 3D models and add them to your digital table to plan your battlefield
             before you buy.
+          </p>
+          <p className="mt-2 text-sm text-white/70">
+            Models are digital STL files for 3D printing, delivered as instant downloads. No physical item is shipped.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
@@ -132,24 +163,12 @@ const Home: React.FC = () => {
 
       <SaleCarousel />
 
-      <section className="mt-12">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-semibold text-foreground">Featured terrain</h2>
-          <Link to="/browse" className="text-sm font-medium text-primary hover:text-primary/80">
-            View all
-          </Link>
-        </div>
-        <div className="mt-6">
-          {loadingFeatured ? (
-            <div className="flex justify-center py-10">
-              <Spinner size="lg" />
-            </div>
-          ) : (
-            <ModelGrid models={featuredModels ?? []} emptyMessage="No featured models available right now." />
-          )}
-        </div>
-      </section>
+      {/* An empty merchandising block reads as a thin shop — only show it with content. */}
+      <FeaturedRow modelClass="terrain" title="Featured terrain" />
+      <FeaturedRow modelClass="vehicles" title="Featured vehicles" />
+      <FeaturedRow modelClass="characters" title="Featured characters" />
 
+      {(loadingTrending || (trendingModels?.length ?? 0) > 0) && (
       <section className="mt-16">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-semibold text-foreground">Trending this week</h2>
@@ -163,10 +182,11 @@ const Home: React.FC = () => {
               <Spinner size="lg" />
             </div>
           ) : (
-            <ModelGrid models={trendingModels ?? []} emptyMessage="No trending models found." />
+            <ModelGrid models={trendingModels ?? []} />
           )}
         </div>
       </section>
+      )}
 
       <section className="mt-16">
         <div className="flex items-center justify-between">

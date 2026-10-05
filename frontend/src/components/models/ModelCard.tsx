@@ -106,16 +106,20 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
               model.onSale && model.salePrice != null ? model.originalPrice ?? model.basePrice : undefined
             }
           />
-          <div className="flex items-center text-sm text-amber-500">
-            <Star size={16} className="mr-1 fill-amber-400" />
-            <span className="text-muted-foreground">{formatRating(model.averageRating)}</span>
-          </div>
+          {(model.reviewCount ?? 0) > 0 ? (
+            <div className="flex items-center text-sm text-amber-500">
+              <Star size={16} className="mr-1 fill-amber-400" />
+              <span className="text-muted-foreground">{formatRating(model.averageRating)}</span>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">Not yet reviewed</span>
+          )}
         </div>
 
         <div className="mt-4 flex justify-between text-xs text-muted-foreground">
           <span>{model.category}</span>
-          {model.reviewCount !== undefined && (
-            <span>{model.reviewCount} reviews</span>
+          {(model.reviewCount ?? 0) > 0 && (
+            <span>{model.reviewCount} {model.reviewCount === 1 ? 'review' : 'reviews'}</span>
           )}
         </div>
 

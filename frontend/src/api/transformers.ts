@@ -175,6 +175,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   })),
   // Default planner tilt baked in by the artist (degrees, pitch about X).
   defaultPitchDeg: Number(model.default_pitch_deg ?? model.defaultPitchDeg ?? 0),
+  defaultRollDeg: Number(model.default_roll_deg ?? model.defaultRollDeg ?? 0),
   // Artist opt-out: whether this model may be placed on the 3D planner at all
   // (a misc item — paint brush holder, display base — still sells normally but
   // never appears as a placeable asset). Defaults true when the API omits it.

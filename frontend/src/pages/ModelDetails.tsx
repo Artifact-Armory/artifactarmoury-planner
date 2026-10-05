@@ -545,7 +545,9 @@ const ModelDetails: React.FC = () => {
                 showTaxNote
               />
               <span className="text-sm text-muted-foreground">
-                Rating {formatRating(model.averageRating)} · {model.reviewCount ?? 0} reviews
+                {(model.reviewCount ?? 0) > 0
+                  ? `Rating ${formatRating(model.averageRating)} · ${model.reviewCount} ${model.reviewCount === 1 ? 'review' : 'reviews'}`
+                  : 'Not yet reviewed'}
               </span>
             </div>
 
@@ -710,9 +712,10 @@ const ModelDetails: React.FC = () => {
                   Dimensions: {model.width} × {model.depth} × {model.height} mm
                 </li>
               )}
-              <li>{model.saleCount ?? 0} purchases</li>
-              {model.downloadCount !== undefined && <li>{model.downloadCount} downloads</li>}
-              {model.viewCount !== undefined && <li>{model.viewCount} total views</li>}
+              {/* Activity counters only help once they're impressive; a handful reads as "nobody buys this". */}
+              {(model.saleCount ?? 0) >= 10 && <li>{model.saleCount} purchases</li>}
+              {(model.downloadCount ?? 0) >= 10 && <li>{model.downloadCount} downloads</li>}
+              {(model.viewCount ?? 0) >= 100 && <li>{model.viewCount} total views</li>}
             </ul>
 
             {/* Report — hidden on the artist's own listing */}

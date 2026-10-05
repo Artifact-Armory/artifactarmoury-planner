@@ -9,20 +9,26 @@ import logger from '../utils/logger';
 import { authenticate, requireArtist, requireTwoFactor, optionalAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/error';
-import { annotateBundlesWithSales, recordPrice } from '../services/sales';
+import { annotateBundlesWithSales, annotateModelsWithSales, recordPrice } from '../services/sales';
 
 const router = Router();
 
 // Load a bundle's constituent models (public projection).
 async function loadBundleModels(bundleId: string) {
   const result = await db.query(
-    `SELECT m.id, m.name, m.thumbnail_path, m.base_price, m.status, m.processing_status
+    `SELECT m.id, m.name, m.artist_id, m.thumbnail_path, m.base_price, m.status, m.processing_status
      FROM bundle_items bi
      JOIN models m ON bi.model_id = m.id
      WHERE bi.bundle_id = $1
      ORDER BY bi.display_order ASC`,
     [bundleId]
   );
+  // Current selling price per model (sale-aware) so a bundle's "you save" compares
+  // against what each model costs today, not its list price.
+  await annotateModelsWithSales(result.rows);
+  for (const r of result.rows) {
+    r.current_price = r.on_sale && r.sale_price != null ? r.sale_price : Number(r.base_price);
+  }
   return result.rows;
 }
 

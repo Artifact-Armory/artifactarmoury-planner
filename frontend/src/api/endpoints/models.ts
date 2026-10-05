@@ -210,6 +210,7 @@ export const modelsApi = {
     thumbnailPath: string | null
     artistId: string
     defaultPitchDeg: number
+    defaultRollDeg: number
     primaryGroupName: string | null
     parts: Array<{
       id: string; name: string; isPrimary: boolean; hasGlb: boolean
@@ -225,6 +226,7 @@ export const modelsApi = {
       thumbnailPath: s.thumbnail_path ?? null,
       artistId: s.artist_id,
       defaultPitchDeg: Number(s.default_pitch_deg ?? 0),
+      defaultRollDeg: Number(s.default_roll_deg ?? 0),
       primaryGroupName: s.primary_group_name ?? null,
       parts: (s.parts ?? []).map((p: any) => ({
         id: p.id,
@@ -347,6 +349,8 @@ export const modelsApi = {
       recommendedInfill?: number | null
       /** Default planner tilt (pitch about X, degrees) so the model stands upright. */
       defaultPitchDeg?: number
+      /** Default planner roll (about Z, degrees), applied before the pitch. */
+      defaultRollDeg?: number
       /** Whether this model may be placed on the 3D planner at all (artist opt-out). */
       showInPlanner?: boolean
     },
@@ -365,6 +369,7 @@ export const modelsApi = {
     if (data.recommendedLayerHeight !== undefined) body.recommended_layer_height = data.recommendedLayerHeight;
     if (data.recommendedInfill !== undefined) body.recommended_infill = data.recommendedInfill;
     if (data.defaultPitchDeg !== undefined) body.default_pitch_deg = data.defaultPitchDeg;
+    if (data.defaultRollDeg !== undefined) body.default_roll_deg = data.defaultRollDeg;
     if (data.showInPlanner !== undefined) body.show_in_planner = data.showInPlanner;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;

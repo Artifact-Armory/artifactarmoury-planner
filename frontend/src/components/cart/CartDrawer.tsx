@@ -7,6 +7,7 @@ import { useCartStore, cartKey } from '../../store/cartStore'
 import PriceDisplay from '../models/PriceDisplay'
 import { useTaxStore, grossFromLines } from '../../store/taxStore'
 import { formatPrice } from '../../utils/format'
+import { useAuthStore } from '../../store/authStore'
 import { Badge } from '../shadcn/badge'
 
 const CartDrawer: React.FC = () => {
@@ -25,6 +26,7 @@ const CartDrawer: React.FC = () => {
   // (each grossed up by PriceDisplay), not the rate applied to the net subtotal —
   // otherwise the visible line items wouldn't add up to it.
   const taxRate = useTaxStore((s) => s.rate())
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const grossSubtotal = grossFromLines(items.map((i) => i.price), taxRate)
 
   // Re-price on open so a sale started since the item was added shows up.
@@ -157,6 +159,10 @@ const CartDrawer: React.FC = () => {
             {taxRate > 0
               ? `Includes ${taxRate}% VAT. This is the total you'll pay.`
               : "No VAT applies where you are. This is the total you'll pay."}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Digital STL downloads. Files unlock in your account straight after payment; nothing is shipped.
+            {!isAuthenticated && ' You\'ll be asked to sign in or create a free account at checkout.'}
           </p>
           <Button
             className="mt-4 w-full"

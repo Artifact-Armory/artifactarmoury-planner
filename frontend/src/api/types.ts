@@ -195,6 +195,8 @@ export interface TerrainModel {
   // Default planner tilt (pitch about X, degrees) baked in by the artist so the
   // model stands upright when placed. 0 = no tilt.
   defaultPitchDeg?: number
+  // Default planner roll (about Z, degrees), applied before the pitch.
+  defaultRollDeg?: number
   // Artist opt-out: whether this model may be placed on the 3D planner at all.
   // Default true — a misc item (paint brush holder, display base, …) can be
   // turned off without affecting its normal marketplace listing/sale.
@@ -460,6 +462,8 @@ export interface BundleModelRef {
   name: string
   thumbnailUrl?: string
   basePrice: number
+  /** What the model costs today (sale-aware). */
+  currentPrice: number
   status?: string
   processingStatus?: string
 }

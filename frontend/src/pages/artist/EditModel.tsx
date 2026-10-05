@@ -55,6 +55,8 @@ const EditModel: React.FC = () => {
   const [infill, setInfill] = React.useState('')
   // Default tilt applied in the 3D planner so the model stands upright (0/90/180/270).
   const [defaultPitch, setDefaultPitch] = React.useState(0)
+  // Roll about Z (applied before the pitch) — what stands up a figure lying along X.
+  const [defaultRoll, setDefaultRoll] = React.useState(0)
   // Whether this model may be placed on the 3D planner at all (artist opt-out for
   // misc items — a paint brush holder, a display base — that aren't table scenery).
   const [showInPlanner, setShowInPlanner] = React.useState(true)
@@ -145,6 +147,7 @@ const EditModel: React.FC = () => {
       setLayerHeight(m.recommendedLayerHeight != null ? String(m.recommendedLayerHeight) : '')
       setInfill(m.recommendedInfill != null ? String(m.recommendedInfill) : '')
       setDefaultPitch(Number(m.defaultPitchDeg ?? 0))
+      setDefaultRoll(Number(m.defaultRollDeg ?? 0))
       setShowInPlanner(m.showInPlanner !== false)
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
@@ -464,6 +467,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
+        defaultRollDeg: defaultRoll,
         showInPlanner,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
@@ -557,6 +561,7 @@ const EditModel: React.FC = () => {
         recommendedLayerHeight: layerHeight.trim() === '' ? null : Number(layerHeight),
         recommendedInfill: infill.trim() === '' ? null : Number(infill),
         defaultPitchDeg: defaultPitch,
+        defaultRollDeg: defaultRoll,
         showInPlanner,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
@@ -748,12 +753,18 @@ const EditModel: React.FC = () => {
         <div className={`rounded-lg border border-border p-3 ${showInPlanner ? '' : 'opacity-50'}`}>
           <p className="text-sm font-medium">Planner orientation</p>
           <p className="text-xs text-muted-foreground mt-1">
-            If your model imports lying on its side in the 3D planner, pick the tilt that
-            stands it upright — the live preview below sits it on the table exactly as buyers
+            If your model imports lying on its side in the 3D planner, pick the roll and tilt
+            that stand it upright — the live preview below sits it on the table exactly as buyers
             will see it. This is applied automatically whenever a buyer places it; the
             downloadable STL is never changed.
             {!showInPlanner && ' (Not shown in the planner while "Available in the 3D Table Planner" is off.)'}
           </p>
+          {(model?.partCount ?? 1) > 1 && (
+            <p className="text-xs font-medium text-amber-700 mt-2">
+              This orientation is applied to every model in this listing in the same way, so
+              they will all be rotated together.
+            </p>
+          )}
           <Suspense
             fallback={
               <div className="mt-3 flex w-full h-56 items-center justify-center rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 text-sm text-muted-foreground">
@@ -761,25 +772,33 @@ const EditModel: React.FC = () => {
               </div>
             }
           >
-            <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} className="mt-3 relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden" />
+            <ModelOrientationPreview url={model?.glbUrl} pitchDeg={defaultPitch} rollDeg={defaultRoll} className="mt-3 relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden" />
           </Suspense>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {[0, 90, 180, 270].map((deg) => (
-              <button
-                key={deg}
-                type="button"
-                onClick={() => setDefaultPitch(deg)}
-                disabled={busy}
-                className={`px-3 py-1.5 rounded border text-sm ${
-                  defaultPitch === deg
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-border text-foreground hover:bg-accent'
-                }`}
-              >
-                {deg === 0 ? 'Default (no tilt)' : `Tilt ${deg}°`}
-              </button>
-            ))}
-          </div>
+          {([
+            ['Roll', 'Roll (spin about its length — stands up a figure lying on its side)', defaultRoll, setDefaultRoll],
+            ['Tilt', 'Tilt (forward / back)', defaultPitch, setDefaultPitch],
+          ] as const).map(([short, hint, value, setValue]) => (
+            <div key={short} className="mt-3">
+              <p className="text-xs text-muted-foreground mb-1">{hint}</p>
+              <div className="flex flex-wrap gap-2">
+                {[0, 90, 180, 270].map((deg) => (
+                  <button
+                    key={deg}
+                    type="button"
+                    onClick={() => setValue(deg)}
+                    disabled={busy}
+                    className={`px-3 py-1.5 rounded border text-sm ${
+                      value === deg
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {deg === 0 ? `${short} 0°` : `${short} ${deg}°`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
 
         <div>

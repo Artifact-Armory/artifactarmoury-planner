@@ -10,6 +10,7 @@ function mapModelRef(m: any): BundleModelRef {
     name: m.name,
     thumbnailUrl: m.thumbnail_url || assetUrl(m.thumbnail_path),
     basePrice: Number(m.base_price ?? m.basePrice ?? 0),
+    currentPrice: Number(m.current_price ?? m.currentPrice ?? m.base_price ?? m.basePrice ?? 0),
     status: m.status,
     processingStatus: m.processing_status ?? m.processingStatus,
   }

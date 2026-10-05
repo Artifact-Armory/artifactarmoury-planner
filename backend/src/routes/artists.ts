@@ -4,6 +4,7 @@ import { db } from '../db'
 import logger from '../utils/logger'
 import { authenticate, optionalAuth, requireArtist } from '../middleware/auth'
 import { notifyNewFollower } from '../services/notifications'
+import { annotateModelsWithSales, effectiveModelPriceSql } from '../services/sales'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
@@ -169,10 +170,10 @@ router.get('/:id/models', async (req, res, next) => {
         orderBy = 'm.view_count DESC, m.sale_count DESC'
         break
       case 'price_asc':
-        orderBy = 'm.base_price ASC'
+        orderBy = `${effectiveModelPriceSql('m')} ASC, m.created_at DESC`
         break
       case 'price_desc':
-        orderBy = 'm.base_price DESC'
+        orderBy = `${effectiveModelPriceSql('m')} DESC, m.created_at DESC`
         break
       default:
         orderBy = 'm.published_at DESC, m.created_at DESC'
@@ -197,7 +198,7 @@ router.get('/:id/models', async (req, res, next) => {
         m.id, m.name, m.description, m.category, m.tags,
         m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth, m.part_count,
-        m.view_count, m.sale_count, m.published_at,
+        m.view_count, m.sale_count, m.published_at, m.artist_id,
         u.artist_name, u.artist_url
        FROM models m
        JOIN users u ON u.id = m.artist_id
@@ -206,6 +207,7 @@ router.get('/:id/models', async (req, res, next) => {
        LIMIT $2 OFFSET $3`,
       pattern ? [id, limitNum, offset, pattern] : [id, limitNum, offset]
     )
+    await annotateModelsWithSales(result.rows)
 
     artistLogger.debug('Artist models fetched', { artistId: id, count: result.rows.length, total })
 

@@ -16,7 +16,8 @@
 // ever selected, and neither occludes or reshapes the piece itself.
 
 import * as THREE from 'three'
-import type { Asset } from '@core/assets'
+import { getAssetById, type Asset } from '@core/assets'
+import { groundOffset, tiltQuaternion } from '@core/orientation'
 import type { Instance } from '@state/store'
 import { ensureTemplate, getResolvedTemplate, subscribeMeshExtras, type AssetPart, type AssetTemplate } from './loaders'
 import { LOD_MAX_ERROR_PX } from './meshExtras'
@@ -36,7 +37,6 @@ const RIM_GLOW_SCALE = 1.05 // how far the rim shell puffs out past the piece's 
 const tmpQuat = new THREE.Quaternion()
 const tmpQuatPitch = new THREE.Quaternion()
 const tmpYAxis = new THREE.Vector3(0, 1, 0)
-const tmpXAxis = new THREE.Vector3(1, 0, 0)
 const tmpPos = new THREE.Vector3()
 const tmpScale = new THREE.Vector3()
 const tmpMat = new THREE.Matrix4()
@@ -396,28 +396,21 @@ export class InstancedScene {
       scale *= 0.6 + 0.4 * easeOutBack(k)
     }
 
-    // yaw about Y, then tilt (pitch) about the model's local X so a piece can be
+    // yaw about Y, then tilt (roll about local Z, pitch about local X) so a piece can be
     // stood upright / laid flat. Pivot is the base-centre (base sits on the table).
     tmpQuat.setFromAxisAngle(tmpYAxis, THREE.MathUtils.degToRad(rotDeg))
     const pitchDeg = inst.pitchDeg ?? 0
+    const rollDeg = getAssetById(inst.assetId)?.defaultRollDeg ?? 0
     // When a piece is tilted, its base-aligned geometry (y ∈ [0, H]) rotates about
     // the base-centre and its lowest point drops below the table — re-ground it so
     // the tilted model still rests on the surface instead of sinking through the floor.
-    let groundOffset = 0
-    if (pitchDeg) {
-      tmpQuatPitch.setFromAxisAngle(tmpXAxis, THREE.MathUtils.degToRad(pitchDeg))
+    let groundLift = 0
+    if (pitchDeg || rollDeg) {
+      tiltQuaternion(pitchDeg, rollDeg, tmpQuatPitch)
       tmpQuat.multiply(tmpQuatPitch)
-      if (aabb) {
-        // Yaw about Y preserves world-Y, so only the pitch drives how far the box
-        // dips. Lowest corner Y = min(0, H·cosθ) − (D/2)·|sinθ|; lift by its negative.
-        const th = THREE.MathUtils.degToRad(pitchDeg)
-        const cos = Math.cos(th)
-        const sin = Math.sin(th)
-        const minY = Math.min(0, aabb.y * cos) - (aabb.z / 2) * Math.abs(sin)
-        groundOffset = -minY
-      }
+      if (aabb) groundLift = groundOffset(tmpQuatPitch, aabb)
     }
-    tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z) + groundOffset, z)
+    tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z) + groundLift, z)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
   }

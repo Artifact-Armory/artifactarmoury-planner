@@ -421,6 +421,15 @@ const Browse: React.FC = () => {
           <div className="mt-6">
             {isLoading ? (
               <div className="flex justify-center py-20"><Spinner size="lg" /></div>
+            ) : models.length === 0 && selectedClass && selectedClass !== 'terrain' && !searchTerm ? (
+              <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                <h3 className="text-lg font-semibold text-foreground">{selectedClassLabel} — coming soon</h3>
+                <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                  Our artists are still building this range. In the meantime, the terrain catalogue is full of
+                  print-ready pieces.
+                </p>
+                <Button className="mt-5" onClick={() => setClass('terrain')}>Browse terrain</Button>
+              </div>
             ) : (
               <ModelGrid models={models} />
             )}

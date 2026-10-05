@@ -45,7 +45,7 @@ const BundleDetails: React.FC = () => {
   const ownedCount = bundle ? bundle.models.filter((m) => ownsModel(m.id)).length : 0
 
   // What the same models cost bought one by one, against what the bundle asks.
-  const separateTotal = bundle ? bundle.models.reduce((sum, m) => sum + m.basePrice, 0) : 0
+  const separateTotal = bundle ? bundle.models.reduce((sum, m) => sum + m.currentPrice, 0) : 0
   const bundlePrice = bundle ? (bundle.onSale && bundle.salePrice != null ? bundle.salePrice : bundle.price) : 0
   const savings = separateTotal - bundlePrice
   const savingsPercent = separateTotal > 0 ? Math.round((savings / separateTotal) * 100) : 0
@@ -133,7 +133,12 @@ const BundleDetails: React.FC = () => {
                       <CheckCircle size={14} /> You own this
                     </span>
                   )}
-                  <span className="text-xs text-muted-foreground line-through">{formatPrice(m.basePrice)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {m.currentPrice < m.basePrice && (
+                      <span className="mr-1 line-through">{formatPrice(m.basePrice)}</span>
+                    )}
+                    {formatPrice(m.currentPrice)}
+                  </span>
                 </li>
               ))}
             </ul>

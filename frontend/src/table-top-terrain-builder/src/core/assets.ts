@@ -41,6 +41,7 @@ export const AssetSchema = z.object({
   // Artist-baked default tilt (pitch about X, degrees) applied when the piece is
   // first placed, so a model authored "lying down" stands upright automatically.
   defaultPitchDeg: z.number().optional(),
+  defaultRollDeg: z.number().optional(),
   // API models come from STLs authored in millimetres, so their GLB is ~1000x
   // too big for the metre-scaled scene. When set, the loader uniformly rescales
   // the GLB to the real-world `aabb` (dev-manifest GLBs are already in metres).
@@ -215,7 +216,7 @@ function modelToAsset(m: {
   id: string; name: string; tags?: string[]; glbUrl?: string; thumbnailUrl?: string
   width?: number | null; depth?: number | null; height?: number | null
   basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; artistId?: string; partCount?: number
-  category?: string; defaultPitchDeg?: number
+  category?: string; defaultPitchDeg?: number; defaultRollDeg?: number
 }): Asset | null {
   if (!m.glbUrl || (m.partCount ?? 1) !== 1) return null
   const wM = m.width != null ? m.width / 1000 : 0.15
@@ -239,6 +240,7 @@ function modelToAsset(m: {
     thumbnail: m.thumbnailUrl,
     scaleToFit: true, // GLB is in mm; rescale to the metre aabb above
     defaultPitchDeg: m.defaultPitchDeg || undefined,
+    defaultRollDeg: m.defaultRollDeg || undefined,
   } satisfies Asset
 }
 
@@ -352,6 +354,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           thumbnail: part.thumbnailUrl ?? assetUrl(s.thumbnailPath ?? undefined),
           scaleToFit: true,
           defaultPitchDeg: s.defaultPitchDeg || undefined,
+          defaultRollDeg: s.defaultRollDeg || undefined,
         } satisfies Asset)
         partAssetIds.push(assetId)
         const gi = part.groupIndex ?? 0

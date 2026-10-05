@@ -211,6 +211,8 @@ CREATE TABLE models (
     -- sculpts Y-up — so an artist can bake in the orientation that stands the model
     -- upright (0/90/180/270) instead of every buyer re-tilting it (migration 036).
     default_pitch_deg INTEGER NOT NULL DEFAULT 0,
+    -- Default roll (about Z, degrees), applied before the pitch (migration 069).
+    default_roll_deg INTEGER NOT NULL DEFAULT 0,
 
     -- Whether this model may be placed on the 3D table planner (migration 045).
     -- Artist-controlled opt-out for listings that aren't scenery at all (a paint

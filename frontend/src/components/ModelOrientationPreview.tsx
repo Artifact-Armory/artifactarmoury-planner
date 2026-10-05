@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { groundOffset, tiltQuaternion } from '@core/orientation'
 
 // One decoder shared across previews (matches the planner's /draco/ setup).
 const dracoLoader = new DRACOLoader()
@@ -30,16 +31,19 @@ interface Props {
   url?: string
   /** Tilt about X in degrees (the value being previewed). */
   pitchDeg: number
+  /** Roll about Z in degrees, applied before the pitch. */
+  rollDeg?: number
   className?: string
 }
 
-const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) => {
+const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, rollDeg = 0, className }) => {
   const mountRef = React.useRef<HTMLDivElement | null>(null)
   // Live scene handles kept across renders so a pitch change doesn't reload the GLB.
   const pivotRef = React.useRef<THREE.Group | null>(null)
-  const aabbRef = React.useRef<{ y: number; z: number }>({ y: 0, z: 0 })
+  const aabbRef = React.useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 })
   // Latest pitch, readable inside the (url-scoped) load callback without re-running it.
   const pitchDegRef = React.useRef(pitchDeg)
+  const rollDegRef = React.useRef(rollDeg)
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error' | 'empty'>('loading')
 
   // Build the renderer/scene once per url; tear down on unmount or url change.
@@ -92,7 +96,7 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
         model.position.z += -center.z
         model.position.y += -box.min.y
         pivot.add(model)
-        aabbRef.current = { y: size.y, z: size.z }
+        aabbRef.current = { x: size.x, y: size.y, z: size.z }
 
         // A ground grid sized to the model so "resting on the table" reads clearly.
         const span = Math.max(size.x, size.z) * 2.2
@@ -109,7 +113,7 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
         controls.target.set(0, size.y * 0.4, 0)
         controls.update()
 
-        applyPitch(pivot, pitchDegRef.current, aabbRef.current)
+        applyTilt(pivot, pitchDegRef.current, rollDegRef.current, aabbRef.current)
         setStatus('ready')
       },
       undefined,
@@ -156,8 +160,9 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
   // Re-tilt the already-loaded model when the previewed pitch changes (no reload).
   React.useEffect(() => {
     pitchDegRef.current = pitchDeg
-    if (pivotRef.current) applyPitch(pivotRef.current, pitchDeg, aabbRef.current)
-  }, [pitchDeg])
+    rollDegRef.current = rollDeg
+    if (pivotRef.current) applyTilt(pivotRef.current, pitchDeg, rollDeg, aabbRef.current)
+  }, [pitchDeg, rollDeg])
 
   return (
     <div className={className ?? 'relative w-full h-56 rounded-sm border bg-linear-to-b from-slate-50 to-slate-100 overflow-hidden'}>
@@ -180,12 +185,10 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, className }) 
   )
 }
 
-/** Tilt the pivot about X and re-ground it so the model rests on y=0 (matches the planner). */
-function applyPitch(pivot: THREE.Group, pitchDeg: number, aabb: { y: number; z: number }) {
-  pivot.rotation.x = THREE.MathUtils.degToRad(pitchDeg)
-  const th = THREE.MathUtils.degToRad(pitchDeg)
-  const minY = Math.min(0, aabb.y * Math.cos(th)) - (aabb.z / 2) * Math.abs(Math.sin(th))
-  pivot.position.y = -minY
+/** Roll (Z) then pitch (X) the pivot and re-ground it so the model rests on y=0 (matches the planner). */
+function applyTilt(pivot: THREE.Group, pitchDeg: number, rollDeg: number, aabb: { x: number; y: number; z: number }) {
+  tiltQuaternion(pitchDeg, rollDeg, pivot.quaternion)
+  pivot.position.y = groundOffset(pivot.quaternion, aabb)
 }
 
 export default ModelOrientationPreview
