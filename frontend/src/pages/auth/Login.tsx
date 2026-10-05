@@ -76,8 +76,18 @@ const Login: React.FC = () => {
             <form onSubmit={onVerify} className="mt-6 space-y-4">
               <Input
                 label="Authentication code"
+                // Distinct name/id so browsers and password managers don't treat this as the
+                // "username" field and drop the saved email into it after the password step.
+                name="two-factor-code"
+                type="text"
                 inputMode="text"
                 autoComplete="one-time-code"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 autoFocus
                 placeholder="123456"
                 value={code}
