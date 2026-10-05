@@ -332,6 +332,7 @@ interface AppState {
     clearBasket: () => void
     markAsPurchased: (assetIds: string[]) => void
     addLayoutToBasket: () => void
+    addPlacedModelToShopCart: (assetId: string) => void
     syncBasketWithTable: () => void
   }
 }
@@ -662,10 +663,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { instances, ...saveHistory({ ...s, instances }) }
       })
       get().actions.syncBasketWithTable()
-      // Placing a model no longer auto-adds it to the shop basket — the planner's
-      // right panel is a bill of materials for the table, and buying is an explicit
-      // action ("Add all to basket"). This keeps an artist laying out their table
-      // from silently filling their cart with other creators' pieces.
+      get().actions.addPlacedModelToShopCart(i.assetId)
       // Purchase-intent analytics: log the placement against the parent model
       // (set parts count for their set). No-ops for demo/non-UUID asset ids.
       {
@@ -890,6 +888,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       get().actions.syncBasketWithTable()
       return newIds
+    },
+
+    // Placing a marketplace model adds it to the shop basket (buy-once). Skips
+    // anything you already own, wrote yourself, or that an owned/in-cart bundle
+    // covers, so checkout's "appears more than once" guard never trips. Never
+    // opens the cart drawer over the planner.
+    addPlacedModelToShopCart: (assetId) => {
+      const s = get()
+      if (s.readOnly) return
+      const parentSet = s.sets.find((p) => p.partAssetIds.includes(assetId))
+      const modelId = parentSet ? parentSet.id : assetId
+      const asset = getAssetById(assetId)
+      if (!parentSet && !asset) return
+      // Demo/local assets aren't marketplace models (non-UUID ids) — nothing to buy.
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(modelId)) return
+      if (s.ownedModelIds.has(modelId)) return
+      const ownerId = parentSet ? parentSet.artistId : asset?.artistId
+      if (ownerId && ownerId === s.currentUserId) return
+      const covering = s.bundles.filter((b) => b.modelIds.includes(modelId))
+      if (covering.some((b) => s.ownedBundleIds.has(b.id))) return
+      const cart = useCartStore.getState()
+      if (cart.hasItem('model', modelId)) return
+      if (covering.some((b) => cart.hasItem('bundle', b.id))) return
+      cart.addItem(
+        {
+          kind: 'model',
+          id: modelId,
+          name: parentSet ? parentSet.name : asset!.name,
+          artistName: (parentSet ? undefined : asset?.artistName) ?? 'Artifact Armoury',
+          price: parentSet ? parentSet.price : asset!.price ?? 0,
+          imageUrl: parentSet ? parentSet.thumbnail : asset!.thumbnail,
+        },
+        false,
+      )
     },
 
     // The USP: push the whole tabletop design into the real shop cart in one click.

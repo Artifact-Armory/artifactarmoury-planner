@@ -150,6 +150,13 @@ later feature). Consequences, all built this session (migration **008**):
   UI in `ui/App.tsx` (`paletteTab`, `expandedBundles`, `renderModelTile`), styles
   `tb-palette-tabs`/`tb-tab`/`tb-bundle`/`tb-chev`/`tb-pill.bundle`. `getEntitlements` now
   returns `{models,bundles}` Sets — `ModelDetails`/`BundleDetails` updated accordingly.
+  **Restored 2026-10-05:** auto-add had silently been removed from `addInstance` (a stale
+  comment said "buying is an explicit action") while this file and the Basket tab still
+  described it, and the planner tour said the opposite. `addPlacedModelToShopCart` is back in
+  `state/store.ts` (also skips read-only showcases, demo/non-UUID assets and your own models),
+  and the tour step (`components/help/tourSteps.ts`), Basket tab tooltip and empty-basket text
+  now say placing adds to the basket. "Add all to basket" still exists. `planner-lab` untouched.
+  Typechecks; not exercised in a browser.
 
 ## Multi-part "set" models (built 2026-07-03, migration 009)
 A single piece of terrain can be **several STL files** (e.g. Gothic Ruin = 4 parts, or

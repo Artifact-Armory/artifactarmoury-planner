@@ -4,7 +4,9 @@ import * as THREE from 'three'
 export function GridHelper(width: number, height: number, cell: number) {
   const group = new THREE.Group()
   const matMinor = new THREE.LineBasicMaterial({ color: 0x243246, transparent: true })
-  const matMajor = new THREE.LineBasicMaterial({ color: 0x3a4e6a })
+  // Transparent too, so both sort in the transparent pass AFTER the placement
+  // ghost (renderOrder 5) and are depth-rejected wherever a model covers them.
+  const matMajor = new THREE.LineBasicMaterial({ color: 0x3a4e6a, transparent: true })
 
   const hw = width / 2
   const hh = height / 2
@@ -36,6 +38,8 @@ export function GridHelper(width: number, height: number, cell: number) {
   const minorLines = new THREE.LineSegments(minor, matMinor)
   const majorLines = new THREE.LineSegments(major, matMajor)
 
+  minorLines.renderOrder = 6
+  majorLines.renderOrder = 6
   minorLines.userData.minor = true // faded by distance in ThreeStage's render loop
   group.add(minorLines, majorLines)
   return group

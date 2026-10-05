@@ -26,7 +26,9 @@ export class Ghost {
       emissive: VALID.clone().multiplyScalar(0.25),
       transparent: true,
       opacity: 0.5,
-      depthWrite: false,
+      // Writes depth so the table grid (drawn after, see helpers.ts) is hidden
+      // behind the ghost instead of showing through its body.
+      depthWrite: true,
       roughness: 0.6,
       metalness: 0,
     })
@@ -48,6 +50,7 @@ export class Ghost {
       const a = asset.aabb ?? { x: 0.1, y: 0.1, z: 0.1 }
       const box = new THREE.Mesh(new THREE.BoxGeometry(a.x, a.y, a.z), this.material)
       box.position.y = a.y / 2
+      box.renderOrder = 5
       this.group.add(box)
       ensureTemplate(asset).then(() => {
         if (this.asset === asset) {
@@ -65,7 +68,10 @@ export class Ghost {
     const clone = scene.clone(true)
     clone.traverse((child) => {
       const mesh = child as THREE.Mesh
-      if ((mesh as any).isMesh) mesh.material = this.material
+      if ((mesh as any).isMesh) {
+        mesh.material = this.material
+        mesh.renderOrder = 5
+      }
     })
     // Preview the artist's baked default tilt (and re-ground it) so the ghost reads
     // the same as the placed piece — matches InstancedScene.composeMatrix. Yaw is

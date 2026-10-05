@@ -1799,7 +1799,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {/* Table build (planning BOM) vs real basket — two tabs so "what I've
               placed" and "what I'm actually buying" are never the same panel.
               An artist building a showcase isn't shopping (they own their own
-              models, and placing one never adds it to a basket — see
+              models, so placing one never adds it to a basket — see
               addPlacedModelToShopCart) so they get a single "what's on this
               table" view with a net value instead of a buy flow. */}
           <aside
@@ -1858,7 +1858,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   <button
                     className={`tb-tab ${buildTab === 'basket' ? 'is-active' : ''}`}
                     onClick={() => setBuildTab('basket')}
-                    title="What's actually in your basket — placing a model here doesn't add it automatically"
+                    title="What you're about to buy — models you place are added automatically"
                   >
                     Basket <span className="tb-small">{cartItems.length}</span>
                   </button>
@@ -1912,7 +1912,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                     <div className="tb-bom-list">
                       {cartItems.length === 0 && (
                         <div className="tb-small" style={{ padding: 8 }}>
-                          Nothing in your basket yet. Build your table, then "Add all to basket" (or add pieces one at a time from the Table tab).
+                          Nothing in your basket yet. Models you place on the table are added here automatically.
                         </div>
                       )}
                       {cartItems.map((item) => (
