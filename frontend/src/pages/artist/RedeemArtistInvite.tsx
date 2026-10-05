@@ -120,7 +120,7 @@ const RedeemArtistInvite: React.FC<{ initialCode?: string; initialArtistName?: s
         />
         <span>
           I agree to the{' '}
-          <a href="/terms" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+          <a href="/seller-terms" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
             seller terms
           </a>
           . I understand my listed prices are what I earn commission on before tax, that VAT is added
