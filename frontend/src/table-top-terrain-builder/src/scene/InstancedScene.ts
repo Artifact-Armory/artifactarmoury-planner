@@ -4,6 +4,11 @@
 // call per sub-mesh, not N. Geometry/materials are shared from the template cache,
 // so a unique GLB is only uploaded to the GPU once.
 //
+// Each sub-mesh also has one InstancedMesh per planner LOD (meshExtras.ts), and
+// every frame each placed piece is drawn by the coarsest level whose geometric
+// error projects to under LOD_MAX_ERROR_PX — a fraction of a pixel, so the switch
+// cannot be seen. Pieces close to the camera always draw the full mesh.
+//
 // Also owns a selection/hover glow, a placement "pop" animation, and instance
 // picking. Selected pieces stay exactly where they rest (no lift): a soft
 // warm-blue glow disc pools under them, plus a thin rim of light hugging their
@@ -13,7 +18,8 @@
 import * as THREE from 'three'
 import type { Asset } from '@core/assets'
 import type { Instance } from '@state/store'
-import { ensureTemplate, getResolvedTemplate, type AssetTemplate } from './loaders'
+import { ensureTemplate, getResolvedTemplate, subscribeMeshExtras, type AssetPart, type AssetTemplate } from './loaders'
+import { LOD_MAX_ERROR_PX } from './meshExtras'
 import { levelToY } from '@core/elevation'
 
 const POP_MS = 180
@@ -34,6 +40,15 @@ const tmpXAxis = new THREE.Vector3(1, 0, 0)
 const tmpPos = new THREE.Vector3()
 const tmpScale = new THREE.Vector3()
 const tmpMat = new THREE.Matrix4()
+const tmpInv = new THREE.Matrix4()
+const tmpRay = new THREE.Ray()
+const tmpSphere = new THREE.Sphere()
+const tmpHit = new THREE.Vector3()
+const tmpCentre = new THREE.Vector3()
+
+/** Moving to a COARSER level needs this much margin under the limit, so a piece
+ *  sitting right at a threshold doesn't flip levels on every frame. */
+const LOD_HYSTERESIS = 0.8
 
 // A soft radial gradient (opaque centre → transparent edge), shared by every
 // glow disc in the app. Built once lazily; never disposed (one small texture
@@ -72,8 +87,17 @@ export class InstancedScene {
   private instances: Instance[] = []
   private assetsById = new Map<string, Asset>()
   private meshes: THREE.InstancedMesh[] = []
-  /** assetId → ordered planner instance ids (instanceIndex → id). */
+  /** assetId → [part][level] instanced meshes; level 0 is the full mesh. Each mesh
+   *  draws only the pieces currently at its level (`count`), listed in
+   *  `userData.slots` (slot → planner instance id). */
+  private meshesByAsset = new Map<string, THREE.InstancedMesh[][]>()
+  /** assetId → ordered planner instance ids. */
   private orderByAsset = new Map<string, string[]>()
+  /** instance id → LOD level per part, as last drawn (the hysteresis needs it). */
+  private levelById = new Map<string, number[]>()
+  /** Camera + drawing-buffer height the LOD choice is made for. */
+  private view: { camera: THREE.PerspectiveCamera; heightPx: number } | null = null
+  private unsubscribeExtras: () => void
   /** live transform overrides while dragging (not yet committed to store). */
   private liveOverride = new Map<string, { x: number; z: number; rotDeg: number }>()
 
@@ -108,6 +132,9 @@ export class InstancedScene {
   constructor(onNeedsTemplate: () => void) {
     this.onNeedsTemplate = onNeedsTemplate
     this.group.add(this.glowGroup)
+    // LODs arrive after their template; rebuilding adds the per-level meshes. The
+    // callback is already coalesced to one rebuild per frame by the stage.
+    this.unsubscribeExtras = subscribeMeshExtras(() => this.onNeedsTemplate())
   }
 
   /** Provide a terrain-height sampler; call refreshTransforms() after a change. */
@@ -158,15 +185,89 @@ export class InstancedScene {
     this.rebuildMatricesAndGlows()
   }
 
-  /** Raycast placed meshes → planner instance id (or null). */
+  /**
+   * Raycast placed meshes → planner instance id (or null).
+   *
+   * Parts with a BVH (meshExtras.ts) are tested through it, one instance at a
+   * time after a bounding-sphere reject; parts still waiting for theirs fall back
+   * to three's brute-force InstancedMesh raycast. The nearest hit of either wins.
+   */
   pick(raycaster: THREE.Raycaster): string | null {
-    const hits = raycaster.intersectObjects(this.meshes, false)
-    if (!hits.length) return null
-    const h = hits[0]
-    const assetId = (h.object as THREE.InstancedMesh).userData.assetId as string
-    const order = this.orderByAsset.get(assetId)
-    if (!order || h.instanceId == null) return null
-    return order[h.instanceId] ?? null
+    let best: string | null = null
+    let bestDist = Infinity
+    const instById = new Map(this.instances.map((i) => [i.id, i]))
+    const bruteForce: THREE.InstancedMesh[] = []
+
+    for (const [assetId, perPart] of this.meshesByAsset) {
+      const asset = this.assetsById.get(assetId)
+      const template = asset ? getResolvedTemplate(asset) : null
+      if (!template) continue
+      const order = this.orderByAsset.get(assetId) ?? []
+      perPart.forEach((levels, partIdx) => {
+        const part = template.parts[partIdx]
+        if (!part) return
+        if (!part.pick) {
+          for (const im of levels) if (im.count > 0) bruteForce.push(im)
+          return
+        }
+        if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere()
+        for (const id of order) {
+          const inst = instById.get(id)
+          if (!inst) continue
+          this.composeMatrix(inst, part.matrix, tmpMat, template.aabb)
+          tmpSphere.copy(part.geometry.boundingSphere!).applyMatrix4(tmpMat)
+          if (!raycaster.ray.intersectsSphere(tmpSphere)) continue
+          tmpRay.copy(raycaster.ray).applyMatrix4(tmpInv.copy(tmpMat).invert())
+          const hit = part.pick.bvh.raycastFirst(tmpRay, THREE.DoubleSide)
+          if (!hit) continue
+          const dist = tmpHit.copy(hit.point).applyMatrix4(tmpMat).distanceTo(raycaster.ray.origin)
+          if (dist < raycaster.near || dist > raycaster.far) continue
+          if (dist < bestDist) {
+            bestDist = dist
+            best = id
+          }
+        }
+      })
+    }
+
+    if (bruteForce.length) {
+      const h = raycaster.intersectObjects(bruteForce, false)[0]
+      if (h && h.distance < bestDist && h.instanceId != null) {
+        best = ((h.object as THREE.InstancedMesh).userData.slots as string[])[h.instanceId] ?? best
+      }
+    }
+    return best
+  }
+
+  /**
+   * Re-choose each piece's LOD level for this view. Cheap (a distance per piece
+   * per part); only rewrites instance matrices when some level actually changed.
+   * `heightPx` is the drawing buffer's height at FULL resolution — not the reduced
+   * one used while the camera moves, or pieces would switch level mid-orbit.
+   */
+  updateLod(camera: THREE.PerspectiveCamera, heightPx: number): void {
+    this.view = { camera, heightPx }
+    let changed = false
+    const instById = new Map(this.instances.map((i) => [i.id, i]))
+    for (const [assetId, perPart] of this.meshesByAsset) {
+      const asset = this.assetsById.get(assetId)
+      const template = asset ? getResolvedTemplate(asset) : null
+      if (!template) continue
+      for (const id of this.orderByAsset.get(assetId) ?? []) {
+        const inst = instById.get(id)
+        if (!inst) continue
+        const prev = this.levelById.get(id)
+        perPart.forEach((levels, partIdx) => {
+          const part = template.parts[partIdx]
+          if (!part || changed) return
+          const level = Math.min(this.chooseLevel(inst, part, prev?.[partIdx] ?? 0, template.aabb), levels.length - 1)
+          if (level !== (prev?.[partIdx] ?? 0)) changed = true
+        })
+        if (changed) break
+      }
+      if (changed) break
+    }
+    if (changed) this.writeMatrices()
   }
 
   /** Bounding box of the given ids (or all placed pieces if omitted). */
@@ -216,6 +317,7 @@ export class InstancedScene {
   }
 
   dispose() {
+    this.unsubscribeExtras()
     this.disposeMeshes()
     this.selectGlowMat.dispose()
     this.hoverGlowMat.dispose()
@@ -233,6 +335,7 @@ export class InstancedScene {
       m.dispose()
     }
     this.meshes = []
+    this.meshesByAsset.clear()
   }
 
   private rebuild() {
@@ -257,15 +360,25 @@ export class InstancedScene {
         ensureTemplate(asset).then(() => this.onNeedsTemplate())
         continue
       }
-      for (const part of template.parts) {
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length)
-        im.userData.assetId = assetId
-        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-        im.frustumCulled = false
-        this.group.add(im)
-        this.meshes.push(im)
-      }
+      // One InstancedMesh per (part, level), each sized for every copy: any piece
+      // can sit at any level. They share the part's vertex buffer, so the extra
+      // levels cost index buffers and instance matrices, not geometry uploads.
+      this.meshesByAsset.set(assetId, template.parts.map((part, partIdx) =>
+        [part.geometry, ...part.lods.map((l) => l.geometry)].map((geometry, level) => {
+          const im = new THREE.InstancedMesh(geometry, part.material, list.length)
+          im.userData = { assetId, partIdx, level, slots: [] as string[] }
+          im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+          im.frustumCulled = false
+          im.count = 0
+          this.group.add(im)
+          this.meshes.push(im)
+          return im
+        }),
+      ))
     }
+    // Forget levels for pieces that no longer exist.
+    const live = new Set(this.instances.map((i) => i.id))
+    for (const id of this.levelById.keys()) if (!live.has(id)) this.levelById.delete(id)
     this.writeMatrices()
     this.rebuildSelectGlows()
   }
@@ -309,38 +422,65 @@ export class InstancedScene {
     out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
   }
 
-  private writeMatrices() {
-    // For each asset, walk its instanced meshes (parts) and its ordered instances.
-    const partCountByAsset = new Map<string, number>()
-    for (const im of this.meshes) {
-      const assetId = im.userData.assetId as string
-      partCountByAsset.set(assetId, (partCountByAsset.get(assetId) ?? 0) + 1)
+  /**
+   * The coarsest LOD level of `part` whose error projects to under the pixel
+   * limit for this piece, given the level it was drawn at last time. Level 0 (the
+   * full mesh) whenever there's no view yet or the part has no LODs.
+   */
+  private chooseLevel(inst: Instance, part: AssetPart, prev: number, aabb: { x: number; y: number; z: number }): number {
+    if (!this.view || part.lods.length === 0) return 0
+    const { camera, heightPx } = this.view
+    // Distance to the nearest point of the piece's bounding sphere: conservative,
+    // so the near side of a large piece is never under-detailed.
+    const t = this.liveOverride.get(inst.id)
+    const x = t ? t.x : inst.position.x
+    const z = t ? t.z : inst.position.z
+    const baseY = levelToY(inst.level ?? 0) + this.heightAt(x, z)
+    tmpCentre.set(x, baseY + aabb.y / 2, z)
+    const radius = 0.5 * Math.hypot(aabb.x, aabb.y, aabb.z)
+    const d = Math.max(camera.near, camera.position.distanceTo(tmpCentre) - radius)
+    const pxPerMetre = heightPx / (2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))
+    for (let level = part.lods.length; level >= 1; level--) {
+      const limit = level > prev ? LOD_MAX_ERROR_PX * LOD_HYSTERESIS : LOD_MAX_ERROR_PX
+      if (part.lods[level - 1].error * pxPerMetre <= limit) return level
     }
-    // Group meshes by asset preserving part order
-    const meshesByAsset = new Map<string, THREE.InstancedMesh[]>()
-    for (const im of this.meshes) {
-      const assetId = im.userData.assetId as string
-      if (!meshesByAsset.has(assetId)) meshesByAsset.set(assetId, [])
-      meshesByAsset.get(assetId)!.push(im)
-    }
+    return 0
+  }
 
-    for (const [assetId, ims] of meshesByAsset) {
+  private writeMatrices() {
+    // For each asset and part, bucket its pieces by LOD level and pack each
+    // level's InstancedMesh with just the pieces it draws.
+    const instById = new Map(this.instances.map((i) => [i.id, i]))
+    for (const [assetId, perPart] of this.meshesByAsset) {
       const asset = this.assetsById.get(assetId)
       const template = asset ? getResolvedTemplate(asset) : null
       if (!template) continue
       const order = this.orderByAsset.get(assetId) ?? []
-      const instById = new Map(this.instances.map((i) => [i.id, i]))
-      ims.forEach((im, partIdx) => {
+      perPart.forEach((levels, partIdx) => {
         const part = template.parts[partIdx]
         if (!part) return
-        order.forEach((id, instIdx) => {
+        for (const im of levels) {
+          im.count = 0
+          ;(im.userData.slots as string[]).length = 0
+        }
+        for (const id of order) {
           const inst = instById.get(id)
-          if (!inst) return
+          if (!inst) continue
+          const chosen = this.levelById.get(id) ?? []
+          const level = Math.min(this.chooseLevel(inst, part, chosen[partIdx] ?? 0, template.aabb), levels.length - 1)
+          chosen[partIdx] = level
+          this.levelById.set(id, chosen)
+          const im = levels[level]
           this.composeMatrix(inst, part.matrix, tmpMat, template.aabb)
-          im.setMatrixAt(instIdx, tmpMat)
-        })
-        im.instanceMatrix.needsUpdate = true
-        im.computeBoundingSphere()
+          im.setMatrixAt(im.count, tmpMat)
+          ;(im.userData.slots as string[]).push(id)
+          im.count++
+        }
+        for (const im of levels) {
+          im.visible = im.count > 0
+          im.instanceMatrix.needsUpdate = true
+          im.computeBoundingSphere()
+        }
       })
     }
   }

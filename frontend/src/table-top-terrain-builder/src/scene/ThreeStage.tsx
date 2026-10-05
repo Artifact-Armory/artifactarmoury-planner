@@ -149,6 +149,9 @@ export function ThreeStage() {
       renderRequested = false
       const camMoving = cam.update()
       const sceneAnimating = inst.update()
+      // Pick each piece's LOD for this view. Sized against the FULL-resolution
+      // buffer even while moving, so the reduced-DPR frames below never coarsen it.
+      inst.updateLod(camera, mount.clientHeight * FULL_DPR)
       // Render at reduced resolution while the camera is in motion, then snap back
       // to full resolution for the settled frame (keeps interaction smooth without
       // any lasting quality loss).

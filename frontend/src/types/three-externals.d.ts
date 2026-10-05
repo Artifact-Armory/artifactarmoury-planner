@@ -95,6 +95,7 @@ declare module 'three/examples/jsm/loaders/DRACOLoader.js' {
     constructor()
     setDecoderPath(path: string): DRACOLoader
     setDecoderConfig(config: { type?: 'js' | 'wasm' }): DRACOLoader
+    setWorkerLimit(workerLimit: number): DRACOLoader
     preload(): DRACOLoader
     dispose(): void
   }

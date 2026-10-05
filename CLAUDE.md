@@ -967,6 +967,40 @@ is why `proxyDecimationEnabled`'s long history of destructive results never had 
   that table** — the LOD needs a production re-bake that can't be run from here: 85.07 MB →
   roughly 28-36 MB, 9.12M triangles → roughly 2.6-4.8M.
 
+## Planner LOD in the browser + BVH picking (built 2026-10-05, frontend only)
+The server-side LOD tier above was rolled back on 2026-09-30 (`plannerMeshUrl` returns the default
+preview; that tier stays OFF). Its replacement is **frontend-only**: no backend change, no migration, no
+backfill. Every model a planner table loads (proxy or owner copy) gets the treatment automatically.
+- **Detail levels are computed in the browser, off the main thread** (`scene/meshExtras.ts` +
+  `meshExtras.worker.ts`, deps `meshoptimizer` + `three-mesh-bvh`). After a template loads, a worker
+  builds up to 3 LOD **index buffers over the part's own vertex buffer** (shared on the GPU, nothing
+  re-uploaded) with meshopt, seams preserved, plus a picking BVH. One lane, or two on ≥8-core machines;
+  ~0.5–1 s of worker time per dense model, after the table is already visible.
+- **Switching is invisible by construction.** `InstancedScene` keeps one InstancedMesh per (part, level)
+  and, every frame (`updateLod`), draws each piece at the coarsest level whose geometric error projects
+  to under **`LOD_MAX_ERROR_PX` = 0.1 device px** (nearest point of the piece's bounding sphere, full-DPR
+  height so the low-res-while-moving frames don't coarsen it; 0.8× hysteresis when coarsening). Measured
+  on a 332k-tri production proxy with the planner's own lighting: at 0.12 px a LOD was indistinguishable
+  even enlarged and changed fewer pixels than moving the camera **a quarter of a pixel**.
+- **Measured on the live 28-model "South East Asian village" showcase** (1440×900, DPR 1): full-table
+  view **9.14M → 2.49M triangles/frame**, close-up framing 9.14M → 6.41M; matched-camera A/B renders
+  differ only by scattered single-pixel aliasing, and enlarged crops are indistinguishable.
+- **Picking uses the BVH** (indirect, over the FULL mesh's own index, so no index copy): hover was a
+  brute-force JS raycast over every triangle of every piece under the cursor on each pointer move
+  (19–35 ms per candidate piece); now 0.01–0.04 ms, and 600/600 random rays matched the old raycast
+  exactly. Parts whose BVH hasn't arrived yet fall back to the old raycast.
+- **Also:** Draco decoder pool raised from three's default 4 to `clamp(cores − 2, 4, 8)`; the footprint
+  bitmap pass (every triangle corner, main thread) now uses a typed array + inline matrix maths.
+- **`?lod=0`** on any planner URL disables LODs (picking BVH stays), for side-by-side checks.
+- **Rejected, with measurements:** (1) shipping LODs inside the GLB, which needs a non-Draco file:
+  storing this geometry losslessly as meshopt is **4.7–5.6 MB gzipped vs Draco's 2.8 MB**, so tables
+  would load slower (meshopt decodes 8× faster, but download dominates); (2) dropping `TANGENT` (once
+  logged as "indistinguishable") changes **4–7% of pixels**; (3) gltf-transform's meshopt "filter" mode
+  silently re-encodes normals at 8 bits; (4) "Permissive" simplification across UV seams visibly scrambles
+  the baked normal map; (5) bounding normal drift leaves almost nothing to cut (~25%) on these sculpts.
+- **Not done:** planner-lab has its own planner copy and is untouched (per the isolation rule). No
+  IndexedDB cache of LODs/BVHs across reloads — they are recomputed each visit (background only).
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

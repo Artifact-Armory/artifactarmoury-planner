@@ -7,6 +7,8 @@
 //   placed copy (the InstancedScene reuses these without re-uploading to the GPU).
 // - Draco decoding runs on a worker (DRACOLoader spins up its own worker pool),
 //   so it never blocks the main thread — keeps the existing Draco→GLB pipeline working.
+// - Once a template resolves, its parts are handed to the mesh worker for planner
+//   LODs and a picking BVH (meshExtras.ts); both arrive later and are optional.
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -14,11 +16,18 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import type { Asset } from '@core/assets'
 import { assetLoadingManager } from './loadManager'
 import { computeFootprintBitmap, setFootprintBitmap } from '@core/footprintMask'
+import { computeMeshExtras } from './meshExtras'
+import type { MeshBVH } from 'three-mesh-bvh'
 
 // One decoder + loader shared process-wide.
 const dracoLoader = new DRACOLoader()
 dracoLoader.setDecoderPath('/draco/')
 dracoLoader.setDecoderConfig({ type: 'wasm' }) // prefer the shipped wasm decoder (asm.js falls back automatically)
+// Draco decoding is the CPU-heavy step of a table load (~0.3 s per dense proxy) and
+// every GLB is requested at once, so the pool size is the parallelism. three's
+// default is 4; use more where the machine has the cores, leaving two for the
+// main thread and the mesh-extras worker.
+dracoLoader.setWorkerLimit(Math.min(8, Math.max(4, (navigator.hardwareConcurrency || 4) - 2)))
 
 // Route model loads through the shared manager so GLBs count toward the
 // initial loading bar (see loadManager.ts).
@@ -51,6 +60,14 @@ export interface AssetPart {
   material: THREE.Material | THREE.Material[]
   /** Local transform of this mesh relative to the base-aligned asset origin. */
   matrix: THREE.Matrix4
+  /**
+   * Lighter index buffers over `geometry`'s own vertices, finest first, with their
+   * geometric error in TEMPLATE space (metres, part scale applied). Empty until the
+   * mesh worker delivers them, and for meshes too light to need any (meshExtras.ts).
+   */
+  lods: { geometry: THREE.BufferGeometry; error: number }[]
+  /** Picking BVH over the full mesh, or null until the worker delivers it. */
+  pick: { geometry: THREE.BufferGeometry; bvh: MeshBVH } | null
 }
 
 export interface AssetTemplate {
@@ -65,6 +82,28 @@ export interface AssetTemplate {
 }
 
 const templateCache = new Map<string, Promise<AssetTemplate>>()
+
+// Notified when a part's LODs / picking BVH arrive, so the instanced scene can
+// rebuild its per-level meshes. Several land together on a table load; the
+// scene's listener coalesces them into one rebuild per frame.
+const extrasListeners = new Set<() => void>()
+export function subscribeMeshExtras(fn: () => void): () => void {
+  extrasListeners.add(fn)
+  return () => { extrasListeners.delete(fn) }
+}
+
+/** Kick off LOD + BVH computation for each part, off the main thread. */
+function requestExtras(parts: AssetPart[]) {
+  for (const part of parts) {
+    computeMeshExtras(part.geometry).then((extras) => {
+      if (!extras) return
+      const scale = part.matrix.getMaxScaleOnAxis()
+      part.lods = extras.lods.map((l) => ({ geometry: l.geometry, error: l.error * scale }))
+      part.pick = { geometry: extras.pickGeometry, bvh: extras.bvh }
+      for (const fn of extrasListeners) fn()
+    })
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Byte-level download progress.
@@ -190,20 +229,32 @@ function fitToAABB(root: THREE.Object3D, target: { x: number; y: number; z: numb
 
 /** Project all triangles to XZ (metres, bbox-centered) and rasterize a footprint bitmap. */
 function footprintBitmapFromParts(parts: AssetPart[], aabb: { x: number; y: number; z: number }): Uint8Array {
-  const xz: number[] = []
-  const v = new THREE.Vector3()
+  // Typed array + inlined matrix maths: this runs on the main thread for every
+  // corner of every triangle (~1M for a dense proxy), where a Vector3 per corner
+  // pushed onto a plain number[] cost tens of milliseconds per model.
+  let total = 0
+  for (const part of parts) {
+    const pos = part.geometry.getAttribute('position')
+    if (!pos) continue
+    const index = part.geometry.getIndex()
+    total += index ? index.count : pos.count
+  }
+  const xz = new Float32Array(total * 2)
+  let o = 0
   for (const part of parts) {
     const pos = part.geometry.getAttribute('position') as THREE.BufferAttribute
     if (!pos) continue
+    const e = part.matrix.elements
     const index = part.geometry.getIndex()
     const count = index ? index.count : pos.count
     for (let i = 0; i < count; i++) {
       const vi = index ? index.getX(i) : i
-      v.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi)).applyMatrix4(part.matrix)
-      xz.push(v.x, v.z)
+      const x = pos.getX(vi), y = pos.getY(vi), z = pos.getZ(vi)
+      xz[o++] = e[0] * x + e[4] * y + e[8] * z + e[12]
+      xz[o++] = e[2] * x + e[6] * y + e[10] * z + e[14]
     }
   }
-  return computeFootprintBitmap(new Float32Array(xz), aabb.x / 2, aabb.z / 2)
+  return computeFootprintBitmap(xz, aabb.x / 2, aabb.z / 2)
 }
 
 function flatten(root: THREE.Object3D): AssetPart[] {
@@ -216,6 +267,8 @@ function flatten(root: THREE.Object3D): AssetPart[] {
         geometry: mesh.geometry,
         material: mesh.material,
         matrix: mesh.matrixWorld.clone(),
+        lods: [],
+        pick: null,
       })
     }
   })
@@ -253,7 +306,7 @@ function fallbackTemplate(asset: Asset): AssetTemplate {
   if (isRamp) {
     const geo = rampGeometry(aabb.x, aabb.y, aabb.z) // base already at y=0
     scene.add(new THREE.Mesh(geo, mat))
-    return { parts: [{ geometry: geo, material: mat, matrix: new THREE.Matrix4() }], aabb, scene, fallback: true }
+    return { parts: [{ geometry: geo, material: mat, matrix: new THREE.Matrix4(), lods: [], pick: null }], aabb, scene, fallback: true }
   }
 
   const geo = new THREE.BoxGeometry(aabb.x, aabb.y, aabb.z)
@@ -261,7 +314,7 @@ function fallbackTemplate(asset: Asset): AssetTemplate {
   mesh.position.y = aabb.y / 2
   scene.add(mesh)
   const m = new THREE.Matrix4().makeTranslation(0, aabb.y / 2, 0)
-  return { parts: [{ geometry: geo, material: mat, matrix: m }], aabb, scene, fallback: true }
+  return { parts: [{ geometry: geo, material: mat, matrix: m, lods: [], pick: null }], aabb, scene, fallback: true }
 }
 
 /** Load (once) and cache an asset's instancing template. */
@@ -304,6 +357,7 @@ export function loadAssetTemplate(asset: Asset): Promise<AssetTemplate> {
         // model's actual footprint, not its bounding-box square.
         try { setFootprintBitmap(asset.id, footprintBitmapFromParts(parts, aabb)) } catch { /* keep rectangle fallback */ }
         resolve({ parts, aabb, scene: root as THREE.Group, fallback: false })
+        requestExtras(parts)
       },
       (e) => {
         if (!e.lengthComputable) return
