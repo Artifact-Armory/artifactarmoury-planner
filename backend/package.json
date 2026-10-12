@@ -38,7 +38,8 @@
     "test:vat": "node -r ts-node/register/transpile-only scripts/test-vat-parity.ts",
     "backfill:full-glb": "node -r ts-node/register/transpile-only scripts/backfill-full-glb.ts",
     "test:fullglb": "node -r ts-node/register/transpile-only scripts/test-full-glb.ts",
-    "test:connect-payouts": "node -r ts-node/register/transpile-only scripts/test-connect-payouts.ts"
+    "test:connect-payouts": "node -r ts-node/register/transpile-only scripts/test-connect-payouts.ts",
+    "import:wargame3d": "node -r ts-node/register/transpile-only scripts/import-wargame3d.ts"
   },
   "keywords": [
     "terrain",

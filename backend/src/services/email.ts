@@ -136,7 +136,15 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       text: text || stripHtml(html),
       ...(replyTo ? { reply_to: replyTo } : {})
     })
-    
+
+    // Resend reports a refused send (quota, unverified domain, bad address) in
+    // the result rather than by throwing, so it has to be checked here or it is
+    // logged as a success.
+    if (result.error) {
+      emailLogger.error('Failed to send email', { error: result.error, to, subject })
+      return
+    }
+
     emailLogger.info('Email sent', {
       to,
       subject,
@@ -175,7 +183,7 @@ export async function sendEmailBatch(messages: BatchMessage[]): Promise<void> {
   for (let i = 0; i < messages.length; i += 100) {
     const chunk = messages.slice(i, i + 100)
     try {
-      await resend.batch.send(
+      const result = await resend.batch.send(
         chunk.map((m) => ({
           from: FROM_EMAIL,
           to: [m.to],
@@ -185,6 +193,10 @@ export async function sendEmailBatch(messages: BatchMessage[]): Promise<void> {
           ...(m.headers ? { headers: m.headers } : {}),
         })),
       )
+      if (result.error) {
+        emailLogger.error('Failed to send batch email', { error: result.error, count: chunk.length })
+        continue
+      }
       emailLogger.info('Batch email sent', { count: chunk.length, subject: chunk[0].subject })
     } catch (error) {
       emailLogger.error('Failed to send batch email', { error, count: chunk.length })

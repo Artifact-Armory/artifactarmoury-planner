@@ -18,19 +18,25 @@ const ForgotPassword: React.FC = () => {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ mode: 'onTouched' })
   const [sent, setSent] = useState(false)
+  const [rateLimited, setRateLimited] = useState(false)
 
   const onSubmit = async (values: FormValues) => {
+    setRateLimited(false)
     try {
       await authApi.requestPasswordReset(values.email.trim())
-    } catch {
-      // The backend always returns success here to avoid confirming which
-      // emails have accounts — a network/500 error is the only real failure,
-      // and there's nothing actionable to tell the user beyond trying again.
-    } finally {
-      // Same reasoning: show the generic confirmation regardless of whether
-      // the address matched an account.
-      setSent(true)
+    } catch (err: any) {
+      // Too many requests means NO email went out, so saying "sent" would leave
+      // them waiting for nothing. It reveals nothing about which emails have
+      // accounts: the limit applies to every address alike.
+      if (err?.response?.status === 429) {
+        setRateLimited(true)
+        return
+      }
+      // Anything else: the backend answers the same for known and unknown
+      // addresses (no account enumeration), so fall through to the generic
+      // confirmation.
     }
+    setSent(true)
   }
 
   if (sent) {
@@ -76,6 +82,11 @@ const ForgotPassword: React.FC = () => {
                 pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email address' },
               })}
             />
+            {rateLimited && (
+              <p className="text-sm text-destructive" role="alert">
+                Too many reset requests. Please wait an hour and try again.
+              </p>
+            )}
             <Button type="submit" className="w-full" loading={isSubmitting}>
               Send reset link
             </Button>

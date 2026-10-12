@@ -1123,6 +1123,11 @@ async function markModelFailed(modelId: string, reason: string): Promise<void> {
     `UPDATE models SET processing_status = 'failed', processing_error = $1, updated_at = NOW() WHERE id = $2`,
     [reason, modelId]
   ).catch((err) => logger.error('Failed to mark model as failed', { error: err, modelId }));
+  // Parts that never got their turn would otherwise read 'processing' forever.
+  await db.query(
+    `UPDATE model_parts SET processing_status = 'failed' WHERE model_id = $1 AND processing_status = 'processing'`,
+    [modelId]
+  ).catch((err) => logger.error('Failed to mark model parts as failed', { error: err, modelId }));
 
   try {
     const row = (await db.query('SELECT artist_id, name FROM models WHERE id = $1', [modelId])).rows[0];

@@ -28,9 +28,31 @@ import 'dotenv/config'
 
 const INTERNAL_HOST = /\.railway\.internal/
 
-if (process.env.DATABASE_PUBLIC_URL && INTERNAL_HOST.test(process.env.DATABASE_URL ?? '')) {
+// 3. NO PUBLIC PROXY AT ALL. `railway connect Postgres --tunnel-only -P <port>`
+//    holds an encrypted SSH tunnel to the private database open on localhost.
+//    With DB_TUNNEL_PORT set, keep the private URL's credentials but aim it at
+//    the tunnel, so the database never needs a public address.
+const tunnelPort = process.env.DB_TUNNEL_PORT?.trim()
+if (tunnelPort && INTERNAL_HOST.test(process.env.DATABASE_URL ?? '')) {
+  const u = new URL(process.env.DATABASE_URL!)
+  u.hostname = '127.0.0.1'
+  u.port = tunnelPort
+  process.env.DATABASE_URL = u.toString()
+  // The tunnel already encrypts the hop; src/db's own setting (SSL off outside
+  // NODE_ENV=production) applies to the plain localhost leg.
+} else if (process.env.DATABASE_PUBLIC_URL && INTERNAL_HOST.test(process.env.DATABASE_URL ?? '')) {
   // Same swap scripts/db-query.ts makes, for the same reason.
   process.env.DATABASE_URL = process.env.DATABASE_PUBLIC_URL
+
+  // src/db only turns SSL on when NODE_ENV=production. The Postgres service
+  // doesn't set NODE_ENV, so it comes from backend/.env as 'development', and
+  // Railway's public proxy drops the unencrypted connection ("Connection
+  // terminated due to connection timeout"). sslmode in the URL wins over the
+  // pool's own ssl setting. no-verify matches scripts/db-query.ts.
+  if (!/[?&]sslmode=/.test(process.env.DATABASE_URL)) {
+    const sep = process.env.DATABASE_URL.includes('?') ? '&' : '?'
+    process.env.DATABASE_URL += `${sep}sslmode=no-verify`
+  }
 }
 
 if (process.env.DATABASE_URL && process.env.DB_MOCK === 'true') {

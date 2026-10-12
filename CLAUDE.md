@@ -859,6 +859,16 @@ a known gap in the old code's own comment ("For higher volume, move this to a re
   ("Japan houses", 4,084,184 triangles) correctly hit the `MAX_INGEST_TRIANGLES` rejection — proof
   the ingest pipeline is genuinely running end-to-end through the worker now, not just deployed.
 
+### Analysis child heap sized to the container (2026-10-12)
+The isolated parse child (`isolatedRunner.ts`) ran on V8's default **2 GB** heap, so the 5M
+`MAX_INGEST_TRIANGLES` cap was never reachable: a 214MB / ~4.5M-tri Wargames3D tank assembly died
+in the fingerprint step (and "Japanese houses" before it). The child now gets
+`--max-old-space-size` = 60% of the cgroup memory limit (floor 2048; override
+`INGEST_CHILD_HEAP_MB`). Measured locally on a 4.6M-tri STL: fingerprint needs ~2.5 GB, analyze +
+mesh QA ~3 GB (fails at 2 GB), so the worker needs a ≥6 GB container, or set the override. The
+OOM log line now carries `heapMB`. `markModelFailed` also marks the model's still-`processing`
+parts `failed`, so a failed multi-part upload no longer looks like it's still running.
+
 ### Large-job single-flight lock (built 2026-09-03, same day)
 The worker's poll loop already runs one job at a time *within a single process*, but with more
 than one worker replica, two genuinely heavy uploads could still land on two different replicas
@@ -1148,6 +1158,19 @@ Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model �
 - Frontend typechecks clean. Not built: the `/bundles` **list** page cards still show only the
   bundle price, no savings badge — only the detail page (`/bundles/:id`) has it; a reasonable
   follow-up if wanted, not requested.
+
+## Social trailer (built 2026-10-06, `trailer/`, not deployed)
+A standalone Vite project (port 3200, `.claude/launch.json` → "trailer") that renders a ~19.7 s
+9:16 advert from the **real** showcase table ("South East Asian village", share token in
+`trailer/content.json`) plus the Gothic church and WW2 figures, and exports a frame-exact H.264
+MP4 in the browser (WebCodecs + mp4-muxer, 5-sample motion blur, ~7 min). It imports the
+planner's `loaders.ts` / `tableMaterials.ts` / `elevation.ts` straight out of `frontend/` (with
+`three` aliased to the frontend's copy) and changes nothing in `frontend/`. Assets are cached by
+`npm run fetch-assets` into the gitignored `trailer/public/cache` (the table textures too, because
+the R2 CDN's CORS doesn't admit localhost). All timings live in `trailer/src/config.ts`, in beats.
+See `trailer/README.md`. Live-data caveats when it was built: every listing's artist is
+"Tester Artist" (shown as the on-screen credit unless `displayOverrides` in content.json is
+filled in) and the "American military" thumbnail on the marketplace is a house image.
 
 ## Gotchas that have already bitten us
 - **Postgres string numerics:** `DECIMAL`/`NUMERIC`/`AVG()`/`COUNT()` come back as

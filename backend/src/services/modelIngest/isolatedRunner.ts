@@ -24,6 +24,7 @@
 import { fork, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import logger from '../../utils/logger';
 import type { GeometryFingerprint } from '../fingerprint';
 import type { MeshQAReport } from '../meshQA';
@@ -41,6 +42,28 @@ const OOM_REASON =
 const isDev = __filename.endsWith('.ts');
 const CHILD_SCRIPT = path.join(__dirname, isDev ? 'isolatedChild.ts' : 'isolatedChild.js');
 const CHILD_EXEC_ARGV = isDev ? ['-r', 'ts-node/register/transpile-only'] : [];
+
+// V8's default heap ceiling (2 GB on the worker) is far below what the
+// container actually has, and parseSTL's object graph costs ~400+ bytes per
+// triangle — so a ~4.5M-triangle file, still under MAX_INGEST_TRIANGLES (5M),
+// died at the default limit (2026-10-12, a 214MB tank assembly). Give the child
+// a share of the real memory limit instead. 60% leaves room for the parent's
+// own copy of the file and the child's off-heap read buffer. Never below the
+// old default. INGEST_CHILD_HEAP_MB overrides.
+function childHeapMB(): number {
+  const override = Number(process.env.INGEST_CHILD_HEAP_MB);
+  if (override > 0) return Math.floor(override);
+  let limit = os.totalmem();
+  for (const f of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const n = Number(fs.readFileSync(f, 'utf8').trim()); // 'max' → NaN → ignored
+      if (n > 0 && n < limit) limit = n;
+      break;
+    } catch { /* not this cgroup version */ }
+  }
+  return Math.max(2048, Math.floor((limit / 1048576) * 0.6));
+}
+const CHILD_HEAP_MB = childHeapMB();
 
 export interface FingerprintOk { ok: true; fingerprint: GeometryFingerprint }
 export interface AnalyzeOk {
@@ -71,7 +94,10 @@ function runChildTask<T extends { ok: boolean }>(msg: Task): Promise<T | Isolate
     }
 
     let settled = false;
-    const child: ChildProcess = fork(CHILD_SCRIPT, [], { execArgv: [...CHILD_EXEC_ARGV, ...process.execArgv] });
+    // Heap flag last so it wins over any inherited --max-old-space-size.
+    const child: ChildProcess = fork(CHILD_SCRIPT, [], {
+      execArgv: [...CHILD_EXEC_ARGV, ...process.execArgv, `--max-old-space-size=${CHILD_HEAP_MB}`],
+    });
 
     const timer = setTimeout(() => {
       if (settled) return;
@@ -97,6 +123,7 @@ function runChildTask<T extends { ok: boolean }>(msg: Task): Promise<T | Isolate
       logger.error('Isolated STL analysis child died without a result — likely out of memory', {
         code,
         signal,
+        heapMB: CHILD_HEAP_MB,
         task: msg.task,
         stlPath: msg.stlPath,
       });
