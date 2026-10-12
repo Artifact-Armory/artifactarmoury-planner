@@ -358,18 +358,21 @@ router.patch('/users/:id/role',
     // account is NOT that person agreeing to the seller terms, and recording it
     // as though they had would fabricate the exact evidence 063 exists to keep
     // honest. The artist is prompted to accept on first entering the dashboard.
+    // "Is this a promotion to artist" goes in as its own boolean ($4). Reusing $2
+    // for both `role = $2` (varchar) and `$2 = 'artist'` (text) makes Postgres
+    // refuse the statement with "inconsistent types deduced for parameter $2".
     const updated = await db.query(
       `UPDATE users
           SET role = $2,
-              artist_name = CASE WHEN $2 = 'artist' THEN $3 ELSE artist_name END,
-              became_artist_at = CASE WHEN $2 = 'artist'
+              artist_name = CASE WHEN $4 THEN $3 ELSE artist_name END,
+              became_artist_at = CASE WHEN $4
                                       THEN COALESCE(became_artist_at, CURRENT_TIMESTAMP)
                                       ELSE became_artist_at END,
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         RETURNING id, email, display_name, role, artist_name, became_artist_at,
                   artist_terms_accepted_at`,
-      [id, role, nameForArtist]
+      [id, role, nameForArtist, role === 'artist']
     );
 
     // Role lives in the JWT, so a demotion would otherwise leave the user holding
