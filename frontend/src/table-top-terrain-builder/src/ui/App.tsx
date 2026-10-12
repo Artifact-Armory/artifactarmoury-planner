@@ -6,7 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight,
+  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -1115,6 +1115,22 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }
 
+  const [printing, setPrinting] = React.useState(false)
+  async function handlePrintLayout() {
+    if (printing) return
+    const s = useAppStore.getState()
+    if (!s.instances.length) { hotToast.error('Place some pieces first'); return }
+    setPrinting(true)
+    try {
+      const { exportLayoutPdf } = await import('./layoutPdf')
+      await exportLayoutPdf({ name: savedTableName ?? 'Untitled table', table: s.table, instances: s.instances, system: unitSystem })
+    } catch {
+      hotToast.error('Could not create the layout PDF')
+    } finally {
+      setPrinting(false)
+    }
+  }
+
   async function handleSave() {
     if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
     if (!isAuthenticated || !user?.email) {
@@ -1369,6 +1385,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <div className="tb-sep" />
             <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={handleSave}>
               <Save size={18} />
+            </button>
+            <button
+              className="tb-icon"
+              title="Print layout (PDF) — top-down plan with positions and gaps"
+              onClick={handlePrintLayout}
+              disabled={printing || instances.length === 0}
+            >
+              {printing ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
             </button>
             <button
               className="tb-icon"
