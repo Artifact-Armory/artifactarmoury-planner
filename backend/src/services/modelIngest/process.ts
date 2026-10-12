@@ -25,6 +25,7 @@ import { enqueueFullGlbJob } from '../fullGlb/queue';
 import { downloadObject, deleteObject } from '../r2';
 import {
   isLikelyDuplicate,
+  GEOMETRY_DEDUP_ENABLED,
   fingerprintDistance,
   MATCH_THRESHOLD,
   type GeometryFingerprint,
@@ -1098,6 +1099,7 @@ export async function findGeometryDuplicate(
     }
   }
   logger.info('Geometry dedup check', {
+    enabled: GEOMETRY_DEDUP_ENABLED,
     candidates: rows.length,
     closest: best.name || null,
     closestDistance: Number.isFinite(best.dist) ? Number(best.dist.toFixed(4)) : null,
@@ -1105,6 +1107,8 @@ export async function findGeometryDuplicate(
     matched: foreign?.name ?? null,
     ownMatch: own?.name ?? null,
   });
+  // Disabled: report what WOULD have matched (above) but never reject or notify.
+  if (!GEOMETRY_DEDUP_ENABLED) return { foreign: null, own: null };
   return { foreign, own };
 }
 

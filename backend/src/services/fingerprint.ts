@@ -139,6 +139,15 @@ export function fingerprintDistance(a: GeometryFingerprint | null, b: GeometryFi
 // FINGERPRINT_MATCH_THRESHOLD if needed.
 export const MATCH_THRESHOLD = Number(process.env.FINGERPRINT_MATCH_THRESHOLD ?? 0.08)
 
+// Rejecting uploads on a geometry match is OFF by default (2026-10-12). Tested on
+// the live catalogue, unrelated shapes sit at 0.068-0.085 — on top of the 0.08
+// threshold — so a pre-supported tank turret was rejected as a "copy" of a house,
+// and two artists' independent models of the same real tank would collide too.
+// Fingerprints are still computed, stored and logged (closest match + distance)
+// so the descriptor can be measured and re-tuned before this is switched back on.
+// The exact-file SHA-256 check is separate and stays on.
+export const GEOMETRY_DEDUP_ENABLED = process.env.GEOMETRY_DEDUP_ENABLED === 'true'
+
 // Secondary guard: the two shapes' compactness must also be within this fraction.
 export const COMPACTNESS_TOLERANCE = Number(process.env.FINGERPRINT_COMPACTNESS_TOLERANCE ?? 0.1)
 

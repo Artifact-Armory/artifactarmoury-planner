@@ -46,7 +46,8 @@ import { createListingFromUpload, MAX_GALLERY_IMAGES } from '../src/services/mod
 // in-process ingest would also drag 1GB+ of meshes through this laptop.
 process.env.MODEL_INGEST_WORKER_ENABLED = 'true'
 
-const PRIMARY_FILE = 'full assembly.stl'
+// Wargame3D spells it both ways ("full assembly.stl" / "fullassembly.stl").
+const PRIMARY_FILES = ['full assembly.stl', 'fullassembly.stl']
 const SKIP_DIRS = new Set(['refs'])
 const CREW_DIR = /tankm[ae]n|crew|figures?/i
 const SUPPORTED = /supported/i
@@ -132,10 +133,10 @@ function planFolder(folder: string, info: ListingInfo) {
   const skipped: Skipped[] = []
   const rel = (f: string) => path.relative(folder, f)
 
-  const primary = path.join(folder, PRIMARY_FILE)
-  if (!fs.existsSync(primary)) throw new Error(`No "${PRIMARY_FILE}" in ${folder}`)
+  const primary = PRIMARY_FILES.map((f) => path.join(folder, f)).find((f) => fs.existsSync(f))
+  if (!primary) throw new Error(`No "${PRIMARY_FILES[0]}" in ${folder}`)
   const primaryProblem = meshProblem(primary)
-  if (primaryProblem) throw new Error(`${PRIMARY_FILE}: ${primaryProblem}`)
+  if (primaryProblem) throw new Error(`${path.basename(primary)}: ${primaryProblem}`)
 
   // Component 0 is the vehicle; its preview is the full assembly, so every other
   // file in it is download-only. A crew folder becomes component 1.
@@ -166,7 +167,13 @@ function planFolder(folder: string, info: ListingInfo) {
       crewThumb = listFiles(dir).filter((f) => IMAGE.test(f)).sort(natural)[0]
     }
     for (const f of listFiles(dir).sort(natural)) consider(f, stem(f).startsWith(dirName) ? stem(f) : `${dirName} - ${stem(f)}`, crew)
-    for (const sub of listDirs(dir)) skipped.push({ file: rel(sub), reason: 'nested folder (not imported)' })
+    for (const sub of listDirs(dir)) {
+      // e.g. "option without blade/HOLLOWED": one level deeper is still part of the kit.
+      if (crew) { skipped.push({ file: rel(sub), reason: 'nested folder (not imported)' }); continue }
+      const subName = path.basename(sub)
+      for (const f of listFiles(sub).sort(natural)) consider(f, `${dirName} - ${subName} - ${stem(f)}`, false)
+      for (const deeper of listDirs(sub)) skipped.push({ file: rel(deeper), reason: 'nested folder (not imported)' })
+    }
   }
   crewParts.forEach((p) => { p.groupName = crewName })
   if (crewParts[0] && crewThumb) crewParts[0].thumbnail = crewThumb
@@ -210,7 +217,7 @@ async function importFolder(folder: string, artistId: string, dryRun: boolean) {
   const plan = planFolder(folder, info)
   const mb = (f: string) => `${(fs.statSync(f).size / 1048576).toFixed(1)}MB`
   console.log(`\n=== ${info.name} — £${info.price.toFixed(2)} ===`)
-  console.log(`  primary + planner preview: ${PRIMARY_FILE} (${mb(plan.primary)})`)
+  console.log(`  primary + planner preview: ${path.basename(plan.primary)} (${mb(plan.primary)})`)
   for (const g of [0, 1]) {
     const ps = plan.parts.filter((p) => p.groupIndex === g)
     if (ps.length === 0) continue
@@ -234,7 +241,7 @@ async function importFolder(folder: string, artistId: string, dryRun: boolean) {
   const galleryKeys: string[] = []
   for (const g of plan.gallery) galleryKeys.push(await putImage(g, 'images'))
 
-  console.log(`  uploading ${PRIMARY_FILE} (twice: print file + preview)…`)
+  console.log(`  uploading ${path.basename(plan.primary)} (twice: print file + preview)…`)
   const rawKey = await putMesh(plan.primary)
   const displayRawKey = await putMesh(plan.primary)
 
@@ -254,7 +261,7 @@ async function importFolder(folder: string, artistId: string, dryRun: boolean) {
 
   const model = await createListingFromUpload(artistId, {
     rawKey,
-    filename: PRIMARY_FILE,
+    filename: path.basename(plan.primary),
     name: info.name,
     description: info.description,
     category: 'vehicles',
@@ -270,7 +277,7 @@ async function importFolder(folder: string, artistId: string, dryRun: boolean) {
     // "Preview" in CreateModel.tsx: the assembled tank stands in for its parts.
     isPresupported: true,
     displayRawKey,
-    displayFilename: PRIMARY_FILE,
+    displayFilename: path.basename(plan.primary),
   })
   console.log(`  ✓ created draft ${model.id} — queued for the ingest worker`)
 }
