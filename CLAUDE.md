@@ -187,6 +187,12 @@ bundle group UI). Distinct from a **bundle** (which groups *independently-listed
   expandable group list (`SET` vs `BUNDLE` pill), gated on the parent **model** owned/in-basket/own.
   Placing a part → `addPlacedModelToShopCart` adds the **parent model** once (buy-once). Only
   the **primary** part carries the price so the "Your build" total counts a set once (extras £0).
+- **One line per set (fixed 2026-10-12):** the planner's Table list used to show a priced primary
+  row plus a £0 row per extra part, and "Add all to basket" pushed every part into the shop cart as
+  its own £0 `part:<id>` line. Now the BOM (`ui/App.tsx`) folds a set's placed parts into one `SET`
+  row at the set's price (×N = pieces placed), and add-all uses the same `addModelForAssetToCart()`
+  helper as auto-add (`state/store.ts`), which maps a part to its parent model. Cart persist is
+  **version 4**, which drops stale `part:` lines from saved baskets. Typechecks; not browser-tested.
 
 ## Grouped listings — several named models in one product (built 2026-08-23, migration 038)
 An artist selling a **"Small Village"** (a Village Tower of 3 parts, a Tavern of 2, a Well of 1)
