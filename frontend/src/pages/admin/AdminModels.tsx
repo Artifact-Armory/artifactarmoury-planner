@@ -10,6 +10,7 @@ import {
   ModelReportRow,
   ReportedModelRow,
 } from '../../api/endpoints/adminModels'
+import { modelsApi } from '../../api/endpoints/models'
 import { assetUrl } from '../../api/transformers'
 import { formatPrice } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
@@ -279,6 +280,19 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Action failed'),
   })
 
+  // The artist's own publish route (same readiness checks, follower fan-out),
+  // called as admin. For listings an admin set up on an artist's behalf: unlike
+  // Reinstate, it files no moderation report and messages nobody.
+  const publish = useMutation({
+    mutationFn: () => modelsApi.publishModel(modelId),
+    onSuccess: () => {
+      toast.success('Published')
+      qc.invalidateQueries({ queryKey: ['admin-model', modelId] })
+      qc.invalidateQueries({ queryKey: ['admin', 'models'] })
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Publish failed'),
+  })
+
   const model = data?.model
   const reports = data?.reports ?? []
   const openReports = reports.filter((r) => ['open', 'under_review', 'awaiting_info'].includes(r.status))
@@ -354,6 +368,22 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
                 </div>
               )}
             </div>
+
+            {model.status === 'draft' && (
+              <div className="border-t border-border pt-5">
+                <p className="text-sm font-medium text-foreground">Publish for the artist</p>
+                <p className="text-xs text-muted-foreground">
+                  Publishes it as if the artist had, with the same checks. No message or moderation record.
+                </p>
+                <button
+                  onClick={() => publish.mutate()}
+                  disabled={publish.isPending}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-green-300 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
+                >
+                  {publish.isPending && <Loader2 size={14} className="animate-spin" />} Publish
+                </button>
+              </div>
+            )}
 
             {/* Fast actions */}
             <div className="border-t border-border pt-5">

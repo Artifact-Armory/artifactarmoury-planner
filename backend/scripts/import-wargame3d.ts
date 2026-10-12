@@ -223,7 +223,7 @@ async function importFolder(folder: string, artistId: string, dryRun: boolean) {
   console.log(`  ${plan.parts.length + 1} files, ${(total / 1048576).toFixed(0)}MB to upload`)
   if (dryRun) return
 
-  const existing = await db.query('SELECT id FROM models WHERE artist_id = $1 AND name = $2', [artistId, info.name])
+  const existing = await db.query('SELECT id FROM models WHERE artist_id = $1 AND name = $2 AND deleted_at IS NULL', [artistId, info.name])
   if (existing.rows.length > 0) {
     console.log(`  Already listed (model ${existing.rows[0].id}) — skipping. Delete it first to re-import.`)
     return
