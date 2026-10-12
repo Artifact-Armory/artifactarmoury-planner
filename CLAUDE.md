@@ -1086,6 +1086,33 @@ Same method (real local Postgres, real routes); 21 new checks plus a download-me
 - **Bundles containing a taken-down (archived/flagged) or deleted model can't be bought.** Draft
   models inside a bundle are still allowed (bundle-only models).
 
+### Rate limits keyed on the real visitor (2026-10-12, no migration)
+Express had no `trust proxy`, so behind Railway's edge `req.ip` was the proxy's address and every
+visitor shared one bucket. Reproduced locally: 16 failed logins from one visitor locked a
+**different** visitor out of logging in (429). Now each visitor has their own bucket; same test →
+the second visitor gets a normal 401.
+- **`utils/clientIp.ts`.** `app.set('trust proxy', trustInternalProxies)` trusts only internal hops
+  (loopback, private, link-local, `100.64.0.0/10` CGNAT that Railway uses), so a visitor can't spoof
+  past them — they can only add X-Forwarded-For entries to the left of what the edge records.
+  `clientIp(req)` then swaps in `CF-Connecting-IP` **only** when the address found is in Cloudflare's
+  published ranges (override with `CLOUDFLARE_IP_RANGES`), so it works whether or not Cloudflare
+  fronts `api.artifactarmoury.com` and can't be forged via the raw railway.app URL. IPv6 is keyed by
+  /64. Railway doesn't document its header behaviour (staff answers conflict), and the live API
+  wasn't reachable from the session that built this — so this design doesn't depend on it.
+  **Verify after deploy:** log or eyeball `Rate limit exceeded` lines' `ip` field — it should be a
+  real public address, not `100.x`/`10.x`.
+- **General limit** (`GENERAL_RATE_LIMIT_MAX`, now default **300**/15 min, was a hard-coded 100 that
+  in practice was shared site-wide) skips `/health*` and planner `preview.glb` requests, which
+  `previewRateLimit` already counts — counted twice, one planner table could exhaust a visitor's budget.
+- **Redis (`REDIS_URL`, optional; not set in prod) now actually works.** Before, the limiters were
+  built at import time while the client was still null, and the store was passed a `client` option
+  rate-limit-redis 4 doesn't take — so setting it did nothing (or would have crashed). Each limiter
+  now uses `ResilientStore`: Redis while connected, in-process memory otherwise, so an outage
+  degrades to per-replica limits instead of blocking requests or crashing the server (the Redis
+  store's start-up script load would otherwise be an unhandled rejection, which this app treats as
+  fatal). Tested with two API servers sharing a local Redis (counts shared), Redis killed mid-run
+  (requests answered in ~11 ms, limits still enforced), and a server booted with Redis unreachable.
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

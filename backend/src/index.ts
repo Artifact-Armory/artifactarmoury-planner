@@ -12,6 +12,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { logger } from './utils/logger';
+import { trustInternalProxies } from './utils/clientIp';
 import { db } from './db';
 
 // Middleware
@@ -71,6 +72,11 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 // ============================================================================
 
 const app = express();
+
+// Behind Railway's edge (and possibly Cloudflare): trust only internal proxy hops, so
+// `req.ip` is the visitor's address rather than the proxy's. See utils/clientIp.ts —
+// without this every visitor shared one rate-limit bucket.
+app.set('trust proxy', trustInternalProxies);
 
 // ============================================================================
 // GLOBAL MIDDLEWARE

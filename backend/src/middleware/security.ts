@@ -1,44 +1,110 @@
 // backend/src/middleware/security.ts
 // Security headers, rate limiting, and attack prevention
 
-import rateLimit from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
+import rateLimit, { MemoryStore, type Options, type Store } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
 import helmet from 'helmet';
 import cors from 'cors';
 import { Request, Response, NextFunction } from 'express';
 import { createClient } from 'redis';
 import { logger } from '../utils/logger';
+import { clientIp, clientIpKey } from '../utils/clientIp';
 import type { AuthRequest } from './auth';
 
 // ============================================================================
-// REDIS CLIENT (For distributed rate limiting)
+// REDIS CLIENT (shared rate-limit counters across API replicas)
 // ============================================================================
+//
+// Optional: with REDIS_URL unset every limiter counts in this process's memory, which
+// is right for a single API replica. Before 2026-10-12 setting it did nothing useful:
+// the client connected asynchronously, but every limiter had already been built (at
+// import time) while it was still null, and the store was given an option this
+// version doesn't take — so the counters were never shared.
 
-let redisClient: ReturnType<typeof createClient> | null = null;
+const redisClient = process.env.REDIS_URL
+  ? createClient({
+      url: process.env.REDIS_URL,
+      // Fail a command at once while disconnected rather than queueing it, so a Redis
+      // outage can't stall requests; ResilientStore then counts in memory instead.
+      disableOfflineQueue: true,
+    })
+  : null;
 
-async function initRedis() {
-  if (process.env.REDIS_URL) {
-    try {
-      redisClient = createClient({
-        url: process.env.REDIS_URL
-      });
-
-      redisClient.on('error', (err) => {
-        logger.error('Redis client error', { error: err });
-      });
-
-      await redisClient.connect();
-      logger.info('Redis connected for rate limiting');
-    } catch (error) {
-      logger.warn('Redis connection failed, using memory store for rate limiting', { error });
-      redisClient = null;
+if (redisClient) {
+  let lastErrorLog = 0;
+  redisClient.on('error', (err) => {
+    // It retries every few hundred ms while down; one line a minute is enough.
+    if (Date.now() - lastErrorLog > 60_000) {
+      lastErrorLog = Date.now();
+      logger.error('Redis (rate limiting) unavailable — counting in memory meanwhile', { error: err });
     }
-  } else {
-    logger.info('No REDIS_URL provided, using memory store for rate limiting');
+  });
+  redisClient.on('ready', () => logger.info('Redis connected for rate limiting'));
+  redisClient.connect().catch(() => { /* reported by the 'error' handler; it keeps retrying */ });
+} else {
+  logger.info('No REDIS_URL provided, using memory store for rate limiting');
+}
+
+/**
+ * Counts in Redis while it is connected, and in this process's memory otherwise, so a
+ * Redis outage degrades rate limiting to per-replica rather than blocking requests or
+ * crashing the server (the Redis store's start-up script load would otherwise end up
+ * as an unhandled promise rejection, which this app treats as fatal).
+ */
+class ResilientStore implements Store {
+  private readonly memory = new MemoryStore();
+  private redis: RedisStore | null = null;
+  private options?: Options;
+
+  constructor(readonly prefix: string) {}
+
+  init(options: Options): void {
+    this.options = options;
+    this.memory.init(options);
+  }
+
+  private shared(): RedisStore | null {
+    if (!redisClient?.isReady) return null;
+    if (!this.redis) {
+      const client = redisClient;
+      const store = new RedisStore({
+        prefix: this.prefix,
+        sendCommand: (...args: string[]) => client.sendCommand(args),
+      });
+      // Script loading starts in the constructor; a failure is retried on the next
+      // increment, so just keep it from becoming an unhandled rejection.
+      (store as any).incrementScriptSha?.catch?.(() => {});
+      (store as any).getScriptSha?.catch?.(() => {});
+      if (this.options) store.init(this.options);
+      this.redis = store;
+    }
+    return this.redis;
+  }
+
+  async increment(key: string) {
+    const shared = this.shared();
+    if (shared) {
+      try { return await shared.increment(key); } catch { /* fall through to memory */ }
+    }
+    return this.memory.increment(key);
+  }
+
+  async decrement(key: string) {
+    const shared = this.shared();
+    if (shared) {
+      try { return await shared.decrement(key); } catch { /* fall through */ }
+    }
+    return this.memory.decrement(key);
+  }
+
+  async resetKey(key: string) {
+    await this.memory.resetKey(key);
+    const shared = this.shared();
+    if (shared) await shared.resetKey(key).catch(() => {});
   }
 }
 
-initRedis();
+const storeFor = (prefix: string) => ({ store: new ResilientStore(prefix) });
 
 // ============================================================================
 // CORS CONFIGURATION
@@ -112,7 +178,7 @@ export const helmetConfig = helmet({
  */
 const rateLimitHandler = (req: Request, res: Response) => {
   logger.warn('Rate limit exceeded', {
-    ip: req.ip,
+    ip: clientIp(req),
     path: req.path,
     userId: (req as AuthRequest).userId
   });
@@ -136,7 +202,7 @@ const skipSuccessfulRequests = (req: Request, res: Response) => {
  */
 const rateLimitKeyGenerator = (req: Request) => {
   const userId = (req as AuthRequest).userId;
-  return userId ? `user:${userId}` : `ip:${req.ip}`;
+  return userId ? `user:${userId}` : clientIpKey(req);
 };
 
 // ============================================================================
@@ -144,25 +210,27 @@ const rateLimitKeyGenerator = (req: Request) => {
 // ============================================================================
 
 /**
- * General API rate limit
- * 100 requests per 15 minutes per IP/user
+ * General API rate limit, per visitor IP. It runs before any route authenticates, so it
+ * can't key by user; it's a flood guard, with the stricter limits on the routes that
+ * need them. Planner meshes are skipped here because previewRateLimit counts those —
+ * counted twice, one planner table could use up a visitor's whole budget.
+ * GENERAL_RATE_LIMIT_MAX: requests per 15 minutes (default 300).
  */
+const PREVIEW_GLB_PATH = /^\/api\/models\/(?:parts\/)?[^/]+\/preview\.glb$/;
 export const generalRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: Number(process.env.GENERAL_RATE_LIMIT_MAX ?? 300),
   message: 'Too many requests from this IP, please try again later',
   handler: rateLimitHandler,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  skip: (req) => process.env.NODE_ENV === 'development' && req.ip === '::1',
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error - RedisStore types not perfect
-      client: redisClient,
-      prefix: 'rl:general:'
-    })
-  })
+  skip: (req) =>
+    (process.env.NODE_ENV === 'development' && req.ip === '::1') ||
+    req.path === '/health' ||
+    req.path === '/health/queues' ||
+    PREVIEW_GLB_PATH.test(req.path),
+  ...storeFor('rl:general:')
 });
 
 /**
@@ -182,18 +250,12 @@ export const previewRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
   skip: (req) => process.env.NODE_ENV === 'development' && req.ip === '::1',
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error - RedisStore types not perfect
-      client: redisClient,
-      prefix: 'rl:preview:'
-    })
-  })
+  ...storeFor('rl:preview:')
 });
 
 /**
- * Strict rate limit for authentication endpoints
- * 5 requests per 15 minutes per IP
+ * Strict rate limit for authentication endpoints: failed attempts per 15 minutes per
+ * visitor IP (AUTH_RATE_LIMIT_MAX, default 15; successful requests don't count).
  */
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -203,17 +265,11 @@ export const authRateLimit = rateLimit({
   handler: rateLimitHandler,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `ip:${req.ip}`,
+  keyGenerator: (req) => clientIpKey(req),
   skip: (req) =>
     process.env.NODE_ENV === 'development' ||
     process.env.DISABLE_AUTH_RATE_LIMIT === 'true',
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:auth:'
-    })
-  })
+  ...storeFor('rl:auth:')
 });
 
 /**
@@ -229,13 +285,7 @@ export const presignRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:presign:'
-    })
-  })
+  ...storeFor('rl:presign:')
 });
 
 /**
@@ -250,13 +300,7 @@ export const uploadRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:upload:'
-    })
-  })
+  ...storeFor('rl:upload:')
 });
 
 /**
@@ -272,13 +316,7 @@ export const paymentRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:payment:'
-    })
-  })
+  ...storeFor('rl:payment:')
 });
 
 /**
@@ -293,13 +331,7 @@ export const searchRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:search:'
-    })
-  })
+  ...storeFor('rl:search:')
 });
 
 /**
@@ -314,13 +346,7 @@ export const emailRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  ...(redisClient && {
-    store: new RedisStore({
-      // @ts-expect-error
-      client: redisClient,
-      prefix: 'rl:email:'
-    })
-  })
+  ...storeFor('rl:email:')
 });
 
 // ============================================================================
@@ -343,7 +369,7 @@ export function checkIPBlacklist(
   res: Response,
   next: NextFunction
 ): void {
-  const ip = req.ip;
+  const ip = clientIp(req);
 
   if (blacklistedIPs.has(ip)) {
     logger.warn('Blocked request from blacklisted IP', { ip, path: req.path });
@@ -365,7 +391,7 @@ export function requireWhitelistedIP(
   res: Response,
   next: NextFunction
 ): void {
-  const ip = req.ip;
+  const ip = clientIp(req);
 
   if (!whitelistedIPs.has(ip) && process.env.NODE_ENV === 'production') {
     logger.warn('Blocked request from non-whitelisted IP', { ip, path: req.path });
