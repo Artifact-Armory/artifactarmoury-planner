@@ -12,6 +12,7 @@ import { validateEmail } from '../utils/validation';
 import {
   createPaymentIntent,
   getPaymentIntent,
+  cancelPaymentIntent,
   paymentMethodOf,
   type OrderPaymentMethod,
 } from '../services/stripe';
@@ -21,8 +22,7 @@ import { getDownloadBytesForModels } from '../services/downloadSize';
 import {
   findActiveCode,
   createPromoApplier,
-  remainingRedemptions,
-  remainingForCustomer,
+  remainingAllowance,
   recordRedemption,
   codeAppliesToModel,
 } from '../services/promoCodes';
@@ -30,6 +30,33 @@ import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../
 import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
 
 const router = Router();
+
+/**
+ * Cancel this buyer's still-unpaid orders that reserved `promoCodeId`. Best-effort per
+ * order: if Stripe won't cancel the intent (e.g. it has just been paid), the order is
+ * left alone and the payment webhook settles it as usual.
+ */
+async function cancelSupersededPromoOrders(client: any, promoCodeId: string, userId: string): Promise<void> {
+  const { rows } = await client.query(
+    `SELECT DISTINCT o.id, o.payment_intent_id
+     FROM promo_code_redemptions r
+     JOIN orders o ON o.id = r.order_id
+     WHERE r.promo_code_id = $1 AND o.user_id = $2 AND o.payment_status = 'pending'`,
+    [promoCodeId, userId]
+  );
+  for (const old of rows) {
+    try {
+      if (old.payment_intent_id) await cancelPaymentIntent(old.payment_intent_id);
+      await client.query(
+        `UPDATE orders SET payment_status = 'failed', internal_notes = 'Superseded by a newer checkout'
+         WHERE id = $1 AND payment_status = 'pending'`,
+        [old.id]
+      );
+    } catch (err) {
+      logger.warn('Could not cancel superseded promo order', { error: err, orderId: old.id });
+    }
+  }
+}
 
 // ============================================================================
 // CREATE ORDER (Initialize Checkout)
@@ -138,13 +165,18 @@ router.post('/',
       if (promoCodeRaw && !promoCode) {
         throw new ValidationError('That promo code is no longer valid. Remove it and try again.');
       }
-      const promoApplier = promoCode
-        ? createPromoApplier(
-            promoCode,
-            remainingRedemptions(promoCode),
-            await remainingForCustomer(client, promoCode, userId),
-          )
-        : null;
+      // This buyer's own earlier unpaid orders that used the code are superseded by
+      // this checkout (remainingAllowance stops counting them), so cancel their
+      // PaymentIntents — otherwise one could still be paid from an old tab and the
+      // buyer would get the discount twice.
+      if (promoCode) {
+        await cancelSupersededPromoOrders(client, promoCode.id, userId);
+      }
+      let promoApplier: ReturnType<typeof createPromoApplier> | null = null;
+      if (promoCode) {
+        const { totalRemaining, perCustomerRemaining } = await remainingAllowance(client, promoCode, userId);
+        promoApplier = createPromoApplier(promoCode, totalRemaining, perCustomerRemaining);
+      }
 
       // Each entry becomes one order_items row per model. A bundle expands into
       // one row per constituent model (so per-model download entitlement + the
@@ -549,6 +581,13 @@ router.post('/:id/confirm',
       });
     }
 
+    // A refunded order is finished. Its PaymentIntent still reads `succeeded` after
+    // the refund, so without this a buyer re-calling confirm used to flip the order
+    // back to paid, count the sale again and re-send the receipt and sale emails.
+    if (order.payment_status === 'refunded') {
+      throw new ValidationError('This order has been refunded');
+    }
+
     // Verify payment with Stripe
     const payment = await getPaymentIntent(paymentIntentId);
 
@@ -561,7 +600,8 @@ router.post('/:id/confirm',
     // any download — the payment_intent.succeeded webhook finishes the job.
     if (payment.status === 'processing') {
       await db.query(
-        `UPDATE orders SET payment_status = 'processing', payment_method = $2 WHERE id = $1`,
+        `UPDATE orders SET payment_status = 'processing', payment_method = $2
+         WHERE id = $1 AND payment_status IN ('pending', 'failed')`,
         [id, paymentMethodOf(payment)]
       );
       return res.json({
@@ -579,17 +619,18 @@ router.post('/:id/confirm',
     // intent rather than trusted from the client: the buyer may have switched to
     // PayPal inside the Payment Element after this order row was written.
     //
-    // `AND payment_status <> 'succeeded'` makes this the atomic claim on the order:
-    // whoever updates a row is the one that sends the receipt and counts the sale.
-    // The check above catches the ordinary case, but it reads and writes separately,
-    // so a webhook landing mid-request could still slip past it.
+    // `AND payment_status IN (...)` makes this the atomic claim on the order: whoever
+    // updates a row is the one that sends the receipt and counts the sale. The checks
+    // above catch the ordinary cases, but they read and write separately, so a webhook
+    // (or a refund) landing mid-request could still slip past them. It names the
+    // payable states rather than "not succeeded" so a refunded order can't match.
     const claim = await db.query(
       `UPDATE orders
        SET payment_status = 'succeeded',
            paid_at = CURRENT_TIMESTAMP,
            fulfillment_status = 'delivered',
            payment_method = $2
-       WHERE id = $1 AND payment_status <> 'succeeded'`,
+       WHERE id = $1 AND payment_status IN ('pending', 'processing', 'failed')`,
       [id, paymentMethodOf(payment)]
     );
     const firstConfirm = (claim.rowCount ?? 0) > 0;

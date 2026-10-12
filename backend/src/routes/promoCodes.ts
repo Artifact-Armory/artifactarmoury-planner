@@ -18,8 +18,7 @@ import {
   normalizeCode,
   codeAppliesToModel,
   createPromoApplier,
-  remainingRedemptions,
-  remainingForCustomer,
+  remainingAllowance,
 } from '../services/promoCodes'
 
 const router = Router()
@@ -184,8 +183,7 @@ router.post(
     const code = await findActiveCode(db, rawCode)
     if (!code) throw new NotFoundError('Promo code')
 
-    const totalRemaining = remainingRedemptions(code)
-    const perCustomerRemaining = await remainingForCustomer(db, code, userId)
+    const { totalRemaining, perCustomerRemaining } = await remainingAllowance(db, code, userId)
     const applier = createPromoApplier(code, totalRemaining, perCustomerRemaining)
 
     const lines: Array<{ modelId: string; name: string; originalPrice: number; discountAmount: number }> = []

@@ -43,10 +43,34 @@ export interface AuthRequest extends Request {
 
 interface JwtPayload {
   userId: string;
-  email: string;
-  role: string;
+  email?: string;
+  role?: string;
+  /** 'access' | 'refresh'. Missing on tokens minted before 2026-10-12. */
+  typ?: string;
+  /** Set on single-purpose tokens (e.g. the 2FA login challenge). */
+  purpose?: string;
   iat: number;
   exp: number;
+}
+
+// Every token is signed with the same secret, so the token's TYPE is what stops one
+// kind being used as another. Before 2026-10-12 nothing checked it: the 5-minute 2FA
+// challenge token (issued after the password step alone) was accepted as a full
+// session and could be swapped at /auth/refresh for a 30-day one — 2FA was
+// bypassable with just the password. Refresh and access tokens were interchangeable
+// too. Tokens minted before `typ` existed are told apart by shape: a legacy access
+// token carries `role`, a legacy refresh token carries only `userId`. The legacy
+// branches can go once every pre-change token has expired (30 days).
+function isAccessToken(d: JwtPayload): boolean {
+  if (d.purpose) return false;
+  if (d.typ) return d.typ === 'access';
+  return !!d.role;
+}
+
+function isRefreshToken(d: JwtPayload): boolean {
+  if (d.purpose) return false;
+  if (d.typ) return d.typ === 'refresh';
+  return !d.role;
 }
 
 // ============================================================================
@@ -82,8 +106,8 @@ export function generateToken(
 ): string {
   const payload =
     typeof userOrId === 'string'
-      ? { userId: userOrId, email: email as string, role: role as string }
-      : { userId: userOrId.id, email: userOrId.email, role: userOrId.role };
+      ? { userId: userOrId, email: email as string, role: role as string, typ: 'access' }
+      : { userId: userOrId.id, email: userOrId.email, role: userOrId.role, typ: 'access' };
 
   return jwt.sign(payload, JWT_SECRET as jwt.Secret, {
     expiresIn: JWT_EXPIRES_IN,
@@ -92,7 +116,7 @@ export function generateToken(
 
 export function generateRefreshToken(userIdOrUser: string | { id: string }): string {
   const uid = typeof userIdOrUser === 'string' ? userIdOrUser : userIdOrUser.id;
-  return jwt.sign({ userId: uid }, JWT_SECRET as jwt.Secret, { expiresIn: '30d' });
+  return jwt.sign({ userId: uid, typ: 'refresh' }, JWT_SECRET as jwt.Secret, { expiresIn: '30d' });
 }
 
 /**
@@ -153,9 +177,17 @@ export async function authenticate(
         return;
       }
       
-      res.status(401).json({ 
+      res.status(401).json({
         error: 'Invalid token',
-        message: 'Authentication failed' 
+        message: 'Authentication failed'
+      });
+      return;
+    }
+
+    if (!isAccessToken(decoded)) {
+      res.status(401).json({
+        error: 'Invalid token',
+        message: 'Authentication failed'
       });
       return;
     }
@@ -252,6 +284,7 @@ export async function optionalAuth(
     // Try to verify token
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+      if (!isAccessToken(decoded)) throw new Error('Not an access token');
 
       // Fetch user
       const result = await db.query(
@@ -549,6 +582,7 @@ export async function refreshAccessToken(
     let decoded: JwtPayload;
     try {
       decoded = jwt.verify(refreshToken, JWT_SECRET) as JwtPayload;
+      if (!isRefreshToken(decoded)) throw new Error('Not a refresh token');
     } catch (error) {
       res.status(401).json({ 
         error: 'Invalid token',

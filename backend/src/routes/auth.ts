@@ -834,7 +834,7 @@ router.post('/upgrade-to-artist', authenticate, asyncHandler(async (req: any, re
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         RETURNING id, email, display_name, role, artist_name, email_verified,
-                  stripe_onboarding_complete, two_factor_enabled`,
+                  stripe_onboarding_complete, totp_enabled`,
       [userId, sanitizeString(cleanArtistName), SELLER_TERMS_VERSION]
     );
 
@@ -878,7 +878,7 @@ router.post('/upgrade-to-artist', authenticate, asyncHandler(async (req: any, re
         artistName: user.artist_name,
         emailVerified: user.email_verified,
         stripeOnboardingComplete: !!user.stripe_onboarding_complete,
-        twoFactorEnabled: !!user.two_factor_enabled
+        twoFactorEnabled: !!user.totp_enabled
       },
       accessToken,
       refreshToken

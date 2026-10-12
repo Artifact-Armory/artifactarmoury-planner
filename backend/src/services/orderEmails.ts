@@ -1,17 +1,19 @@
 // backend/src/services/orderEmails.ts
 // The one-time side effects of an order turning `succeeded`: buyer receipt, artist
-// sale emails, and model sale counts. Shared by POST /orders/:id/confirm and the
+// sale emails, model sale counts and promo-code redemption counts. Shared by POST /orders/:id/confirm and the
 // payment_intent.succeeded webhook — previously only the confirm route did any of
 // this, so an order that settled via the webhook alone (async PayPal, or a buyer
 // who closed the tab mid-redirect) got no receipt and no sale count at all.
 //
 // Callers must only invoke this from the request that won the atomic
-// `UPDATE orders ... WHERE payment_status <> 'succeeded'` claim, so it runs once.
+// `UPDATE orders ... WHERE payment_status IN ('pending','processing','failed')`
+// claim, so it runs once.
 
 import { db } from '../db'
 import logger from '../utils/logger'
 import { sendOrderConfirmation, sendArtistSaleNotification } from './email'
 import { PAYOUT_HOLD_DAYS } from './earnings'
+import { countPaidRedemptions } from './promoCodes'
 
 const log = logger.child('ORDER_EMAILS')
 
@@ -80,6 +82,9 @@ export async function runOrderPaidSideEffects(orderId: string): Promise<void> {
       db.query('UPDATE models SET sale_count = sale_count + $1 WHERE id = $2', [r.quantity, r.model_id])
         .catch((err) => log.error('Failed to update sale count', { error: err, orderId }))
     }
+
+    countPaidRedemptions(db, orderId)
+      .catch((err) => log.error('Failed to count promo redemptions', { error: err, orderId }))
   } catch (err) {
     log.error('runOrderPaidSideEffects failed', { error: err, orderId })
   }

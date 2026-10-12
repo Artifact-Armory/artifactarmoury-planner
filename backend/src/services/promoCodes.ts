@@ -86,15 +86,6 @@ export function computeDiscountAmount(code: PromoCode, originalPrice: number): n
   return round2(Math.max(0, Math.min(raw, maxDiscount)))
 }
 
-/** How many times this user has already redeemed this code. */
-export async function customerRedemptionCount(q: Queryable, codeId: string, userId: string): Promise<number> {
-  const { rows } = await q.query(
-    `SELECT COUNT(*) FROM promo_code_redemptions WHERE promo_code_id = $1 AND user_id = $2`,
-    [codeId, userId],
-  )
-  return parseInt(rows[0].count, 10)
-}
-
 /**
  * Stateful helper that applies a code across several cart lines in order,
  * respecting the code's total and per-customer redemption limits as it goes
@@ -121,19 +112,56 @@ export function createPromoApplier(
   }
 }
 
-/** Remaining total redemptions for a code, or null = unlimited. */
-export function remainingRedemptions(code: PromoCode): number | null {
-  if (code.max_redemptions == null) return null
-  return Math.max(0, code.max_redemptions - code.redemption_count)
+// How long an unpaid order holds on to the redemptions it reserved. A redemption row
+// is written when the order is created (inside the transaction that locks the code
+// row, which is what stops two buyers racing for the last use), but an order that
+// never gets paid must not use the code up for ever. Before 2026-10-12 it did: an
+// abandoned checkout — or "Back to cart" then "Continue", which creates a new order —
+// burned a limited code, and the same buyer was then charged full price with no
+// warning. Long enough to cover a PayPal round trip.
+export const PROMO_RESERVATION_MINUTES = 60
+
+/**
+ * What is left of a code's total and per-customer allowance, for `userId`, or null
+ * for "unlimited". Counted live from the redemption rows and their orders' state:
+ * paid (or refunded, or settling) orders always count; another buyer's unpaid order
+ * counts only while its reservation is fresh; the caller's OWN unpaid orders never
+ * count — a new checkout supersedes them (POST /orders cancels them).
+ */
+export async function remainingAllowance(
+  q: Queryable,
+  code: PromoCode,
+  userId: string,
+): Promise<{ totalRemaining: number | null; perCustomerRemaining: number | null }> {
+  if (code.max_redemptions == null && code.max_redemptions_per_customer == null) {
+    return { totalRemaining: null, perCustomerRemaining: null }
+  }
+  const { rows } = await q.query(
+    `SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE r.user_id = $2) AS mine
+     FROM promo_code_redemptions r
+     JOIN orders o ON o.id = r.order_id
+     WHERE r.promo_code_id = $1
+       AND (o.payment_status IN ('succeeded', 'refunded', 'processing')
+            OR (o.payment_status = 'pending'
+                AND o.user_id IS DISTINCT FROM $2
+                AND o.created_at > NOW() - make_interval(mins => $3)))`,
+    [code.id, userId, PROMO_RESERVATION_MINUTES],
+  )
+  const total = parseInt(rows[0]?.total ?? '0', 10)
+  const mine = parseInt(rows[0]?.mine ?? '0', 10)
+  return {
+    totalRemaining: code.max_redemptions == null ? null : Math.max(0, code.max_redemptions - total),
+    perCustomerRemaining:
+      code.max_redemptions_per_customer == null ? null : Math.max(0, code.max_redemptions_per_customer - mine),
+  }
 }
 
-/** Remaining redemptions for one customer, or null = unlimited. */
-export async function remainingForCustomer(q: Queryable, code: PromoCode, userId: string): Promise<number | null> {
-  if (code.max_redemptions_per_customer == null) return null
-  const used = await customerRedemptionCount(q, code.id, userId)
-  return Math.max(0, code.max_redemptions_per_customer - used)
-}
-
+/**
+ * Reserve one discounted line against a code. `promo_codes.redemption_count` is NOT
+ * bumped here — it means "used on a paid order" and is incremented by
+ * countPaidRedemptions once the order is actually paid.
+ */
 export async function recordRedemption(
   q: Queryable,
   args: {
@@ -150,6 +178,22 @@ export async function recordRedemption(
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [args.promoCodeId, args.orderId, args.orderItemId, args.userId, args.modelId, args.discountAmount],
   )
-  await q.query(`UPDATE promo_codes SET redemption_count = redemption_count + 1 WHERE id = $1`, [args.promoCodeId])
-  logger.info('Promo code redeemed', args)
+  logger.info('Promo code reserved', args)
+}
+
+/**
+ * An order has just been paid: count its reserved redemptions as used. Call only from
+ * the request that won the order's payment claim (see services/orderEmails.ts), so it
+ * runs once per order.
+ */
+export async function countPaidRedemptions(q: Queryable, orderId: string): Promise<void> {
+  await q.query(
+    `UPDATE promo_codes pc
+     SET redemption_count = pc.redemption_count + x.n
+     FROM (SELECT promo_code_id, COUNT(*)::int AS n
+           FROM promo_code_redemptions WHERE order_id = $1
+           GROUP BY promo_code_id) x
+     WHERE pc.id = x.promo_code_id`,
+    [orderId],
+  )
 }

@@ -660,16 +660,18 @@ async function handlePaymentIntentSucceeded(
     // Mark paid + delivered (digital STLs fulfil instantly). The method is taken from
     // the intent rather than from whatever the client said at checkout — the buyer
     // can switch to PayPal inside the Payment Element after the order row was written.
-    // `AND payment_status <> 'succeeded'` is the same atomic claim the confirm route
-    // uses, so whichever of the two actually wins the race is the one that runs the
-    // one-time side effects below.
+    // `AND payment_status IN (...)` is the same atomic claim the confirm route uses,
+    // so whichever of the two actually wins the race is the one that runs the one-time
+    // side effects below. It lists the payable states rather than saying "not
+    // succeeded": a refunded order must never flip back to paid when Stripe
+    // redelivers this event (the intent itself stays `succeeded` after a refund).
     const claim = await db.query(
       `UPDATE orders
        SET payment_status = 'succeeded',
            paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
            fulfillment_status = 'delivered',
            payment_method = $2
-       WHERE id = $1 AND payment_status <> 'succeeded'`,
+       WHERE id = $1 AND payment_status IN ('pending', 'processing', 'failed')`,
       [orderId, await resolvePaymentMethod(paymentIntent)]
     )
     const firstConfirm = (claim.rowCount ?? 0) > 0
@@ -707,10 +709,16 @@ async function handlePaymentIntentFailed(
   const orderId = paymentIntent.metadata.order_id
   
   if (orderId) {
+    // `orders` has no `status`/`notes` columns — the old query here wrote to them, so
+    // every payment_failed webhook threw and was answered 400, and Stripe kept
+    // retrying it. Only an order still awaiting payment is touched: a failure event
+    // arriving late must not overwrite one that has since succeeded. (A failed
+    // intent can still be retried by the buyer, which is why the success claim
+    // accepts 'failed'.)
     await db.query(
-      `UPDATE orders 
-       SET status = 'payment_failed', notes = $1 
-       WHERE id = $2`,
+      `UPDATE orders
+       SET payment_status = 'failed', internal_notes = $1
+       WHERE id = $2 AND payment_status IN ('pending', 'processing')`,
       [paymentIntent.last_payment_error?.message || 'Payment failed', orderId]
     )
   }

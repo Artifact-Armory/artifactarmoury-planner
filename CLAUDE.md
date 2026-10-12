@@ -1027,6 +1027,36 @@ setting it out on a real table. `ui/layoutPdf.ts`, jsPDF (lazy-loaded on click, 
 - Footprints are bounding boxes, not true silhouettes, so gaps are measured box-to-box.
 - Verified by generating a PDF in Chromium with demo assets and checking the rendered pages.
 
+## Code-review fixes (2026-10-12, migration 070)
+Five bugs found by running every migration and every backend SQL query against a real local
+Postgres 16, then driving the API end-to-end in mock-payment mode. All reproduced before the
+fix and re-tested after (28 checks + a real TOTP login).
+- **2FA was bypassable with just the password.** Every JWT shares one secret and nothing checked
+  its type, so the 5-minute 2FA challenge token worked as a full session and `/auth/refresh` swapped
+  it for a 30-day one. Tokens now carry `typ: 'access' | 'refresh'`; `authenticate`/`optionalAuth`
+  accept only access tokens, refresh only refresh tokens, and anything with `purpose` is refused by
+  both. Pre-change tokens are recognised by shape (legacy access has `role`, legacy refresh doesn't),
+  so nobody is logged out; drop those branches in `isAccessToken`/`isRefreshToken` after 30 days.
+- **Invite redemption always 500'd.** `/auth/upgrade-to-artist` returned a non-existent
+  `two_factor_enabled` column (it's `totp_enabled`).
+- **`payment_intent.payment_failed` webhook always errored** (wrote `orders.status`/`notes`, which
+  don't exist), so Stripe retried it for days. Now sets `payment_status='failed'` + `internal_notes`,
+  only on a still-unpaid order. The success claim accepts `failed` so a retried card still settles.
+- **Refunded orders could be re-confirmed.** A PaymentIntent stays `succeeded` after a refund, and both
+  claims were `WHERE payment_status <> 'succeeded'`, so re-calling confirm (or a redelivered webhook)
+  flipped a refunded order back to paid, double-counted the sale and re-sent the receipt + artist
+  sale email. Both claims now list the payable states `IN ('pending','processing','failed')`, and
+  confirm refuses a refunded order outright.
+- **Promo codes were used up by unpaid orders.** Redemptions are still written at order creation
+  (under the code's row lock), but limits are now counted live by `remainingAllowance()`: paid,
+  refunded and settling orders count; another buyer's unpaid order counts for
+  `PROMO_RESERVATION_MINUTES` (60); the buyer's own unpaid orders don't — a new checkout cancels
+  their PaymentIntents (`cancelSupersededPromoOrders` in `routes/orders.ts`). `redemption_count` now
+  means "used on a paid order" (bumped in `runOrderPaidSideEffects`); 070 recomputes it.
+  Known gap: an unpaid order paid more than 60 minutes after creation can push a limited code one
+  use over its limit.
+- Not tested against live Stripe (cancel/webhook paths only ran their SQL under the mock).
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:
