@@ -387,7 +387,7 @@ export const adminApi = {
     models: any[]
     pagination: AdminPagination
   }> => {
-    const { data } = await apiClient.get(`/api/browse`, { params })
+    const { data } = await apiClient.get(`/api/admin/models`, { params })
     return data
   },
 }

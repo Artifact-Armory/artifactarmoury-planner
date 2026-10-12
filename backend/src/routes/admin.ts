@@ -551,6 +551,38 @@ router.delete('/users/:id',
 // MODEL MODERATION
 // ============================================================================
 
+// Every model in any status (drafts included — the public /browse the admin page
+// used to read only ever returns published ones). Soft-deleted rows are left out.
+router.get('/models',
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 24));
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const params: any[] = [];
+    let where = `m.deleted_at IS NULL`;
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (m.name ILIKE $1 OR u.artist_name ILIKE $1 OR u.email ILIKE $1)`;
+    }
+    const total = Number(
+      (await db.query(`SELECT COUNT(*) FROM models m JOIN users u ON u.id = m.artist_id WHERE ${where}`, params))
+        .rows[0]?.count ?? 0,
+    );
+    const rows = (
+      await db.query(
+        `SELECT m.id, m.name, m.status, m.processing_status, m.thumbnail_path, m.base_price, m.created_at,
+                u.artist_name, u.email AS artist_email
+           FROM models m JOIN users u ON u.id = m.artist_id
+          WHERE ${where}
+          ORDER BY m.created_at DESC
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, (page - 1) * limit],
+      )
+    ).rows;
+    res.json({ models: rows, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
+  })
+);
+
 // Get flagged models
 router.get('/models/flagged',
   asyncHandler(async (req, res) => {

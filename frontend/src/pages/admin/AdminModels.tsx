@@ -176,8 +176,13 @@ const AdminModels: React.FC = () => {
                       <div className="text-xs text-muted-foreground truncate">
                         {m.artist_name || 'Unknown artist'}
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-foreground">
-                        {formatPrice(m.base_price ?? 0)}
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-foreground">{formatPrice(m.base_price ?? 0)}</span>
+                        {m.status && m.status !== 'published' && (
+                          <span className={`rounded-sm px-1.5 py-0.5 text-xs font-medium ${STATUS_BADGE[m.status] ?? 'bg-muted'}`}>
+                            {m.status}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>
