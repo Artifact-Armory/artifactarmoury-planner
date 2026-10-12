@@ -11,10 +11,20 @@
 
 import { db } from '../db'
 import logger from '../utils/logger'
-import { createTransfer, isStripeMock, isUsableAccountId } from './stripe'
+import {
+  createTransfer,
+  findTransferByGroup,
+  isAmbiguousStripeError,
+  isStripeMock,
+  isUsableAccountId,
+} from './stripe'
 import { createNotification } from './notifications'
 
 const log = logger.child('PAYOUTS')
+
+// The pool or a single client. The reconcile step holds a row lock on one client, so
+// everything it writes must go through that same client or it waits on itself.
+type Queryable = { query: (text: string, params?: any[]) => Promise<any> }
 
 // Don't fire a transfer for trivial balances — Stripe/payout overheads make tiny
 // transfers wasteful, so sub-threshold balances roll into the next run.
@@ -86,6 +96,7 @@ export async function runPayouts(): Promise<Array<{ artistId: string; amount: nu
 /** Create a payout batch for one artist, transfer via Stripe, mark earnings paid. */
 async function payArtist(artistId: string, accountId: string, amount: number): Promise<void> {
   const client = await db.connect()
+  let payout: { id: string; amount: number; transferGroup: string }
   try {
     await client.query('BEGIN')
 
@@ -104,13 +115,15 @@ async function payArtist(artistId: string, accountId: string, amount: number): P
     const earningIds = rows.rows.map((r: any) => r.id)
 
     // Create the payout batch (pending) first so we have an id to stamp on the earnings.
-    const payout = await client.query(
+    const inserted = await client.query(
       `INSERT INTO payouts (artist_id, amount, currency, stripe_account_id, status)
        VALUES ($1, $2, 'GBP', $3, 'pending')
        RETURNING id`,
       [artistId, roundedTotal, accountId],
     )
-    const payoutId = payout.rows[0].id
+    const payoutId = inserted.rows[0].id
+    const transferGroup = `payout_${payoutId}`
+    await client.query(`UPDATE payouts SET transfer_group = $1 WHERE id = $2`, [transferGroup, payoutId])
 
     await client.query(
       `UPDATE artist_earnings SET status = 'paid', payout_id = $1, updated_at = CURRENT_TIMESTAMP
@@ -119,48 +132,169 @@ async function payArtist(artistId: string, accountId: string, amount: number): P
     )
 
     await client.query('COMMIT')
-
-    // Do the actual money movement AFTER committing the ledger, so a Stripe hiccup
-    // can't leave earnings marked paid inside an open transaction. If the transfer
-    // fails we flip the payout to 'failed' and release the earnings back to cleared.
-    try {
-      const transferId = await createTransfer({
-        accountId,
-        amount: roundedTotal,
-        currency: 'gbp',
-        description: `Artifact Armoury payout ${payoutId}`,
-        metadata: { payout_id: payoutId, artist_id: artistId },
-      })
-      await db.query(
-        `UPDATE payouts SET status = 'paid', stripe_transfer_id = $1, paid_at = CURRENT_TIMESTAMP WHERE id = $2`,
-        [transferId, payoutId],
-      )
-      await createNotification({
-        userId: artistId,
-        type: 'payout_paid',
-        title: `You've been paid £${roundedTotal.toFixed(2)}`,
-        body: 'Your cleared earnings have been sent to your connected account.',
-        link: '/artist/payouts',
-      })
-      log.info('Artist paid out', { artistId, payoutId, amount: roundedTotal })
-    } catch (transferErr) {
-      // Roll the ledger back to cleared and mark the payout failed for retry next run.
-      await db.query(
-        `UPDATE artist_earnings SET status = 'cleared', payout_id = NULL WHERE payout_id = $1`,
-        [payoutId],
-      )
-      await db.query(
-        `UPDATE payouts SET status = 'failed', failure_reason = $2 WHERE id = $1`,
-        [payoutId, (transferErr as Error).message],
-      )
-      throw transferErr
-    }
+    payout = { id: payoutId, amount: roundedTotal, transferGroup }
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     throw err
   } finally {
     client.release()
   }
+
+  // Do the actual money movement AFTER committing the ledger, so a Stripe hiccup
+  // can't leave earnings marked paid inside an open transaction.
+  await transferPayout(db, payout.id, artistId, accountId, payout.amount, payout.transferGroup)
+}
+
+/**
+ * Send one payout's money and record the outcome.
+ *
+ * - Stripe confirms the transfer → payout `paid`.
+ * - Stripe definitely refused it → payout `failed`, earnings back to `cleared` for the
+ *   next run (no money moved, so nothing can be paid twice).
+ * - The answer is unknown (timeout, dropped connection, 5xx) → the transfer may well
+ *   have gone through, so NOTHING is released: the payout stays `pending` with its
+ *   earnings held, and reconcilePendingPayouts settles it on the next run by looking
+ *   the transfer up. This used to release the earnings, and the next run paid them
+ *   again — a double payout whenever Stripe's response was lost.
+ */
+async function transferPayout(
+  q: Queryable,
+  payoutId: string,
+  artistId: string,
+  accountId: string,
+  amount: number,
+  transferGroup: string,
+): Promise<void> {
+  let transferId: string
+  try {
+    transferId = await createTransfer({
+      accountId,
+      amount,
+      currency: 'gbp',
+      description: `Artifact Armoury payout ${payoutId}`,
+      metadata: { payout_id: payoutId, artist_id: artistId },
+      transferGroup,
+      idempotencyKey: transferGroup,
+    })
+  } catch (transferErr) {
+    const message = (transferErr as Error).message
+    if (isAmbiguousStripeError(transferErr)) {
+      await q.query(
+        `UPDATE payouts SET failure_reason = $2 WHERE id = $1`,
+        [payoutId, `Transfer unconfirmed, will be checked on the next run: ${message}`],
+      )
+      log.error('Payout transfer outcome unknown — holding earnings for reconciliation', {
+        error: transferErr, payoutId, artistId, amount,
+      })
+    } else {
+      // Roll the ledger back to cleared and mark the payout failed for retry next run.
+      await q.query(
+        `UPDATE artist_earnings SET status = 'cleared', payout_id = NULL WHERE payout_id = $1`,
+        [payoutId],
+      )
+      await q.query(
+        `UPDATE payouts SET status = 'failed', failure_reason = $2 WHERE id = $1`,
+        [payoutId, message],
+      )
+    }
+    throw transferErr
+  }
+  await markPayoutPaid(q, payoutId, artistId, amount, transferId)
+}
+
+async function markPayoutPaid(
+  q: Queryable,
+  payoutId: string,
+  artistId: string,
+  amount: number,
+  transferId: string,
+): Promise<void> {
+  await q.query(
+    `UPDATE payouts SET status = 'paid', stripe_transfer_id = $1, paid_at = CURRENT_TIMESTAMP, failure_reason = NULL
+     WHERE id = $2`,
+    [transferId, payoutId],
+  )
+  await createNotification({
+    userId: artistId,
+    type: 'payout_paid',
+    title: `You've been paid £${amount.toFixed(2)}`,
+    body: 'Your cleared earnings have been sent to your connected account.',
+    link: '/artist/payouts',
+  })
+  log.info('Artist paid out', { artistId, payoutId, amount })
+}
+
+// A payout younger than this may still be mid-transfer in another request, so it is
+// left alone.
+const RECONCILE_MIN_AGE_MINUTES = 10
+
+/**
+ * Settle payouts whose transfer outcome was never confirmed (see transferPayout). For
+ * each, ask Stripe whether a transfer exists under its transfer_group: if so, record
+ * it; if not, send it now. Each row is locked while it's handled so two servers can't
+ * both send it. Payouts from before migration 071 have no transfer_group and can't be
+ * checked this way, so they are only logged for a manual look in the Stripe dashboard.
+ */
+export async function reconcilePendingPayouts(): Promise<number> {
+  const legacy = await db.query(
+    `SELECT id, artist_id, amount FROM payouts
+     WHERE status = 'pending' AND stripe_transfer_id IS NULL AND transfer_group IS NULL
+       AND created_at < NOW() - make_interval(mins => $1)`,
+    [RECONCILE_MIN_AGE_MINUTES],
+  )
+  if (legacy.rows.length) {
+    log.warn('Pending payouts with no transfer on record — check them in the Stripe dashboard', {
+      payouts: legacy.rows,
+    })
+  }
+
+  const candidates = await db.query(
+    `SELECT id FROM payouts
+     WHERE status = 'pending' AND stripe_transfer_id IS NULL AND transfer_group IS NOT NULL
+       AND created_at < NOW() - make_interval(mins => $1)
+     ORDER BY created_at`,
+    [RECONCILE_MIN_AGE_MINUTES],
+  )
+
+  let settled = 0
+  for (const { id } of candidates.rows) {
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      // Re-check under a row lock: another server may have settled it meanwhile.
+      const { rows } = await client.query(
+        `SELECT id, artist_id, amount, stripe_account_id, transfer_group FROM payouts
+         WHERE id = $1 AND status = 'pending' AND stripe_transfer_id IS NULL
+         FOR UPDATE SKIP LOCKED`,
+        [id],
+      )
+      const p = rows[0]
+      if (p) {
+        const amount = Number(p.amount)
+        try {
+          const existing = await findTransferByGroup(p.transfer_group)
+          if (existing) {
+            await markPayoutPaid(client, p.id, p.artist_id, amount, existing)
+          } else {
+            await transferPayout(client, p.id, p.artist_id, p.stripe_account_id, amount, p.transfer_group)
+          }
+          settled++
+        } catch (err) {
+          // transferPayout has already recorded the outcome; an unknown one stays
+          // pending and is tried again on the next run.
+          log.error('Could not reconcile payout', { error: err, payoutId: p.id })
+        }
+      }
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      log.error('Payout reconciliation step failed', { error: err, payoutId: id })
+    } finally {
+      client.release()
+    }
+  }
+  if (settled) log.info('Reconciled pending payouts', { settled })
+  return settled
 }
 
 // Paying out under STRIPE_MOCK would mark earnings `paid` against a fake `tr_mock_`
@@ -183,6 +317,7 @@ export async function runPayoutCycle(): Promise<{ cleared: number; payouts: Arra
     return { cleared, payouts: [], skipped: 'payments_mocked' }
   }
 
+  await reconcilePendingPayouts().catch(err => log.error('Payout reconciliation failed', { error: err }))
   const payouts = await runPayouts()
   return { cleared, payouts }
 }

@@ -540,26 +540,52 @@ export interface CreateTransferParams {
   currency?: string
   metadata?: Record<string, string>
   description?: string
+  /** Lets a later run find this transfer with findTransferByGroup. */
+  transferGroup?: string
+  /** Stripe returns the original transfer for a repeated key (kept ~24h). */
+  idempotencyKey?: string
 }
 
 /** Create a Stripe Connect transfer to an artist's connected account (mock-aware). */
 export async function createTransfer(params: CreateTransferParams): Promise<string> {
-  const { accountId, amount, currency = 'gbp', metadata, description } = params
+  const { accountId, amount, currency = 'gbp', metadata, description, transferGroup, idempotencyKey } = params
   const amountInPence = Math.round(amount * 100)
 
   if (STRIPE_MOCK) {
     return `tr_mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   }
 
-  const transfer = await stripe.transfers.create({
-    amount: amountInPence,
-    currency,
-    destination: accountId,
-    description,
-    metadata,
-  })
+  const transfer = await stripe.transfers.create(
+    {
+      amount: amountInPence,
+      currency,
+      destination: accountId,
+      description,
+      metadata,
+      ...(transferGroup ? { transfer_group: transferGroup } : {}),
+    },
+    idempotencyKey ? { idempotencyKey } : undefined
+  )
   stripeLogger.info('Transfer created', { transferId: transfer.id, accountId, amount })
   return transfer.id
+}
+
+/** The id of a transfer already made under `transferGroup`, or null if none exists. */
+export async function findTransferByGroup(transferGroup: string): Promise<string | null> {
+  if (STRIPE_MOCK) return null
+  const list = await stripe.transfers.list({ transfer_group: transferGroup, limit: 1 })
+  return list.data[0]?.id ?? null
+}
+
+/**
+ * True when a failed Stripe call may still have taken effect: the connection dropped,
+ * Stripe returned a 5xx, or the error isn't a Stripe error at all. Errors where Stripe
+ * definitely refused the request (invalid request, card, auth, permission, idempotency)
+ * return false — nothing happened, so it is safe to undo our own bookkeeping.
+ */
+export function isAmbiguousStripeError(err: unknown): boolean {
+  const type = (err as { type?: string } | null)?.type
+  return !type || type === 'StripeConnectionError' || type === 'StripeAPIError' || type === 'StripeRateLimitError'
 }
 
 // ============================================================================
@@ -767,7 +793,10 @@ async function handleTransferFailed(transfer: Stripe.Transfer): Promise<void> {
 export async function createRefund(
   paymentIntentId: string,
   amount?: number, // In pounds, optional for partial refund
-  reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer'
+  reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer',
+  // Stripe returns the original refund for a repeated key instead of refunding again.
+  // Pass one per thing being refunded (e.g. `refund-item-<orderItemId>`).
+  idempotencyKey?: string
 ): Promise<string> {
   if (STRIPE_MOCK) {
     return `re_mock_${Date.now()}`
@@ -788,7 +817,10 @@ export async function createRefund(
       refundParams.amount = Math.round(amount * 100) // Convert to pence
     }
     
-    const refund = await stripe.refunds.create(refundParams)
+    const refund = await stripe.refunds.create(
+      refundParams,
+      idempotencyKey ? { idempotencyKey } : undefined
+    )
     
     stripeLogger.info('Refund created', {
       refundId: refund.id,
@@ -821,6 +853,8 @@ export default {
   getPaymentIntent,
   cancelPaymentIntent,
   createTransfer,
+  findTransferByGroup,
+  isAmbiguousStripeError,
   constructWebhookEvent,
   handleWebhookEvent,
   createRefund

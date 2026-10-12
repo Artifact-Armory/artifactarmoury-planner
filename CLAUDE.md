@@ -1057,6 +1057,35 @@ fix and re-tested after (28 checks + a real TOTP login).
   use over its limit.
 - Not tested against live Stripe (cancel/webhook paths only ran their SQL under the mock).
 
+### Second batch (2026-10-12, migration 071)
+Same method (real local Postgres, real routes); 21 new checks plus a download-memory harness.
+- **Public tables no longer expose the owner's account email.** `GET /tables/:id` and
+  `/tables/shared/:token` returned `user_email` to anyone (artists' showcases included).
+  `tableForViewer()` now keeps it only for the owner/admin — the planner (`App.tsx`, and
+  planner-lab) still compares it to decide Save-vs-copy, so for anyone else its absence reads as
+  "not yours". The public gallery's creator-name fallback was the email's local part; now
+  `'Anonymous'`.
+- **Refunds claim the line before calling Stripe** (`UPDATE … WHERE refunded_at IS NULL`), undo
+  the claim if Stripe refuses, and pass idempotency key `refund-item-<orderItemId>`. A double-click
+  or two admins used to send two Stripe refunds. Applies to the single-line route and
+  `refund_buyers`.
+- **Payouts can't double-pay on a lost Stripe response.** Each transfer is tagged
+  `transfer_group = payout_<id>` (also its idempotency key; stored in `payouts.transfer_group`, 071).
+  `transferPayout()`: confirmed → paid; Stripe definitely refused (`isAmbiguousStripeError` false)
+  → failed + earnings released, as before; unknown (timeout/5xx/connection) → payout stays
+  `pending` with earnings held. `reconcilePendingPayouts()` runs at the start of each payout cycle:
+  for each pending payout older than 10 min it looks the transfer up by group and records it, or
+  sends it (row-locked, writes on the same client). Pre-071 pending payouts have no group and are
+  only logged for a manual Stripe-dashboard check.
+- **ZIP downloads have a memory budget** (`ZIP_BUFFER_BUDGET_MB`, default 192, per download).
+  Measured on 8 × 60 MB incompressible files with a slow client: server held 480 MB before, 187 MB
+  after; a client that disconnects now stops further R2 fetches (3 of 8 vs all 8). The single-STL
+  stream no longer hangs (and leaks its R2 stream) when the buyer cancels — it used to wait for a
+  `drain` that never comes and was logged as a 500. Watermark functions untouched. The single-file
+  ASCII path still buffers one whole file.
+- **Bundles containing a taken-down (archived/flagged) or deleted model can't be bought.** Draft
+  models inside a bundle are still allowed (bundle-only models).
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

@@ -1141,11 +1141,23 @@ async function resolveReport(id: string, action: string, summary: string, adminI
             const vatPence = vatPenceOn(netPence, Number(row.tax_rate) || 0);
             const grossAmount = (netPence + vatPence) / 100;
             try {
-              await createRefund(row.payment_intent_id, grossAmount, 'requested_by_customer');
-              await db.query(
-                `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2 WHERE id = $3`,
+              // Claim first, then refund — same reasoning as the single-line refund
+              // route: a concurrent refund of the same line must not pay out twice.
+              const claimed = await db.query(
+                `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2
+                 WHERE id = $3 AND refunded_at IS NULL`,
                 [adminId, grossAmount, row.order_item_id],
               );
+              if ((claimed.rowCount ?? 0) === 0) continue;
+              try {
+                await createRefund(row.payment_intent_id, grossAmount, 'requested_by_customer', `refund-item-${row.order_item_id}`);
+              } catch (refundErr) {
+                await db.query(
+                  `UPDATE order_items SET refunded_at = NULL, refunded_by = NULL, refund_amount = NULL WHERE id = $1`,
+                  [row.order_item_id],
+                );
+                throw refundErr;
+              }
               const remaining = await db.query(
                 `SELECT COUNT(*) FROM order_items WHERE order_id = $1 AND refunded_at IS NULL`,
                 [row.order_id],
@@ -1491,12 +1503,26 @@ router.post('/orders/:orderId/items/:itemId/refund',
     const vatPence = vatPenceOn(netPence, Number(order.tax_rate) || 0);
     const grossAmount = (netPence + vatPence) / 100;
 
-    await createRefund(order.payment_intent_id, grossAmount, 'requested_by_customer');
-
-    await db.query(
-      `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2 WHERE id = $3`,
+    // Claim the line BEFORE asking Stripe for money back. The check above reads and
+    // the refund writes separately, so a double-click (or two admins) used to send two
+    // Stripe refunds for one line. Only the request that flips refunded_at from NULL
+    // goes on; the idempotency key is a second guard if a claim is ever undone and
+    // retried after Stripe did act (e.g. its response was lost).
+    const claimed = await db.query(
+      `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP, refunded_by = $1, refund_amount = $2
+       WHERE id = $3 AND refunded_at IS NULL`,
       [adminId, grossAmount, itemId],
     );
+    if ((claimed.rowCount ?? 0) === 0) throw new ValidationError('This item has already been refunded');
+    try {
+      await createRefund(order.payment_intent_id, grossAmount, 'requested_by_customer', `refund-item-${itemId}`);
+    } catch (err) {
+      await db.query(
+        `UPDATE order_items SET refunded_at = NULL, refunded_by = NULL, refund_amount = NULL WHERE id = $1`,
+        [itemId],
+      );
+      throw err;
+    }
     const { alreadyPaid } = await reverseEarningsForOrderItem(itemId, `Refunded by admin — order ${order.order_number}`);
 
     // If every item in the order is now refunded, reflect that at the order level.

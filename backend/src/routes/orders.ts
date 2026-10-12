@@ -272,6 +272,17 @@ router.post('/',
           );
           const bundleModels = modelsResult.rows;
           if (bundleModels.length === 0) throw new ValidationError(`Bundle "${bundle.name}" has no models`);
+          // A model taken down by moderation (archived/flagged) can't be downloaded at all
+          // (see GET /models/:id/download), and one its artist deleted is withdrawn from
+          // sale, so the bundle must not be sold with either inside — the buyer would pay
+          // for a file they can't get. Draft models are fine: an artist may sell a model
+          // only as part of a bundle.
+          const unavailable = bundleModels.find(
+            (m: any) => m.deleted_at || ['archived', 'flagged', 'deleted'].includes(m.status)
+          );
+          if (unavailable) {
+            throw new ValidationError(`"${bundle.name}" includes a model that is no longer available, so it can't be bought right now`);
+          }
           // SECURITY (2026-09-06 audit): see the matching check on the single-model
           // path — a negative base_price on any constituent model would skew the
           // proportional price split (inflating other models' shares, or handing the

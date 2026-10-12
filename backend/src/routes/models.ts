@@ -2585,14 +2585,38 @@ router.get('/:id/download',
  */
 async function streamWatermarkedSTL(stlKey: string, payload: WatermarkPayload, res: Response): Promise<void> {
   const { stream, size } = await getObjectStream(stlKey);
+  // Waits out backpressure, but gives up if the buyer goes away: 'drain' never fires
+  // on a closed response, so waiting for it alone left the request (and its open R2
+  // stream) hanging for ever on every cancelled download.
   const write = (buf: Buffer) =>
     new Promise<void>((resolve, reject) => {
-      const ok = res.write(buf, (err?: Error | null) => { if (err) reject(err); });
-      if (ok) resolve();
-      else res.once('drain', resolve);
+      if (res.destroyed) { reject(new Error('Client disconnected')); return; }
+      if (res.write(buf)) { resolve(); return; }
+      const onDrain = () => { cleanup(); resolve(); };
+      const onClose = () => { cleanup(); reject(new Error('Client disconnected')); };
+      const cleanup = () => { res.off('drain', onDrain); res.off('close', onClose); };
+      res.once('drain', onDrain);
+      res.once('close', onClose);
     });
 
-  const iter = stream[Symbol.asyncIterator]();
+  try {
+    await writeWatermarkedSTL(stream, size, payload, write);
+    res.end();
+  } catch (err) {
+    if (!res.destroyed) throw err;
+    logger.debug('STL download cancelled by client', { stlKey });
+  } finally {
+    stream.destroy();
+  }
+}
+
+async function writeWatermarkedSTL(
+  stream: NodeJS.ReadableStream,
+  size: number,
+  payload: WatermarkPayload,
+  write: (buf: Buffer) => Promise<void>,
+): Promise<void> {
+  const iter = (stream as any)[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
   const chunks: Buffer[] = [];
   let head = Buffer.alloc(0);
   while (head.length < 84) {
@@ -2616,7 +2640,6 @@ async function streamWatermarkedSTL(stlKey: string, payload: WatermarkPayload, r
     const isAscii = full.subarray(0, 5).toString('ascii').toLowerCase() === 'solid';
     await write(isAscii ? watermarkAsciiSTL(full, payload) : full);
   }
-  res.end();
 }
 
 /** Download an STL from R2 and return it with the buyer's watermark applied. */
@@ -2647,9 +2670,19 @@ async function watermarkedEntryBuffer(key: string, format: MeshFormat, payload: 
 // whichever finishes first is appended first.
 const ZIP_FETCH_CONCURRENCY = 6;
 
+// How many bytes of file data one ZIP download may hold in memory at once. Each
+// entry is fetched whole (the watermark functions work on a buffer) and archiver
+// queues whatever it is handed, so before this limit the fetch workers kept
+// appending while the buyer's connection drained at its own pace, and a big set
+// ended up in the API server's memory in full — up to 250MB per file. A file larger
+// than the whole budget is still allowed, on its own.
+const ZIP_BUFFER_BUDGET_BYTES = Number(process.env.ZIP_BUFFER_BUDGET_MB || 192) * 1024 * 1024;
+
 /**
  * Stream a ZIP of watermarked deliverables. Used for multi-part "sets" and for
  * single OBJ/3MF models (where the buyer gets the original file + a converted STL).
+ * Never throws once streaming has begun: a failure or a disconnect tears the
+ * response down and frees every buffer.
  */
 async function streamWatermarkedZip(
   files: Array<{ name: string; key: string; format: MeshFormat }>,
@@ -2660,26 +2693,64 @@ async function streamWatermarkedZip(
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${zipName}.zip"`);
   const archive = createArchive('zip', { zlib: { level: 6 } });
-  archive.on('error', (err: Error) => {
-    logger.error('ZIP stream error', { error: err });
-    res.destroy(err);
+
+  let stopped = false;
+  let held = 0; // bytes fetched but not yet written into the ZIP
+  const appendedSizes: number[] = []; // in append order; archiver writes in that order
+  const waiters: Array<() => void> = [];
+  const wake = () => { while (waiters.length) waiters.shift()!(); };
+  const stop = (reason: string, err?: unknown) => {
+    if (stopped) return;
+    stopped = true;
+    if (err) logger.error('ZIP download failed', { error: err, reason, zipName });
+    else logger.debug('ZIP download stopped', { reason, zipName });
+    archive.abort();
+    res.destroy();
+    wake();
+  };
+
+  res.on('close', () => { if (!res.writableFinished) stop('client disconnected'); });
+  archive.on('error', (err: Error) => stop('archive error', err));
+  // Fires once an entry has been written into the ZIP, so its buffer can go.
+  archive.on('entry', () => {
+    held -= appendedSizes.shift() ?? 0;
+    wake();
   });
   archive.pipe(res);
 
+  const reserve = async (bytes: number) => {
+    while (!stopped && held > 0 && held + bytes > ZIP_BUFFER_BUDGET_BYTES) {
+      await new Promise<void>((resolve) => waiters.push(resolve));
+    }
+    held += bytes;
+  };
+
   let nextIndex = 0;
   const worker = async (): Promise<void> => {
-    for (;;) {
+    while (!stopped) {
       const i = nextIndex++;
       if (i >= files.length) return;
       const f = files[i];
+      const size = (await objectSize(f.key)) ?? 0;
+      await reserve(size);
+      if (stopped) return;
       const buf = await watermarkedEntryBuffer(f.key, f.format, payload);
+      if (stopped) return;
+      // The watermarked copy can differ in size from the stored object (an ASCII
+      // header rewrite, an OBJ/3MF tag), so account for what is actually held.
+      held += buf.length - size;
+      appendedSizes.push(buf.length);
       archive.append(buf, { name: f.name });
     }
   };
-  const workerCount = Math.min(ZIP_FETCH_CONCURRENCY, files.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-  await archive.finalize();
+  try {
+    const workerCount = Math.min(ZIP_FETCH_CONCURRENCY, files.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    if (!stopped) await archive.finalize();
+  } catch (err) {
+    stop('fetch or watermark failed', err);
+  }
 }
 
 export default router;

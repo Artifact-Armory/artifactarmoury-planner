@@ -759,6 +759,8 @@ CREATE TABLE payouts (
     currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
     stripe_transfer_id VARCHAR(255),
     stripe_account_id  VARCHAR(255),
+    -- Tag on the Stripe transfer, used to look it up if its outcome was lost (071).
+    transfer_group VARCHAR(64),
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed')),
     failure_reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -28,6 +28,19 @@ function canModifyTable(req: AuthRequest, ownerEmail: string): boolean {
   return req.user.email === ownerEmail
 }
 
+/**
+ * A table row as a given viewer may see it. `user_email` is the owner's ACCOUNT
+ * email; public and shared tables (artists' showcases among them) used to hand it to
+ * anyone who opened them. It stays visible to the owner and admins only — the planner
+ * compares it with the signed-in user's email to decide whether Save updates the table
+ * or makes a copy, so for everyone else its absence correctly reads as "not yours".
+ */
+function tableForViewer(req: AuthRequest, table: any) {
+  if (canModifyTable(req, table.user_email)) return table
+  const { user_email: _ownerEmail, ...rest } = table
+  return rest
+}
+
 /** Flat price per generated terrain tile (£). Overridable via env. */
 const TERRAIN_PRICE_PER_TILE = Number(process.env.TERRAIN_PRICE_PER_TILE ?? 1.5)
 
@@ -388,7 +401,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       isPublic: table.is_public
     })
 
-    res.json({ table })
+    res.json({ table: tableForViewer(req, table) })
   } catch (error) {
     tablesLogger.error('Get table failed', { error, tableId: req.params.id })
     next(error)
@@ -399,7 +412,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 // GET SHARED TABLE (by share token - public)
 // ============================================================================
 
-router.get('/shared/:token', async (req, res, next) => {
+router.get('/shared/:token', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { token } = req.params
 
@@ -424,7 +437,7 @@ router.get('/shared/:token', async (req, res, next) => {
       shareToken: token
     })
 
-    res.json({ table })
+    res.json({ table: tableForViewer(req, table) })
   } catch (error) {
     tablesLogger.error('Get shared table failed', { error, token: req.params.token })
     next(error)
@@ -651,7 +664,7 @@ router.get('/public/list', async (req, res, next) => {
         CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
              THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,
         u.id            AS creator_id,
-        COALESCE(NULLIF(u.artist_name, ''), NULLIF(u.display_name, ''), split_part(t.user_email, '@', 1)) AS creator_name,
+        COALESCE(NULLIF(u.artist_name, ''), NULLIF(u.display_name, ''), 'Anonymous') AS creator_name,
         (u.role = 'artist') AS creator_is_artist,
         thumbs.thumbnails
        FROM user_tables t
