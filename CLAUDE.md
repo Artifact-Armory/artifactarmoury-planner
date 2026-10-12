@@ -187,6 +187,12 @@ bundle group UI). Distinct from a **bundle** (which groups *independently-listed
   expandable group list (`SET` vs `BUNDLE` pill), gated on the parent **model** owned/in-basket/own.
   Placing a part → `addPlacedModelToShopCart` adds the **parent model** once (buy-once). Only
   the **primary** part carries the price so the "Your build" total counts a set once (extras £0).
+- **One line per set (fixed 2026-10-12):** the planner's Table list used to show a priced primary
+  row plus a £0 row per extra part, and "Add all to basket" pushed every part into the shop cart as
+  its own £0 `part:<id>` line. Now the BOM (`ui/App.tsx`) folds a set's placed parts into one `SET`
+  row at the set's price (×N = pieces placed), and add-all uses the same `addModelForAssetToCart()`
+  helper as auto-add (`state/store.ts`), which maps a part to its parent model. Cart persist is
+  **version 4**, which drops stale `part:` lines from saved baskets. Typechecks; not browser-tested.
 
 ## Grouped listings — several named models in one product (built 2026-08-23, migration 038)
 An artist selling a **"Small Village"** (a Village Tower of 3 parts, a Tavern of 2, a Well of 1)
@@ -1007,6 +1013,19 @@ backfill. Every model a planner table loads (proxy or owner copy) gets the treat
   the baked normal map; (5) bounding normal drift leaves almost nothing to cut (~25%) on these sculpts.
 - **Not done:** planner-lab has its own planner copy and is untouched (per the isolation rule). No
   IndexedDB cache of LODs/BVHs across reloads — they are recomputed each visit (background only).
+
+## Print layout PDF (built 2026-10-12, frontend only)
+Planner toolbar **Printer** button (next to Save) downloads a to-scale A4 plan of the table for
+setting it out on a real table. `ui/layoutPdf.ts`, jsPDF (lazy-loaded on click, ~118 KB gzipped).
+- **Page 1:** top-down plan, FRONT = bottom of page (the +Z edge the default camera looks from),
+  ruler/grid measured from the left and front edges, each piece's footprint (its tilted + yawed
+  bounding box projected flat, mirroring `InstancedScene.composeMatrix`) with a number badge, and
+  an orange dimension line + label for each piece's **edge-to-edge gap to its nearest neighbour**.
+  Stacked pieces are dashed and are not paired with the piece they sit on.
+- **Page 2+:** list of every piece — centre distance from left and front edges, rotation, level,
+  nearest gap. Inches for imperial, cm for metric (the planner's units toggle).
+- Footprints are bounding boxes, not true silhouettes, so gaps are measured box-to-box.
+- Verified by generating a PDF in Chromium with demo assets and checking the rendered pages.
 
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY

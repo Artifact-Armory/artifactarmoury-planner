@@ -6,7 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight,
+  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import { FEATURES } from '@/config/features'
@@ -988,13 +988,28 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     // Without the fallback, a placed model would silently vanish from the build
     // the moment the palette filter no longer includes it.
     const byId = new Map([...assets, ...setPartAssets].map((a) => [a.id, a]))
-    const rows = [...counts.entries()]
-      .map(([id, qty]) => ({ asset: byId.get(id) ?? getAssetById(id), qty }))
-      .filter((r) => r.asset)
-    const total = rows.reduce((sum, r) => sum + (r.asset!.price ?? 0), 0)
+    // A set is one purchase: fold all of its placed parts into a single row at the
+    // set's price, instead of a priced primary plus a £0 row per extra part.
+    const setOfPart = new Map<string, PlannerSetData>()
+    for (const st of sets) for (const pid of st.partAssetIds) setOfPart.set(pid, st)
+    const rowsById = new Map<string, { id: string; name: string; thumbnail?: string; price: number; qty: number; isSet: boolean }>()
+    for (const [id, qty] of counts) {
+      const st = setOfPart.get(id)
+      if (st) {
+        const row = rowsById.get(st.id)
+        if (row) row.qty += qty
+        else rowsById.set(st.id, { id: st.id, name: st.name, thumbnail: st.thumbnail, price: st.price, qty, isSet: true })
+        continue
+      }
+      const asset = byId.get(id) ?? getAssetById(id)
+      if (!asset) continue
+      rowsById.set(id, { id, name: asset.name, thumbnail: asset.thumbnail, price: asset.price ?? 0, qty, isSet: false })
+    }
+    const rows = [...rowsById.values()]
+    const total = rows.reduce((sum, r) => sum + r.price, 0)
     const pieceCount = instances.length
     return { rows, total, pieceCount }
-  }, [instances, assets, setPartAssets])
+  }, [instances, assets, setPartAssets, sets])
 
   function handleAddAll() {
     const count = addLayoutToShopCart()
@@ -1112,6 +1127,22 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       hotToast.error('Could not copy this table')
     } finally {
       setCopying(false)
+    }
+  }
+
+  const [printing, setPrinting] = React.useState(false)
+  async function handlePrintLayout() {
+    if (printing) return
+    const s = useAppStore.getState()
+    if (!s.instances.length) { hotToast.error('Place some pieces first'); return }
+    setPrinting(true)
+    try {
+      const { exportLayoutPdf } = await import('./layoutPdf')
+      await exportLayoutPdf({ name: savedTableName ?? 'Untitled table', table: s.table, instances: s.instances, system: unitSystem })
+    } catch {
+      hotToast.error('Could not create the layout PDF')
+    } finally {
+      setPrinting(false)
     }
   }
 
@@ -1369,6 +1400,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <div className="tb-sep" />
             <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={handleSave}>
               <Save size={18} />
+            </button>
+            <button
+              className="tb-icon"
+              title="Print layout (PDF) — top-down plan with positions and gaps"
+              onClick={handlePrintLayout}
+              disabled={printing || instances.length === 0}
+            >
+              {printing ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
             </button>
             <button
               className="tb-icon"
@@ -1820,13 +1859,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                     </div>
                   )}
                   {bom.rows.map((r) => (
-                    <div className="tb-bom-row" key={r.asset!.id}>
+                    <div className="tb-bom-row" key={r.id}>
                       <div className="tb-thumb sm">
-                        {r.asset!.thumbnail ? <img src={r.asset!.thumbnail} alt="" /> : <Box size={16} />}
+                        {r.thumbnail ? <img src={r.thumbnail} alt="" /> : <Box size={16} />}
                       </div>
-                      <div className="tb-bom-name">{r.asset!.name}</div>
+                      <div className="tb-bom-name">{r.name}{r.isSet && <span className="tb-pill bundle" style={{ marginLeft: 6 }}>SET</span>}</div>
                       <div className="tb-bom-qty" title={`${r.qty} on the table`}>×{r.qty}</div>
-                      <div className="tb-bom-price">£{(r.asset!.price ?? 0).toFixed(2)}</div>
+                      <div className="tb-bom-price">£{r.price.toFixed(2)}</div>
                     </div>
                   ))}
                 </div>
@@ -1873,19 +1912,19 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                         </div>
                       )}
                       {bom.rows.map((r) => (
-                        <div className="tb-bom-row" key={r.asset!.id}>
+                        <div className="tb-bom-row" key={r.id}>
                           <div className="tb-thumb sm">
-                            {r.asset!.thumbnail ? <img src={r.asset!.thumbnail} alt="" /> : <Box size={16} />}
+                            {r.thumbnail ? <img src={r.thumbnail} alt="" /> : <Box size={16} />}
                           </div>
-                          <div className="tb-bom-name">{r.asset!.name}</div>
+                          <div className="tb-bom-name">{r.name}{r.isSet && <span className="tb-pill bundle" style={{ marginLeft: 6 }}>SET</span>}</div>
                           <div className="tb-bom-qty" title={`${r.qty} on the table — you only pay once`}>×{r.qty}</div>
-                          <div className="tb-bom-price">£{grossPrice(r.asset!.price ?? 0).toFixed(2)}</div>
+                          <div className="tb-bom-price">£{grossPrice(r.price).toFixed(2)}</div>
                         </div>
                       ))}
                     </div>
                     <div className="tb-bom-total">
                       <span>Total cost of Table</span>
-                      <strong>£{grossFromLines(bom.rows.map((r) => r.asset!.price ?? 0), vatRate).toFixed(2)}</strong>
+                      <strong>£{grossFromLines(bom.rows.map((r) => r.price), vatRate).toFixed(2)}</strong>
                     </div>
                     {vatRate > 0 && (
                       <div className="tb-small" style={{ textAlign: 'right', opacity: 0.7 }}>

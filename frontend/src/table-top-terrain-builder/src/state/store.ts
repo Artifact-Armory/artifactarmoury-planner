@@ -359,6 +359,42 @@ function saveHistory(state: AppState): Partial<AppState> {
   }
 }
 
+/**
+ * Add the purchasable model behind a placed asset to the shop basket. A set part
+ * resolves to its parent model, so every piece of a set shares one basket line.
+ * Skips demo assets, models you own or wrote, anything already in the basket, and
+ * anything an owned/in-basket bundle covers (checkout rejects duplicates).
+ * Returns true if a line was added.
+ */
+function addModelForAssetToCart(s: AppState, assetId: string): boolean {
+  const parentSet = s.sets.find((p) => p.partAssetIds.includes(assetId))
+  const modelId = parentSet ? parentSet.id : assetId
+  const asset = getAssetById(assetId)
+  if (!parentSet && !asset) return false
+  // Demo/local assets aren't marketplace models (non-UUID ids) — nothing to buy.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(modelId)) return false
+  if (s.ownedModelIds.has(modelId)) return false
+  const ownerId = parentSet ? parentSet.artistId : asset?.artistId
+  if (ownerId && ownerId === s.currentUserId) return false
+  const covering = s.bundles.filter((b) => b.modelIds.includes(modelId))
+  if (covering.some((b) => s.ownedBundleIds.has(b.id))) return false
+  const cart = useCartStore.getState()
+  if (cart.hasItem('model', modelId)) return false
+  if (covering.some((b) => cart.hasItem('bundle', b.id))) return false
+  cart.addItem(
+    {
+      kind: 'model',
+      id: modelId,
+      name: parentSet ? parentSet.name : asset!.name,
+      artistName: (parentSet ? undefined : asset?.artistName) ?? 'Artifact Armoury',
+      price: parentSet ? parentSet.price : asset!.price ?? 0,
+      imageUrl: parentSet ? parentSet.thumbnail : asset!.thumbnail,
+    },
+    false,
+  )
+  return true
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   // gridSize is the snap/movement increment in metres (also the visible minor-line
   // spacing — see scene/helpers.ts GridHelper). 0.0127m = 1/2" — halved from 1" so
@@ -895,63 +931,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     // covers, so checkout's "appears more than once" guard never trips. Never
     // opens the cart drawer over the planner.
     addPlacedModelToShopCart: (assetId) => {
-      const s = get()
-      if (s.readOnly) return
-      const parentSet = s.sets.find((p) => p.partAssetIds.includes(assetId))
-      const modelId = parentSet ? parentSet.id : assetId
-      const asset = getAssetById(assetId)
-      if (!parentSet && !asset) return
-      // Demo/local assets aren't marketplace models (non-UUID ids) — nothing to buy.
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(modelId)) return
-      if (s.ownedModelIds.has(modelId)) return
-      const ownerId = parentSet ? parentSet.artistId : asset?.artistId
-      if (ownerId && ownerId === s.currentUserId) return
-      const covering = s.bundles.filter((b) => b.modelIds.includes(modelId))
-      if (covering.some((b) => s.ownedBundleIds.has(b.id))) return
-      const cart = useCartStore.getState()
-      if (cart.hasItem('model', modelId)) return
-      if (covering.some((b) => cart.hasItem('bundle', b.id))) return
-      cart.addItem(
-        {
-          kind: 'model',
-          id: modelId,
-          name: parentSet ? parentSet.name : asset!.name,
-          artistName: (parentSet ? undefined : asset?.artistName) ?? 'Artifact Armoury',
-          price: parentSet ? parentSet.price : asset!.price ?? 0,
-          imageUrl: parentSet ? parentSet.thumbnail : asset!.thumbnail,
-        },
-        false,
-      )
+      if (get().readOnly) return
+      addModelForAssetToCart(get(), assetId)
     },
 
     // The USP: push the whole tabletop design into the real shop cart in one click.
     // Digital STLs are bought once (print as many copies as you like), so each
     // unique model on the table is added to the cart a single time.
     addLayoutToShopCart: () => {
-      const { instances, assets } = get()
-      const uniqueAssetIds = new Set(instances.map(inst => inst.assetId))
-      const assetsById = new Map(assets.map(a => [a.id, a]))
-
-      const cart = useCartStore.getState()
+      const state = get()
       let added = 0
-      uniqueAssetIds.forEach(assetId => {
-        // Fall back to the global registry for a piece placed under a catalogue
-        // selection (search/filter/sort) that has since moved on — `assets` here
-        // is only the *current* palette view, not everything ever placed.
-        const asset = assetsById.get(assetId) ?? getAssetById(assetId)
-        if (!asset) return
-        if (cart.hasItem('model', assetId)) return // already in cart
-        cart.addItem({
-          kind: 'model',
-          id: assetId,
-          name: asset.name,
-          artistName: asset.artistName ?? 'Artifact Armoury',
-          price: asset.price ?? 0,
-          imageUrl: asset.thumbnail,
-        })
-        added += 1
+      // A set's parts all map to their parent model, so a set is added once at its
+      // own price rather than once per part (the extra parts carry no price).
+      new Set(state.instances.map(inst => inst.assetId)).forEach(assetId => {
+        if (addModelForAssetToCart(state, assetId)) added += 1
       })
-      cart.openCart()
+      useCartStore.getState().openCart()
       return added
     },
 

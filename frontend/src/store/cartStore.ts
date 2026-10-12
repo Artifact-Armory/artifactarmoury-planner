@@ -122,15 +122,15 @@ export const useCartStore = create<CartState>()(
         subtotal: state.subtotal,
         totalItems: state.totalItems,
       }),
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const empty = { items: [] as CartItem[], subtotal: 0, totalItems: 0, isOpen: false }
         if (!persisted) return empty
 
+        let items: CartItem[] = (persisted as any).items ?? []
         // v1/v2 stored { modelId, quantity } lines — map them to model items.
         if (version < 3) {
-          const oldItems = (persisted as any).items ?? []
-          const items: CartItem[] = oldItems.map((i: any) => ({
+          items = items.map((i: any) => ({
             kind: 'model' as const,
             id: i.id ?? i.modelId,
             name: i.name ?? 'Model',
@@ -138,10 +138,12 @@ export const useCartStore = create<CartState>()(
             price: Number(i.price ?? 0),
             imageUrl: i.imageUrl,
           }))
-          return { ...empty, items, ...calculateTotals(items) }
         }
+        // v3: the planner's "Add all" added a set's extra parts as their own £0
+        // lines (`part:<id>`). A set is bought via its parent model — drop them.
+        if (version < 4) items = items.filter((i) => !String(i.id).startsWith('part:'))
 
-        return { ...(persisted as any), isOpen: false }
+        return { ...empty, items, ...calculateTotals(items) }
       },
     }
   )
