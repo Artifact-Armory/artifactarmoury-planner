@@ -9,7 +9,7 @@ import Input from '../../components/ui/Input'
 type Phase = 'idle' | 'enrolling' | 'showing-codes'
 
 const SecuritySettings: React.FC = () => {
-  const { user, setUser } = useAuthStore()
+  const { user, setUser, setTokens } = useAuthStore()
   const [status, setStatus] = React.useState<TwoFactorStatus | null>(null)
   const [loading, setLoading] = React.useState(true)
 
@@ -79,7 +79,9 @@ const SecuritySettings: React.FC = () => {
     if (!disablePassword) return
     setBusy(true)
     try {
-      await authApi.twoFactor.disable(disablePassword)
+      const result = await authApi.twoFactor.disable(disablePassword)
+      // The server ended every session when 2FA went off; keep this one signed in.
+      if (result.accessToken) setTokens(result.accessToken, result.refreshToken)
       setDisablePassword('')
       setShowDisable(false)
       syncUserFlag(false)

@@ -1113,6 +1113,23 @@ the second visitor gets a normal 401.
   fatal). Tested with two API servers sharing a local Redis (counts shared), Redis killed mid-run
   (requests answered in ~11 ms, limits still enforced), and a server booted with Redis unreachable.
 
+### Low-severity batch (2026-10-12, no migration)
+- **Turning 2FA off (and password change) no longer signs you out.** Both end every session via
+  `invalidateUserTokens()` — including the caller's own, so the Security page's very next request
+  401'd and the user was logged out. They now call `reissueSessionAfterInvalidation()`
+  (`middleware/auth.ts`), which invalidates and then returns a fresh `accessToken`/`refreshToken`
+  pair, with `iat` pinned to no earlier than the DB's invalidation time so app/DB clock skew can't
+  make the new session look stale. `SecuritySettings.tsx` stores them. Other devices are still
+  signed out. NB there is **no change-password page** in the frontend at all (only reset via
+  email) — the endpoint returns the new pair for whenever one is built.
+- **Review text is length-checked** (`reviewText()` in `routes/models.ts`): comment ≤ 2,000 (same as
+  `ReviewModal.tsx`'s `maxLength`), title ≤ 200. A title over the 255-char column used to be a 500.
+- **Deleted four dead routes** in `routes/artists.ts` (`/:id/examples`, `/:artistId/examples/:exampleId`,
+  `/:id/analytics`, `PUT /:id/profile`) — they queried `artists`/`example_tables`/`stripe_transfers`,
+  which don't exist, so they always 500'd; nothing called them. `db/index.ts`'s unused
+  `initializeDatabase`/`runMigrations` helpers also reference missing tables and were left alone.
+- 22 checks against a real local Postgres, plus the earlier suites re-run.
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

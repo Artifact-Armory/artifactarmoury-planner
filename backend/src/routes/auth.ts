@@ -12,6 +12,7 @@ import {
   authenticate,
   refreshAccessToken,
   invalidateUserTokens,
+  reissueSessionAfterInvalidation,
   JWT_SECRET,
 } from '../middleware/auth';
 import { authRateLimit, emailRateLimit } from '../middleware/security';
@@ -684,11 +685,11 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
     [passwordHash, (req as any).userId]
   );
 
-  // SECURITY (2026-09-05 audit): invalidate every OTHER session — the current
-  // request already passed `authenticate` before this handler ran, so it isn't
-  // affected, but any other captured/leaked token for this account stops working
-  // as of now rather than surviving up to its full 7/30-day lifetime.
-  await invalidateUserTokens((req as any).userId);
+  // SECURITY (2026-09-05 audit): invalidate every existing session, so a captured/leaked
+  // token for this account stops working now rather than surviving up to its full
+  // 7/30-day lifetime. That includes the caller's own token, so they get a fresh pair
+  // back — otherwise their very next request would sign them out.
+  const session = await reissueSessionAfterInvalidation((req as any).user);
 
   // Log activity
   await db.query(
@@ -699,7 +700,7 @@ router.post('/password/change', authenticate, asyncHandler(async (req, res) => {
 
   logger.info('Password changed', { userId: (req as any).userId });
 
-  res.json({ message: 'Password changed successfully' });
+  res.json({ message: 'Password changed successfully', ...session });
 }));
 
 // ============================================================================
@@ -1025,8 +1026,9 @@ router.post('/2fa/disable', authenticate, asyncHandler(async (req, res) => {
 
   // SECURITY (2026-09-05 audit): disabling 2FA removes a factor an attacker with a
   // captured token would otherwise still need — invalidate other sessions here too,
-  // same reasoning as password change/reset above.
-  await invalidateUserTokens(userId);
+  // same reasoning as password change/reset above. The caller gets a fresh session so
+  // turning 2FA off doesn't sign them out of the page they did it on.
+  const session = await reissueSessionAfterInvalidation((req as any).user);
 
   await db.query(
     `INSERT INTO activity_log (user_id, action, resource_type, ip_address)
@@ -1036,7 +1038,7 @@ router.post('/2fa/disable', authenticate, asyncHandler(async (req, res) => {
   logger.info('2FA disabled', { userId });
   emailTwoFactorChange(userId, false);
 
-  res.json({ message: 'Two-factor authentication has been turned off.' });
+  res.json({ message: 'Two-factor authentication has been turned off.', ...session });
 }));
 
 export default router;

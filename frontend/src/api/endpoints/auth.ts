@@ -120,10 +120,15 @@ export const authApi = {
       )
       return response.data
     },
-    disable: async (password: string): Promise<{ message: string }> => {
-      const response = await apiClient.post<{ message: string }>(`${AUTH_BASE}/2fa/disable`, {
-        password,
-      })
+    // Turning 2FA off ends every existing session, this one included, so the server
+    // returns a fresh pair of tokens for the caller to keep using.
+    disable: async (
+      password: string,
+    ): Promise<{ message: string; accessToken?: string; refreshToken?: string }> => {
+      const response = await apiClient.post<{ message: string; accessToken?: string; refreshToken?: string }>(
+        `${AUTH_BASE}/2fa/disable`,
+        { password },
+      )
       return response.data
     },
   },

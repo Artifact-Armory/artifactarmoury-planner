@@ -2332,14 +2332,28 @@ router.get('/:id/reviews',
 );
 
 // Create or update the signed-in buyer's review for a model they purchased.
+// Review text limits. The comment cap matches the review form's maxLength
+// (ReviewModal.tsx); the API had none, so a direct request could store megabytes, and a
+// title over the column's 255 characters failed as a database error (a 500).
+const REVIEW_COMMENT_MAX = 2000;
+const REVIEW_TITLE_MAX = 200;
+
+/** Trimmed review text, null when empty; rejects anything over `max` characters. */
+function reviewText(value: unknown, max: number, label: string): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text.length > max) throw new ValidationError(`${label} must be ${max} characters or fewer`);
+  return text || null;
+}
+
 router.post('/:id/reviews',
   authenticate,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = (req as any).userId;
     const rating = Number(req.body.rating);
-    const comment = typeof req.body.comment === 'string' ? req.body.comment.trim() || null : null;
-    const title = typeof req.body.title === 'string' ? req.body.title.trim() || null : null;
+    const comment = reviewText(req.body.comment, REVIEW_COMMENT_MAX, 'Review');
+    const title = reviewText(req.body.title, REVIEW_TITLE_MAX, 'Review title');
 
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new ValidationError('Rating must be a whole number from 1 to 5');
@@ -2398,11 +2412,11 @@ router.put('/reviews/:reviewId',
     }
     if (req.body.comment !== undefined) {
       sets.push(`comment = $${i++}`);
-      values.push(typeof req.body.comment === 'string' ? req.body.comment.trim() || null : null);
+      values.push(reviewText(req.body.comment, REVIEW_COMMENT_MAX, 'Review'));
     }
     if (req.body.title !== undefined) {
       sets.push(`title = $${i++}`);
-      values.push(typeof req.body.title === 'string' ? req.body.title.trim() || null : null);
+      values.push(reviewText(req.body.title, REVIEW_TITLE_MAX, 'Review title'));
     }
     if (!sets.length) throw new ValidationError('Nothing to update');
 

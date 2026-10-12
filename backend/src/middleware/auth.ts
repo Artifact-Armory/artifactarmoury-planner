@@ -102,21 +102,25 @@ const JWT_EXPIRES_IN: jwt.SignOptions['expiresIn'] = (process.env.JWT_EXPIRES_IN
 export function generateToken(
   userOrId: { id: string; email: string; role: string } | string,
   email?: string,
-  role?: string
+  role?: string,
+  issuedAt?: number
 ): string {
-  const payload =
+  const payload: Record<string, unknown> =
     typeof userOrId === 'string'
       ? { userId: userOrId, email: email as string, role: role as string, typ: 'access' }
       : { userId: userOrId.id, email: userOrId.email, role: userOrId.role, typ: 'access' };
+  if (issuedAt) payload.iat = issuedAt;
 
   return jwt.sign(payload, JWT_SECRET as jwt.Secret, {
     expiresIn: JWT_EXPIRES_IN,
   });
 }
 
-export function generateRefreshToken(userIdOrUser: string | { id: string }): string {
+export function generateRefreshToken(userIdOrUser: string | { id: string }, issuedAt?: number): string {
   const uid = typeof userIdOrUser === 'string' ? userIdOrUser : userIdOrUser.id;
-  return jwt.sign({ userId: uid, typ: 'refresh' }, JWT_SECRET as jwt.Secret, { expiresIn: '30d' });
+  const payload: Record<string, unknown> = { userId: uid, typ: 'refresh' };
+  if (issuedAt) payload.iat = issuedAt;
+  return jwt.sign(payload, JWT_SECRET as jwt.Secret, { expiresIn: '30d' });
 }
 
 /**
@@ -130,8 +134,41 @@ export function generateRefreshToken(userIdOrUser: string | { id: string }): str
  * a token generated even a few ms after this resolves still passes (see
  * `isTokenStillValid` below) as long as it's generated after, not before.
  */
-export async function invalidateUserTokens(userId: string): Promise<void> {
-  await db.query('UPDATE users SET tokens_valid_from = CURRENT_TIMESTAMP WHERE id = $1', [userId]);
+export async function invalidateUserTokens(userId: string): Promise<Date | null> {
+  const result = await db.query(
+    'UPDATE users SET tokens_valid_from = CURRENT_TIMESTAMP WHERE id = $1 RETURNING tokens_valid_from',
+    [userId]
+  );
+  const validFrom = result.rows[0]?.tokens_valid_from;
+  return validFrom ? new Date(validFrom) : null;
+}
+
+/**
+ * Invalidate every existing session, then hand back a fresh one for the request that
+ * asked. Used where the user is changing their own security settings: the old tokens
+ * must die (a stolen one would otherwise survive), but the person at the keyboard
+ * shouldn't be signed out for doing it. Before 2026-10-12 password change and 2FA
+ * disable invalidated the caller's own token too, so the next request in that tab
+ * failed and they were logged out.
+ *
+ * The new tokens' `iat` is pinned to no earlier than the database's invalidation
+ * time, so a few hundred ms of clock difference between this server and Postgres
+ * can't make the fresh session look older than the cut-off.
+ */
+export async function reissueSessionAfterInvalidation(user: {
+  id: string;
+  email: string;
+  role: string;
+}): Promise<{ accessToken: string; refreshToken: string }> {
+  const validFrom = await invalidateUserTokens(user.id);
+  const issuedAt = Math.max(
+    Math.floor(Date.now() / 1000),
+    validFrom ? Math.floor(validFrom.getTime() / 1000) : 0
+  );
+  return {
+    accessToken: generateToken(user, undefined, undefined, issuedAt),
+    refreshToken: generateRefreshToken(user.id, issuedAt),
+  };
 }
 
 /** Whether a decoded JWT's `iat` is on or after this user's invalidation watermark. */
@@ -682,6 +719,7 @@ export default {
   refreshAccessToken,
   generateToken,
   generateRefreshToken,
+  reissueSessionAfterInvalidation,
   isAdmin,
   isArtist,
   isAuthenticated
