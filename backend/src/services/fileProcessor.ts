@@ -131,6 +131,22 @@ function binaryStlDeclaredTriangleCount(buffer: Buffer): number | null {
 }
 
 /**
+ * Binary vs ASCII STL. Binary is recognised by size (84 + 50n), NOT by the
+ * "solid" prefix — SolidWorks and plenty of other binary exporters write
+ * "solid ..." into the 80-byte header, which fools the prefix test into an
+ * ASCII parse that yields zero triangles. Same rule as fingerprint.ts's
+ * readTrianglePositions and watermark.ts's isBinarySTL. A file whose size
+ * doesn't match is ASCII only if it actually starts with "solid"; anything
+ * else stays binary (e.g. trailing padding after the last triangle), so a
+ * malformed file still surfaces parseBinarySTL's error rather than silently
+ * parsing to nothing.
+ */
+function isBinarySTLBuffer(buffer: Buffer): boolean {
+  if (binaryStlDeclaredTriangleCount(buffer) !== null) return true
+  return buffer.toString('ascii', 0, 5).toLowerCase() !== 'solid'
+}
+
+/**
  * Cheap upper-bound triangle count for an ASCII STL, without allocating any
  * triangle objects: counts the "facet normal" marker each triangle starts
  * with (searched directly over the raw bytes, so this doesn't even pay for a
@@ -159,9 +175,7 @@ function countAsciiFacets(buffer: Buffer): number {
  */
 export async function declaredTriangleCount(filePath: string): Promise<number | null> {
   const buffer = await readFile(filePath)
-  const header = buffer.toString('ascii', 0, 5)
-  const isBinary = header !== 'solid'
-  return isBinary ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
+  return isBinarySTLBuffer(buffer) ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
 }
 
 /**
@@ -176,9 +190,7 @@ export async function parseSTL(filePath: string): Promise<ParsedSTL> {
     throw new Error('Failed to parse STL file')
   }
 
-  // Check if binary or ASCII
-  const header = buffer.toString('ascii', 0, 5)
-  const isBinary = header !== 'solid'
+  const isBinary = isBinarySTLBuffer(buffer)
 
   const declaredTriangles = isBinary ? binaryStlDeclaredTriangleCount(buffer) : countAsciiFacets(buffer)
   if (declaredTriangles !== null && declaredTriangles > MAX_INGEST_TRIANGLES) {
