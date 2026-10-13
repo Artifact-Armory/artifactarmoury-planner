@@ -24,11 +24,11 @@ import { generateGLB, computeFileHash, declaredTriangleCount, MAX_PREVIEW_PART_T
 import { enqueueFullGlbJob } from '../fullGlb/queue';
 import { downloadObject, deleteObject } from '../r2';
 import {
-  isLikelyDuplicate,
   GEOMETRY_DEDUP_ENABLED,
-  fingerprintDistance,
+  compareFingerprints,
   MATCH_THRESHOLD,
   type GeometryFingerprint,
+  type FingerprintComparison,
 } from '../fingerprint';
 import { isolatedFingerprint, isolatedStlAnalysis, isIsolatedFailure } from './isolatedRunner';
 import { meshFormatFromName, convertToStl, type MeshFormat } from '../meshConvert';
@@ -1086,23 +1086,33 @@ export async function findGeometryDuplicate(
   let foreign: GeometryMatch | null = null;
   let own: GeometryMatch | null = null;
   // Track the closest candidate so a false positive / near-miss is diagnosable
-  // in the logs (compare against FINGERPRINT_MATCH_THRESHOLD).
-  let best = { id: '', name: '', dist: Infinity };
+  // in the logs: `closestScore` is on the same scale as the threshold (≤ 1 =
+  // duplicate) and `closestDistances` says which measurement was nearest.
+  // Fingerprints from an older version can't be compared and are counted
+  // instead — `npm run backfill:fingerprints` upgrades them.
+  let best: { name: string; cmp: FingerprintComparison | null } = { name: '', cmp: null };
+  let incomparable = 0;
   for (const row of rows) {
     const fp = row.geometry_fingerprint as GeometryFingerprint;
-    const dist = fingerprintDistance(fingerprint, fp);
-    if (dist < best.dist) best = { id: row.id, name: row.name, dist };
-    if (isLikelyDuplicate(fingerprint, fp)) {
+    const cmp = compareFingerprints(fingerprint, fp);
+    if (!cmp) { incomparable++; continue; }
+    if (!best.cmp || cmp.score < best.cmp.score) best = { name: row.name, cmp };
+    if (cmp.score <= MATCH_THRESHOLD) {
       const hit: GeometryMatch = { id: row.id, name: row.name, artistId: row.artist_id };
       if (uploaderId && row.artist_id === uploaderId) { own ??= hit; }
       else { foreign ??= hit; }
     }
   }
+  const round4 = (x: number) => Number(x.toFixed(4));
   logger.info('Geometry dedup check', {
     enabled: GEOMETRY_DEDUP_ENABLED,
     candidates: rows.length,
+    incomparable,
     closest: best.name || null,
-    closestDistance: Number.isFinite(best.dist) ? Number(best.dist.toFixed(4)) : null,
+    closestScore: best.cmp ? round4(best.cmp.score) : null,
+    closestDistances: best.cmp
+      ? Object.fromEntries(Object.entries(best.cmp.distances).map(([k, v]) => [k, round4(v)]))
+      : null,
     threshold: MATCH_THRESHOLD,
     matched: foreign?.name ?? null,
     ownMatch: own?.name ?? null,

@@ -67,16 +67,33 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
    `routes/models.ts`) pulls it from R2 → SHA-256 dedup → **geometry fingerprint
    dedup** → `processSTL` + `generateGLB` → stores derived GLB → flips
    `processing_status` to `ready`/`failed`. Frontend `CreateModel.tsx` polls.
-2. **Geometry fingerprint** (`services/fingerprint.ts`): rotation/scale/
-   tessellation-invariant D2 shape descriptor + compactness. Catches re-uploads
-   even after re-export/rotate/rescale/reorder. Stored in `models.geometry_fingerprint` (JSONB).
-   Never modifies the file. Threshold `FINGERPRINT_MATCH_THRESHOLD` (**default 0.08**
-   — was 0.2, which false-positived two different-but-similar models e.g. two houses;
-   real re-uploads score ~0.0–0.04 so 0.08 keeps them caught) + a compactness guard
-   `FINGERPRINT_COMPACTNESS_TOLERANCE` (default 0.10). `findGeometryDuplicate` logs
-   `Geometry dedup check {closestDistance, threshold, matched}` on every upload — check
-   Railway logs to tune. Failed dedup does **not** store a fingerprint, so rejected
-   uploads never become match candidates.
+2. **Geometry fingerprint** (`services/fingerprint.ts`, **v2 since 2026-10-13**). Stored in
+   `models.geometry_fingerprint` / `model_parts.geometry_fingerprint` (JSONB, ~3 KB). Never
+   modifies the file. v1 (one D2 histogram, 16k random pairs) had sampling noise as big as the
+   gap between different models — a tank turret "matched" a house — so rejection was switched
+   off on 2026-10-12. v2 measures **five** rotation/translation/scale/mirror-invariant things from
+   131k stratified surface samples: exact principal-moment ratios (`eig`), centroid-distance
+   (`d1`), pair-distance from 8.4M pairs (`d2`), per-principal-axis profiles (`axes`, swapped for
+   in-plane radius when two moments are within 10% — square/round towers have arbitrary axes) and
+   spherical-harmonic energies l=1..8 in 8 radial shells (`sh`). **Score = max over components of
+   distance / `COMPONENT_TOLERANCE`; match when ≤ 1** (`FINGERPRINT_MATCH_SCORE` overrides; the old
+   `FINGERPRINT_MATCH_THRESHOLD` / `_COMPACTNESS_TOLERANCE` are no longer read). Rejection is **ON**
+   again (`GEOMETRY_DEDUP_ENABLED=false` turns it off; it then still logs).
+   - **Calibrated on 49 real STLs** (`npm run test:fingerprint -- <dirs>`): rotate+mirror+rescale+
+     shuffle, 4× re-mesh, 0.02 mm quantised re-export, 0.01 mm jitter and 50% decimation all score
+     ≤ 0.68; the closest pair of **different artists'** models scored **4.22**; the closest
+     same-artist variants (turret with vs without hatch) 1.89. Mirror images match by design.
+     Not caught: 25%-decimating a low-poly piece (1 of 49), and anything that adds/removes real
+     geometry (supports, a base, splitting into parts) — those change the shape.
+   - Binary STLs are read straight into a Float32Array (detected by size, not the "solid" prefix),
+     so fingerprinting no longer builds parseSTL's object graph; ~0.5–1 s per model.
+   - **v1 and v2 can't be compared** — after deploying, run
+     `railway run npm run backfill:fingerprints` (downloads each STL from R2 on your machine; only
+     rows that already have a fingerprint, so rejected uploads stay excluded). Until then old models
+     are counted as `incomparable` in the log and can't block anything.
+   - `findGeometryDuplicate` logs `Geometry dedup check {closestScore, closestDistances, incomparable,
+     matched}` on every upload. Failed dedup does **not** store a fingerprint, so rejected uploads
+     never become match candidates.
 3. **Watermark** (`services/watermark.ts`): AES-256-GCM payload (modelId+buyerId+
    orderId) written into the binary STL's ignored **80-byte header** — traces a
    leaked file to the exact buyer by decrypting the header alone; **geometry
