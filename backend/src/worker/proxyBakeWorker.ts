@@ -24,6 +24,13 @@ import { db, closeDatabase } from '../db'
 // processing stack (sharp, gltf-transform, the mesh converters) and the point of this
 // process is to stay small. The two things it needs from them are inlined below.
 const isFullGlbEnabled = () => process.env.FULL_GLB_ENABLED !== 'false'
+// Mirrors services/fingerprintUpgrade.ts (STALE_FINGERPRINT_SQL, version 2) —
+// inlined for the same reason. Keep the two in step if the version changes.
+const isFingerprintUpgradeEnabled = () => process.env.FINGERPRINT_UPGRADE_ENABLED !== 'false'
+const STALE_FINGERPRINT_SQL = `geometry_fingerprint IS NOT NULL
+  AND COALESCE(geometry_fingerprint->>'v', '1') <> '2'
+  AND geometry_fingerprint->>'upgradeFailedAt' IS NULL
+  AND stl_file_path IS NOT NULL`
 
 /** Same upsert as queueHealth.recordWorkerHeartbeat (which the child uses). */
 async function beat(): Promise<void> {
@@ -81,9 +88,12 @@ async function hasClaimableWork(): Promise<boolean> {
   const stale = `status = 'running' AND locked_at < NOW() - ($1::int * INTERVAL '1 millisecond')`
   const tables = ['proxy_bake_jobs', 'model_ingest_jobs']
   if (isFullGlbEnabled()) tables.push('full_glb_jobs')
-  const sql = tables
-    .map((t) => `SELECT 1 FROM ${t} WHERE status = 'queued' OR (${stale})`)
-    .join(' UNION ALL ')
+  const queries = tables.map((t) => `SELECT 1 FROM ${t} WHERE status = 'queued' OR (${stale})`)
+  if (isFingerprintUpgradeEnabled()) {
+    queries.push(`SELECT 1 FROM models WHERE ${STALE_FINGERPRINT_SQL}`)
+    queries.push(`SELECT 1 FROM model_parts WHERE ${STALE_FINGERPRINT_SQL}`)
+  }
+  const sql = queries.join(' UNION ALL ')
   const { rows } = await db.query(`SELECT EXISTS (${sql}) AS work`, [STALE_LOCK_MS])
   return !!rows[0]?.work
 }
