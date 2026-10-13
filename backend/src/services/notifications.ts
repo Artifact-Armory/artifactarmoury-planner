@@ -216,6 +216,20 @@ async function notifyAdmins(input: Omit<NotificationInput, 'userId'>): Promise<v
 }
 
 /**
+ * A model marked as a real-world subject matched another artist's model and was
+ * let through (migration 072) — an admin needs to compare the two.
+ */
+export async function notifyAdminsOfGeometryReview(uploadName: string, matchedName: string, modelId: string): Promise<void> {
+  await notifyAdmins({
+    type: 'admin.geometry_review',
+    title: 'Similar model needs a look',
+    body: `"${uploadName}" (marked as a real-world subject) closely matches "${matchedName}" by another artist. It has gone live — check it isn't a copy.`,
+    link: '/admin/similar-models',
+    modelId,
+  })
+}
+
+/**
  * Processing-queue alarm (services/queueAlarm.ts). Goes to the in-app admin bell
  * as well as email, because sendEmail() logs-and-swallows its failures by design
  * — if Resend is misconfigured the email channel fails silently, which is the

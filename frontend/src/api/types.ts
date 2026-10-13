@@ -201,6 +201,10 @@ export interface TerrainModel {
   // Default true — a misc item (paint brush holder, display base, …) can be
   // turned off without affecting its normal marketplace listing/sale.
   showInPlanner?: boolean
+  // Scale model of a real-world subject (vehicle, aircraft, ship, building): a
+  // geometry match against another artist's model goes to admin review instead
+  // of rejecting the upload.
+  isRealSubject?: boolean
   images?: Array<{
     id: string
     imagePath?: string

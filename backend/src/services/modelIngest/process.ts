@@ -33,7 +33,7 @@ import {
 import { isolatedFingerprint, isolatedStlAnalysis, isIsolatedFailure } from './isolatedRunner';
 import { meshFormatFromName, convertToStl, type MeshFormat } from '../meshConvert';
 import { isBakeWorkerEnabled, enqueueBakeJob } from '../proxyBake/queue';
-import { createNotification, notifyOwnersOfModelUpdate } from '../notifications';
+import { createNotification, notifyOwnersOfModelUpdate, notifyAdminsOfGeometryReview } from '../notifications';
 import { estimatePrintCost } from '../printEstimator';
 import { uploadToStorage } from '../storage';
 import { promises as fsp } from 'fs';
@@ -53,7 +53,7 @@ function duplicateMessage(kind: 'file' | 'geometry', partLabel?: string): string
   const subject = partLabel ? `The file "${partLabel}"` : 'This file';
   return kind === 'file'
     ? `${subject} is already on the marketplace under another artist's listing. If you believe this is your own work, contact support.`
-    : `${subject} is nearly identical to a model already on the marketplace (same shape, even if re-exported or rescaled). If you believe this is your own work, contact support.`;
+    : `${subject} is nearly identical to a model already on the marketplace (same shape, even if re-exported or rescaled). If this is your own scale model of a real-world vehicle, aircraft, ship or building, tick "Scale model of a real-world subject" and upload it again — it will go live and be checked by our team. Otherwise, if you believe this is your own work, contact support.`;
 }
 
 /**
@@ -175,7 +175,7 @@ export async function processUploadedModel(
         return;
       }
       const displayFingerprint = displayFpResult.fingerprint;
-      const displayGeoDup = await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
+      const displayGeoDup = await findGeometryDuplicate(displayFingerprint, modelId, uploaderId, 'preview model');
       if (displayGeoDup.foreign) {
         await markModelFailed(modelId, duplicateMessage('geometry', 'preview model'));
         await safeDeleteObject(rawKey);
@@ -637,7 +637,7 @@ async function processOnePart(
       });
     } else {
       fingerprint = fpResult.fingerprint;
-      const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId);
+      const geoDup = await findGeometryDuplicate(fingerprint, modelId, uploaderId, part.name);
       if (geoDup.foreign) {
         const reason = duplicateMessage('geometry', part.name);
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
@@ -735,7 +735,7 @@ async function processOnePart(
       const displayFingerprint = displayFpResult.fingerprint;
       const displayGeoDup = foreignDisplayHashDup
         ? null
-        : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId);
+        : await findGeometryDuplicate(displayFingerprint, modelId, uploaderId, `${part.name} preview`);
       if (foreignDisplayHashDup || displayGeoDup?.foreign) {
         const reason = duplicateMessage(foreignDisplayHashDup ? 'file' : 'geometry', `${part.name} preview`);
         await db.query(`UPDATE model_parts SET processing_status='failed', processing_error=$1 WHERE id=$2`, [reason, part.id]);
@@ -1067,6 +1067,7 @@ export async function findGeometryDuplicate(
   fingerprint: GeometryFingerprint,
   excludeId: string,
   uploaderId?: string | null,
+  fileLabel?: string,
 ): Promise<GeometryDuplicates> {
   // Scan both whole models and individual set parts (excluding the model being
   // processed and its own parts), so a stolen file re-uploaded as a "part" is
@@ -1091,6 +1092,7 @@ export async function findGeometryDuplicate(
   // Fingerprints from an older version can't be compared and are counted
   // instead — `npm run backfill:fingerprints` upgrades them.
   let best: { name: string; cmp: FingerprintComparison | null } = { name: '', cmp: null };
+  let foreignCmp: FingerprintComparison | null = null;
   let incomparable = 0;
   for (const row of rows) {
     const fp = row.geometry_fingerprint as GeometryFingerprint;
@@ -1100,7 +1102,7 @@ export async function findGeometryDuplicate(
     if (cmp.score <= MATCH_THRESHOLD) {
       const hit: GeometryMatch = { id: row.id, name: row.name, artistId: row.artist_id };
       if (uploaderId && row.artist_id === uploaderId) { own ??= hit; }
-      else { foreign ??= hit; }
+      else if (!foreign) { foreign = hit; foreignCmp = cmp; }
     }
   }
   const round4 = (x: number) => Number(x.toFixed(4));
@@ -1119,7 +1121,50 @@ export async function findGeometryDuplicate(
   });
   // Disabled: report what WOULD have matched (above) but never reject or notify.
   if (!GEOMETRY_DEDUP_ENABLED) return { foreign: null, own: null };
+  // Real-world subjects (migration 072): two artists modelling the same tank can
+  // legitimately match, so the upload goes through and an admin reviews the pair.
+  if (foreign && foreignCmp && (await isRealSubject(excludeId))) {
+    await queueGeometryReview(excludeId, foreign, foreignCmp, fileLabel);
+    return { foreign: null, own };
+  }
   return { foreign, own };
+}
+
+async function isRealSubject(modelId: string): Promise<boolean> {
+  const { rows } = await db.query(`SELECT is_real_subject FROM models WHERE id::text = $1`, [modelId]);
+  return rows[0]?.is_real_subject === true;
+}
+
+/**
+ * Record a real-subject upload's match for admin review and ping the admins.
+ * One open row per (upload, matched model) — every file of a multi-part upload
+ * that matches the same listing collapses into it. A failure here must not
+ * fail the upload: the artist did nothing wrong, so it is logged instead.
+ */
+async function queueGeometryReview(
+  modelId: string,
+  match: GeometryMatch,
+  cmp: FingerprintComparison,
+  fileLabel?: string,
+): Promise<void> {
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO geometry_match_reviews (model_id, matched_model_id, score, distances, file_label)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (model_id, matched_model_id) WHERE status = 'open' DO NOTHING
+       RETURNING id`,
+      [modelId, match.id, Number(cmp.score.toFixed(4)), JSON.stringify(cmp.distances), fileLabel ?? null],
+    );
+    logger.info('Real-subject geometry match queued for review', {
+      modelId, matchedModelId: match.id, score: cmp.score, fileLabel, newReview: rows.length > 0,
+    });
+    if (rows.length > 0) {
+      const { rows: names } = await db.query(`SELECT name FROM models WHERE id = $1`, [modelId]);
+      await notifyAdminsOfGeometryReview(names[0]?.name ?? 'A new upload', match.name, modelId);
+    }
+  } catch (err) {
+    logger.error('Failed to queue geometry match review', { error: err, modelId, matchedModelId: match.id });
+  }
 }
 
 /**

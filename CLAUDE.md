@@ -94,6 +94,20 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
    - `findGeometryDuplicate` logs `Geometry dedup check {closestScore, closestDistances, incomparable,
      matched}` on every upload. Failed dedup does **not** store a fingerprint, so rejected uploads
      never become match candidates.
+   - **Real-world subjects (migration 072, 2026-10-13).** Two artists modelling the same real tank /
+     plane / ship / building can legitimately match. The upload form (and Edit page) has a
+     "Scale model of a real-world subject" checkbox → `models.is_real_subject`. When such a model
+     matches **another artist's** model, `findGeometryDuplicate` does NOT reject: it writes a
+     `geometry_match_reviews` row (one open row per upload+matched pair, score + distances + which
+     file), notifies admins (`admin.geometry_review`) and lets the upload go live. Admins decide at
+     **`/admin/similar-models`** (`AdminGeometryReviews.tsx`, `GET/PATCH /api/admin/geometry-reviews`):
+     *clear* (stays live) or *take down* (needs a 10+ char reason; archives the model, voids un-paid
+     earnings via `reverseEarningsForModel`, notifies the artist with the reason — refunds go through the
+     normal moderation flow). Only the **uploader's** flag counts (old models all default false, so
+     requiring both sides would have blocked every honest historical upload). A byte-identical file
+     (SHA-256) is still rejected outright. A thief can tick the box, which is exactly why every
+     exemption lands in front of an admin. The rejection message for a geometry duplicate now tells
+     the artist about the checkbox. **Untested against a real Postgres** (DB_MOCK) — verify on deploy.
 3. **Watermark** (`services/watermark.ts`): AES-256-GCM payload (modelId+buyerId+
    orderId) written into the binary STL's ignored **80-byte header** — traces a
    leaked file to the exact buyer by decrypting the header alone; **geometry

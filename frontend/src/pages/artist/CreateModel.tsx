@@ -166,6 +166,7 @@ const CreateModel: React.FC = () => {
   // most models are terrain/scenery; an artist unticks this for a misc item (a paint
   // brush holder, a display base, a tool) that isn't meant to go on a battlefield table.
   const [showInPlanner, setShowInPlanner] = React.useState(true)
+  const [isRealSubject, setIsRealSubject] = React.useState(false)
   const [thumbFile, setThumbFile] = React.useState<File | null>(null)
   // Extra store-page photos (beyond the required thumbnail) — optional, uploaded
   // alongside everything else in the same batch so this is all done from one page.
@@ -418,6 +419,7 @@ const CreateModel: React.FC = () => {
         primaryThumbnailKey,
         galleryKeys: galleryKeys.length ? galleryKeys : undefined,
         showInPlanner,
+        isRealSubject: isRealSubject || undefined,
         isPresupported: displayRawKey ? true : undefined,
         keepPartsPlaceable: displayRawKey && primaryComp.keepPartsPlaceable ? true : undefined,
         displayRawKey,
@@ -593,6 +595,28 @@ const CreateModel: React.FC = () => {
                 On by default. Turn this off for a listing that isn't table scenery — a paint
                 brush holder, a display base, a tool — so it still sells normally but never
                 shows up as a placeable piece in the planner.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div className="rounded-lg border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={isRealSubject}
+              onChange={(e) => setIsRealSubject(e.target.checked)}
+              disabled={busy}
+            />
+            <span>
+              <span className="font-medium block">Scale model of a real-world subject</span>
+              <span className="text-xs text-muted-foreground">
+                Tick this for a model of a real vehicle, aircraft, ship or building (a Tiger I,
+                a Spitfire, a real cathedral). Two artists modelling the same real thing can end
+                up with very similar shapes, so if yours closely matches another artist's model
+                it will still go live, and our team will compare the two by eye instead of our
+                copy check rejecting it.
               </span>
             </span>
           </label>

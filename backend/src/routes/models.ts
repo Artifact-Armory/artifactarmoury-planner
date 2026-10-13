@@ -1357,12 +1357,17 @@ router.patch('/:id',
     const allowedFields = [
       'name', 'description', 'category', 'tags', 'base_price', 'license', 'printer_type',
       'supports_required', 'recommended_layer_height', 'recommended_infill', 'default_pitch_deg', 'default_roll_deg',
-      'show_in_planner'
+      'show_in_planner', 'is_real_subject'
     ];
 
     // Whether this model may be placed on the 3D planner — coerce to a real boolean.
     if (updates.show_in_planner !== undefined) {
       updates.show_in_planner = updates.show_in_planner === true || updates.show_in_planner === 'true';
+    }
+    // Real-world subject (migration 072) — only consulted by later file uploads'
+    // geometry check (new version, added/replaced models), never retroactively.
+    if (updates.is_real_subject !== undefined) {
+      updates.is_real_subject = updates.is_real_subject === true || updates.is_real_subject === 'true';
     }
 
     // Default planner tilt: normalise to an integer in [0, 359] (any junk → 0).

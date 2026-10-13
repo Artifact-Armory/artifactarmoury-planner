@@ -61,7 +61,7 @@ export async function createListingFromUpload(
     throw new ValidationError('Direct uploads are not configured (R2 is disabled)');
   }
 
-  const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, primaryThumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys, keepPartsPlaceable } = body ?? {};
+  const { rawKey, filename, name, description, category, tags, basePrice, thumbnailKey, primaryThumbnailKey, parts, terms, license, printerType, primaryGroupName, showInPlanner, isPresupported, displayRawKey, displayFilename, galleryKeys, keepPartsPlaceable, isRealSubject } = body ?? {};
 
   if (!rawKey || typeof rawKey !== 'string' || !rawKey.startsWith('raw/')) {
     throw new ValidationError('rawKey (an uploaded raw/ object) is required');
@@ -83,6 +83,9 @@ export async function createListingFromUpload(
   // (see migration 053). The checkbox and the file travel together: ticking it
   // without attaching a file is rejected rather than silently ignored.
   const presupported = isPresupported === true || isPresupported === 'true';
+  // Scale model of a real-world subject (migration 072): a geometry match against
+  // another artist's model is reviewed by an admin instead of rejecting the upload.
+  const realSubject = isRealSubject === true || isRealSubject === 'true';
   let cleanDisplayRawKey: string | null = null;
   if (presupported) {
     if (!displayRawKey || typeof displayRawKey !== 'string' || !displayRawKey.startsWith('raw/')) {
@@ -318,10 +321,10 @@ export async function createListingFromUpload(
   const result = await db.query(
     `INSERT INTO models (
       artist_id, name, description, category, tags,
-      stl_file_path, thumbnail_path, primary_thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, status, processing_status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'stl', $10, $11, $12, $13, $14, $15, 'draft', 'processing')
+      stl_file_path, thumbnail_path, primary_thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, is_real_subject, status, processing_status
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'stl', $10, $11, $12, $13, $14, $15, $16, 'draft', 'processing')
     RETURNING id, name, created_at`,
-    [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, cleanPrimaryThumbnailKey, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported]
+    [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, cleanPrimaryThumbnailKey, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported, realSubject]
   );
   const model = result.rows[0];
   // Seed price history (backs the anti-inflation guard on sales).

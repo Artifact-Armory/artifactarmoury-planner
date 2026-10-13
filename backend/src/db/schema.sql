@@ -143,6 +143,10 @@ CREATE TABLE models (
     -- download — stl_file_path (the print file) is unaffected either way.
     is_presupported BOOLEAN NOT NULL DEFAULT false,
     display_stl_path VARCHAR(500),
+    -- Scale model of a real-world subject (migration 072): a geometry match against
+    -- another artist's model is let through and queued in geometry_match_reviews
+    -- instead of rejecting the upload.
+    is_real_subject BOOLEAN NOT NULL DEFAULT false,
     thumbnail_path VARCHAR(500),
     -- Planner thumbnail for THIS model specifically (migration 059) — separate
     -- from thumbnail_path above, which is the store page's main image and is
@@ -847,6 +851,27 @@ CREATE INDEX idx_contact_messages_created ON contact_messages(created_at DESC);
 CREATE INDEX idx_contact_messages_user ON contact_messages(user_id);
 CREATE INDEX idx_contact_messages_status ON contact_messages(status);
 CREATE INDEX idx_contact_messages_unread ON contact_messages(is_read) WHERE is_read = false;
+
+-- ============================================================================
+-- GEOMETRY MATCH REVIEWS (migration 072): real-world-subject uploads that matched
+-- another artist's model, let through for an admin to clear or take down
+-- ============================================================================
+
+CREATE TABLE geometry_match_reviews (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    matched_model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    score NUMERIC(8, 4) NOT NULL,
+    distances JSONB,
+    file_label VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cleared', 'taken_down')),
+    resolution_note TEXT,
+    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_geometry_match_reviews_open_pair ON geometry_match_reviews(model_id, matched_model_id) WHERE status = 'open';
+CREATE INDEX idx_geometry_match_reviews_status ON geometry_match_reviews(status, created_at DESC);
 
 CREATE TABLE contact_message_attachments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

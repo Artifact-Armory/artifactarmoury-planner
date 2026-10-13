@@ -59,6 +59,12 @@ export const modelsApi = {
      */
     showInPlanner?: boolean
     /**
+     * Scale model of a real-world subject (vehicle, aircraft, ship, building). A
+     * geometry match against another artist's model then goes to admin review
+     * instead of rejecting the upload — two artists can model the same tank.
+     */
+    isRealSubject?: boolean
+    /**
      * Set when the print file (rawKey) already has supports built in. When true,
      * displayRawKey is required — a separate support-free STL used ONLY to build
      * the marketplace/planner previews. The print file itself is unaffected and
@@ -353,6 +359,8 @@ export const modelsApi = {
       defaultRollDeg?: number
       /** Whether this model may be placed on the 3D planner at all (artist opt-out). */
       showInPlanner?: boolean
+      /** Scale model of a real-world subject — see createFromUpload's isRealSubject. */
+      isRealSubject?: boolean
     },
   ): Promise<{ id: string; name: string }> => {
     const body: Record<string, unknown> = {};
@@ -371,6 +379,7 @@ export const modelsApi = {
     if (data.defaultPitchDeg !== undefined) body.default_pitch_deg = data.defaultPitchDeg;
     if (data.defaultRollDeg !== undefined) body.default_roll_deg = data.defaultRollDeg;
     if (data.showInPlanner !== undefined) body.show_in_planner = data.showInPlanner;
+    if (data.isRealSubject !== undefined) body.is_real_subject = data.isRealSubject;
     const response = await apiClient.patch(`${BASE_URL}/${id}`, body);
     return response.data?.model ?? response.data;
   },

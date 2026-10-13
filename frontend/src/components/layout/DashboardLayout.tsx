@@ -31,7 +31,7 @@ import {
   Megaphone,
   Flag,
   Eye,
-  Mail, Activity} from 'lucide-react';
+  Mail, Activity, Copy} from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import CartDrawer from '../cart/CartDrawer';
@@ -572,6 +572,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <Mail size={18} className="mr-3" />
                 Contact Messages
+              </NavLink>
+              <NavLink
+                to="/admin/similar-models"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  isActiveRoute('/admin/similar-models')
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
+                }`}
+              >
+                <Copy size={18} className="mr-3" />
+                Similar Models
               </NavLink>
               <NavLink
                 to="/admin/queues"

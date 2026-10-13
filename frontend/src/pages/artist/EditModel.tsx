@@ -60,6 +60,7 @@ const EditModel: React.FC = () => {
   // Whether this model may be placed on the 3D planner at all (artist opt-out for
   // misc items — a paint brush holder, a display base — that aren't table scenery).
   const [showInPlanner, setShowInPlanner] = React.useState(true)
+  const [isRealSubject, setIsRealSubject] = React.useState(false)
 
   // The model's class (set at upload) — scopes which facets the tag picker shows.
   const modelClass = React.useMemo(() => {
@@ -149,6 +150,7 @@ const EditModel: React.FC = () => {
       setDefaultPitch(Number(m.defaultPitchDeg ?? 0))
       setDefaultRoll(Number(m.defaultRollDeg ?? 0))
       setShowInPlanner(m.showInPlanner !== false)
+      setIsRealSubject(m.isRealSubject === true)
     } catch (err) {
       setLoadError(errMessage(err, 'Could not load this model'))
     } finally {
@@ -469,6 +471,7 @@ const EditModel: React.FC = () => {
         defaultPitchDeg: defaultPitch,
         defaultRollDeg: defaultRoll,
         showInPlanner,
+        isRealSubject,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
       })
@@ -563,6 +566,7 @@ const EditModel: React.FC = () => {
         defaultPitchDeg: defaultPitch,
         defaultRollDeg: defaultRoll,
         showInPlanner,
+        isRealSubject,
         terms: withLicenceTerm(withPrinterTypeTerm(terms, printerType), license),
         thumbnailKey,
       })
@@ -745,6 +749,28 @@ const EditModel: React.FC = () => {
                 Turn this off for a listing that isn't table scenery — a paint brush holder, a
                 display base, a tool — so it still sells normally but never shows up as a
                 placeable piece in the planner.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div className="rounded-lg border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={isRealSubject}
+              onChange={(e) => setIsRealSubject(e.target.checked)}
+              disabled={busy}
+            />
+            <span>
+              <span className="font-medium block">Scale model of a real-world subject</span>
+              <span className="text-xs text-muted-foreground">
+                Tick this for a model of a real vehicle, aircraft, ship or building (a Tiger I,
+                a Spitfire, a real cathedral). Two artists modelling the same real thing can end
+                up with very similar shapes, so if yours closely matches another artist's model
+                it will still go live, and our team will compare the two by eye instead of our
+                copy check rejecting it. Applies to files you upload from now on.
               </span>
             </span>
           </label>

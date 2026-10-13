@@ -2270,6 +2270,112 @@ router.post('/models/:id/rebake',
 );
 
 // ============================================================================
+// SIMILAR-MODEL REVIEWS (migration 072): uploads marked "scale model of a
+// real-world subject" that matched another artist's model on geometry. They went
+// live instead of being rejected; an admin compares the pair and either clears
+// it (independent work) or takes the upload down (a copy).
+// ============================================================================
+
+const REVIEW_MODEL_COLUMNS = (alias: string, prefix: string) => `
+  ${alias}.id AS ${prefix}_id, ${alias}.name AS ${prefix}_name, ${alias}.thumbnail_path AS ${prefix}_thumbnail_path,
+  ${alias}.status AS ${prefix}_status, ${alias}.processing_status AS ${prefix}_processing_status,
+  ${alias}.width AS ${prefix}_width, ${alias}.depth AS ${prefix}_depth, ${alias}.height AS ${prefix}_height,
+  ${alias}.part_count AS ${prefix}_part_count, ${alias}.created_at AS ${prefix}_created_at,
+  ${alias}.artist_id AS ${prefix}_artist_id`;
+
+router.get('/geometry-reviews',
+  asyncHandler(async (req, res) => {
+    const status = typeof req.query.status === 'string' ? req.query.status : 'open';
+    if (!['open', 'cleared', 'taken_down'].includes(status)) {
+      throw new ValidationError('status must be open, cleared or taken_down');
+    }
+    const result = await db.query(
+      `SELECT r.id, r.score, r.distances, r.file_label, r.status, r.resolution_note,
+              r.resolved_at, r.created_at, ru.display_name AS resolved_by_name,
+              ${REVIEW_MODEL_COLUMNS('m', 'upload')}, ua.display_name AS upload_artist_name,
+              ${REVIEW_MODEL_COLUMNS('o', 'matched')}, oa.display_name AS matched_artist_name
+         FROM geometry_match_reviews r
+         JOIN models m ON m.id = r.model_id
+         JOIN users ua ON ua.id = m.artist_id
+         JOIN models o ON o.id = r.matched_model_id
+         JOIN users oa ON oa.id = o.artist_id
+         LEFT JOIN users ru ON ru.id = r.resolved_by
+        WHERE r.status = $1
+        ORDER BY r.created_at DESC
+        LIMIT 200`,
+      [status],
+    );
+    const openResult = await db.query(`SELECT COUNT(*) FROM geometry_match_reviews WHERE status = 'open'`);
+    res.json({ reviews: result.rows, openCount: parseInt(openResult.rows[0]?.count ?? '0') });
+  }),
+);
+
+// Decide a review: 'clear' (independent work, leave it live) or 'take_down'
+// (a copy: archive the upload, void its artist's un-paid earnings, tell them).
+router.patch('/geometry-reviews/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { action, note } = req.body ?? {};
+    const adminId = (req as any).userId as string;
+    if (action !== 'clear' && action !== 'take_down') {
+      throw new ValidationError('action must be "clear" or "take_down"');
+    }
+    const cleanNote = typeof note === 'string' ? note.trim().slice(0, 2000) : '';
+    if (action === 'take_down' && cleanNote.length < 10) {
+      throw new ValidationError('Give a reason (10+ characters) — it is sent to the artist');
+    }
+
+    // Claim atomically so two admins can't decide the same review twice.
+    const claimed = await db.query(
+      `UPDATE geometry_match_reviews
+          SET status = $2, resolution_note = $3, resolved_by = $4, resolved_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND status = 'open'
+        RETURNING id, model_id, status`,
+      [id, action === 'clear' ? 'cleared' : 'taken_down', cleanNote || null, adminId],
+    );
+    if (claimed.rows.length === 0) {
+      const exists = await db.query(`SELECT status FROM geometry_match_reviews WHERE id = $1`, [id]);
+      if (exists.rows.length === 0) throw new NotFoundError('Review');
+      throw new ValidationError(`This review was already decided (${exists.rows[0].status})`);
+    }
+    const modelId = claimed.rows[0].model_id as string;
+    const notes: string[] = [];
+
+    if (action === 'take_down') {
+      const reason = `Taken down after a similar-model review: ${cleanNote}`;
+      const model = await db.query(
+        `UPDATE models SET status = 'archived', flagged_reason = $1, moderated_by = $2, moderated_at = CURRENT_TIMESTAMP
+          WHERE id = $3 RETURNING name, artist_id`,
+        [reason, adminId, modelId],
+      );
+      // The listing is gone, so any other open reviews of it are moot.
+      await db.query(
+        `UPDATE geometry_match_reviews
+            SET status = 'taken_down', resolution_note = $2, resolved_by = $3, resolved_at = CURRENT_TIMESTAMP
+          WHERE model_id = $1 AND status = 'open'`,
+        [modelId, cleanNote, adminId],
+      );
+      const { reversed, alreadyPaid } = await reverseEarningsForModel(modelId, `Model taken down: similar-model review ${id}`);
+      notes.push(`voided ${reversed} un-paid earning(s)${alreadyPaid ? `, ${alreadyPaid} already paid` : ''}`);
+      const m = model.rows[0];
+      if (m) {
+        await createNotification({
+          userId: m.artist_id,
+          type: 'model.taken_down',
+          title: `"${m.name}" has been taken down`,
+          body: `Our team compared it with a very similar model already on the marketplace and concluded it is a copy. Reason: ${cleanNote}. If you think this is wrong, reply via the Contact page.`,
+          link: '/artist/models',
+          modelId,
+        });
+      }
+    }
+
+    logger.info('Geometry match review decided', { reviewId: id, modelId, action, adminId });
+    res.json({ review: claimed.rows[0], notes });
+  }),
+);
+
+// ============================================================================
 // CONTACT INBOX (migration 047): admin view of the public Contact page
 // (routes/contact.ts). Simple by design — no assignment/workflow, just an
 // unread flag for the nav badge and an open/resolved toggle.
