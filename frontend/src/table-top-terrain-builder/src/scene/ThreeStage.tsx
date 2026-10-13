@@ -281,6 +281,7 @@ export function ThreeStage() {
         cam.frameBox(box.isEmpty() ? tableBox() : box)
       },
       home: () => cam.home(tableBox()),
+      getPose: () => cam.getPose(),
     })
     // Engine actions the on-screen touch controls need (no keyboard on a tablet).
     useAppStore.getState().setStageApi({
@@ -618,7 +619,10 @@ export function ThreeStage() {
         const pieceId = pickPiece(e)
         useAppStore.getState().setSelectedInstances(pieceId ? [pieceId] : [])
         inst.setSelection(new Set(useAppStore.getState().selectedInstanceIds))
-        eng.drag = { kind: 'none' }
+        // A finger has no middle button, so on touch a drag is the only way to
+        // pan — arm the same tap-or-drag detection the editor uses (a drag past
+        // the threshold becomes a pan in onPointerMove; a tap does nothing more).
+        eng.drag = touch ? { kind: 'maybePlace', x: e.clientX, y: e.clientY, touch: true } : { kind: 'none' }
         requestRender()
         return
       }
@@ -701,6 +705,11 @@ export function ThreeStage() {
       // grab cursor — just a plain pointer over models to hint they're clickable.
       if (store().readOnly) {
         cellHi.visible = false
+        const d = eng.drag
+        if (d.kind === 'maybePlace' && d.touch && Math.hypot(e.clientX - d.x, e.clientY - d.y) > DRAG_THRESHOLD) {
+          eng.drag = { kind: 'pan', x: e.clientX, y: e.clientY }
+          return
+        }
         if (overCanvas && e.buttons === 0) setCursor(pickPiece(e) ? 'pointer' : 'default')
         return
       }
@@ -858,7 +867,7 @@ export function ThreeStage() {
       if (d.kind === 'pan') return
       if (d.kind === 'maybePlace') {
         const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y)
-        if (moved <= DRAG_THRESHOLD) placeGhost(e)
+        if (moved <= DRAG_THRESHOLD && !store().readOnly) placeGhost(e)
         return
       }
       if (d.kind === 'maybe') {

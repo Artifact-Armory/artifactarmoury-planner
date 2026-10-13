@@ -27,6 +27,7 @@ import { ensureTemplate, subscribeGlbBytes, glbUnitsSince, glbBytesFor } from '@
 import { CoachMarks } from './CoachMarks'
 import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
+import { MovementTutorial, shouldShowMovementTutorial } from './MovementTutorial'
 import { PreviewQualityNotice, hasAcknowledgedPreviewQuality } from './PreviewQualityNotice'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
@@ -310,6 +311,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [expandedBundles, setExpandedBundles] = React.useState<Set<string>>(new Set())
   const [uiHidden, setUiHidden] = React.useState(false)
   const [showHelp, setShowHelp] = React.useState(false)
+  // Read-only showcase, first time in the planner: hands-on camera tutorial.
+  const [showMoveTutorial, setShowMoveTutorial] = React.useState(false)
   const [showPreviewQuality, setShowPreviewQuality] = React.useState(false)
   // Tablet support. `coarse` adds on-screen buttons for the keyboard-only actions;
   // `compact` turns the two fixed side panels into drawers. Both are false on a
@@ -534,6 +537,17 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const t = window.setTimeout(() => setShowPreviewQuality(true), 600)
     return () => window.clearTimeout(t)
   }, [readOnly, showTable, tourActive, showHelp])
+
+  // Someone whose first look at the planner is a showcase never sees the
+  // editor's walkthrough (it's skipped in read-only), so teach the camera here
+  // once the table is visible. Leaving read-only ("Edit a copy") closes it; the
+  // editor's own onboarding takes over from there.
+  React.useEffect(() => {
+    if (!readOnly) { setShowMoveTutorial(false); return }
+    if (!showTable || !shouldShowMovementTutorial()) return
+    const t = window.setTimeout(() => setShowMoveTutorial(true), 500)
+    return () => window.clearTimeout(t)
+  }, [readOnly, showTable])
 
   // Clear any tour left active elsewhere (e.g. the dashboard walkthrough) so it
   // can't bleed into the planner; our own effect above starts it when relevant.
@@ -2233,10 +2247,20 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       )}
 
       {!readOnly && <CoachMarks />}
+      {readOnly && showMoveTutorial && !showHelp && (
+        <MovementTutorial touch={coarse} onClose={() => setShowMoveTutorial(false)} />
+      )}
       {showHelp && (
         <HelpOverlay touch={coarse}
+          replayLabel={readOnly ? 'Movement tutorial' : undefined}
           onClose={() => setShowHelp(false)}
-          onReplayTour={() => { setShowHelp(false); startTour() }}
+          onReplayTour={() => {
+            setShowHelp(false)
+            // The editor walkthrough isn't rendered in read-only; replay the
+            // movement tutorial there instead.
+            if (readOnly) setShowMoveTutorial(true)
+            else startTour()
+          }}
           onShowPreviewQuality={() => setShowPreviewQuality(true)}
         />
       )}

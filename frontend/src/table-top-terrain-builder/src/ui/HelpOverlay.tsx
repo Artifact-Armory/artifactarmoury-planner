@@ -97,6 +97,7 @@ export function HelpOverlay({
   onReplayTour,
   onShowPreviewQuality,
   touch = false,
+  replayLabel = 'Replay walkthrough',
 }: {
   onClose: () => void
   onReplayTour?: () => void
@@ -104,6 +105,8 @@ export function HelpOverlay({
   onShowPreviewQuality?: () => void
   /** Show the finger-gesture reference instead of the mouse/keyboard one. */
   touch?: boolean
+  /** Text for the replay button (read-only showcases replay the movement tutorial). */
+  replayLabel?: string
 }) {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -123,7 +126,7 @@ export function HelpOverlay({
               <button className="tb-btn" onClick={onShowPreviewQuality}>Preview vs print</button>
             )}
             {onReplayTour && (
-              <button className="tb-btn" onClick={onReplayTour}>Replay walkthrough</button>
+              <button className="tb-btn" onClick={onReplayTour}>{replayLabel}</button>
             )}
             <button className="tb-icon" onClick={onClose} aria-label="Close"><X size={18} /></button>
           </div>

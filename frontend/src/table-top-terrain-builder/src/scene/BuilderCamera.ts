@@ -33,6 +33,15 @@ export interface BuilderCameraOptions {
   damping?: number // 0..1 per-frame approach (higher = snappier)
 }
 
+export interface CameraPose {
+  /** Radians around the target. */
+  azimuth: number
+  /** Radians down from straight overhead. */
+  polar: number
+  distance: number
+  target: { x: number; y: number; z: number }
+}
+
 export class BuilderCamera {
   readonly camera: THREE.PerspectiveCamera
   private dom: HTMLElement
@@ -148,6 +157,20 @@ export class BuilderCamera {
   panByScreenDelta(dx: number, dy: number) {
     this.panByPixels(dx, dy)
     this.onChange()
+  }
+
+  /**
+   * Where the camera is heading (the damped camera catches up to this). Read by
+   * the showcase movement tutorial to tell whether the viewer has orbited,
+   * zoomed or panned yet, whatever input they used to do it.
+   */
+  getPose(): CameraPose {
+    return {
+      azimuth: this.desiredAzimuth,
+      polar: this.desiredPolar,
+      distance: this.desiredDistance,
+      target: { x: this.desiredTarget.x, y: this.desiredTarget.y, z: this.desiredTarget.z },
+    }
   }
 
   /** True while two or more fingers are down — the host suppresses its own drag. */

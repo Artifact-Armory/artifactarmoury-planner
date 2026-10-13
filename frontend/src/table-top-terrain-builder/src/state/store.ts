@@ -17,6 +17,7 @@ import { ordersApi } from '@/api/endpoints/orders'
 import { analyticsApi } from '@/api/endpoints/analytics'
 import { taxonomyApi, MODEL_CLASS_SLUG, type TaxFacet } from '@/api/endpoints/taxonomy'
 import type { SearchFilters } from '@/api/types'
+import type { CameraPose } from '../scene/BuilderCamera'
 
 /** Build the browse `terms` string from a class + facet-token selection. */
 function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
@@ -59,6 +60,7 @@ export interface CameraApi {
   frameTable: () => void
   frameSelection: () => void
   home: () => void
+  getPose: () => CameraPose
 }
 
 /**
