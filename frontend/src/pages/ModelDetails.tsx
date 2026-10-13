@@ -617,6 +617,10 @@ const ModelDetails: React.FC = () => {
                   the file on.
                 </p>
               </>
+            ) : model.salesDisabled ? (
+              <p className="mt-6 rounded-md bg-muted px-3 py-2 text-center text-sm font-medium text-muted-foreground">
+                On display only — not for sale yet
+              </p>
             ) : inCart ? (
               <Button className="mt-6 w-full" onClick={() => openCart()} variant="outline" leftIcon={<ShoppingCart size={16} />}>
                 In cart — view

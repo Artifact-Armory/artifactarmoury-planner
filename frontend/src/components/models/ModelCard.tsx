@@ -123,15 +123,21 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
           )}
         </div>
 
-        <Button
-          variant="primary"
-          size="md"
-          className="mt-4 w-full"
-          onClick={handleAddToCart}
-          leftIcon={<ShoppingCart size={16} />}
-        >
-          Add to cart
-        </Button>
+        {model.salesDisabled ? (
+          <p className="mt-4 rounded-md bg-muted px-3 py-2 text-center text-sm font-medium text-muted-foreground">
+            Display only
+          </p>
+        ) : (
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-4 w-full"
+            onClick={handleAddToCart}
+            leftIcon={<ShoppingCart size={16} />}
+          >
+            Add to cart
+          </Button>
+        )}
       </div>
     </article>
   )

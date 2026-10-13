@@ -28,6 +28,8 @@ export const AssetSchema = z.object({
   // Owning artist's user id (API models only) — used to gate placing another
   // artist's model on a showcase behind a collaboration request.
   artistId: z.string().optional(),
+  // Display-only artist account: placeable, never added to the shop basket.
+  salesDisabled: z.boolean().optional(),
   category: z.string().optional(),   // palette grouping, e.g. "Elevation"
   // Modular height-tile metadata (absent for ordinary props/buildings).
   elevation: z.object({
@@ -215,7 +217,7 @@ export async function loadAssetsFromAPI(filter?: {
 function modelToAsset(m: {
   id: string; name: string; tags?: string[]; glbUrl?: string; thumbnailUrl?: string
   width?: number | null; depth?: number | null; height?: number | null
-  basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; artistId?: string; partCount?: number
+  basePrice?: number; fulfillmentType?: 'stl' | 'print'; artistName?: string; artistId?: string; salesDisabled?: boolean; partCount?: number
   category?: string; defaultPitchDeg?: number; defaultRollDeg?: number
 }): Asset | null {
   if (!m.glbUrl || (m.partCount ?? 1) !== 1) return null
@@ -234,6 +236,7 @@ function modelToAsset(m: {
     fulfillment: m.fulfillmentType ?? 'print',
     artistName: m.artistName,
     artistId: m.artistId,
+    salesDisabled: m.salesDisabled || undefined,
     category: m.category, // palette grouping heading (buildings / vehicles / …)
     // Planner tier, not the product page's proxy — see plannerMeshUrl.
     model: plannerMeshUrl(m.glbUrl),
@@ -345,6 +348,7 @@ export async function loadSetsFromAPI(): Promise<{ sets: PlannerSetData[]; partA
           price: assetId === s.id ? s.price : 0,
           fulfillment: 'stl',
           artistId: s.artistId,
+          salesDisabled: s.salesDisabled || undefined,
           model: plannerMeshUrl(part.isPrimary ? previewGlbUrl(s.id) : previewPartGlbUrl(part.id)),
           // Per-component thumbnail (migration 058) when the artist set one for
           // THIS named model — already a full URL from getSets(), unlike

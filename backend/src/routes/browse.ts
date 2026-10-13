@@ -148,7 +148,7 @@ router.get('/',
         m.view_count, m.sale_count,
         m.published_at,
         m.artist_id,
-        u.artist_name, u.artist_url,
+        u.artist_name, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
@@ -159,7 +159,7 @@ router.get('/',
        JOIN users u ON m.artist_id = u.id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        WHERE ${whereClause}
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url, u.sales_disabled
        ORDER BY ${orderBy}
        LIMIT ${limitP} OFFSET ${offsetP}`,
       params
@@ -254,7 +254,7 @@ router.get('/featured',
       `SELECT 
         m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price, m.fulfillment_type,
-        u.artist_name, u.artist_url,
+        u.artist_name, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         m.sale_count,
@@ -275,7 +275,7 @@ router.get('/featured',
            WHERE mt.model_id = m.id AND fc.slug = 'model-class'
              AND t.path = $3 AND t.is_active = true
          ))
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url, u.sales_disabled
        HAVING COUNT(DISTINCT r.id) >= 3 AND AVG(r.rating) >= 4.0
        ORDER BY (AVG(r.rating) * 0.6 + (m.sale_count / 100.0) * 0.4) DESC
        LIMIT $2`,
@@ -303,7 +303,7 @@ router.get('/new',
         m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price,
         m.published_at,
-        u.artist_name, u.artist_url,
+        u.artist_name, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
@@ -314,7 +314,7 @@ router.get('/new',
        JOIN users u ON m.artist_id = u.id
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        WHERE m.status = 'published' AND m.visibility = 'public'
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url, u.sales_disabled
        ORDER BY m.published_at DESC
        LIMIT $2`,
       [(req as any).userId || null, Number(limit)]
@@ -342,7 +342,7 @@ router.get('/trending',
         m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price,
         m.view_count, m.sale_count,
-        u.artist_name, u.artist_url,
+        u.artist_name, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
@@ -355,7 +355,7 @@ router.get('/trending',
        WHERE m.status = 'published' 
          AND m.visibility = 'public'
          AND m.published_at > CURRENT_DATE - INTERVAL '30 days'
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url, u.sales_disabled
        ORDER BY m.view_count DESC
        LIMIT $2`,
       [(req as any).userId || null, Number(limit)]
@@ -447,7 +447,7 @@ router.get('/:id/related',
       `SELECT 
         m.id, m.name, m.description, m.category, m.artist_id,
         m.thumbnail_path, m.base_price, m.fulfillment_type,
-        u.artist_name, u.artist_url,
+        u.artist_name, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         EXISTS(
@@ -469,7 +469,7 @@ router.get('/:id/related',
          AND m.visibility = 'public'
          AND m.id != $4
          AND (m.category = $2 OR m.tags && $3::text[])
-       GROUP BY m.id, u.artist_name, u.artist_url
+       GROUP BY m.id, u.artist_name, u.artist_url, u.sales_disabled
        ORDER BY relevance_score DESC, m.view_count DESC
        LIMIT $5`,
       [(req as any).userId || null, category, tags || [], id, Number(limit)]

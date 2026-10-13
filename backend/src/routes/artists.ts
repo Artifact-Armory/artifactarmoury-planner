@@ -199,7 +199,7 @@ router.get('/:id/models', async (req, res, next) => {
         m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count, m.published_at, m.artist_id,
-        u.artist_name, u.artist_url
+        u.artist_name, u.artist_url, u.sales_disabled
        FROM models m
        JOIN users u ON u.id = m.artist_id
        WHERE m.artist_id = $1 AND m.status = 'published' AND m.visibility = 'public'${mainSearch}
@@ -231,7 +231,7 @@ const MODEL_CARD_FIELDS = `
   m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
   m.width, m.height, m.depth, m.part_count,
   m.view_count, m.sale_count, m.published_at,
-  u.id AS artist_id, u.artist_name, u.artist_url`
+  u.id AS artist_id, u.artist_name, u.artist_url, u.sales_disabled`
 
 // ============================================================================
 // FEATURED MODELS CAROUSEL
@@ -516,7 +516,7 @@ router.get('/me/feed', authenticate, async (req, res, next) => {
         m.thumbnail_path, (m.glb_file_path IS NOT NULL) AS has_glb, m.base_price, m.fulfillment_type,
         m.width, m.height, m.depth, m.part_count,
         m.view_count, m.sale_count, m.published_at,
-        u.id AS artist_id, u.artist_name, u.artist_url
+        u.id AS artist_id, u.artist_name, u.artist_url, u.sales_disabled
        FROM follows fo
        JOIN models m ON m.artist_id = fo.artist_id
        JOIN users u ON u.id = m.artist_id

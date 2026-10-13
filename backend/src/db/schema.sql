@@ -57,6 +57,8 @@ CREATE TABLE users (
     -- Shadow-ban: still 'active' for buying (and reporting a model they own), but blocked
     -- from filing other reports, posting reviews, and messaging. Orthogonal to account_status.
     shadow_banned BOOLEAN NOT NULL DEFAULT false,
+    -- Display-only seller (migration 073): listings show but can't be bought.
+    sales_disabled BOOLEAN NOT NULL DEFAULT false,
 
     -- Optional TOTP two-factor auth (migration 031). totp_secret is encrypted at
     -- rest (services/totp.ts); backup codes are stored hashed.

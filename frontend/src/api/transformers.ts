@@ -181,6 +181,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   // never appears as a placeable asset). Defaults true when the API omits it.
   showInPlanner: (model.show_in_planner ?? model.showInPlanner ?? true) as boolean,
   isRealSubject: (model.is_real_subject ?? model.isRealSubject ?? false) as boolean,
+  salesDisabled: Boolean(model.sales_disabled ?? model.salesDisabled),
   // Multi-part ("set") models: number of STL files + the extra parts.
   partCount: Number(model.part_count ?? model.partCount ?? 1),
   // Total download size (STL, or ZIP for a multi-part set) — see the backend's

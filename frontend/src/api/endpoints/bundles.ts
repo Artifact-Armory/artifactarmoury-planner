@@ -21,6 +21,7 @@ export function mapBundle(b: any): Bundle {
     id: b.id,
     artistId: b.artist_id ?? b.artistId,
     artistName: b.artist_name ?? b.artistName,
+    salesDisabled: Boolean(b.sales_disabled ?? b.salesDisabled),
     name: b.name,
     description: b.description ?? undefined,
     price: Number(b.price ?? 0),

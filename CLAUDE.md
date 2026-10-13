@@ -1189,6 +1189,16 @@ the second visitor gets a normal 401.
   `initializeDatabase`/`runMigrations` helpers also reference missing tables and were left alone.
 - 22 checks against a real local Postgres, plus the earlier suites re-run.
 
+## Display-only artist accounts (built 2026-10-13, migration 073)
+`users.sales_disabled`: the account's models and bundles stay on the marketplace and in the planner, but
+nobody can buy them. Used for the Wargames3D catalogue (uploaded on WG3D's behalf) and the "Tester Artist"
+account. Enforced server-side in `POST /api/orders` (`assertSellable` in `routes/orders.ts`, both the
+single-model and bundle paths); the storefront shows "Display only" instead of Add to cart (`ModelCard`,
+`ModelDetails`, `BundleDetails`), and the planner never auto-adds them to the basket
+(`addModelForAssetToCart`, plus the read-only "Add to basket" button). 073 sets the flag by matching
+`artist_name`/`display_name` against "Tester Artist" and "wargame%3d%" — check which accounts it caught.
+To start selling: `UPDATE users SET sales_disabled = false WHERE email = '...';`
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

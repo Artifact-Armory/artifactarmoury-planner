@@ -125,12 +125,12 @@ router.get('/',
     const { page = 1, limit = 24 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
     const bundles = await db.query(
-      `SELECT b.*, u.artist_name, COUNT(bi.model_id) AS model_count
+      `SELECT b.*, u.artist_name, u.sales_disabled, COUNT(bi.model_id) AS model_count
        FROM bundles b
        JOIN users u ON b.artist_id = u.id
        LEFT JOIN bundle_items bi ON bi.bundle_id = b.id
        WHERE b.status = 'published' AND b.visibility = 'public'
-       GROUP BY b.id, u.artist_name
+       GROUP BY b.id, u.artist_name, u.sales_disabled
        ORDER BY b.published_at DESC NULLS LAST, b.created_at DESC
        LIMIT $1 OFFSET $2`,
       [Number(limit), offset]
@@ -152,7 +152,7 @@ router.get('/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const result = await db.query(
-      `SELECT b.*, u.artist_name FROM bundles b
+      `SELECT b.*, u.artist_name, u.sales_disabled FROM bundles b
        JOIN users u ON b.artist_id = u.id
        WHERE b.id = $1`,
       [id]

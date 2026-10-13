@@ -190,6 +190,10 @@ const BundleDetails: React.FC = () => {
               <p className="mt-6 flex items-center justify-center gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
                 <CheckCircle size={16} /> You own every model in this bundle
               </p>
+            ) : bundle.salesDisabled ? (
+              <p className="mt-6 rounded-md bg-muted px-3 py-2 text-center text-sm font-medium text-muted-foreground">
+                On display only — not for sale yet
+              </p>
             ) : inCart ? (
               <Button className="mt-6 w-full" variant="outline" onClick={() => openCart()} leftIcon={<ShoppingCart size={16} />}>
                 In cart — view

@@ -215,6 +215,7 @@ export const modelsApi = {
     price: number
     thumbnailPath: string | null
     artistId: string
+    salesDisabled: boolean
     defaultPitchDeg: number
     defaultRollDeg: number
     primaryGroupName: string | null
@@ -231,6 +232,7 @@ export const modelsApi = {
       price: Number(s.price ?? 0),
       thumbnailPath: s.thumbnail_path ?? null,
       artistId: s.artist_id,
+      salesDisabled: Boolean(s.sales_disabled),
       defaultPitchDeg: Number(s.default_pitch_deg ?? 0),
       defaultRollDeg: Number(s.default_roll_deg ?? 0),
       primaryGroupName: s.primary_group_name ?? null,

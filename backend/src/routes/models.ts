@@ -985,7 +985,8 @@ router.get('/sets',
     const models = (await db.query(
       `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.primary_thumbnail_path, m.artist_id,
               m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg, m.default_roll_deg,
-              m.primary_group_name
+              m.primary_group_name,
+              (SELECT u.sales_disabled FROM users u WHERE u.id = m.artist_id) AS sales_disabled
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
          AND m.show_in_planner = true
@@ -1065,6 +1066,7 @@ router.get('/sets',
         price: m.base_price,
         thumbnail_path: m.thumbnail_path,
         artist_id: m.artist_id,
+        sales_disabled: Boolean(m.sales_disabled),
         default_pitch_deg: m.default_pitch_deg,
         default_roll_deg: m.default_roll_deg,
         primary_group_name: m.primary_group_name ?? null,
@@ -1117,7 +1119,7 @@ router.get('/planner-assets',
     if (ids.length === 0) { res.json({ models: [] }); return; }
     const models = (await db.query(
       `SELECT m.id, m.name, m.tags, (m.glb_file_path IS NOT NULL) AS has_glb, m.thumbnail_path,
-              m.width, m.depth, m.height, m.base_price, m.artist_id, m.default_pitch_deg, m.default_roll_deg, u.artist_name
+              m.width, m.depth, m.height, m.base_price, m.artist_id, m.default_pitch_deg, m.default_roll_deg, u.artist_name, u.sales_disabled
        FROM models m JOIN users u ON u.id = m.artist_id
        WHERE m.id = ANY($1::uuid[]) AND m.part_count = 1 AND m.glb_file_path IS NOT NULL`,
       [ids]
@@ -1138,7 +1140,7 @@ router.get('/:id',
     const result = await db.query(
       `SELECT
         m.*,
-        u.artist_name, u.artist_bio, u.artist_url,
+        u.artist_name, u.artist_bio, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         COUNT(DISTINCT f.id) as favorite_count
@@ -1147,7 +1149,7 @@ router.get('/:id',
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        LEFT JOIN favorites f ON m.id = f.model_id
        WHERE m.id = $1
-       GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url`,
+       GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url, u.sales_disabled`,
       [id]
     );
 

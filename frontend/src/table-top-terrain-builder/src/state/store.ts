@@ -373,6 +373,8 @@ function addModelForAssetToCart(s: AppState, assetId: string): boolean {
   const modelId = parentSet ? parentSet.id : assetId
   const asset = getAssetById(assetId)
   if (!parentSet && !asset) return false
+  // Display-only artist: placeable, but not for sale (checkout would refuse it).
+  if (asset?.salesDisabled) return false
   // Demo/local assets aren't marketplace models (non-UUID ids) — nothing to buy.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(modelId)) return false
   if (s.ownedModelIds.has(modelId)) return false

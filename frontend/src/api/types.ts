@@ -205,6 +205,9 @@ export interface TerrainModel {
   // geometry match against another artist's model goes to admin review instead
   // of rejecting the upload.
   isRealSubject?: boolean
+  // The artist's account is display-only (users.sales_disabled): shown and
+  // placeable, but not for sale — checkout refuses it.
+  salesDisabled?: boolean
   images?: Array<{
     id: string
     imagePath?: string
@@ -477,6 +480,7 @@ export interface Bundle {
   id: string
   artistId?: string
   artistName?: string
+  salesDisabled?: boolean
   name: string
   description?: string
   price: number

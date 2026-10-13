@@ -31,6 +31,13 @@ import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
 
 const router = Router();
 
+// An artist account with users.sales_disabled (migration 073) lists for display only:
+// the models are on the marketplace and the planner, but nobody can buy them. Used for
+// catalogues uploaded on someone else's behalf before they have agreed to sell here.
+function assertSellable(salesDisabled: unknown, name: string): void {
+  if (salesDisabled) throw new ValidationError(`"${name}" is on display only and isn't for sale yet`);
+}
+
 /**
  * Cancel this buyer's still-unpaid orders that reserved `promoCodeId`. Best-effort per
  * order: if Stripe won't cancel the intent (e.g. it has just been paid), the order is
@@ -255,14 +262,17 @@ router.post('/',
         if (item?.bundleId) {
           // --- Bundle: one price, split across its models -------------------
           const bundleResult = await client.query(
-            `SELECT id, name, price, artist_id FROM bundles WHERE id = $1 AND status = 'published'`,
+            `SELECT b.id, b.name, b.price, b.artist_id, u.sales_disabled
+             FROM bundles b JOIN users u ON u.id = b.artist_id
+             WHERE b.id = $1 AND b.status = 'published'`,
             [item.bundleId]
           );
           if (bundleResult.rows.length === 0) throw new NotFoundError(`Bundle ${item.bundleId}`);
           const bundle = bundleResult.rows[0];
+          assertSellable(bundle.sales_disabled, bundle.name);
 
           const modelsResult = await client.query(
-            `SELECT m.*, u.commission_rate
+            `SELECT m.*, u.commission_rate, u.sales_disabled
              FROM bundle_items bi
              JOIN models m ON bi.model_id = m.id
              JOIN users u ON m.artist_id = u.id
@@ -272,6 +282,7 @@ router.post('/',
           );
           const bundleModels = modelsResult.rows;
           if (bundleModels.length === 0) throw new ValidationError(`Bundle "${bundle.name}" has no models`);
+          assertSellable(bundleModels.some((m: any) => m.sales_disabled), bundle.name);
           // A model taken down by moderation (archived/flagged) can't be downloaded at all
           // (see GET /models/:id/download), and one its artist deleted is withdrawn from
           // sale, so the bundle must not be sold with either inside — the buyer would pay
@@ -315,13 +326,14 @@ router.post('/',
         } else if (item?.modelId) {
           // --- Single model -------------------------------------------------
           const modelResult = await client.query(
-            `SELECT m.*, u.commission_rate
+            `SELECT m.*, u.commission_rate, u.sales_disabled
              FROM models m JOIN users u ON m.artist_id = u.id
              WHERE m.id = $1 AND m.status = 'published'`,
             [item.modelId]
           );
           if (modelResult.rows.length === 0) throw new NotFoundError(`Model ${item.modelId}`);
           const model = modelResult.rows[0];
+          assertSellable(model.sales_disabled, model.name);
           // SECURITY (2026-09-06 audit): defense-in-depth against a corrupted/negative
           // base_price reaching checkout (the write path itself is now validated in
           // PATCH /models/:id, but a negative line here would otherwise subtract

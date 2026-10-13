@@ -1082,6 +1082,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       artistName: asset?.artistName ?? 'Artifact Armoury',
       owned: ownedModelIds.has(id),
       inCart: cartItems.some((it) => it.kind === 'model' && it.id === id),
+      notForSale: !!asset?.salesDisabled,
       // The placed piece's own real-world size (a set part shows its own size,
       // not the whole set's) — lets a shopper double-check the scale in person.
       aabb: asset?.aabb,
@@ -1089,7 +1090,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }, [readOnly, selectedInstanceIds, instances, assetsById, sets, ownedModelIds, cartItems])
 
   function handleAddSelected() {
-    if (!selectedModel || selectedModel.owned || selectedModel.inCart) return
+    if (!selectedModel || selectedModel.owned || selectedModel.inCart || selectedModel.notForSale) return
     addCartItem(
       {
         kind: 'model',
@@ -2260,6 +2261,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   <span className="tb-view-selected-state"><Check size={14} /> Owned</span>
                 ) : selectedModel.inCart ? (
                   <span className="tb-view-selected-state"><Check size={14} /> In basket</span>
+                ) : selectedModel.notForSale ? (
+                  <span className="tb-view-selected-state">Display only</span>
                 ) : (
                   <button className="tb-cta sm" onClick={handleAddSelected}>
                     <ShoppingCart size={16} /> Add to basket
