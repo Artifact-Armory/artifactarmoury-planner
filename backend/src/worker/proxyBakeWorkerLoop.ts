@@ -44,6 +44,7 @@ import {
 import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb/runner'
 import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
+import { upgradeOneStaleFingerprint, isFingerprintUpgradeEnabled } from '../services/fingerprintUpgrade'
 import { isLargeJobLockHeld } from '../services/modelIngest/queue'
 import { recordWorkerHeartbeat } from '../services/queueHealth'
 import { closeDatabase } from '../db'
@@ -161,6 +162,11 @@ async function main(): Promise<void> {
       }
       if (!didWork && !stopping && !largeJobInProgress && isFullGlbEnabled()) {
         didWork = await runOneFullGlbJob(WORKER_ID)
+      }
+      // Lowest priority: upgrade one old-version geometry fingerprint
+      // (services/fingerprintUpgrade.ts). Only ever runs with every queue empty.
+      if (!didWork && !stopping && !largeJobInProgress && isFingerprintUpgradeEnabled()) {
+        didWork = await upgradeOneStaleFingerprint()
       }
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })

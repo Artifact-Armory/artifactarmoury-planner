@@ -87,10 +87,16 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
      geometry (supports, a base, splitting into parts) — those change the shape.
    - Binary STLs are read straight into a Float32Array (detected by size, not the "solid" prefix),
      so fingerprinting no longer builds parseSTL's object graph; ~0.5–1 s per model.
-   - **v1 and v2 can't be compared** — after deploying, run
-     `railway run npm run backfill:fingerprints` (downloads each STL from R2 on your machine; only
-     rows that already have a fingerprint, so rejected uploads stay excluded). Until then old models
-     are counted as `incomparable` in the log and can't block anything.
+   - **v1 and v2 can't be compared.** The **worker upgrades old fingerprints itself**
+     (`services/fingerprintUpgrade.ts`): lowest priority, one file per idle cycle, only when the
+     ingest/bake/full-GLB queues are empty, fingerprinted in the isolated child. The supervisor's
+     `hasClaimableWork` counts stale rows so it starts the job process. Only rows that already have a
+     fingerprint are touched; a file that fails (missing from R2, unparseable) gets `upgradeFailedAt`
+     in its old JSON and is skipped. `FINGERPRINT_UPGRADE_ENABLED=false` turns it off. Built because
+     `railway run npm run backfill:fingerprints` (laptop script, still there, retries failed rows)
+     couldn't reach the DB proxy from the office network on 2026-10-13. Not-yet-upgraded models count
+     as `incomparable` in the dedup log and can't block anything. Progress check:
+     `SELECT geometry_fingerprint->>'v' AS v, COUNT(*) FROM models GROUP BY 1`.
    - `findGeometryDuplicate` logs `Geometry dedup check {closestScore, closestDistances, incomparable,
      matched}` on every upload. Failed dedup does **not** store a fingerprint, so rejected uploads
      never become match candidates.
