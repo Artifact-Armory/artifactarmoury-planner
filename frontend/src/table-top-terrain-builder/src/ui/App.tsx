@@ -28,6 +28,7 @@ import { CoachMarks } from './CoachMarks'
 import { useCoarsePointer, useCompactLayout } from './useDeviceLayout'
 import { HelpOverlay } from './HelpOverlay'
 import { MovementTutorial, shouldShowMovementTutorial } from './MovementTutorial'
+import { tableNameError } from '@/components/tables/TableNameEditor'
 import { PreviewQualityNotice, hasAcknowledgedPreviewQuality } from './PreviewQualityNotice'
 import OnboardingTour from '@/components/help/OnboardingTour'
 import { plannerShowcaseSteps, plannerBuyerSteps } from '@/components/help/tourSteps'
@@ -113,6 +114,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // Server-table binding: which saved table (if any) this planner is editing.
   const [savedTableId, setSavedTableId] = React.useState<string | null>(tableId ?? null)
   const [savedTableName, setSavedTableName] = React.useState<string | null>(null)
+  const [renaming, setRenaming] = React.useState(false)
   // Loading a shared link gives you an editable copy — you don't own the original
   // until you save it as your own (which flips this true).
   const [isOwner, setIsOwner] = React.useState<boolean>(!shareToken)
@@ -1205,6 +1207,28 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }
 
+  // Rename the table you own without touching its layout. A copy made with
+  // "Edit a copy" otherwise keeps its "Copy of …" name for good.
+  async function handleRename() {
+    if (readOnly || !savedTableId || !isOwner || renaming) return
+    const input = window.prompt('Rename this table:', savedTableName ?? '')
+    if (input === null) return
+    const problem = tableNameError(input)
+    if (problem) { hotToast.error(problem); return }
+    const name = input.trim()
+    if (name === savedTableName) return
+    setRenaming(true)
+    try {
+      const updated = await tablesApi.updateTable(savedTableId, { name })
+      setSavedTableName(updated.name || name)
+      hotToast.success('Table renamed')
+    } catch {
+      hotToast.error('Could not rename the table')
+    } finally {
+      setRenaming(false)
+    }
+  }
+
   // Confirming the collaboration prompt places the piece and immediately saves, so
   // the request goes out to the owner (requests are raised at save time). A scratch
   // table is created as a draft here (name prompt), matching the "save then send" flow.
@@ -1415,6 +1439,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={handleSave}>
               <Save size={18} />
             </button>
+            {savedTableId && isOwner && (
+              <button
+                className="tb-icon"
+                title={`Rename table${savedTableName ? ` (“${savedTableName}”)` : ''}`}
+                onClick={handleRename}
+                disabled={renaming}
+              >
+                <Pencil size={18} />
+              </button>
+            )}
             <button
               className="tb-icon"
               title="Print layout (PDF) — top-down plan with positions and gaps"

@@ -186,6 +186,11 @@ router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
       is_public
     } = req.body
 
+    // Renaming (name sent on its own, or with a save) gets the same rule as
+    // creating; a blank name used to slip through COALESCE as an empty string.
+    const newName = name === undefined || name === null ? null : String(name).trim()
+    if (newName !== null) validateString(newName, 'name', { minLength: 3, maxLength: 255 })
+
     // Validate the authenticated user owns this table (JWT identity, not body).
     const checkResult = await db.query(
       'SELECT user_email FROM user_tables WHERE id = $1',
@@ -212,7 +217,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
        WHERE id = $5
        RETURNING *`,
       [
-        name,
+        newName,
         table_config ? JSON.stringify(table_config) : null,
         layout_data ? JSON.stringify(layout_data) : null,
         is_public,

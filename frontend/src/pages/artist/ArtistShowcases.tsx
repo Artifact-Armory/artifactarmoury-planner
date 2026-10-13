@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { tablesApi } from '../../api/endpoints/tables'
 import { useAuthStore } from '../../store/authStore'
 import { TableLayout } from '../../api/types'
+import TableNameEditor from '../../components/tables/TableNameEditor'
 
 /**
  * Artist showcases — saved planners the artist builds to display their models
@@ -127,7 +128,12 @@ const ArtistShowcases: React.FC = () => {
               <li key={t.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-foreground">{t.name}</span>
+                    <TableNameEditor
+                      tableId={t.id}
+                      name={t.name}
+                      disabled={busy}
+                      onRenamed={(name) => setTables((list) => list.map((x) => (x.id === t.id ? { ...x, name } : x)))}
+                    />
                     {t.isPublic ? (
                       <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">published</span>
                     ) : (
