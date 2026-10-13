@@ -15,21 +15,20 @@ export type MeshFormat = 'stl' | 'obj' | '3mf'
 
 // Hard cap on an uploaded model (or set part) file. Processing an upload is
 // entirely in-memory (download -> parse to triangles -> STL -> preview GLB), so
-// a very large mesh exhausts the server's memory and crashes it. 250MB — raised
-// from 150MB on 2026-09-03 — is a deliberate middle ground between
-// MyMiniFactory's two tiers (100MB regular-designer, 500MB Store Manager),
-// rather than matching their top tier outright, given the real memory risk
-// below. Enforced client-side (fast fail) and server-side (authoritative, from
+// a very large mesh exhausts the server's memory and crashes it. 500MB matches
+// MyMiniFactory's top (Store Manager) tier. Raised 150MB -> 250MB on 2026-09-03,
+// then 250MB -> 500MB on 2026-10-13 once the worker moved to Railway Pro (32GB
+// per replica) and the ingest child's heap became sized to the container. Enforced client-side (fast fail) and server-side (authoritative, from
 // the object's real R2 size).
 //
 // This byte cap alone doesn't bound memory for a dense mesh — see
 // fileProcessor.ts's MAX_INGEST_TRIANGLES, added alongside this raise, which
 // rejects an overly-dense STL before it's parsed regardless of its byte size.
 // Binary STL is exactly 50 bytes/triangle, so for that (the common) case the
-// triangle ceiling ends up the binding constraint well under 250MB; the higher
+// triangle ceiling ends up the binding constraint well under 500MB; the higher
 // byte cap mainly benefits large-but-lower-density files (ASCII STL, OBJ, 3MF)
 // and genuinely low-poly-but-physically-large terrain.
-export const MAX_MODEL_FILE_BYTES = 250 * 1024 * 1024
+export const MAX_MODEL_FILE_BYTES = 500 * 1024 * 1024
 export const MAX_MODEL_FILE_MB = Math.round(MAX_MODEL_FILE_BYTES / (1024 * 1024))
 
 interface V3 { x: number; y: number; z: number }

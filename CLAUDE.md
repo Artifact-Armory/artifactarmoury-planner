@@ -772,6 +772,18 @@ client-side fail before wasting an upload — must match) updated to match.
   worker restart, not a site outage. Still unprofiled — watch worker memory on the first real upload
   near 5M.
 
+- **Raised again 2026-10-13 (Railway Pro, 32GB/replica): `MAX_MODEL_FILE_BYTES` 250MB → 500MB**
+  (backend `meshConvert.ts` + frontend `CreateModel.tsx`, must match), **`MAX_INGEST_TRIANGLES`
+  5M → 10.5M** (a 500MB binary STL ≈ 10.48M tris; ~650 B child heap/tri ≈ 7GB at the ceiling),
+  and `FULL_GLB_MAX_SOURCE_BYTES` 400MB → 600MB so it stays unreachable. Set
+  `INGEST_CHILD_HEAP_MB` on the worker (16384) rather than trusting cgroup detection.
+  `FULL_GLB_MAX_TRIS` also raised 3.5M → 10.5M (≈11.5 GB RSS). That build runs in the worker's
+  **main** process, so `fullGlb/build.ts` now caps it at what the V8 heap can hold
+  (`effectiveMaxTris()`, budget 1,100 B/tri = the measured RSS figure, an upper bound) and
+  **skips** rather than crash-looping; the worker needs `NODE_OPTIONS=--max-old-space-size=14336`
+  to reach 10.5M. `MAX_PREVIEW_PART_TRIANGLES` (3.5M) left as-is. The Blender
+  proxy bake has not been exercised above ~5M tris — watch worker memory on the first one.
+
 ## Preview file replaces a named model's part files in the planner (built 2026-10-01, migration 067)
 The preview upload in `CreateModel.tsx` is no longer tied to "has supports" — it's an optional field on
 every named model (pre-assembled one-piece model, or a support-free copy). When one is attached, that

@@ -92,11 +92,16 @@ interface ParsedSTL {
  *
  * For binary STL (fixed 50 bytes/triangle) this ceiling — not
  * MAX_MODEL_FILE_BYTES — ends up the binding constraint well under that byte
- * cap (250MB); a dense binary STL anywhere near the byte cap will still be
+ * cap (500MB); a dense binary STL anywhere near the byte cap will still be
  * rejected here. The higher byte cap mainly helps less triangle-dense uploads
  * (ASCII STL, OBJ, 3MF) and genuinely low-poly-but-physically-large terrain.
+ *
+ * 5M -> 10.5M on 2026-10-13, alongside the 500MB byte cap: a 500MB binary STL is
+ * ~10.48M triangles, so this keeps the byte cap meaningful for binary STL. The
+ * isolated child needs ~650 bytes of heap per triangle (a 4.6M-tri file took
+ * ~3GB), so ~7GB at the ceiling — the worker's INGEST_CHILD_HEAP_MB must cover it.
  */
-export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 5_000_000)
+export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 10_500_000)
 
 /**
  * Stricter cap applied ONLY to an extra part of a grouped/multi-part listing

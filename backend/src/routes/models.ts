@@ -2334,7 +2334,7 @@ const ZIP_FETCH_CONCURRENCY = 6;
 // entry is fetched whole (the watermark functions work on a buffer) and archiver
 // queues whatever it is handed, so before this limit the fetch workers kept
 // appending while the buyer's connection drained at its own pace, and a big set
-// ended up in the API server's memory in full — up to 250MB per file. A file larger
+// ended up in the API server's memory in full — up to 500MB per file. A file larger
 // than the whole budget is still allowed, on its own.
 const ZIP_BUFFER_BUDGET_BYTES = Number(process.env.ZIP_BUFFER_BUDGET_MB || 192) * 1024 * 1024;
 

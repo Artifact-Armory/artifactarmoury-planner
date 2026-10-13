@@ -24,7 +24,7 @@
 //   aa-listing.json          name / description / price (written per model, since
 //                            MyMiniFactory blocks scripted fetches)
 //
-// Files over the ingest caps (250MB / 5M triangles) and non-mesh files (.chitubox,
+// Files over the ingest caps (500MB / 10.5M triangles) and non-mesh files (.chitubox,
 // .rtf) are skipped and reported, never silently dropped.
 //
 // The listing is created as a DRAFT. The worker builds its previews; publish it from

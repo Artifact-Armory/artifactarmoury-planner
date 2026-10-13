@@ -18,7 +18,7 @@ import { formatPrice, formatRating, formatBytes } from '../utils/format'
 // Above this, the download gets a "this may take a while" note — a heavy
 // multi-part set (many print-ready STLs, often with supports baked in) can
 // run into the gigabytes even though any single uploaded file is capped at
-// 250MB. See the "South East Asian village" case: 28 files, ~3GB total, ~200s
+// 500MB. See the "South East Asian village" case: 28 files, ~3GB total, ~200s
 // to download over a typical connection — no server-side bug, just a lot of
 // data to move over the buyer's own internet connection.
 const LARGE_DOWNLOAD_WARN_BYTES = 300_000_000 // 300 MB

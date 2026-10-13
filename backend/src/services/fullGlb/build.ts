@@ -20,6 +20,7 @@ import { promises as fsp } from 'fs'
 import crypto from 'crypto'
 import os from 'os'
 import path from 'path'
+import v8 from 'v8'
 import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { convertSTLtoGLBFull } from '../fileProcessor'
@@ -56,11 +57,37 @@ import { convertSTLtoGLBFull } from '../fileProcessor'
  * never inline in the API server, so a spike here can't take down checkout/
  * storefront. Not proven against a real 3.4M-triangle build yet — watch worker
  * memory (`railway logs`) on the next upload that exercises this range.
+ *
+ * Raised 3.5M -> 10.5M (2026-10-13, Railway Pro, 32GB per replica) to match
+ * MAX_INGEST_TRIANGLES, so every mesh that can be listed also gets an owner GLB.
+ * ≈ 11.5 GB RSS at the ceiling. Unlike ingest this build runs in the worker's
+ * MAIN process, so it is also bounded by that process's V8 heap — see
+ * effectiveMaxTris() below, which skips instead of crashing when the heap is
+ * too small (give the worker NODE_OPTIONS=--max-old-space-size=...).
  */
-export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 3_500_000)
+export const FULL_GLB_MAX_TRIS = Number(process.env.FULL_GLB_MAX_TRIS ?? 10_500_000)
+
+/**
+ * JS heap budgeted per SOURCE triangle for convertSTLtoGLBFull. Not measured
+ * directly: it is the measured peak RSS per triangle (above), which is a safe
+ * upper bound, since the heap is a subset of RSS. Lower it if a real heap
+ * measurement shows room.
+ */
+const HEAP_BYTES_PER_TRI = Number(process.env.FULL_GLB_HEAP_BYTES_PER_TRI ?? 1100)
+
+/**
+ * The cap actually applied: FULL_GLB_MAX_TRIS, lowered to what this process's
+ * heap can hold. A heap OOM kills the whole worker mid-job and the retry dies
+ * identically, so on a worker still running V8's default heap a dense mesh is
+ * skipped (owner keeps the proxy) rather than crash-looping the bake queue.
+ */
+function effectiveMaxTris(): number {
+  const heapLimit = v8.getHeapStatistics().heap_size_limit
+  return Math.min(FULL_GLB_MAX_TRIS, Math.floor((heapLimit * 0.85) / HEAP_BYTES_PER_TRI))
+}
 
 /** Refuse a source file this large outright, before parsing it. */
-const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 400 * 1024 * 1024)
+const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 600 * 1024 * 1024)
 
 /**
  * Triangle count from an STL *without* parsing it — a binary STL states it in the
@@ -124,9 +151,10 @@ export async function runFullGlbBuild(input: FullGlbBuildInput): Promise<FullGlb
     if (srcBuf.length > MAX_SOURCE_BYTES) {
       return skip(`source file is ${(srcBuf.length / 1024 / 1024).toFixed(0)} MB (limit ${(MAX_SOURCE_BYTES / 1024 / 1024).toFixed(0)} MB)`, 0)
     }
+    const maxTris = effectiveMaxTris()
     const declaredTris = binaryStlTriangleCount(srcBuf)
-    if (declaredTris !== null && declaredTris > FULL_GLB_MAX_TRIS) {
-      return skip(`mesh has ${declaredTris} triangles (limit ${FULL_GLB_MAX_TRIS})`, declaredTris)
+    if (declaredTris !== null && declaredTris > maxTris) {
+      return skip(`mesh has ${declaredTris} triangles (limit ${maxTris}${maxTris < FULL_GLB_MAX_TRIS ? ', bounded by worker heap' : ''})`, declaredTris)
     }
 
     const stlPath = path.join(work, 'source.stl')
@@ -139,8 +167,8 @@ export async function runFullGlbBuild(input: FullGlbBuildInput): Promise<FullGlb
     // parsing. Rare, and the byte-size guard above already bounds the damage.
     // Checked against the SOURCE count — the memory cost was paid parsing and
     // building the full-resolution document, before any decimation trims it.
-    if (sourceTriangles > FULL_GLB_MAX_TRIS) {
-      return skip(`mesh has ${sourceTriangles} triangles (limit ${FULL_GLB_MAX_TRIS})`, sourceTriangles)
+    if (sourceTriangles > maxTris) {
+      return skip(`mesh has ${sourceTriangles} triangles (limit ${maxTris})`, sourceTriangles)
     }
 
     const glbKey = ownerGlbKey(input.modelId, input.partId)
