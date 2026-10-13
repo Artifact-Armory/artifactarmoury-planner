@@ -17,8 +17,8 @@ import type { PaintMap } from './paintmap'
 /** Physical size (metres) that one texture tile covers on the table. 1 ft ≈ 0.3048m. */
 export const TEXTURE_TILE_SIZE = 0.3048
 
-const ASSET_BASE: string =
-  (import.meta.env.VITE_ASSET_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+// Isolated lab uses procedural materials; no live CDN dependency.
+const ASSET_BASE: string = ''
 
 export interface TableMaterialDef {
   id: string
@@ -43,6 +43,10 @@ export const TABLE_MATERIALS: TableMaterialDef[] = [
   { id: 'metal', label: 'Metal', color: 0x8a8f96, roughness: 0.5,  speckle: 8,  pbr: true },
   { id: 'wood',  label: 'Wood',  color: 0x6b4a2e, roughness: 0.7,  speckle: 12, planks: true },
   { id: 'stone', label: 'Stone', color: 0x6e7378, roughness: 0.85, speckle: 22 },
+  // Lighter/flatter than Stone — poured concrete rather than natural rock. Doubles
+  // as the auto-texture a Road landform gets on commit (see terrainPaths.ts's
+  // PATH_MATERIAL), but also stands on its own in the manual paint picker.
+  { id: 'concrete', label: 'Concrete', color: 0x9c9a92, roughness: 0.88, speckle: 14 },
   { id: 'plain', label: 'Plain', color: 0x18212e, roughness: 0.95, speckle: 0 },
 ]
 

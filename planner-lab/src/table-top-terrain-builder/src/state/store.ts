@@ -1,5 +1,10 @@
+import toast from 'react-hot-toast'
+import { validateTerrainPaths, simplifyPath, MAX_DRAW_POINTS, translateConnectedPaths } from '../core/terrainPaths'
 // src/state/store.ts
 import { create } from 'zustand'
+import { physicalDetailSchema, defaultPhysicalDetail, type PhysicalDetail } from '../../../manufacturing/physicalDetails'
+import { DEFAULT_PRINT, printSchema, type PrintProfile } from '../../../manufacturing/document'
+import { resizeTerrain } from '../../../manufacturing/resize'
 import * as THREE from 'three'
 import {
   loadAssets, loadAssetsFromAPI, loadSetsFromAPI, loadMyModelsForPlanner, getAssetById,
@@ -9,10 +14,10 @@ import {
   type Heightmap, type TerrainTool, createHeightmap, heightmapFitsTable, applyBrush,
 } from '../core/heightmap'
 import {
-  type TerrainFeature, type TerrainFeatureType, defaultFeature, compositeHeightmap,
+  type TerrainFeature, type TerrainFeatureType, defaultFeature, compositeHeightmap, evaluateTerrainHeight, gridBounds, featureBounds, pathBounds, unionBounds, type TerrainBounds,
 } from '../core/terrainFeatures'
 import {
-  type TerrainPath, defaultPath, translatePath,
+  type TerrainPath, type TerrainPathKind, defaultPath, translatePath, isPathKind,
 } from '../core/terrainPaths'
 import {
   type PaintMap, createPaintMap, paintFitsTable, applyPaintBrush, clonePaintMap,
@@ -22,6 +27,18 @@ import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
 import { analyticsApi } from '@/api/endpoints/analytics'
 import { taxonomyApi, MODEL_CLASS_SLUG, type TaxFacet } from '@/api/endpoints/taxonomy'
+
+let brushSurface: Heightmap | null = null
+
+function compositeEdit(s: {terrainFeatures:TerrainFeature[];terrainPaths:TerrainPath[];terrainDetail:Heightmap|null;table:Table;terraceStep:number;heightmap:Heightmap|null}, features:TerrainFeature[], paths:TerrainPath[]) {
+  let bounds:TerrainBounds|undefined
+  const include=(b:TerrainBounds)=>{bounds=bounds?unionBounds(bounds,b):b}
+  for(const f of s.terrainFeatures) if(!features.includes(f)) include(featureBounds(f))
+  for(const f of features) if(!s.terrainFeatures.includes(f)) include(featureBounds(f))
+  for(const p of s.terrainPaths) if(!paths.includes(p)) include(pathBounds(p,s.table))
+  for(const p of paths) if(!s.terrainPaths.includes(p)) include(pathBounds(p,s.table))
+  return bounds?compositeHeightmap(features,paths,s.terrainDetail,s.table,s.terraceStep,{target:s.heightmap,bounds}):s.heightmap
+}
 
 /** Build the browse `terms` string from a class + facet-token selection. */
 function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
@@ -90,15 +107,14 @@ export type Instance = {
   level: number        // discrete elevation level of the piece's base (0 = table)
 }
 
-export type SavedLayout = {
-  id: string
-  name: string
-  table: Table
-  instances: Instance[]
-  createdAt: number
-}
+
 
 interface HistoryState {
+  physicalDetails: PhysicalDetail[]
+  table: Table
+  tableMaterial: string
+  terraceStep: number
+  printProfile: PrintProfile
   instances: Instance[]
   selectedInstanceId: string | null
   // Terrain sculpt + texture painting are part of the same undo timeline as
@@ -142,7 +158,15 @@ export interface BasketItem {
   repeatQty?: number
 }
 
-interface AppState {
+export interface AppState {
+  detailArmed: PhysicalDetail['kind'] | null
+  selectedDetailId: string | null
+  armDetail: (kind: PhysicalDetail['kind'] | null) => void
+  selectDetail: (id: string | null) => void
+  placeDetail: (x: number, z: number) => void
+  moveDetailLive: (id: string, x: number, z: number) => void
+  physicalDetails: PhysicalDetail[]
+  setPhysicalDetails: (details: PhysicalDetail[]) => void
   table: Table
   scene: THREE.Scene | null
   camera: THREE.PerspectiveCamera | null
@@ -186,18 +210,21 @@ interface AppState {
   // consumer (ThreeStage, tile export) reads. This keeps their contract (a
   // single final Heightmap | null) completely unchanged by the stamp system.
   heightmap: Heightmap | null       // derived/cached — see compositeHeightmap()
+  printProfile: PrintProfile
+  setPrintProfile: (profile: PrintProfile) => void
   terrainDetail: Heightmap | null   // the freehand-brush layer (null = untouched)
   terrainFeatures: TerrainFeature[] // landform stamps (hill/plateau)
-  terrainPaths: TerrainPath[]       // drawn ditches
-  /** A ditch being drawn — one point per click so far, not yet committed to terrainPaths. */
-  pathDrawing: { points: Array<{ x: number; z: number }> } | null
+  terrainPaths: TerrainPath[]       // drawn ditch/road/cliff/shoreline paths
+  /** A path being drawn — one point per click so far, not yet committed to terrainPaths. */
+  pathDrawing: { points: Array<{ x: number; z: number }>; branchFrom?: {pathId: string; pointIndex: number} } | null
   terraceStep: number               // metres; 0 = smooth/continuous (not undoable — a display setting, like tableMaterial)
   selectedFeatureId: string | null  // point stamp currently shown in the landform property panel
-  selectedPathId: string | null     // ditch currently shown in the landform property panel
-  landformArmed: TerrainFeatureType | 'ditch' | null // next table click places/draws this
+  selectedPathId: string | null     // path currently shown in the landform property panel
+  landformArmed: TerrainFeatureType | TerrainPathKind | null // next table click places/draws this
   terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt/paint brush
   brushRadius: number          // metres
   brushStrength: number        // 0..1
+  terrainInteractive: boolean // transient slider interaction; never saved or exported
   terrainRev: number           // bumped on every sculpt so the scene re-syncs
 
   // Ground texture painting (an overlay of table materials brushed onto the surface)
@@ -251,10 +278,11 @@ interface AppState {
   setPaintMaterial: (id: string) => void
   /**
    * Arm a landform tool: 'hill'/'plateau' places one on the next table click;
-   * 'ditch' starts point-by-point path drawing instead (see actions below).
-   * Clears the brush/placement tools and any other landform selection.
+   * 'ditch'/'road'/'cliff'/'shoreline' start point-by-point path drawing
+   * instead (see actions below). Clears the brush/placement tools and any
+   * other landform selection.
    */
-  setLandformArmed: (type: TerrainFeatureType | 'ditch' | null) => void
+  setLandformArmed: (type: TerrainFeatureType | TerrainPathKind | null) => void
   /** Select a placed point stamp for the landform property panel (null = none). */
   setSelectedFeature: (id: string | null) => void
   /** Select a placed ditch for the landform property panel (null = none). */
@@ -288,20 +316,23 @@ interface AppState {
     /** Delete a stamp — one-shot, commits history immediately. */
     removeTerrainFeature: (id: string) => void
 
-    // Ditch path drawing (Manor-Lords-road style: click, click, click, Finish).
-    /** Add a point to the ditch being drawn — starts a new draw if none is in progress. */
+    // Path drawing (Manor-Lords-road style: click, click, click, Finish) —
+    // shared by ditch/road/cliff/shoreline, which only differ in cross-section
+    // maths (terrainPaths.ts) and default params/UI.
+    /** Add a point to the path being drawn — starts a new draw if none is in progress. */
     addPathPoint: (worldX: number, worldZ: number) => void
+    startPathBranch: (pathId: string, pointIndex: number) => void
     /** Remove the last placed point (e.g. Backspace) — clears the draw if that was the only one. */
     undoLastPathPoint: () => void
-    /** Commit the in-progress draw as a TerrainPath (needs >=2 points) and select it, or no-op/cancel if too short. */
+    /** Commit the in-progress draw (using the armed kind) as a TerrainPath (needs >=2 points) and select it, or no-op/cancel if too short. */
     finishPathDraw: () => void
     /** Discard the in-progress draw without committing anything. */
     cancelPathDraw: () => void
-    /** Reposition/resize a committed ditch WITHOUT committing history — same live-drag pattern as stamps. */
-    updateTerrainPathLive: (id: string, patch: Partial<Pick<TerrainPath, 'channelWidth' | 'bermWidth' | 'bermHeight'>>) => void
-    /** Translate every point of a committed ditch by (dx, dz), live (no history) — for dragging the whole path. */
+    /** Reposition/resize/reheight a committed path WITHOUT committing history — same live-drag pattern as stamps. */
+    updateTerrainPathLive: (id: string, patch: Partial<Omit<TerrainPath, 'id' | 'kind' | 'points'>>) => void
+    /** Translate every point of a committed path by (dx, dz), live (no history) — for dragging the whole path. */
     moveTerrainPathLive: (id: string, dx: number, dz: number) => void
-    /** Delete a ditch — one-shot, commits history immediately. */
+    /** Delete a path — one-shot, commits history immediately. */
     removeTerrainPath: (id: string) => void
 
     /** Clear all painted ground texture. */
@@ -338,8 +369,6 @@ interface AppState {
     canRedo: () => boolean
     
     // Save/Load
-    saveLayout: (name: string) => string
-    loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
     applyLayout: (data: {
       table: Table
@@ -348,13 +377,11 @@ interface AppState {
       terrainDetail?: Heightmap | null
       terrainFeatures?: TerrainFeature[]
       terrainPaths?: TerrainPath[]
+      physicalDetails?: PhysicalDetail[]
       terraceStep?: number
       paint?: PaintMap | null
+      printProfile?: PrintProfile
     }) => void
-    getSavedLayouts: () => SavedLayout[]
-    deleteLayout: (id: string) => void
-    exportLayout: () => string
-    importLayout: (json: string) => void
     
     // Basket
     addToBasket: (assetId: string, quantity?: number) => void
@@ -371,6 +398,9 @@ interface AppState {
 function saveHistory(state: AppState): Partial<AppState> {
   const newHistory = state.history.slice(0, state.historyIndex + 1)
   newHistory.push({
+    physicalDetails: state.physicalDetails.map(f => ({ ...f })),
+    table: { ...state.table }, tableMaterial: state.tableMaterial,
+    terraceStep: state.terraceStep, printProfile: { ...state.printProfile },
     instances: JSON.parse(JSON.stringify(state.instances)),
     selectedInstanceId: state.selectedInstanceId,
     terrainDetail: cloneHeightmap(state.terrainDetail),
@@ -392,6 +422,39 @@ function saveHistory(state: AppState): Partial<AppState> {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  detailArmed: null,
+  selectedDetailId: null,
+  armDetail: (kind) => set({detailArmed:kind, selectedDetailId:null, selectedFeatureId:null, selectedPathId:null, selectedAssetId:null, selectedInstanceId:null, selectedInstanceIds:[], landformArmed:null,pathDrawing:null,terrainTool:'none'}),
+  selectDetail: (id) => set({selectedDetailId:id,detailArmed:null,selectedFeatureId:null,selectedPathId:null,selectedInstanceId:null,selectedInstanceIds:[],selectedAssetId:null,landformArmed:null,pathDrawing:null,terrainTool:'none'}),
+  placeDetail: (x,z) => {
+    const s=get();if(!s.detailArmed||s.readOnly)return
+    const f={...defaultPhysicalDetail(s.detailArmed),x,z}
+    s.setPhysicalDetails([...s.physicalDetails,f]);set({detailArmed:null,selectedDetailId:f.id})
+  },
+  moveDetailLive: (id,x,z) => set(s => {
+    if(s.readOnly||!Number.isFinite(x)||!Number.isFinite(z))return {}
+    const physicalDetails=s.physicalDetails.map(f=>f.id===id?{...f,x:Math.max(-s.table.width/2,Math.min(s.table.width/2,x)),z:Math.max(-s.table.height/2,Math.min(s.table.height/2,z))}:f)
+    return {physicalDetails,terrainRev:s.terrainRev+1}
+  }),
+  physicalDetails: [],
+  setPhysicalDetails: (details) => {
+    const parsed = physicalDetailSchema.array().max(128).parse(details)
+    const s = get()
+    if (parsed.some(f => Math.abs(f.x) > s.table.width / 2 || Math.abs(f.z) > s.table.height / 2))
+      throw new Error('Detail centres must lie on the table')
+    if (new Set([...s.terrainFeatures, ...s.terrainPaths, ...s.instances, ...parsed].map(f => f.id)).size !== s.terrainFeatures.length + s.terrainPaths.length + s.instances.length + parsed.length)
+      throw new Error('Authored objects must have unique IDs')
+    s.actions.ensureInitialHistory()
+    set(current => {
+      const next = { ...current, physicalDetails: parsed, terrainRev: current.terrainRev + 1 }
+      return { physicalDetails: parsed, terrainRev: next.terrainRev, ...saveHistory(next) }
+    })
+  },
+  printProfile: { ...DEFAULT_PRINT },
+  setPrintProfile: (profile) => set(s => {
+    const next = { ...s, printProfile: printSchema.parse(profile) }
+    return { printProfile: next.printProfile, ...saveHistory(next) }
+  }),
   // gridSize is the snap/movement increment in metres (also the visible minor-line
   // spacing — see scene/helpers.ts GridHelper). 0.0127m = 1/2" — halved from 1" so
   // pieces can be nudged into finer positions.
@@ -434,6 +497,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   terrainTool: 'none',
   brushRadius: 0.12,
   brushStrength: 0.5,
+  terrainInteractive: false,
   terrainRev: 0,
 
   paint: null,
@@ -471,11 +535,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ pendingCollab: null })
   },
 
-  setTable: (t) => set(s => ({ table: { ...s.table, ...t } })),
+  setTable: (t) => set(s => {
+    const table = { ...s.table, ...t }
+    if (!(table.width >= 0.05 && table.width <= 4 && table.height >= 0.05 && table.height <= 4)) return {}
+    const resized = resizeTerrain(s, table)
+    const next = { ...s, ...resized, table }
+    return { ...resized, table, terrainRev: s.terrainRev + 1, paintRev: s.paintRev + 1, ...saveHistory(next) }
+  }),
   setRefs: (refs) => set(refs as any),
   // Placement and terrain sculpting are mutually exclusive — picking a model to
   // place leaves sculpt mode (and any armed landform stamp).
   setSelectedAsset: (id) => set(s => ({
+    detailArmed:null, selectedDetailId:null, selectedFeatureId:null, selectedPathId:null,
     selectedAssetId: id,
     terrainTool: id ? 'none' : s.terrainTool,
     landformArmed: id ? null : s.landformArmed,
@@ -496,7 +567,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     s.placementLevel === level && s.placementManual === manual
       ? {}
       : { placementLevel: level, placementManual: manual }),
-  setTableMaterial: (id) => set({ tableMaterial: id }),
+  setTableMaterial: (id) => set(s => ({ tableMaterial: id, ...saveHistory({ ...s, tableMaterial: id }) })),
 
   setTerrainTool: (tool) => {
     // Entering a sculpt/paint tool clears any pending model placement AND any
@@ -509,7 +580,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.ensurePaintMap()
       set({ selectedAssetId: null, landformArmed: null, pathDrawing: null })
     }
-    set({ terrainTool: tool })
+    set({ terrainTool: tool, detailArmed:null, selectedDetailId:null, selectedFeatureId:null, selectedPathId:null })
   },
   setBrush: (patch) => set(s => ({
     brushRadius: patch.radius != null ? patch.radius : s.brushRadius,
@@ -517,23 +588,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   })),
   setPaintMaterial: (id) => set({ paintMaterial: id }),
   setLandformArmed: (type) => set(s => ({
+    detailArmed:null, selectedDetailId:null, selectedFeatureId:null, selectedPathId:null,
     landformArmed: type,
     // Arming a stamp leaves brush/paint/placement mode, same mutual exclusion
-    // as the other tools. Switching to/away from any tool abandons an
-    // in-progress ditch draw rather than silently keeping it half-finished.
-    pathDrawing: type === 'ditch' ? s.pathDrawing : null,
+    // as the other tools. Switching to/away from any path tool abandons an
+    // in-progress draw rather than silently keeping it half-finished.
+    pathDrawing: type === s.landformArmed ? s.pathDrawing : null,
     terrainTool: type ? 'none' : s.terrainTool,
     selectedAssetId: type ? null : s.selectedAssetId,
   })),
   // Only one landform property panel shows at a time — selecting one kind
   // clears the other, but deselecting (id=null, e.g. the panel's X button)
   // must NOT clobber an unrelated selection that wasn't part of this call.
-  setSelectedFeature: (id) => set(s => ({ selectedFeatureId: id, selectedPathId: id ? null : s.selectedPathId })),
-  setSelectedPath: (id) => set(s => ({ selectedPathId: id, selectedFeatureId: id ? null : s.selectedFeatureId })),
+  setSelectedFeature: (id) => set(s => ({ selectedFeatureId: id, selectedDetailId:null,detailArmed:null, selectedPathId: id ? null : s.selectedPathId })),
+  setSelectedPath: (id) => set(s => ({ selectedPathId: id, selectedDetailId:null,detailArmed:null, selectedFeatureId: id ? null : s.selectedFeatureId })),
   setTerraceStep: (metres) => set(s => ({
     terraceStep: metres,
     heightmap: compositeHeightmap(s.terrainFeatures, s.terrainPaths, s.terrainDetail, s.table, metres),
     terrainRev: s.terrainRev + 1,
+    ...saveHistory({ ...s, terraceStep: metres }),
   })),
 
   actions: {
@@ -554,11 +627,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (s.terrainTool === 'none') return false
       let hm = s.terrainDetail
       if (!heightmapFitsTable(hm, s.table)) hm = createHeightmap(s.table)
-      const changed = applyBrush(hm, s.table, worldX, worldZ, s.terrainTool, s.brushRadius, s.brushStrength)
+      const bounds={minX:worldX-s.brushRadius,maxX:worldX+s.brushRadius,minZ:worldZ-s.brushRadius,maxZ:worldZ+s.brushRadius}
+      let changed: boolean
+      if(s.terrainTool==='raise'||s.terrainTool==='lower') {
+        changed=applyBrush(hm,s.table,worldX,worldZ,s.terrainTool,s.brushRadius,s.brushStrength)
+      } else {
+        // Evaluate only the brush and its neighbour halo into reusable scratch storage.
+        if(!heightmapFitsTable(brushSurface,s.table)) brushSurface=createHeightmap(s.table)
+        const surface=brushSurface
+        const b=gridBounds(surface,s.table,bounds,1)
+        for(let j=b.j0;j<=b.j1;j++) for(let i=b.i0;i<=b.i1;i++) {
+          const x=-s.table.width/2+i/(surface.cols-1)*s.table.width,z=-s.table.height/2+j/(surface.rows-1)*s.table.height
+          surface.heights[j*surface.cols+i]=evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,hm,s.table,0,x,z)
+        }
+        changed=applyBrush(surface,s.table,worldX,worldZ,s.terrainTool,s.brushRadius,s.brushStrength,
+          (k,before,after)=>{hm.heights[k]+=after-before})
+      }
       if (changed) {
         set({
           terrainDetail: hm,
-          heightmap: compositeHeightmap(s.terrainFeatures, s.terrainPaths, hm, s.table, s.terraceStep),
+          heightmap: compositeHeightmap(s.terrainFeatures, s.terrainPaths, hm, s.table, s.terraceStep, {target:s.heightmap,bounds}),
           terrainRev: s.terrainRev + 1,
         })
       }
@@ -573,7 +661,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const terrainFeatures = [...s.terrainFeatures, f]
         const next = {
           terrainFeatures,
-          heightmap: compositeHeightmap(terrainFeatures, s.terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, terrainFeatures, s.terrainPaths),
           terrainRev: s.terrainRev + 1,
           selectedFeatureId: f.id,
           selectedPathId: null,
@@ -596,7 +684,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const terrainFeatures = s.terrainFeatures.map(f => f.id === id ? { ...f, ...clamped } : f)
         return {
           terrainFeatures,
-          heightmap: compositeHeightmap(terrainFeatures, s.terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, terrainFeatures, s.terrainPaths),
           terrainRev: s.terrainRev + 1,
         }
       })
@@ -607,7 +695,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const terrainFeatures = s.terrainFeatures.filter(f => f.id !== id)
         const next = {
           terrainFeatures,
-          heightmap: compositeHeightmap(terrainFeatures, s.terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, terrainFeatures, s.terrainPaths),
           terrainRev: s.terrainRev + 1,
           selectedFeatureId: s.selectedFeatureId === id ? null : s.selectedFeatureId,
         }
@@ -615,17 +703,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     },
 
-    // ---- Ditch path drawing ----
+    // ---- Path drawing (ditch/road/cliff/shoreline) ----
     // Non-deforming while in progress (ThreeStage draws a flat preview
     // ribbon) — nothing touches terrainPaths/heightmap until finishPathDraw.
+    startPathBranch: (pathId,pointIndex) => {
+      const s=get(),p=s.terrainPaths.find(p=>p.id===pathId)
+      if(s.readOnly||s.pathDrawing||!p||!['trench','ditch','shoreline'].includes(p.kind)||!p.points[pointIndex])return
+      set({landformArmed:p.kind,detailArmed:null,selectedDetailId:null,selectedFeatureId:null,selectedPathId:p.id,selectedAssetId:null,selectedInstanceId:null,selectedInstanceIds:[],terrainTool:'none',pathDrawing:{points:[{...p.points[pointIndex]}],branchFrom:{pathId,pointIndex}}})
+    },
     addPathPoint: (worldX, worldZ) => {
       const s = get()
-      if (s.landformArmed !== 'ditch') return
+      if (!isPathKind(s.landformArmed)) return
+      if((s.pathDrawing?.points.length??0)>=MAX_DRAW_POINTS){toast.error('Finish this path before adding more points.');return}
       const hw = s.table.width / 2, hh = s.table.height / 2
       const point = { x: THREE.MathUtils.clamp(worldX, -hw, hw), z: THREE.MathUtils.clamp(worldZ, -hh, hh) }
       set(st => ({
         pathDrawing: st.pathDrawing
-          ? { points: [...st.pathDrawing.points, point] }
+          ? { ...st.pathDrawing, points: [...st.pathDrawing.points, point] }
           : { points: [point] },
       }))
     },
@@ -634,7 +728,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(s => {
         if (!s.pathDrawing || s.pathDrawing.points.length === 0) return {}
         const points = s.pathDrawing.points.slice(0, -1)
-        return { pathDrawing: points.length ? { points } : null }
+        return { pathDrawing: points.length ? { ...s.pathDrawing, points } : null }
       })
     },
 
@@ -646,14 +740,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ pathDrawing: null, landformArmed: null })
         return
       }
-      const path = defaultPath('ditch', points)
+      const kind: TerrainPathKind = isPathKind(s.landformArmed) ? s.landformArmed : 'ditch'
+      const fresh = defaultPath(kind, simplifyPath(points))
+      const connection=s.pathDrawing?.branchFrom
+      const parent=connection?s.terrainPaths.find(p=>p.id===connection.pathId):undefined
+      const path: TerrainPath=parent?{...parent,id:fresh.id,points:fresh.points,connection:{...connection!}}:fresh
+      try {validateTerrainPaths([...s.terrainPaths,path],s.table)} catch(e) {toast.error(String(e));return}
       set(st => {
         const terrainPaths = [...st.terrainPaths, path]
         const next = {
           terrainPaths,
           pathDrawing: null,
           landformArmed: null,
-          heightmap: compositeHeightmap(st.terrainFeatures, terrainPaths, st.terrainDetail, st.table, st.terraceStep),
+          heightmap: compositeEdit(st, st.terrainFeatures, terrainPaths),
           terrainRev: st.terrainRev + 1,
           selectedPathId: path.id,
           selectedFeatureId: null,
@@ -667,9 +766,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     updateTerrainPathLive: (id, patch) => {
       set(s => {
         const terrainPaths = s.terrainPaths.map(p => p.id === id ? { ...p, ...patch } : p)
+        try {validateTerrainPaths(terrainPaths,s.table)} catch {return {}}
         return {
           terrainPaths,
-          heightmap: compositeHeightmap(s.terrainFeatures, terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, s.terrainFeatures, terrainPaths),
           terrainRev: s.terrainRev + 1,
         }
       })
@@ -677,10 +777,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     moveTerrainPathLive: (id, dx, dz) => {
       set(s => {
-        const terrainPaths = s.terrainPaths.map(p => p.id === id ? translatePath(p, dx, dz, s.table) : p)
+        const terrainPaths = translateConnectedPaths(s.terrainPaths,id,dx,dz,s.table)
+        try {validateTerrainPaths(terrainPaths,s.table)} catch {return {}}
         return {
           terrainPaths,
-          heightmap: compositeHeightmap(s.terrainFeatures, terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, s.terrainFeatures, terrainPaths),
           terrainRev: s.terrainRev + 1,
         }
       })
@@ -688,10 +789,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     removeTerrainPath: (id) => {
       set(s => {
-        const terrainPaths = s.terrainPaths.filter(p => p.id !== id)
+        const terrainPaths = s.terrainPaths.filter(p => p.id !== id).map(p=>p.connection?.pathId===id?{...p,connection:undefined}:p)
         const next = {
           terrainPaths,
-          heightmap: compositeHeightmap(s.terrainFeatures, terrainPaths, s.terrainDetail, s.table, s.terraceStep),
+          heightmap: compositeEdit(s, s.terrainFeatures, terrainPaths),
           terrainRev: s.terrainRev + 1,
           selectedPathId: s.selectedPathId === id ? null : s.selectedPathId,
         }
@@ -718,7 +819,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // "Reset terrain" clears both layers — the freehand detail AND every landform
     // stamp — back to a flat table. (Confirmed via a dialog in the UI already.)
-    resetTerrain: () => set(s => ({
+    resetTerrain: () => set(s => {
+      const next = {
+      physicalDetails: [],
+      selectedDetailId:null,detailArmed:null,
       terrainDetail: createHeightmap(s.table),
       terrainFeatures: [],
       terrainPaths: [],
@@ -727,9 +831,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedFeatureId: null,
       selectedPathId: null,
       terrainRev: s.terrainRev + 1,
-    })),
+      }
+      return { ...next, ...saveHistory({ ...s, ...next }) }
+    }),
 
-    resetPaint: () => set(s => ({ paint: createPaintMap(s.table), paintRev: s.paintRev + 1 })),
+    resetPaint: () => set(s => {
+      const paint = createPaintMap(s.table)
+      return { paint, paintRev: s.paintRev + 1, ...saveHistory({ ...s, paint }) }
+    }),
 
     // Camera framing is owned by the constrained BuilderCamera in ThreeStage.
     fitView: () => {
@@ -1027,6 +1136,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const terrainFeatures = cloneFeatures(state.terrainFeatures)
       const terrainPaths = clonePaths(state.terrainPaths)
       set({
+        selectedDetailId:null,detailArmed:null,
+        physicalDetails: state.physicalDetails.map(f => ({ ...f })),
+        table: { ...state.table }, tableMaterial: state.tableMaterial, terraceStep: state.terraceStep, printProfile: { ...state.printProfile },
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
@@ -1034,7 +1146,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         terrainFeatures,
         terrainPaths,
         pathDrawing: null,
-        heightmap: compositeHeightmap(terrainFeatures, terrainPaths, terrainDetail, s.table, s.terraceStep),
+        heightmap: compositeHeightmap(terrainFeatures, terrainPaths, terrainDetail, state.table, state.terraceStep),
         selectedFeatureId: null,
         selectedPathId: null,
         paint: clonePaintMap(state.paint),
@@ -1056,6 +1168,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const terrainFeatures = cloneFeatures(state.terrainFeatures)
       const terrainPaths = clonePaths(state.terrainPaths)
       set({
+        selectedDetailId:null,detailArmed:null,
+        physicalDetails: state.physicalDetails.map(f => ({ ...f })),
+        table: { ...state.table }, tableMaterial: state.tableMaterial, terraceStep: state.terraceStep, printProfile: { ...state.printProfile },
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
@@ -1063,7 +1178,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         terrainFeatures,
         terrainPaths,
         pathDrawing: null,
-        heightmap: compositeHeightmap(terrainFeatures, terrainPaths, terrainDetail, s.table, s.terraceStep),
+        heightmap: compositeHeightmap(terrainFeatures, terrainPaths, terrainDetail, state.table, state.terraceStep),
         selectedFeatureId: null,
         selectedPathId: null,
         paint: clonePaintMap(state.paint),
@@ -1087,45 +1202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     canUndo: () => get().historyIndex > 0,
     canRedo: () => get().historyIndex < get().history.length - 1,
 
-    saveLayout: (name: string) => {
-      const { table, instances } = get()
-      const id = `layout_${Date.now()}_${Math.random().toString(36).slice(2,9)}`
-      
-      const layout: SavedLayout = {
-        id,
-        name,
-        table: { ...table },
-        instances: JSON.parse(JSON.stringify(instances)),
-        createdAt: Date.now()
-      }
-      
-      const saved = get().actions.getSavedLayouts()
-      saved.push(layout)
-      localStorage.setItem('terrain_layouts', JSON.stringify(saved))
-      
-      return id
-    },
-
-    loadLayout: (id: string) => {
-      const layouts = get().actions.getSavedLayouts()
-      const layout = layouts.find(l => l.id === id)
-      if (!layout) return
-      
-      set(s => ({
-        table: { ...layout.table },
-        instances: JSON.parse(JSON.stringify(layout.instances)),
-        selectedInstanceId: null,
-        ...saveHistory({ 
-          ...s, 
-          instances: JSON.parse(JSON.stringify(layout.instances)),
-          selectedInstanceId: null 
-        })
-      }))
-      get().actions.syncBasketWithTable()
-      get().actions.fitView()
-    },
-
-    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, terrainPaths, terraceStep, paint }) => {
+    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, terrainPaths, physicalDetails = [], terraceStep, paint, printProfile }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
       const detail = terrainDetail ?? null
       const features = terrainFeatures ?? []
@@ -1134,12 +1211,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const pm = paint ?? null
       const hm = compositeHeightmap(features, paths, detail, table, step)
       set((s) => ({
+        printProfile: printProfile ?? DEFAULT_PRINT,
+        selectedDetailId:null,detailArmed:null,
         table: { ...table },
         tableMaterial: tableMaterial ?? s.tableMaterial,
         instances: clean,
         terrainDetail: detail,
         terrainFeatures: features,
         terrainPaths: paths,
+        physicalDetails: physicalDetails.map(f => ({ ...f })),
         pathDrawing: null,
         terraceStep: step,
         heightmap: hm,
@@ -1156,44 +1236,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         history: [],
         historyIndex: -1,
         ...saveHistory({
-          ...s, instances: clean, selectedInstanceId: null,
-          terrainDetail: detail, terrainFeatures: features, terrainPaths: paths, paint: pm,
+          ...s, table, tableMaterial: tableMaterial ?? s.tableMaterial, terraceStep: step, printProfile: printProfile ?? DEFAULT_PRINT, instances: clean, selectedInstanceId: null,
+          terrainDetail: detail, terrainFeatures: features, terrainPaths: paths, physicalDetails: physicalDetails.map(f => ({ ...f })), paint: pm,
           history: [], historyIndex: -1,
         }),
       }))
       get().actions.syncBasketWithTable()
       get().actions.fitView()
-    },
-
-    getSavedLayouts: () => {
-      const saved = localStorage.getItem('terrain_layouts')
-      return saved ? JSON.parse(saved) : []
-    },
-
-    deleteLayout: (id: string) => {
-      const layouts = get().actions.getSavedLayouts().filter(l => l.id !== id)
-      localStorage.setItem('terrain_layouts', JSON.stringify(layouts))
-    },
-
-    exportLayout: () => {
-      const { table, instances } = get()
-      return JSON.stringify({ table, instances }, null, 2)
-    },
-
-    importLayout: (json: string) => {
-      try {
-        const { table, instances } = JSON.parse(json)
-        set(s => ({
-          table,
-          instances,
-          selectedInstanceId: null,
-          ...saveHistory({ ...s, instances, selectedInstanceId: null })
-        }))
-        get().actions.syncBasketWithTable()
-        get().actions.fitView()
-      } catch (e) {
-        console.error('Failed to import layout:', e)
-      }
     },
 
     syncBasketWithTable: () => {

@@ -26,6 +26,9 @@ function getSessionId(): string {
 }
 
 const apiClient = axios.create({
+  // Defense in depth: copied marketplace clients cannot send any request,
+  // even if a user changes .env or opens a production-looking model action.
+  adapter: async () => { throw new Error('Marketplace API is disabled in the isolated planner lab') },
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',

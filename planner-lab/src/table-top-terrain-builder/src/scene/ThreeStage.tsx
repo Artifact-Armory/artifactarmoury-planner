@@ -1,3 +1,9 @@
+import { pathPaintChanged } from '../core/paintmap'
+import { FrameQueue } from '../core/frameQueue'
+import { defaultPhysicalDetail, type PhysicalDetail } from '../../../manufacturing/physicalDetails'
+import { compositePathPaint } from '@core/paintmap'
+import type { BattlefieldDocument } from '../../../manufacturing/document'
+import { evaluateTerrainHeight } from '@core/terrainFeatures'
 import React, { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useAppStore } from '@state/store'
@@ -17,17 +23,40 @@ import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY,
 } from '@core/elevation'
 import { buildTableMaterial, bakePaintOverlayCanvas, makePaintOverlayTexture } from '@core/tableMaterials'
-import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight, createHeightmap } from '@core/heightmap'
+import { buildTerrainGeometry, heightmapFitsTable, sampleHeight, createHeightmap } from '@core/heightmap'
 import { paintFitsTable, isBlank as paintIsBlank } from '@core/paintmap'
 import { FEATURE_DEFAULTS, type TerrainFeatureType } from '@core/terrainFeatures'
-import { DITCH_DEFAULTS, distToPath, translatePath, type TerrainPath } from '@core/terrainPaths'
+import {
+  DITCH_DEFAULTS, ROAD_DEFAULTS, CLIFF_DEFAULTS, SHORELINE_DEFAULTS,
+  distToPath, translatePath, isPathKind, type TerrainPath, type TerrainPathKind,
+} from '@core/terrainPaths'
 
 const FEATURE_COLOR: Record<TerrainFeatureType, number> = {
   hill: 0xffcc44,
   plateau: 0x6cc4ff,
 }
-const DITCH_COLOR = 0xff6b4a
-const DITCH_PREVIEW_COLOR = 0xffa07a
+// Colour + preview-tint per path kind. Bands (ditch/road) render a symmetric
+// pair of edge rails; edges (cliff/shoreline) render one rail on the high side.
+const PATH_COLOR: Record<TerrainPathKind, number> = {
+  trench: 0xb89a70,
+  ditch: 0xff6b4a, road: 0x9aa0a6, cliff: 0xb5793f, shoreline: 0x4fc3d9,
+}
+const PATH_PREVIEW_COLOR: Record<TerrainPathKind, number> = {
+  trench: 0xd8ba90,
+  ditch: 0xffa07a, road: 0xc7cbcf, cliff: 0xd9ab73, shoreline: 0x9fe3ee,
+}
+const PATH_IS_BAND: Record<TerrainPathKind, boolean> = {
+  trench: true,
+  ditch: true, road: true, cliff: false, shoreline: false,
+}
+/** Half-width of the drawing-preview footprint, using each kind's defaults (nothing is committed yet, so the actual path's own params don't exist). */
+const PATH_PREVIEW_HALF: Record<TerrainPathKind, number> = {
+  trench: 0.03,
+  ditch: DITCH_DEFAULTS.channelWidth / 2 + DITCH_DEFAULTS.bermWidth,
+  road: ROAD_DEFAULTS.channelWidth / 2 + ROAD_DEFAULTS.bermWidth,
+  cliff: CLIFF_DEFAULTS.transitionWidth,
+  shoreline: SHORELINE_DEFAULTS.transitionWidth,
+}
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
@@ -35,6 +64,7 @@ const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 // wheel, so on touch a drag that would box-select on desktop pans the camera
 // instead — tap still places/selects, via the same movement threshold.
 type LeftDrag =
+  | { kind: 'moveDetail'; id:string; orig:{x:number;z:number}; start:THREE.Vector3; plane:THREE.Plane }
   | { kind: 'none' }
   | { kind: 'maybePlace'; x: number; y: number; touch: boolean }
   | { kind: 'maybe'; mode: 'piece' | 'box'; x: number; y: number; pieceId?: string; ground: THREE.Vector3 | null; additive: boolean; touch: boolean }
@@ -46,6 +76,7 @@ type LeftDrag =
 
 export function ThreeStage() {
   const mountRef = useRef<HTMLDivElement>(null)
+  const [terrainQuality, setTerrainQuality] = useState('')
   const [boxRect, setBoxRect] = useState<{ l: number; t: number; w: number; h: number } | null>(null)
 
   // Engine refs (live outside React's render cycle).
@@ -143,7 +174,7 @@ export function ThreeStage() {
     // Terrain height (m) at a world (x,z) so placed pieces / the ghost ride the surface.
     const terrainHeightAt = (x: number, z: number) => {
       const s = store()
-      return sampleHeight(s.heightmap, s.table, x, z)
+      return evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,x,z)
     }
 
     // ---- instanced placed pieces ----
@@ -205,6 +236,8 @@ export function ThreeStage() {
     // and updatePathPreview().
     const pathGroup = new THREE.Group()
     scene.add(pathGroup)
+    const detailGroup=new THREE.Group(),detailGhost=new THREE.Group()
+    scene.add(detailGroup,detailGhost)
     const pathPreviewGroup = new THREE.Group()
     scene.add(pathPreviewGroup)
 
@@ -252,14 +285,7 @@ export function ThreeStage() {
       nudgeLevel: (delta) => nudgeLevel(delta),
     })
 
-    buildTable()
-    syncFeatureMarkers()
-    syncPaths()
-    applySnapVisual()
-    cam.home(tableBox())
-    // Seed a baseline undo snapshot so the first placement/sculpt/paint is undoable.
-    store().actions.ensureInitialHistory()
-    requestRender()
+
 
     // ---- resize ----
     const onResize = () => {
@@ -275,7 +301,7 @@ export function ThreeStage() {
     // Is the surface painted? (a fitting, non-blank paint map)
     function hasPaint(): boolean {
       const s = store()
-      return paintFitsTable(s.paint, s.table) && !paintIsBlank(s.paint)
+      return s.terrainPaths.length > 0 || (paintFitsTable(s.paint, s.table) && !paintIsBlank(s.paint))
     }
 
     function buildTable() {
@@ -283,6 +309,9 @@ export function ThreeStage() {
       const hm = store().heightmap
       const sculpted = !!(hm && heightmapFitsTable(hm, t))
       const painted = hasPaint()
+      const geometries=new Set<THREE.BufferGeometry>()
+      tableGroup.traverse(obj=>{const m=obj as THREE.Mesh;if(m.geometry)geometries.add(m.geometry);if(m.material)for(const mat of Array.isArray(m.material)?m.material:[m.material])mat.dispose()})
+      geometries.forEach(g=>g.dispose());paintTex?.dispose()
       tableGroup.clear()
       terrainMesh = null
       terrainGeo = null
@@ -291,13 +320,13 @@ export function ThreeStage() {
       paintCanvas = null
       const mat = buildTableMaterial(store().tableMaterial, t)
 
-      if (sculpted || painted) {
+      if (sculpted || painted || store().physicalDetails.length) {
         // World-space grid mesh (Y up), known UVs 0..1 for the paint overlay. Uses
         // the height field when sculpted, otherwise a flat field.
         const field = sculpted ? hm! : createHeightmap(t)
-        const geo = buildTerrainGeometry(field, t)
+        const geo=buildTerrainGeometry(field,t)
         const mesh = new THREE.Mesh(geo, mat)
-        mesh.position.y = -0.004
+        mesh.position.y = 0 // Same surface used by placement sampling and manufacturing.
         mesh.receiveShadow = true
         tableGroup.add(mesh)
         terrainMesh = mesh
@@ -311,7 +340,7 @@ export function ThreeStage() {
         geo.setAttribute('uv2', new THREE.BufferAttribute((geo.attributes.uv as THREE.BufferAttribute).array, 2))
         const plane = new THREE.Mesh(geo, mat)
         plane.rotation.x = -Math.PI / 2
-        plane.position.y = -0.006
+        plane.position.y = 0
         plane.receiveShadow = true
         tableGroup.add(plane)
       }
@@ -331,8 +360,7 @@ export function ThreeStage() {
     // Build the transparent painted-texture overlay sharing the surface geometry.
     function buildPaintOverlay(geo: THREE.BufferGeometry, baseY: number) {
       const s = store()
-      if (!paintFitsTable(s.paint, s.table)) return
-      paintCanvas = bakePaintOverlayCanvas(s.paint, s.table)
+      paintCanvas = bakePaintOverlayCanvas(compositePathPaint(s.paint,s.table,s.terrainPaths), s.table)
       paintTex = makePaintOverlayTexture(paintCanvas)
       const mat = new THREE.MeshStandardMaterial({
         map: paintTex,
@@ -341,6 +369,7 @@ export function ThreeStage() {
         depthWrite: false,
         roughness: 0.95,
         metalness: 0,
+        flatShading: !!geo.userData.hardTerrain,
         side: THREE.DoubleSide,
         polygonOffset: true,
         polygonOffsetFactor: -1,
@@ -354,39 +383,74 @@ export function ThreeStage() {
       paintMesh = mesh
     }
 
-    // sculptAt() fires on every raw pointermove while dragging (can be well over
-    // 60/s on a high-poll-rate mouse or a drawing tablet), and each dab bumps
-    // terrainRev — but syncTerrain() rebuilds the WHOLE grid's normals, not just
-    // the brushed cells. Left uncoalesced that's a full-mesh computeVertexNormals()
-    // several times per rendered frame, which is exactly the stutter a sculpt
-    // stroke should never have. Collapse any number of dabs between frames into
-    // one sync, timed to the frame that actually gets painted.
-    let terrainSyncQueued = false
-    function queueTerrainSync() {
-      if (terrainSyncQueued) return
-      terrainSyncQueued = true
-      requestAnimationFrame(() => {
-        terrainSyncQueued = false
-        syncTerrain()
-        inst.refreshTransforms() // pieces ride the sculpted surface
-        syncFeatureMarkers() // rings sit just above the surface — follow it too
-        syncPaths()
+    // Keep only the newest input and one outstanding worker job. Superseded replies
+    // cannot replace a newer edit, undo, table resize, or completed interaction.
+    const editQueue=new FrameQueue(),cursorQueue=new FrameQueue()
+    let terrainFrame:number|null=null,terrainDirty=false,paintDirty=false,disposed=false
+    let previewId=0,workerBusy=false,previewPending=false
+    let previewWorker:Worker|null=new Worker(new URL('./terrainPreview.worker.ts',import.meta.url),{type:'module'})
+    const isInteracting=()=>store().terrainInteractive||!!engine.current&&(engine.current.sculpting||engine.current.drag.kind==='moveDetail'||engine.current.drag.kind==='moveFeature'||engine.current.drag.kind==='movePath')
+    function previewDocument():BattlefieldDocument {
+      const state=store()
+      return {schemaVersion:1,evaluatorVersion:3,physicalDetails:state.physicalDetails,units:'metres-y-up',id:'preview',name:'Preview',revision:0,seed:1,table:state.table,tableMaterial:state.tableMaterial,terrainFeatures:state.terrainFeatures,terrainPaths:state.terrainPaths,terrainDetail:state.terrainDetail?{...state.terrainDetail,heights:Array.from(state.terrainDetail.heights)}:null,terraceStep:state.terraceStep,paint:null,instances:[],print:state.printProfile}
+    }
+    function sendPreview() {
+      if(disposed||workerBusy||!previewPending||!previewWorker)return
+      workerBusy=true;previewPending=false
+      previewWorker.postMessage({id:previewId,doc:previewDocument(),interactive:isInteracting()})
+    }
+    function installPreview(data:{position:Float32Array;normal:Float32Array;uv:Float32Array;index:Uint16Array|Uint32Array;hard:boolean}) {
+      if(!terrainMesh)return
+      const geo=new THREE.BufferGeometry()
+      geo.setAttribute('position',new THREE.BufferAttribute(data.position,3));geo.setAttribute('normal',new THREE.BufferAttribute(data.normal,3))
+      geo.setAttribute('uv',new THREE.BufferAttribute(data.uv,2));geo.setAttribute('uv2',geo.getAttribute('uv'));geo.setIndex(new THREE.BufferAttribute(data.index,1));geo.userData.hardTerrain=data.hard
+      geo.computeBoundingSphere()
+      const old=terrainGeo;terrainGeo=geo;terrainMesh.geometry=geo
+      const material=terrainMesh.material as THREE.MeshStandardMaterial
+      if(material.flatShading!==data.hard){material.flatShading=data.hard;material.needsUpdate=true}
+      if(paintMesh){paintMesh.geometry=geo;const m=paintMesh.material as THREE.MeshStandardMaterial;if(m.flatShading!==data.hard){m.flatShading=data.hard;m.needsUpdate=true}}
+      old?.dispose();requestRender()
+    }
+    previewWorker.onmessage=event=>{
+      workerBusy=false
+      const data=event.data
+      if(!disposed&&data.id===previewId) {
+        if(data.error) {buildTable();setTerrainQuality('Reduced preview — detailed rebuild failed')}
+        else {installPreview(data);setTerrainQuality(data.interactive?'Reduced quality while editing':'')}
+      }
+      sendPreview()
+    }
+    previewWorker.onerror=()=>{
+      previewWorker?.terminate();previewWorker=null;workerBusy=false
+      setTerrainQuality('Reduced preview — worker unavailable')
+      buildTable()
+    }
+    function queueTerrainSync(surface=true,paint=false) {
+      terrainDirty ||= surface;paintDirty ||= paint
+      if(surface){previewId++;previewPending=true}
+      if(terrainFrame!==null)return
+      terrainFrame=requestAnimationFrame(()=>{
+        terrainFrame=null
+        const surfaceChanged=terrainDirty,paintChanged=paintDirty;terrainDirty=false;paintDirty=false
+        if(surfaceChanged){syncTerrain();inst.refreshTransforms();syncFeatureMarkers();syncPaths()}
+        if(paintChanged)syncPaint()
         requestRender()
       })
     }
-
-    // Re-sync the surface mesh after a sculpt (or when the heightmap appears/clears).
     function syncTerrain() {
-      const s = store()
-      const sculpted = !!(s.heightmap && heightmapFitsTable(s.heightmap, s.table))
-      const painted = hasPaint()
-      const needsGrid = sculpted || painted
-      if (needsGrid !== !!terrainMesh) {
-        buildTable() // switch between flat plane and grid mesh
-      } else if (sculpted && terrainGeo && s.heightmap) {
-        updateTerrainGeometry(terrainGeo, s.heightmap) // shared geo → overlay follows
-      }
-      requestRender()
+      const s=store(),needsGrid=!!s.heightmap||hasPaint()||s.physicalDetails.length>0
+      if(needsGrid!==!!terrainMesh)buildTable()
+      if(previewWorker)sendPreview()
+      else buildTable()
+    }
+    function finishTerrainInput() {
+      editQueue.flush()
+      // Ending interaction requests the 10 mm / exact-boundary worker preview.
+      queueTerrainSync()
+    }
+    function clearMarkers(group:THREE.Group) {
+      group.traverse(obj=>{const m=obj as THREE.Mesh;if(m.geometry)m.geometry.dispose();if(m.material)for(const mat of Array.isArray(m.material)?m.material:[m.material])mat.dispose()})
+      group.clear()
     }
 
     // Re-bake the painted overlay after a paint stroke (or when it appears/clears).
@@ -394,8 +458,9 @@ export function ThreeStage() {
       const painted = hasPaint()
       if (painted !== !!paintMesh) {
         buildTable() // add/remove the overlay (and switch flat plane ↔ grid mesh)
+        queueTerrainSync() // restore exact boundaries after replacing the shared mesh
       } else if (painted && paintCanvas && paintTex) {
-        bakePaintOverlayCanvas(store().paint!, store().table, paintCanvas)
+        bakePaintOverlayCanvas(compositePathPaint(store().paint,store().table,store().terrainPaths), store().table, paintCanvas)
         paintTex.needsUpdate = true
       }
       requestRender()
@@ -405,6 +470,16 @@ export function ThreeStage() {
     // sculpt the field; paint/erase tools stamp the texture overlay. A changed dab
     // flags the stroke so pointer-up records one undo step.
     function sculptAt(e: { clientX: number; clientY: number }) {
+      const point={clientX:e.clientX,clientY:e.clientY},tool=store().terrainTool
+      editQueue.enqueue(()=>{
+        if(!engine.current||store().terrainTool!==tool)return
+        const start=performance.now()
+        applySculptAt(point)
+        updateBrushRing(point)
+        if(performance.now()-start>16.7)setTerrainQuality('Reduced quality while editing')
+      })
+    }
+    function applySculptAt(e: { clientX: number; clientY: number }) {
       const gp = groundPoint(e)
       if (!gp) return
       const tool = store().terrainTool
@@ -419,10 +494,10 @@ export function ThreeStage() {
       const s = store()
       // While a point-stamp landform (hill/plateau) is armed, the same ring
       // previews its footprint (radius + colour) at the point it'll be placed
-      // — one less concept to learn than a second cursor indicator. The ditch
-      // is a drawn path, not a circular stamp, so it has its own preview
+      // — one less concept to learn than a second cursor indicator. A drawn
+      // path (ditch/road/cliff/shoreline) has its own preview
       // (updatePathPreview) instead of this ring.
-      const armed = s.landformArmed !== 'ditch' ? s.landformArmed : null
+      const armed = !isPathKind(s.landformArmed) ? s.landformArmed : null
       const active = s.terrainTool !== 'none' || !!armed
       const gp = active ? groundPoint(e) : null
       if (!gp) { if (brushRing.visible) { brushRing.visible = false; requestRender() } return }
@@ -448,7 +523,7 @@ export function ThreeStage() {
     }
 
     function pointsToWorld(points: Array<{ x: number; z: number }>, s: ReturnType<typeof store>, yOffset: number): THREE.Vector3[] {
-      return points.map((p) => new THREE.Vector3(p.x, sampleHeight(s.heightmap, s.table, p.x, p.z) + yOffset, p.z))
+      return points.map((p) => new THREE.Vector3(p.x, evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,p.x,p.z) + yOffset, p.z))
     }
 
     function buildPathLine(pts: THREE.Vector3[], color: number, opacity: number, dashed: boolean): THREE.Line {
@@ -468,12 +543,12 @@ export function ThreeStage() {
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false }),
       )
       dot.rotation.x = -Math.PI / 2
-      dot.position.set(p.x, sampleHeight(s.heightmap, s.table, p.x, p.z) + yOffset, p.z)
+      dot.position.set(p.x, evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,p.x,p.z) + yOffset, p.z)
       dot.renderOrder = 10
       return dot
     }
 
-    /** Nearest committed ditch whose berm footprint (+ a little slack) contains the world point, or null. */
+    /** Nearest committed path whose footprint (+ a little slack) contains the world point, or null. */
     function pickPathAt(gp: THREE.Vector3 | null): string | null {
       if (!gp) return null
       const { terrainPaths } = store()
@@ -481,47 +556,86 @@ export function ThreeStage() {
       let best: { id: string; dist: number } | null = null
       for (const p of terrainPaths) {
         const d = distToPath(p.points, gp.x, gp.z)
-        const threshold = p.channelWidth / 2 + p.bermWidth + slack
+        const threshold = (PATH_IS_BAND[p.kind] ? p.channelWidth / 2 + p.bermWidth : p.transitionWidth) + slack
         if (d <= threshold && (!best || d < best.dist)) best = { id: p.id, dist: d }
       }
       return best?.id ?? null
     }
 
-    // Rebuild committed-ditch outlines: a dashed centreline + two rails at the
-    // trench edges (channelWidth/2 either side), following the actual sampled
-    // surface so they hug the real (raised-bank) terrain.
+    // Rebuild committed-path outlines. Band kinds (ditch/road): a dashed
+    // centreline + two rails at the core's edges (channelWidth/2 either
+    // side). Edge kinds (cliff/shoreline): a solid centreline (it's a
+    // permanent boundary, not a hollow channel) + one dashed rail on the
+    // HIGH side marking where the ramp finishes (offset by transitionWidth,
+    // using highSide so it lands on the same side edgeContribution() treats
+    // as high — see nearestSegmentSide's doc comment). All follow the actual
+    // sampled surface so they hug the real (raised/ramped) terrain.
+    let markerPaths:ReturnType<typeof store>['terrainPaths']|null=null,markerPathSelection:string|null=null
     function syncPaths() {
       const s = store()
-      pathGroup.clear()
+      if(markerPaths===s.terrainPaths&&markerPathSelection===s.selectedPathId) {
+        pathGroup.traverse(obj=>{
+          if(obj instanceof THREE.Line) {
+            const pos=obj.geometry.getAttribute('position') as THREE.BufferAttribute
+            const offsets=obj.userData.surfaceOffsets as number[]
+            for(let i=0;i<pos.count;i++)pos.setY(i,evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,pos.getX(i),pos.getZ(i))+offsets[i])
+            pos.needsUpdate=true;obj.geometry.computeBoundingSphere();if(obj.material instanceof THREE.LineDashedMaterial)obj.computeLineDistances()
+          } else if(obj instanceof THREE.Mesh) obj.position.y=evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,obj.position.x,obj.position.z)+obj.userData.surfaceOffset
+        })
+        return
+      }
+      markerPaths=s.terrainPaths;markerPathSelection=s.selectedPathId
+      clearMarkers(pathGroup)
       for (const p of s.terrainPaths) {
         if (p.points.length < 2) continue
         const selected = s.selectedPathId === p.id
-        pathGroup.add(buildPathLine(pointsToWorld(p.points, s, 0.016), DITCH_COLOR, selected ? 1 : 0.55, true))
-        const half = p.channelWidth / 2
-        pathGroup.add(buildPathLine(pointsToWorld(perpOffset(p.points, half), s, 0.015), DITCH_COLOR, selected ? 0.9 : 0.4, false))
-        pathGroup.add(buildPathLine(pointsToWorld(perpOffset(p.points, -half), s, 0.015), DITCH_COLOR, selected ? 0.9 : 0.4, false))
-        for (const pt of p.points) pathGroup.add(pointDot(pt, s, DITCH_COLOR, selected ? 0.95 : 0.5, 0.017))
+        if(!selected)continue
+        const color = PATH_COLOR[p.kind]
+        if (PATH_IS_BAND[p.kind]) {
+          pathGroup.add(buildPathLine(pointsToWorld(p.points, s, 0.016), color, selected ? 1 : 0.55, true))
+          const half = p.channelWidth / 2
+          pathGroup.add(buildPathLine(pointsToWorld(perpOffset(p.points, half), s, 0.015), color, selected ? 0.9 : 0.4, false))
+          pathGroup.add(buildPathLine(pointsToWorld(perpOffset(p.points, -half), s, 0.015), color, selected ? 0.9 : 0.4, false))
+        } else {
+          pathGroup.add(buildPathLine(pointsToWorld(p.points, s, 0.016), color, selected ? 1 : 0.6, false))
+          const crest = perpOffset(p.points, p.highSide * p.transitionWidth)
+          pathGroup.add(buildPathLine(pointsToWorld(crest, s, 0.015), color, selected ? 0.85 : 0.35, true))
+          for (const pt of crest) pathGroup.add(pointDot(pt, s, color, selected ? 0.7 : 0.3, 0.016))
+        }
+        for (const pt of p.points) pathGroup.add(pointDot(pt, s, color, selected ? 0.95 : 0.5, 0.017))
       }
+      pathGroup.traverse(obj=>{
+        if(obj instanceof THREE.Line){const pos=obj.geometry.getAttribute('position') as THREE.BufferAttribute;obj.userData.surfaceOffsets=Array.from({length:pos.count},(_,i)=>pos.getY(i)-evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,pos.getX(i),pos.getZ(i)))}
+        else if(obj instanceof THREE.Mesh)obj.userData.surfaceOffset=obj.position.y-evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,obj.position.x,obj.position.z)
+      })
     }
 
-    // Live preview while drawing a ditch — never touches terrainPaths/the
-    // heightmap, just shows where it'll go (centreline + full footprint at
-    // the default width) from the placed points out to the live cursor.
+    // Live preview while drawing a path — never touches terrainPaths/the
+    // heightmap, just shows where it'll go (centreline + footprint at the
+    // armed kind's default width) from the placed points out to the live
+    // cursor. Bands preview both edges; edges (cliff/shoreline) preview just
+    // the default high-side rail (highSide defaults to +1 until committed).
     function updatePathPreview(e: { clientX: number; clientY: number } | null) {
       const s = store()
-      pathPreviewGroup.clear()
-      if (s.landformArmed !== 'ditch') { requestRender(); return }
+      clearMarkers(pathPreviewGroup)
+      if (!isPathKind(s.landformArmed)) { requestRender(); return }
+      const kind = s.landformArmed
+      const color = PATH_PREVIEW_COLOR[kind]
       const gp = e ? groundPoint(e) : null
       const drawn = s.pathDrawing?.points ?? []
       const preview = gp ? [...drawn, { x: gp.x, z: gp.z }] : drawn
       if (preview.length >= 2) {
-        pathPreviewGroup.add(buildPathLine(pointsToWorld(preview, s, 0.02), DITCH_PREVIEW_COLOR, 0.9, true))
-        const half = DITCH_DEFAULTS.channelWidth / 2 + DITCH_DEFAULTS.bermWidth
-        pathPreviewGroup.add(buildPathLine(pointsToWorld(perpOffset(preview, half), s, 0.019), DITCH_PREVIEW_COLOR, 0.4, false))
-        pathPreviewGroup.add(buildPathLine(pointsToWorld(perpOffset(preview, -half), s, 0.019), DITCH_PREVIEW_COLOR, 0.4, false))
+        pathPreviewGroup.add(buildPathLine(pointsToWorld(preview, s, 0.02), color, 0.9, true))
+        const half = PATH_PREVIEW_HALF[kind]
+        if (PATH_IS_BAND[kind]) {
+          pathPreviewGroup.add(buildPathLine(pointsToWorld(perpOffset(preview, half), s, 0.019), color, 0.4, false))
+          pathPreviewGroup.add(buildPathLine(pointsToWorld(perpOffset(preview, -half), s, 0.019), color, 0.4, false))
+        } else {
+          pathPreviewGroup.add(buildPathLine(pointsToWorld(perpOffset(preview, half), s, 0.019), color, 0.4, true))
+        }
       }
-      for (const pt of drawn) pathPreviewGroup.add(pointDot(pt, s, DITCH_PREVIEW_COLOR, 0.95, 0.021))
-      if (gp) pathPreviewGroup.add(pointDot({ x: gp.x, z: gp.z }, s, DITCH_PREVIEW_COLOR, 0.9, 0.021))
+      for (const pt of drawn) pathPreviewGroup.add(pointDot(pt, s, color, 0.95, 0.021))
+      if (gp) pathPreviewGroup.add(pointDot({ x: gp.x, z: gp.z }, s, color, 0.9, 0.021))
       requestRender()
     }
 
@@ -540,13 +654,20 @@ export function ThreeStage() {
     // Rebuild the stamp marker rings. Called whenever the feature list, the
     // selection, or the composited surface (which the rings sit just above)
     // changes — see queueTerrainSync and the selectedFeatureId subscription.
+    let markerFeatures:ReturnType<typeof store>['terrainFeatures']|null=null,markerFeatureSelection:string|null=null
     function syncFeatureMarkers() {
       const s = store()
-      featureGroup.clear()
+      if(markerFeatures===s.terrainFeatures&&markerFeatureSelection===s.selectedFeatureId){
+        for(const obj of featureGroup.children)obj.position.y=evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,obj.position.x,obj.position.z)+obj.userData.surfaceOffset
+        return
+      }
+      markerFeatures=s.terrainFeatures;markerFeatureSelection=s.selectedFeatureId
+      clearMarkers(featureGroup)
       for (const f of s.terrainFeatures) {
         const selected = s.selectedFeatureId === f.id
+        if(!selected)continue
         const color = FEATURE_COLOR[f.type]
-        const y = sampleHeight(s.heightmap, s.table, f.x, f.z) + 0.015
+        const y = evaluateTerrainHeight(s.terrainFeatures,s.terrainPaths,s.terrainDetail,s.table,s.terraceStep,f.x,f.z) + 0.015
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(f.radius * 0.94, f.radius, 48),
           new THREE.MeshBasicMaterial({
@@ -556,6 +677,7 @@ export function ThreeStage() {
         )
         ring.rotation.x = -Math.PI / 2
         ring.position.set(f.x, y, f.z)
+        ring.userData.surfaceOffset=0.015
         ring.renderOrder = 9
         featureGroup.add(ring)
         if (selected) {
@@ -565,6 +687,7 @@ export function ThreeStage() {
           )
           dot.rotation.x = -Math.PI / 2
           dot.position.set(f.x, y + 0.001, f.z)
+          dot.userData.surfaceOffset=0.016
           dot.renderOrder = 9
           featureGroup.add(dot)
         }
@@ -623,6 +746,51 @@ export function ThreeStage() {
       nx = THREE.MathUtils.clamp(nx, -hw, hw)
       nz = THREE.MathUtils.clamp(nz, -hh, hh)
       return { x: nx, z: nz }
+    }
+
+    function detailOutline(f:PhysicalDetail,group:THREE.Group,color:number) {
+      clearMarkers(group)
+      const box=new THREE.BoxGeometry(f.length/1000,Math.max(f.height,2)/1000,f.width/1000)
+      const edges=new THREE.EdgesGeometry(box);box.dispose()
+      const wire=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color,depthTest:false,transparent:true,opacity:0.9}))
+      const cut=f.kind==='crack'||f.kind==='pothole'
+      wire.position.set(f.x,terrainHeightAt(f.x,f.z)+(f.elevation+(cut?-f.height/2:f.height/2))/1000,f.z)
+      wire.rotation.y=-f.rotation*Math.PI/180;wire.renderOrder=11;group.add(wire)
+    }
+    function syncDetails() {
+      const s=store(),f=s.physicalDetails.find(f=>f.id===s.selectedDetailId)
+      if(f)detailOutline(f,detailGroup,0xffcc44);else clearMarkers(detailGroup)
+      if(!s.detailArmed)clearMarkers(detailGhost)
+    }
+    function updateDetailGhost(e:{clientX:number;clientY:number}) {
+      const s=store();if(!s.detailArmed)return
+      const gp=groundPoint(e);if(!gp)return
+      detailOutline({...defaultPhysicalDetail(s.detailArmed),...snapWorld(gp.x,gp.z)},detailGhost,0x44d07a)
+      setCursor('crosshair');requestRender()
+    }
+    function pickDetail(gp:THREE.Vector3|null) {
+      if(!gp)return null
+      return [...store().physicalDetails].reverse().find(f=>{
+        const a=f.rotation*Math.PI/180,dx=(gp.x-f.x)*1000,dz=(gp.z-f.z)*1000
+        const x=dx*Math.cos(a)+dz*Math.sin(a),z=-dx*Math.sin(a)+dz*Math.cos(a)
+        return Math.abs(x)<=f.length/2+2&&Math.abs(z)<=f.width/2+2
+      })??null
+    }
+    function onBranchPointerDown(e:PointerEvent) {
+      const s=store();if(e.button!==1||s.readOnly||s.pathDrawing)return
+      const p=s.terrainPaths.find(p=>p.id===s.selectedPathId)
+      if(!p||!['trench','ditch','shoreline'].includes(p.kind))return
+      const rect=renderer.domElement.getBoundingClientRect()
+      let best=14,index=-1
+      p.points.forEach((pt,i)=>{
+        const v=new THREE.Vector3(pt.x,terrainHeightAt(pt.x,pt.z)+0.017,pt.z).project(camera)
+        if(v.z<-1||v.z>1)return
+        const distance=Math.hypot(rect.left+(v.x+1)*rect.width/2-e.clientX,rect.top+(1-v.y)*rect.height/2-e.clientY)
+        if(distance<best){best=distance;index=i}
+      })
+      if(index<0)return
+      e.preventDefault();e.stopImmediatePropagation()
+      s.actions.startPathBranch(p.id,index);requestRender()
     }
 
     function assetMap() {
@@ -701,6 +869,8 @@ export function ThreeStage() {
     // ---- left-button pointer state machine ----
     let lastGround: THREE.Vector3 | null = null
     function trackGround(e: PointerEvent) {
+      const s=store(),drag=engine.current!.drag
+      if(s.terrainTool!=='none'||s.landformArmed||s.detailArmed||drag.kind==='moveDetail'||drag.kind==='moveFeature'||drag.kind==='movePath')return
       lastGround = groundPoint(e)
     }
 
@@ -708,6 +878,11 @@ export function ThreeStage() {
     // landed, so the camera owns the gesture now).
     function cancelDrag() {
       const eng = engine.current!
+      editQueue.flush()
+      if(eng.drag.kind==='moveDetail') {
+        const drag=eng.drag,f=store().physicalDetails.find(f=>f.id===drag.id)
+        if(f&&(f.x!==drag.orig.x||f.z!==drag.orig.z))store().actions.commitHistory()
+      }
       if (eng.drag.kind === 'move') inst.clearLive()
       if (eng.drag.kind === 'box') setBoxRect(null)
       eng.drag = { kind: 'none' }
@@ -715,6 +890,7 @@ export function ThreeStage() {
       // the gesture latch is set, so close the undo step here or the brush would
       // stay "down" and keep sculpting after the pinch.
       if (eng.sculpting) {
+        finishTerrainInput()
         eng.sculpting = false
         if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
       }
@@ -749,6 +925,10 @@ export function ThreeStage() {
       const s = store()
 
       // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.
+      if(s.detailArmed) {
+        const gp=groundPoint(e);if(gp){const pos=snapWorld(gp.x,gp.z);s.placeDetail(pos.x,pos.z)}
+        requestRender();return
+      }
       if (s.terrainTool !== 'none') {
         eng.sculpting = true
         eng.strokeChanged = false
@@ -756,10 +936,11 @@ export function ThreeStage() {
         return
       }
 
-      // Ditch armed: Manor-Lords-road style — every click adds a point to the
-      // path being drawn; Finish/Enter (in the panel, or the keydown handler)
-      // commits it. Stays armed across clicks (unlike hill/plateau below).
-      if (s.landformArmed === 'ditch') {
+      // A path tool (ditch/road/cliff/shoreline) is armed: Manor-Lords-road
+      // style — every click adds a point to the path being drawn; Finish/
+      // Enter (in the panel, or the keydown handler) commits it. Stays armed
+      // across clicks (unlike hill/plateau below).
+      if (isPathKind(s.landformArmed)) {
         const gp = groundPoint(e)
         if (gp) store().actions.addPathPoint(gp.x, gp.z)
         requestRender()
@@ -782,6 +963,12 @@ export function ThreeStage() {
       }
       const pieceId = pickPiece(e)
       const gp = groundPoint(e)
+      const detail=pickDetail(gp)
+      if(detail&&gp&&!pieceId) {
+        s.selectDetail(detail.id)
+        eng.drag={kind:'moveDetail',id:detail.id,orig:{x:detail.x,z:detail.z},start:gp.clone(),plane:new THREE.Plane(new THREE.Vector3(0,1,0),-gp.y)}
+        setCursor('grab');requestRender();return
+      }
       if (pieceId) {
         useAppStore.getState().setSelectedFeature(null)
         useAppStore.getState().setSelectedPath(null)
@@ -813,6 +1000,7 @@ export function ThreeStage() {
           inst.setSelection(new Set())
           eng.drag = { kind: 'movePath', id: pathId, startGround: { x: gp.x, z: gp.z }, lastGround: { x: gp.x, z: gp.z } }
         } else {
+          useAppStore.setState({selectedDetailId:null,selectedFeatureId:null,selectedPathId:null})
           eng.drag = { kind: 'maybe', mode: 'box', x: e.clientX, y: e.clientY, ground: gp, additive: e.shiftKey, touch }
         }
       }
@@ -842,19 +1030,27 @@ export function ThreeStage() {
 
       // Terrain sculpt mode: brush ring follows the cursor; drag paints the surface.
       if (store().terrainTool !== 'none') {
-        if (overCanvas || eng.sculpting) updateBrushRing(e)
+        if (!eng.sculpting) {
+          const point={clientX:e.clientX,clientY:e.clientY}
+          cursorQueue.enqueue(()=>updateBrushRing(point))
+        }
         if (eng.sculpting && (e.buttons & 1)) sculptAt(e)
         return
       }
-      // Landform tool armed: preview where/how big it'll be placed. The ditch
-      // draws a path preview (from the last click to the cursor); hill/
+      // Landform tool armed: preview where/how big it'll be placed. A path
+      if(store().detailArmed) {
+        if(overCanvas){const point={clientX:e.clientX,clientY:e.clientY};cursorQueue.enqueue(()=>updateDetailGhost(point))}
+        else {clearMarkers(detailGhost);requestRender()}
+        return
+      }
+      // tool draws a path preview (from the last click to the cursor); hill/
       // plateau show the brush-style radius ring.
-      if (store().landformArmed === 'ditch') {
-        if (overCanvas) updatePathPreview(e)
+      if (isPathKind(store().landformArmed)) {
+        if (overCanvas) {const point={clientX:e.clientX,clientY:e.clientY};cursorQueue.enqueue(()=>updatePathPreview(point))}
         return
       }
       if (store().landformArmed) {
-        if (overCanvas) updateBrushRing(e)
+        if (overCanvas) {const point={clientX:e.clientX,clientY:e.clientY};cursorQueue.enqueue(()=>updateBrushRing(point))}
         return
       }
 
@@ -908,23 +1104,27 @@ export function ThreeStage() {
         }
         setCursor('grabbing')
         requestRender()
-      } else if (eng.drag.kind === 'moveFeature') {
-        const gp = groundPoint(e)
-        if (!gp) return
-        // Live update (no history entry per pixel) — same pattern as the sculpt
-        // brush; the whole drag becomes one undo step on pointerup.
-        store().actions.updateTerrainFeatureLive(eng.drag.id, { x: gp.x, z: gp.z })
+      } else if(eng.drag.kind==='moveDetail') {
+        const point={clientX:e.clientX,clientY:e.clientY}
+        editQueue.enqueue(()=>{
+          const drag=eng.drag;if(drag.kind!=='moveDetail')return
+          raycaster.setFromCamera(ndc(point,ndcTmp),camera)
+          const hit=raycaster.ray.intersectPlane(drag.plane,new THREE.Vector3());if(!hit)return
+          const pos=snapWorld(drag.orig.x+hit.x-drag.start.x,drag.orig.z+hit.z-drag.start.z)
+          store().moveDetailLive(drag.id,pos.x,pos.z)
+        });setCursor('grabbing')
+      } else if (eng.drag.kind === 'moveFeature' || eng.drag.kind === 'movePath') {
+        const point={clientX:e.clientX,clientY:e.clientY}
+        editQueue.enqueue(()=>{
+          const drag=eng.drag
+          if(drag.kind!=='moveFeature'&&drag.kind!=='movePath')return
+          const gp=groundPoint(point);if(!gp)return
+          const start=performance.now()
+          if(drag.kind==='moveFeature')store().actions.updateTerrainFeatureLive(drag.id,{x:gp.x,z:gp.z})
+          else {store().actions.moveTerrainPathLive(drag.id,gp.x-drag.lastGround.x,gp.z-drag.lastGround.z);eng.drag={...drag,lastGround:{x:gp.x,z:gp.z}}}
+          if(performance.now()-start>16.7)setTerrainQuality('Reduced quality while editing')
+        })
         setCursor('grabbing')
-        requestRender()
-      } else if (eng.drag.kind === 'movePath') {
-        const gp = groundPoint(e)
-        if (!gp) return
-        const dx = gp.x - eng.drag.lastGround.x
-        const dz = gp.z - eng.drag.lastGround.z
-        store().actions.moveTerrainPathLive(eng.drag.id, dx, dz)
-        eng.drag = { ...eng.drag, lastGround: { x: gp.x, z: gp.z } }
-        setCursor('grabbing')
-        requestRender()
       } else if (eng.drag.kind === 'box') {
         const l = Math.min(eng.drag.x, e.clientX)
         const t = Math.min(eng.drag.y, e.clientY)
@@ -973,14 +1173,17 @@ export function ThreeStage() {
         }
       }
       if (eng.sculpting) {
+        finishTerrainInput()
         eng.sculpting = false
         // Record the whole stroke as one undoable step (terrain + paint are in the
         // same timeline as placement).
         if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
         return
       }
+      editQueue.flush()
       const d = eng.drag
       eng.drag = { kind: 'none' }
+      if(d.kind==='moveFeature'||d.kind==='movePath'||d.kind==='moveDetail')queueTerrainSync()
 
       if (d.kind === 'pan') return
       if (d.kind === 'maybePlace') {
@@ -1017,6 +1220,11 @@ export function ThreeStage() {
         requestRender()
         return
       }
+      if(d.kind==='moveDetail') {
+        const f=store().physicalDetails.find(f=>f.id===d.id)
+        if(f&&(f.x!==d.orig.x||f.z!==d.orig.z))store().actions.commitHistory()
+        setCursor('grab');requestRender();return
+      }
       if (d.kind === 'moveFeature') {
         // A plain click (no actual movement) just leaves the stamp selected —
         // don't clutter undo with a no-op "move".
@@ -1045,7 +1253,6 @@ export function ThreeStage() {
     // Treat it as a hard reset so nothing is left half-dragged.
     function onPointerCancel(e: PointerEvent) {
       const eng = engine.current!
-      if (e.pointerType !== 'touch') return
       eng.touchIds.delete(e.pointerId)
       if (eng.touchIds.size === 0) eng.gestureLatch = false
       cancelDrag()
@@ -1157,8 +1364,8 @@ export function ThreeStage() {
       }
 
       if (e.ctrlKey || e.metaKey) {
-        if (k === 'z' && !e.shiftKey) { e.preventDefault(); s.actions.undo(); afterStateChange(); return }
-        if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); s.actions.redo(); afterStateChange(); return }
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); editQueue.clear(); eng.sculpting=false; eng.strokeChanged=false; s.actions.undo(); afterStateChange(); return }
+        if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); editQueue.clear(); eng.sculpting=false; eng.strokeChanged=false; s.actions.redo(); afterStateChange(); return }
         if (k === 'd' && s.selectedInstanceIds.length) {
           e.preventDefault()
           const ids = s.actions.duplicateInstances(s.selectedInstanceIds)
@@ -1169,17 +1376,18 @@ export function ThreeStage() {
         return
       }
 
-      // Ditch drawing: Enter/Return commits the path (Manor-Lords-road style —
+      // Path drawing: Enter/Return commits the path (Manor-Lords-road style —
       // click, click, click, then confirm), Backspace un-does the last point,
       // Escape abandons the whole draw. Checked before the generic Escape
       // handler below so it doesn't also clear placement/selection.
-      if (s.landformArmed === 'ditch') {
+      if (isPathKind(s.landformArmed)) {
         if (e.key === 'Enter') { e.preventDefault(); s.actions.finishPathDraw(); return }
         if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); s.actions.undoLastPathPoint(); return }
         if (e.key === 'Escape') { s.actions.cancelPathDraw(); return }
       }
 
       if (e.key === 'Escape') {
+        useAppStore.setState({detailArmed:null,selectedDetailId:null,selectedFeatureId:null,selectedPathId:null})
         if (s.selectedAssetId) { useAppStore.getState().setSelectedAsset(null); ghost.setAsset(null); cellHi.visible = false }
         else { useAppStore.getState().setSelectedInstances([]); inst.setSelection(new Set()) }
         eng.levelOverride = null
@@ -1189,6 +1397,12 @@ export function ThreeStage() {
       }
 
       // Delete a selected ditch/stamp (mirrors the instance-delete key below).
+      if((e.key==='Delete'||e.key==='Backspace')&&s.selectedDetailId) {
+        e.preventDefault();s.setPhysicalDetails(s.physicalDetails.filter(f=>f.id!==s.selectedDetailId));s.selectDetail(null);return
+      }
+      if(k==='r'&&s.selectedDetailId) {
+        e.preventDefault();s.setPhysicalDetails(s.physicalDetails.map(f=>f.id===s.selectedDetailId?{...f,rotation:(f.rotation+(e.shiftKey?-15:15)+360)%360}:f));return
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedPathId) {
         s.actions.removeTerrainPath(s.selectedPathId)
         return
@@ -1275,14 +1489,18 @@ export function ThreeStage() {
       }
       if (s.table !== prev.table || s.tableMaterial !== prev.tableMaterial) {
         buildTable()
+        queueTerrainSync()
         requestRender()
       }
-      if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap) {
+      if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap || s.terrainInteractive !== prev.terrainInteractive) {
         queueTerrainSync()
       }
-      if (s.paintRev !== prev.paintRev || s.paint !== prev.paint) {
-        syncPaint()
+      if(s.physicalDetails!==prev.physicalDetails||s.selectedDetailId!==prev.selectedDetailId||s.detailArmed!==prev.detailArmed||s.terrainRev!==prev.terrainRev) {syncDetails();requestRender()}
+      if(s.detailArmed!==prev.detailArmed){setCursor(s.detailArmed?'crosshair':'default');if(s.detailArmed)brushRing.visible=false}
+      if (s.paintRev !== prev.paintRev || s.paint !== prev.paint || pathPaintChanged(prev.terrainPaths,s.terrainPaths)) {
+        queueTerrainSync(false,true)
       }
+      if(s.table!==prev.table||s.historyIndex!==prev.historyIndex||s.terrainTool!==prev.terrainTool)editQueue.clear()
       if (s.terrainTool !== prev.terrainTool) {
         // Entering/leaving sculpt mode: hide the brush ring + set the cursor.
         if (s.terrainTool === 'none') brushRing.visible = false
@@ -1290,8 +1508,8 @@ export function ThreeStage() {
         requestRender()
       }
       if (s.landformArmed !== prev.landformArmed) {
-        if (s.landformArmed !== 'ditch') brushRing.visible = false
-        if (s.landformArmed !== 'ditch') pathPreviewGroup.clear()
+        if (!isPathKind(s.landformArmed)) brushRing.visible = false
+        if (!isPathKind(s.landformArmed)) clearMarkers(pathPreviewGroup)
         setCursor(s.landformArmed ? 'crosshair' : (s.selectedAssetId ? 'cell' : 'default'))
         requestRender()
       }
@@ -1327,9 +1545,21 @@ export function ThreeStage() {
       }
     })
 
+    buildTable()
+    syncFeatureMarkers()
+    syncPaths()
+    syncDetails()
+    applySnapVisual()
+    cam.home(tableBox())
+    // Seed a baseline undo snapshot so the first placement/sculpt/paint is undoable.
+    store().actions.ensureInitialHistory()
+    requestRender()
+    queueTerrainSync()
+
     // ---- listeners ----
     const dom = renderer.domElement
     dom.addEventListener('pointerdown', onPointerDown)
+    dom.addEventListener('pointerdown', onBranchPointerDown, true)
     window.addEventListener('pointermove', trackGround)
     window.addEventListener('pointermove', onPointerMoveLeft)
     window.addEventListener('pointerup', onPointerUpLeft)
@@ -1338,10 +1568,14 @@ export function ThreeStage() {
     window.addEventListener('keyup', onKeyUp)
 
     return () => {
+      disposed=true;editQueue.clear();cursorQueue.clear();if(terrainFrame!==null)cancelAnimationFrame(terrainFrame);previewWorker?.terminate()
+      clearMarkers(featureGroup);clearMarkers(pathGroup);clearMarkers(pathPreviewGroup)
+      clearMarkers(detailGroup);clearMarkers(detailGhost)
       ro.disconnect()
       unsubInstances()
       unsubLoading()
       dom.removeEventListener('pointerdown', onPointerDown)
+      dom.removeEventListener('pointerdown', onBranchPointerDown, true)
       window.removeEventListener('pointermove', trackGround)
       window.removeEventListener('pointermove', onPointerMoveLeft)
       window.removeEventListener('pointerup', onPointerUpLeft)
@@ -1360,6 +1594,7 @@ export function ThreeStage() {
   return (
     <>
       <div className="tb-canvas-wrap" ref={mountRef} />
+      {terrainQuality && <div role="status" style={{position:"absolute",bottom:12,left:12,zIndex:5,padding:"6px 10px",borderRadius:6,background:"#242a31",color:"#f2d39b",pointerEvents:"none",fontSize:12}}>{terrainQuality}</div>}
       {boxRect && (
         <div
           style={{

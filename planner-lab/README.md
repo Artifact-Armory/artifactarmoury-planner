@@ -1,73 +1,29 @@
 # Planner Lab
 
-A standalone copy of the Artifact Armoury 3D table planner, for long-term
-tweaking without touching the real site. This folder is **not** part of the
-`frontend/` build and Cloudflare Pages never sees it (its root dir is
-`frontend`) — it's a completely separate Vite app living at the repo root,
-with its own `package.json`, dev server, and dependencies.
+Standalone Artifact Armoury planner experiments. This folder is not the deployed frontend and must never be ported or deployed without explicit user authorization.
 
-## What's copied in here
+**Current status:** milestones 1–6 of the printable battlefield pipeline are implemented locally. Start with [IMPLEMENTATION_MEMORY.md](IMPLEMENTATION_MEMORY.md) for decisions, validation results and remaining work. See [docs/MANUFACTURING.md](docs/MANUFACTURING.md) for architecture, limitations and usage.
 
-- `src/table-top-terrain-builder/` — the planner itself, copied verbatim
-  from `frontend/src/table-top-terrain-builder/`.
-- `src/api/` — the full API client (`frontend/src/api/`), copied verbatim so
-  the planner can load real models/bundles/orders/tables.
-- `src/store/{authStore,cartStore,taxStore,onboardingStore}.ts` — copied
-  verbatim so login, the shop basket, VAT-inclusive pricing, and the
-  first-visit tours all behave exactly as they do on the live site.
-- `src/components/common/Logo.tsx`, `src/components/taxonomy/FacetRail.tsx`,
-  `src/components/help/{OnboardingTour,tourSteps}.tsx` — the handful of
-  shared UI pieces the planner itself renders (the catalogue filter rail,
-  the logo shown while loading, the guided tour).
-- `src/config/features.ts`, `src/utils/cn.ts` — small shared utilities the
-  above depend on.
-- `src/index.css`, `postcss.config.js`, Tailwind v4 setup — copied so the
-  planner (and FacetRail) render pixel-identical to production.
-- `public/draco/` — the Draco decoder the planner's GLTFLoader needs.
-- `public/assets/preview-quality/` — the two images the "previews aren't
-  your final print" popup shows.
+## Run
 
-**Deliberately NOT copied**: the marketplace pages, header/nav, dashboard,
-checkout, etc. `src/main.tsx` here mounts the planner directly inside just a
-`<BrowserRouter>` + toast host — there's no site chrome around it.
+Run npm install, then npm run dev. Open http://localhost:3100, click the mountain icon, and scroll to **Local battlefield**.
 
-## Data source: the REAL production backend
+Save/Open stays in the browser; JSON export/import supports portable designs. Compile exports the current document snapshot through a dedicated worker, with a compiled tile preview and a ZIP of STLs, source design, assembly diagram and validation manifest.
 
-`.env` points `VITE_API_BASE_URL` at `https://api.artifactarmoury.com` and
-`VITE_ASSET_BASE_URL` at the real CDN. That means:
+## Isolation
 
-- The catalogue, textures, and pricing you see are real production data.
-- Logging in uses your real account against the real database.
-- **Anything that writes** — saving/sharing a table, adding to the cart,
-  checking out — is a real write against production. Be careful with
-  destructive or purchase-y actions; this app has no `DB_MOCK` safety net.
-- If you want a fully offline sandbox instead, point `.env` at a local
-  backend (`cd backend && npm run dev`, which runs `DB_MOCK=true`) — the
-  catalogue will just be empty since the mock returns no rows.
+The lab no longer proxies the production backend. The copied marketplace API client cannot send requests. The catalogue uses the bundled demo manifest and ground textures are procedural; this is not a production-data snapshot. No account, database or live payment flow is needed for terrain authoring or export.
 
-## Running it
+The live frontend/ and backend/ are untouched. Changes here do not automatically synchronize with either.
 
-```bash
-cd planner-lab
-npm install
-npm run dev
-```
+## Checks
 
-Opens on **http://localhost:3100** (deliberately a different port from the
-real frontend's :3000, so both can run side by side).
+- npm run typecheck
+- npm run test:manufacturing
+- npm run build
 
-```bash
-npm run typecheck
-```
+Tests cover full-board tiling, solid closure, seam alignment, collision-free assembly, printer bounds, document round trips, brush behavior and undo/redo. Actual printer fit and overhang/support behavior require physical calibration; the user does not currently own a printer.
 
-## Relationship to the real site
+## Scope boundaries
 
-This is a fork, not a symlink — edits here never touch `frontend/`, and
-`frontend/` deploys are completely unaffected by whatever happens in this
-folder. If a change made here is worth keeping, port it back into
-`frontend/src/table-top-terrain-builder/` (and whichever shared file it
-touched) by hand; nothing here auto-syncs.
-
-Being a fork also means it will drift: if `frontend/`'s planner or its
-shared dependencies (the API client, the stores, `FacetRail`, etc.) change
-after this copy was made, this folder won't pick that up automatically.
+Hills, plateaus, broad brushes, graded roads, excavated ditches/trenches, vertical cliffs and terrace risers are supported. Physical cracks, potholes, seeded rocks and timber beams compile as solid geometry and appear in the live preview. Import [the step 6 example](docs/examples/step6-battlefield.json) for a mixed four-tile battlefield. Printable model fusion is milestone 7. Material paint does not become STL geometry.

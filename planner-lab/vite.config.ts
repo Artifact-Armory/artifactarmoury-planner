@@ -9,24 +9,28 @@ const rootDir = fileURLToPath(new URL('.', import.meta.url))
 // Different dev port on purpose so this can run alongside the real site's
 // `npm run dev` (port 3000) without a clash.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'planner-lab-isolation',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.startsWith('/api/') || req.url?.startsWith('/cdn/')) {
+          res.statusCode = 404
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: 'Planner lab is offline. Use local battlefield files and bundled assets.' }))
+          return
+        }
+        next()
+      })
+    },
+  }],
+  worker: { format: 'es' },
   server: {
     port: 3100,
     // The production backend's CORS allowlist only includes the real site
     // origins, so a browser request straight from localhost:3100 would be
     // rejected (see .env). Proxying server-side avoids CORS entirely — the
     // browser only ever talks to this dev server.
-    proxy: {
-      '/api': {
-        target: 'https://api.artifactarmoury.com',
-        changeOrigin: true,
-      },
-      '/cdn': {
-        target: 'https://assets.artifactplanner.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/cdn/, ''),
-      },
-    },
+    // No production proxy. Local documents and export workers need no backend.
   },
   resolve: {
     alias: {

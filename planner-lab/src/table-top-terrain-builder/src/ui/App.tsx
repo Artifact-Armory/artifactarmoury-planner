@@ -1,3 +1,4 @@
+import { FrameQueue } from '../core/frameQueue'
 // src/ui/App.tsx — full-screen game-like planner shell.
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -6,13 +7,17 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Triangle, Minus,
+  Milestone, ArrowUpRight, Anchor, FlipHorizontal2,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import {
   type TerrainFeatureType, FEATURE_DEFAULTS, FEATURE_RADIUS_RANGE, FEATURE_HEIGHT_RANGE, TERRACE_STEPS,
 } from '@core/terrainFeatures'
 import {
+  type TerrainPathKind, PATH_KINDS, PATH_LABEL, PATH_HINT, isPathKind,
   DITCH_CHANNEL_RANGE, DITCH_BERM_WIDTH_RANGE, DITCH_BERM_HEIGHT_RANGE,
+  ROAD_DECK_RANGE, ROAD_SHOULDER_RANGE, ROAD_DECK_HEIGHT_RANGE,
+  EDGE_HEIGHT_RANGE, EDGE_TRANSITION_RANGE,
 } from '@core/terrainPaths'
 import { FEATURES } from '@/config/features'
 import hotToast from 'react-hot-toast'
@@ -24,7 +29,9 @@ import { tablesApi } from '@/api/endpoints/tables'
 import { assetUrl } from '@/api/transformers'
 import { collaborationsApi, type TableCollaboration } from '@/api/endpoints/collaborations'
 import CollabRequestModal from './CollabRequestModal'
-import { serializeLayout, deserializeLayout } from '@state/tableMapping'
+import { PrintPanel } from '../../../manufacturing/PrintPanel'
+import { PhysicalDetailsPanel } from '../../../manufacturing/PhysicalDetailsPanel'
+import { saveDocument } from '../../../manufacturing/editor'
 import { resolveAssetsByIds, getAssetById } from '@core/assets'
 import { ThreeStage } from '@scene/ThreeStage'
 import { subscribeLoading } from '@scene/loadManager'
@@ -176,9 +183,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const setLandformArmed = useAppStore((s) => s.setLandformArmed)
   const selectedFeatureId = useAppStore((s) => s.selectedFeatureId)
   const setSelectedFeature = useAppStore((s) => s.setSelectedFeature)
-  const updateFeatureLive = useAppStore((s) => s.actions.updateTerrainFeatureLive)
+  const applyFeatureLive = useAppStore((s) => s.actions.updateTerrainFeatureLive)
   const removeFeature = useAppStore((s) => s.actions.removeTerrainFeature)
-  const commitHistory = useAppStore((s) => s.actions.commitHistory)
+  const saveTerrainHistory = useAppStore((s) => s.actions.commitHistory)
   const terraceStep = useAppStore((s) => s.terraceStep)
   const setTerraceStep = useAppStore((s) => s.setTerraceStep)
   const selectedFeature = selectedFeatureId ? terrainFeatures.find((f) => f.id === selectedFeatureId) ?? null : null
@@ -192,49 +199,41 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const undoLastPathPoint = useAppStore((s) => s.actions.undoLastPathPoint)
   const finishPathDraw = useAppStore((s) => s.actions.finishPathDraw)
   const cancelPathDraw = useAppStore((s) => s.actions.cancelPathDraw)
-  const updatePathLive = useAppStore((s) => s.actions.updateTerrainPathLive)
+  const applyPathLive = useAppStore((s) => s.actions.updateTerrainPathLive)
   const removePath = useAppStore((s) => s.actions.removeTerrainPath)
+  const terrainInputs=React.useRef<FrameQueue|null>(null)
+  if(!terrainInputs.current)terrainInputs.current=new FrameQueue()
+  const updateFeatureLive:typeof applyFeatureLive=(id,patch)=>{
+    useAppStore.setState({terrainInteractive:true})
+    terrainInputs.current!.enqueue(()=>applyFeatureLive(id,patch))
+  }
+  const updatePathLive:typeof applyPathLive=(id,patch)=>{
+    useAppStore.setState({terrainInteractive:true})
+    terrainInputs.current!.enqueue(()=>applyPathLive(id,patch))
+  }
+  const commitHistory=()=>{
+    terrainInputs.current!.flush()
+    useAppStore.setState({terrainInteractive:false})
+    saveTerrainHistory()
+  }
+  React.useEffect(()=>{
+    const unsubscribe=useAppStore.subscribe((s,p)=>{
+      if(s.table!==p.table||s.historyIndex!==p.historyIndex||s.selectedFeatureId!==p.selectedFeatureId||s.selectedPathId!==p.selectedPathId) {
+        terrainInputs.current?.clear()
+        if(s.terrainInteractive)useAppStore.setState({terrainInteractive:false})
+      }
+    })
+    return ()=>{unsubscribe();terrainInputs.current?.clear();useAppStore.setState({terrainInteractive:false})}
+  },[])
   const selectedPath = selectedPathId ? terrainPaths.find((p) => p.id === selectedPathId) ?? null : null
 
-  const LANDFORM_ICON: Record<TerrainFeatureType | 'ditch', React.ReactNode> = {
-    hill: <Triangle size={16} />, plateau: <Layers size={16} />, ditch: <Minus size={16} />,
+  const LANDFORM_ICON: Record<TerrainFeatureType | TerrainPathKind, React.ReactNode> = {
+    hill: <Triangle size={16} />, plateau: <Layers size={16} />,
+    trench: <Minus size={16} />,
+    ditch: <Minus size={16} />, road: <Milestone size={16} />,
+    cliff: <ArrowUpRight size={16} />, shoreline: <Anchor size={16} />,
   }
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
-  const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
-  const [exportingTiles, setExportingTiles] = React.useState(false)
-
-  // Quote (tile count + price) for the saved table's sculpted surface. Reflects
-  // the last save — sculpt then Save (Ctrl+S) to refresh.
-  React.useEffect(() => {
-    if (!terrainPanelOpen || !savedTableId) { setTerrainQuote(null); return }
-    let cancelled = false
-    tablesApi.getTerrainQuote(savedTableId)
-      .then((q) => { if (!cancelled) setTerrainQuote(q.hasTerrain ? { tileCount: q.tileCount, price: q.price } : null) })
-      .catch(() => { if (!cancelled) setTerrainQuote(null) })
-    return () => { cancelled = true }
-  }, [terrainPanelOpen, savedTableId, savedTableName])
-
-  async function handleExportTiles() {
-    if (!savedTableId) {
-      hotToast.error('Save your table first, then export the tiles')
-      return
-    }
-    setExportingTiles(true)
-    try {
-      await tablesApi.downloadTerrainTiles(savedTableId, user?.email)
-      hotToast.success('Downloading printable tiles…')
-    } catch (e: any) {
-      const s = e?.response?.status
-      hotToast.error(
-        s === 400 ? 'Sculpt some terrain first, then save'
-          : s === 403 ? 'You can only export your own map'
-          : 'Tile export failed — try again',
-      )
-    } finally {
-      setExportingTiles(false)
-    }
-  }
-
   const [query, setQuery] = React.useState('')
   const [paletteTab, setPaletteTab] = React.useState<'catalogue' | 'mine'>('catalogue')
   // Right panel while editing: "table" is what's placed (a planning BOM — placing
@@ -322,61 +321,11 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     })
     // Absolute fallback: procedural placeholders / no CDN means nothing loads
     // over the network — never leave the user stuck behind the overlay.
-    const hard = window.setTimeout(finish, 8000)
+    const hard = window.setTimeout(finish, 500) // Offline lab has no catalogue/CDN startup queue.
     return () => { unsub(); window.clearTimeout(settleTimer); window.clearTimeout(hard) }
   }, [])
 
-  // First-visit onboarding. Runs once the scene is ready (so palette/toolbar
-  // targets are painted) and skipped in read-only preview mode. Artists who
-  // haven't seen it get the guided *showcase* walkthrough; everyone else gets
-  // the one-time Controls guide. We suppress the generic aids for artists so the
-  // two don't stack on the same first load.
-  React.useEffect(() => {
-    if (readOnly || onboardRef.current || !sceneReady) return
-    // A signed-in user whose profile hasn't loaded yet — wait so we know the role.
-    if (isAuthenticated && !user) return
-    try {
-      const isArtist = user?.role === 'artist'
-      const plannerTourKey = `aa_planner_showcase_tour_v1:${user?.id ?? 'anon'}`
-      if (isArtist && !localStorage.getItem(plannerTourKey)) {
-        onboardRef.current = true
-        localStorage.setItem(plannerTourKey, '1')
-        localStorage.setItem('tb_help_seen_v1', '1')
-        localStorage.setItem('tb_coach_v1', '1')
-        window.setTimeout(() => startTour(), 400)
-        return
-      }
-      // Buyers (and guests) get their own first-visit walkthrough: browse → place
-      // → basket. Same overlay, buyer-tailored steps chosen at the render below.
-      const buyerTourKey = `aa_planner_buyer_tour_v1:${user?.id ?? 'anon'}`
-      if (!isArtist && !localStorage.getItem(buyerTourKey)) {
-        onboardRef.current = true
-        localStorage.setItem(buyerTourKey, '1')
-        localStorage.setItem('tb_help_seen_v1', '1')
-        localStorage.setItem('tb_coach_v1', '1')
-        window.setTimeout(() => startTour(), 400)
-        return
-      }
-      if (!localStorage.getItem('tb_help_seen_v1')) {
-        onboardRef.current = true
-        setShowHelp(true)
-        localStorage.setItem('tb_help_seen_v1', '1')
-        localStorage.setItem('tb_coach_v1', '1')
-      }
-    } catch { /* localStorage unavailable (private mode) — just skip */ }
-  }, [readOnly, sceneReady, isAuthenticated, user, startTour])
-
-  // First visit: explain that the table shows decimated + watermarked previews,
-  // not the STL they'd print. Deliberately waits until the walkthrough and the
-  // controls overlay are done — three modals stacked on load is worse than the
-  // confusion this is meant to prevent — so it lands on a table they can see.
-  React.useEffect(() => {
-    if (readOnly || !sceneReady || tourActive || showHelp) return
-    if (hasAcknowledgedPreviewQuality()) return
-    const t = window.setTimeout(() => setShowPreviewQuality(true), 600)
-    return () => window.clearTimeout(t)
-  }, [readOnly, sceneReady, tourActive, showHelp])
-
+  // Marketplace onboarding is available from Help, but never interrupts the offline manufacturing lab.
   // Clear any tour left active elsewhere (e.g. the dashboard walkthrough) so it
   // can't bleed into the planner; our own effect above starts it when relevant.
   React.useEffect(() => {
@@ -395,53 +344,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }, [assets.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load a server-saved table (own id or a shared token) into the planner.
-  // Re-runs when the signed-in user changes so swapping accounts never leaves the
-  // previous user's layout on the table.
-  React.useEffect(() => {
-    // Scratch mode (/planner): start from a clean table. This also clears a
-    // previously-loaded table when navigating /planner/t/:id → /planner, and
-    // resets the layout when a different user signs in.
-    if (!tableId && !shareToken) {
-      clearInstances()
-      useAppStore.getState().actions.resetTerrain()
-      setSavedTableId(null)
-      setSavedTableName(null)
-      setIsOwner(false)
-      refreshCollabs(null, false)
-      return
-    }
-    let cancelled = false
-    ;(async () => {
-      try {
-        const t = shareToken
-          ? await tablesApi.getSharedTable(shareToken)
-          : await tablesApi.getById(tableId!, { userEmail: user?.email })
-        if (cancelled) return
-        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, terrainPaths, terraceStep, paint } = deserializeLayout(t.tableConfig, t.layoutData)
-        // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
-        // artist's unpublished piece) so every placed model renders, not a grey box.
-        await resolveAssetsByIds(instances.map((i) => i.assetId))
-        if (cancelled) return
-        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, terrainPaths, terraceStep, paint })
-        setSavedTableName(shareToken ? `${t.name} (Copy)` : t.name)
-        if (!shareToken) {
-          setSavedTableId(t.id)
-          // Own it only if it's yours; otherwise Save makes a copy under your account.
-          const owned = !!user?.email && t.userEmail === user.email
-          setIsOwner(owned)
-          refreshCollabs(t.id, owned)
-        } else {
-          // A shared copy starts with no collaborations of its own; foreign models
-          // already in it get requests raised when the copier first saves.
-          refreshCollabs(null, false)
-        }
-      } catch {
-        if (!cancelled) hotToast.error('Could not load that table')
-      }
-    })()
-    return () => { cancelled = true }
-  }, [tableId, shareToken, user?.email]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Battlefield persistence is local through PrintPanel; no account-reset effect.
 
   // global UI keys (scene keys are handled inside ThreeStage)
   React.useEffect(() => {
@@ -677,51 +580,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }
 
   async function handleSave() {
-    if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
-    if (!isAuthenticated || !user?.email) {
-      hotToast.error('Log in to save this table to your account')
-      navigate('/login')
-      return
-    }
-    if (saving) return
-
-    const s = useAppStore.getState()
-    const { tableConfig, layoutData } = serializeLayout(
-      s.table, s.tableMaterial, s.instances, s.heightmap, s.paint,
-      s.terrainFeatures, s.terraceStep, s.terrainDetail, s.terrainPaths,
-    )
-    const email = user.email
-
-    setSaving(true)
-    try {
-      if (savedTableId && isOwner) {
-        // Update the table you already own.
-        await tablesApi.updateTable(savedTableId, {
-          name: savedTableName ?? 'My table',
-          tableConfig: tableConfig as any,
-          layoutData: layoutData as any,
-          userEmail: email,
-        })
-        hotToast.success('Table saved')
-        // Saving raises/refreshes collaboration requests for any foreign models.
-        await refreshCollabs(savedTableId, true)
-      } else {
-        // New table, or a copy of a shared one → create under your account.
-        const name = window.prompt('Name this table:', savedTableName ?? `Table ${new Date().toLocaleDateString()}`)
-        if (!name) { setSaving(false); return }
-        const created = await tablesApi.createTable({ name, tableConfig: tableConfig as any, layoutData: layoutData as any, userEmail: email })
-        setSavedTableId(created.id)
-        setSavedTableName(created.name)
-        setIsOwner(true)
-        hotToast.success('Saved to your tables')
-        await refreshCollabs(created.id, true)
-        navigate(`/planner/t/${created.id}`)
-      }
-    } catch {
-      hotToast.error('Save failed')
-    } finally {
-      setSaving(false)
-    }
+    try { saveDocument(); hotToast.success('Battlefield saved locally') }
+    catch (e) { hotToast.error(e instanceof Error ? e.message : 'Local save failed') }
   }
 
   // Confirming the collaboration prompt places the piece and immediately saves, so
@@ -977,18 +837,21 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                         {LANDFORM_ICON[type]}<span>{FEATURE_DEFAULTS[type].label}</span>
                       </button>
                     ))}
-                    <button
-                      className={`tb-terrain-tool ${landformArmed === 'ditch' ? 'is-active' : ''}`}
-                      onClick={() => setLandformArmed(landformArmed === 'ditch' ? null : 'ditch')}
-                    >
-                      {LANDFORM_ICON.ditch}<span>Ditch</span>
-                    </button>
+                    {PATH_KINDS.map((kind) => (
+                      <button
+                        key={kind}
+                        className={`tb-terrain-tool ${landformArmed === kind ? 'is-active' : ''}`}
+                        onClick={() => setLandformArmed(landformArmed === kind ? null : kind)}
+                      >
+                        {LANDFORM_ICON[kind]}<span>{PATH_LABEL[kind]}</span>
+                      </button>
+                    ))}
                   </div>
                   <p className="tb-small tb-terrain-sub">
                     {pathDrawing
                       ? `${pathDrawing.points.length} point${pathDrawing.points.length === 1 ? '' : 's'} — click to add another, Enter to finish.`
-                      : landformArmed === 'ditch'
-                        ? 'Click the table for each corner, like laying a road.'
+                      : isPathKind(landformArmed)
+                        ? PATH_HINT[landformArmed]
                         : landformArmed
                           ? 'Click the table to place it.'
                           : selectedFeature || selectedPath
@@ -1028,7 +891,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                           min={FEATURE_RADIUS_RANGE.min} max={FEATURE_RADIUS_RANGE.max} step={FEATURE_RADIUS_RANGE.step}
                           value={selectedFeature.radius}
                           onChange={(e) => updateFeatureLive(selectedFeature.id, { radius: parseFloat(e.target.value) })}
-                          onMouseUp={commitHistory} onTouchEnd={commitHistory}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
                         />
                       </label>
                       <label className="tb-terrain-row">
@@ -1038,7 +901,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                           min={FEATURE_HEIGHT_RANGE.min} max={FEATURE_HEIGHT_RANGE.max} step={FEATURE_HEIGHT_RANGE.step}
                           value={selectedFeature.height}
                           onChange={(e) => updateFeatureLive(selectedFeature.id, { height: parseFloat(e.target.value) })}
-                          onMouseUp={commitHistory} onTouchEnd={commitHistory}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
                         />
                       </label>
                       <p className="tb-small tb-terrain-sub">{Math.round(selectedFeature.height * 1000)}mm tall · {Math.round(selectedFeature.radius * 1000)}mm radius</p>
@@ -1050,53 +913,124 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                       </button>
                     </div>
                   )}
-                  {selectedPath && (
+                  {selectedPath && (selectedPath.kind === 'ditch' || selectedPath.kind === 'trench' || selectedPath.kind === 'road') && (
                     <div className="tb-terrain-feature-props">
                       <div className="tb-terrain-feature-head">
-                        <span>{LANDFORM_ICON.ditch} Ditch</span>
+                        <span>{LANDFORM_ICON[selectedPath.kind]} {PATH_LABEL[selectedPath.kind]}</span>
                         <button className="tb-icon" title="Deselect" onClick={() => setSelectedPath(null)}>
                           <X size={14} />
                         </button>
                       </div>
                       <label className="tb-terrain-row">
-                        <span>Channel width</span>
+                        <span>{selectedPath.kind !== 'road' ? 'Channel width' : 'Deck width'}</span>
                         <input
                           type="range"
-                          min={DITCH_CHANNEL_RANGE.min} max={DITCH_CHANNEL_RANGE.max} step={DITCH_CHANNEL_RANGE.step}
+                          min={(selectedPath.kind !== 'road' ? DITCH_CHANNEL_RANGE : ROAD_DECK_RANGE).min}
+                          max={(selectedPath.kind !== 'road' ? DITCH_CHANNEL_RANGE : ROAD_DECK_RANGE).max}
+                          step={(selectedPath.kind !== 'road' ? DITCH_CHANNEL_RANGE : ROAD_DECK_RANGE).step}
                           value={selectedPath.channelWidth}
                           onChange={(e) => updatePathLive(selectedPath.id, { channelWidth: parseFloat(e.target.value) })}
-                          onMouseUp={commitHistory} onTouchEnd={commitHistory}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
                         />
                       </label>
                       <label className="tb-terrain-row">
-                        <span>Bank width</span>
+                        <span>{selectedPath.kind !== 'road' ? 'Wall slope run' : 'Shoulder width'}</span>
                         <input
                           type="range"
-                          min={DITCH_BERM_WIDTH_RANGE.min} max={DITCH_BERM_WIDTH_RANGE.max} step={DITCH_BERM_WIDTH_RANGE.step}
+                          min={(selectedPath.kind !== 'road' ? DITCH_BERM_WIDTH_RANGE : ROAD_SHOULDER_RANGE).min}
+                          max={(selectedPath.kind !== 'road' ? DITCH_BERM_WIDTH_RANGE : ROAD_SHOULDER_RANGE).max}
+                          step={(selectedPath.kind !== 'road' ? DITCH_BERM_WIDTH_RANGE : ROAD_SHOULDER_RANGE).step}
                           value={selectedPath.bermWidth}
                           onChange={(e) => updatePathLive(selectedPath.id, { bermWidth: parseFloat(e.target.value) })}
-                          onMouseUp={commitHistory} onTouchEnd={commitHistory}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
                         />
                       </label>
                       <label className="tb-terrain-row">
-                        <span>Bank height</span>
+                        <span>{selectedPath.kind !== 'road' ? 'Spoil bank height' : 'Start elevation'}</span>
                         <input
                           type="range"
-                          min={DITCH_BERM_HEIGHT_RANGE.min} max={DITCH_BERM_HEIGHT_RANGE.max} step={DITCH_BERM_HEIGHT_RANGE.step}
+                          min={(selectedPath.kind !== 'road' ? DITCH_BERM_HEIGHT_RANGE : ROAD_DECK_HEIGHT_RANGE).min}
+                          max={(selectedPath.kind !== 'road' ? DITCH_BERM_HEIGHT_RANGE : ROAD_DECK_HEIGHT_RANGE).max}
+                          step={(selectedPath.kind !== 'road' ? DITCH_BERM_HEIGHT_RANGE : ROAD_DECK_HEIGHT_RANGE).step}
                           value={selectedPath.bermHeight}
                           onChange={(e) => updatePathLive(selectedPath.id, { bermHeight: parseFloat(e.target.value) })}
-                          onMouseUp={commitHistory} onTouchEnd={commitHistory}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
                         />
                       </label>
+                      <label className="tb-terrain-row">
+                        <span>{selectedPath.kind === 'road' ? 'End elevation (mm)' : 'Excavation depth (mm)'}</span>
+                        <input type="number" step="1" min={selectedPath.kind === 'road' ? -500 : 0} max="500"
+                          value={Math.round((selectedPath.kind === 'road' ? selectedPath.endHeight : selectedPath.depth)*1000)}
+                          onChange={e => updatePathLive(selectedPath.id, selectedPath.kind === 'road' ? {endHeight:Number(e.target.value)/1000} : {depth:Math.max(0,Number(e.target.value))/1000})}
+                          onBlur={commitHistory} />
+                      </label>
+                      {selectedPath.kind !== 'road' && <label className="tb-terrain-row">
+                        <span>Road crossing</span>
+                        <select value={selectedPath.crossing} onChange={e=>{updatePathLive(selectedPath.id,{crossing:e.target.value as 'excavate'|'preserve-road'});commitHistory()}}>
+                          <option value="excavate">Cut through road</option><option value="preserve-road">Keep solid road causeway</option>
+                        </select>
+                      </label>}
                       <p className="tb-small tb-terrain-sub">
-                        {selectedPath.points.length} points · {Math.round(selectedPath.channelWidth * 1000)}mm channel ·
-                        banks {Math.round(selectedPath.bermHeight * 1000)}mm tall — floor stays flush with the table.
+                        {selectedPath.kind !== 'road'
+                          ? <>{selectedPath.points.length} points · {Math.round(selectedPath.channelWidth * 1000)}mm channel ·
+                              floor {Math.round(selectedPath.depth * 1000)}mm below ground datum.</>
+                          : <>{selectedPath.points.length} points · {Math.round(selectedPath.channelWidth * 1000)}mm deck ·{' '}
+                              {Math.round(selectedPath.bermHeight * 1000)}mm start elevation. Roads cut and fill the surrounding terrain.</>}
                       </p>
                       <button
                         className="tb-terrain-reset"
                         onClick={() => removePath(selectedPath.id)}
                       >
-                        <Trash2 size={14} /> Delete ditch
+                        <Trash2 size={14} /> Delete {PATH_LABEL[selectedPath.kind].toLowerCase()}
+                      </button>
+                    </div>
+                  )}
+                  {selectedPath && (selectedPath.kind === 'cliff' || selectedPath.kind === 'shoreline') && (
+                    <div className="tb-terrain-feature-props">
+                      <div className="tb-terrain-feature-head">
+                        <span>{LANDFORM_ICON[selectedPath.kind]} {PATH_LABEL[selectedPath.kind]}</span>
+                        <button className="tb-icon" title="Deselect" onClick={() => setSelectedPath(null)}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <label className="tb-terrain-row">
+                        <span>Height</span>
+                        <input
+                          type="range"
+                          min={EDGE_HEIGHT_RANGE.min} max={EDGE_HEIGHT_RANGE.max} step={EDGE_HEIGHT_RANGE.step}
+                          value={selectedPath.highHeight}
+                          onChange={(e) => updatePathLive(selectedPath.id, { highHeight: parseFloat(e.target.value) })}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
+                        />
+                      </label>
+                      {selectedPath.kind === 'shoreline' && (
+                      <label className="tb-terrain-row">
+                        <span>Slope width</span>
+                        <input
+                          type="range"
+                          min={EDGE_TRANSITION_RANGE.min} max={EDGE_TRANSITION_RANGE.max} step={EDGE_TRANSITION_RANGE.step}
+                          value={selectedPath.transitionWidth}
+                          onChange={(e) => updatePathLive(selectedPath.id, { transitionWidth: parseFloat(e.target.value) })}
+                          onPointerUp={commitHistory} onPointerCancel={commitHistory} onKeyUp={commitHistory} onBlur={commitHistory}
+                        />
+                      </label>
+                      )}
+                      <button
+                        className="tb-terrain-tool"
+                        title="Flip which side is high ground"
+                        onClick={() => { updatePathLive(selectedPath.id, { highSide: selectedPath.highSide === 1 ? -1 : 1 }); commitHistory() }}
+                      >
+                        <FlipHorizontal2 size={16} /><span>Flip side</span>
+                      </button>
+                      <p className="tb-small tb-terrain-sub">
+                        {selectedPath.points.length} points · {Math.round(selectedPath.highHeight * 1000)}mm{' '}
+                        {selectedPath.kind === 'cliff' ? 'vertical rise above existing terrain. End tangents extend to the table edges.' : 'inland rise with a smooth shoreline slope.'}
+                      </p>
+                      <button
+                        className="tb-terrain-reset"
+                        onClick={() => removePath(selectedPath.id)}
+                      >
+                        <Trash2 size={14} /> Delete {PATH_LABEL[selectedPath.kind].toLowerCase()}
                       </button>
                     </div>
                   )}
@@ -1112,6 +1046,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                   </label>
                 </div>
               )}
+              {FEATURES.terrainSculpt && <PhysicalDetailsPanel />}
               {FEATURES.terrainSculpt && <div className="tb-terrain-export-head">Detail brush</div>}
               {FEATURES.terrainSculpt && (
                 <div className="tb-terrain-tools">
@@ -1194,28 +1129,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </div>
 
               {FEATURES.terrainSculpt && (
-              <div className="tb-terrain-export">
-                <div className="tb-terrain-export-head">Printable tiles</div>
-                {terrainQuote ? (
-                  <p className="tb-small">
-                    {terrainQuote.tileCount} tile{terrainQuote.tileCount === 1 ? '' : 's'} · £{terrainQuote.price.toFixed(2)}
-                    <span className="tb-terrain-sub"> (reflects last save)</span>
-                  </p>
-                ) : (
-                  <p className="tb-small tb-terrain-sub">
-                    {savedTableId ? 'Sculpt, then Save (Ctrl+S) to price the tiles.' : 'Save your table to price & export tiles.'}
-                  </p>
-                )}
-                <button className="tb-terrain-tool tb-terrain-export-btn" disabled={exportingTiles} onClick={handleExportTiles}>
-                  <Download size={16} />
-                  <span>{exportingTiles ? 'Preparing…' : 'Download printable tiles'}</span>
-                </button>
-              </div>
+              <PrintPanel />
               )}
 
               {FEATURES.terrainSculpt && (
                 <p className="tb-small tb-terrain-hint">
-                  Drag on the table to sculpt. Cliffs are steep slopes. Tiles are watertight shells —
+                  Brushes shape broad ground beneath paths. Cliffs and terraces have vertical faces. Tiles are watertight shells —
                   print with normal infill.
                 </p>
               )}

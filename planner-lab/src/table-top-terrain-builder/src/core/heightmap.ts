@@ -25,8 +25,8 @@ export interface Heightmap {
   heights: Float32Array
 }
 
-/** Target spacing between height samples (metres). ~2.5cm keeps a 6×4ft table light. */
-export const TERRAIN_CELL = 0.025
+/** Interactive sample spacing in metres; export spacing is independently configurable. */
+export const TERRAIN_CELL = 0.01
 /** Clamp the surface so a single brush can't punch absurd spikes/pits. */
 export const MAX_HEIGHT = 0.35
 export const MIN_HEIGHT = -0.18
@@ -51,7 +51,7 @@ export function heightmapFitsTable(hm: Heightmap | null | undefined, table: Tabl
 
 export function isFlat(hm: Heightmap | null | undefined): boolean {
   if (!hm) return true
-  for (let k = 0; k < hm.heights.length; k++) if (Math.abs(hm.heights[k]) > 1e-4) return false
+  for (let k = 0; k < hm.heights.length; k++) if (Math.abs(hm.heights[k]) > 1e-9) return false
   return true
 }
 
@@ -70,8 +70,8 @@ function vertZ(j: number, rows: number, table: Table) {
 export function sampleHeight(hm: Heightmap | null | undefined, table: Table, x: number, z: number): number {
   if (!hm || !hm.heights.length) return 0
   const { cols, rows, heights } = hm
-  const gx = ((x + table.width / 2) / table.width) * (cols - 1)
-  const gz = ((z + table.height / 2) / table.height) * (rows - 1)
+  const gx = Math.max(0, Math.min(cols - 1, ((x + table.width / 2) / table.width) * (cols - 1)))
+  const gz = Math.max(0, Math.min(rows - 1, ((z + table.height / 2) / table.height) * (rows - 1)))
   const i0 = Math.floor(gx), j0 = Math.floor(gz)
   const ci0 = Math.max(0, Math.min(cols - 1, i0))
   const cj0 = Math.max(0, Math.min(rows - 1, j0))
@@ -81,9 +81,9 @@ export function sampleHeight(hm: Heightmap | null | undefined, table: Table, x: 
   const fz = Math.max(0, Math.min(1, gz - j0))
   const h00 = heights[cj0 * cols + ci0], h10 = heights[cj0 * cols + ci1]
   const h01 = heights[cj1 * cols + ci0], h11 = heights[cj1 * cols + ci1]
-  const a = h00 + (h10 - h00) * fx
-  const b = h01 + (h11 - h01) * fx
-  return a + (b - a) * fz
+  // Same b-c diagonal as buildTerrainGeometry and the manufacturing evaluator.
+  return fx + fz <= 1 ? h00 + fx * (h10-h00) + fz * (h01-h00)
+    : h11 + (1-fx) * (h01-h11) + (1-fz) * (h10-h11)
 }
 
 /** Build a fresh terrain mesh geometry from the height field. */
@@ -134,6 +134,8 @@ export function updateTerrainGeometry(geo: THREE.BufferGeometry, hm: Heightmap) 
  * Apply one brush dab centred at world (wx, wz). `strength` is 0..1 from the UI;
  * `radius` is in metres. Returns true if any height changed.
  */
+let smoothScratch = new Float32Array(0)
+
 export function applyBrush(
   hm: Heightmap,
   table: Table,
@@ -142,6 +144,7 @@ export function applyBrush(
   tool: TerrainTool,
   radius: number,
   strength: number,
+  onChange?: (index: number, before: number, after: number) => void,
 ): boolean {
   if (tool === 'none' || tool === 'paint' || tool === 'erase' || radius <= 0) return false
   const { cols, rows } = hm
@@ -162,6 +165,11 @@ export function applyBrush(
   // Per-dab magnitude in metres (scaled by the surface range so the slider feels
   // consistent across brushes).
   const amount = strength * 0.05
+  if (tool === 'smooth') {
+    if (smoothScratch.length !== hm.heights.length) smoothScratch = new Float32Array(hm.heights.length)
+    smoothScratch.set(hm.heights)
+  }
+  const original = smoothScratch
   const centreH = hm.heights[Math.round(cj) * cols + Math.round(ci)] ?? 0
   let changed = false
 
@@ -185,16 +193,16 @@ export function applyBrush(
         // Blend toward the average of the 4-neighbourhood.
         let sum = 0
         let n = 0
-        if (i > 0) { sum += hm.heights[idx - 1]; n++ }
-        if (i < cols - 1) { sum += hm.heights[idx + 1]; n++ }
-        if (j > 0) { sum += hm.heights[idx - cols]; n++ }
-        if (j < rows - 1) { sum += hm.heights[idx + cols]; n++ }
+        if (i > 0) { sum += original[idx - 1]; n++ }
+        if (i < cols - 1) { sum += original[idx + 1]; n++ }
+        if (j > 0) { sum += original[idx - cols]; n++ }
+        if (j < rows - 1) { sum += original[idx + cols]; n++ }
         const avg = n ? sum / n : h
         next = h + (avg - h) * falloff * Math.min(1, strength)
       }
 
-      next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, next))
-      if (next !== h) { hm.heights[idx] = next; changed = true }
+      // Preserve authored geometry. Manufacturing reports print-volume/floor limits.
+      if (next !== h) { hm.heights[idx] = next; onChange?.(idx, h, hm.heights[idx]); changed = true }
     }
   }
   return changed
@@ -212,7 +220,7 @@ export interface SerializedHeightmap {
 export function serializeHeightmap(hm: Heightmap | null): SerializedHeightmap | null {
   if (!hm || isFlat(hm)) return null
   const mm = new Array(hm.heights.length)
-  for (let k = 0; k < hm.heights.length; k++) mm[k] = Math.round(hm.heights[k] * 1000)
+  for (let k = 0; k < hm.heights.length; k++) mm[k] = hm.heights[k] * 1000
   return { cols: hm.cols, rows: hm.rows, mm }
 }
 

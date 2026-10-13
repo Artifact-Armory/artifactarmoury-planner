@@ -812,7 +812,11 @@
   position: absolute;
   top: 14px;
   right: 14px;
-  width: 220px;
+  width: min(340px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1313,3 +1317,13 @@ html[data-tb-theme="graphite-mono"] .tb-fs {
   --tb-accent-strong: #d97c1a;
   --tb-accent-ink: #1c0f02;
 }
+.tb-terrain > * { flex-shrink: 0; }
+.lab-print-panel { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; font-size: 12px; }
+.lab-print-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+.lab-print-panel input, .lab-print-panel select { background: #172024; color: #eee; border: 1px solid #667078; border-radius: 4px; padding: 5px; width: 110px; min-width: 0; flex-shrink: 0; }
+.lab-print-panel button { border: 1px solid #667078; border-radius: 5px; padding: 7px 10px; background: #263337; color: #eee; cursor: pointer; }
+.lab-print-panel button:disabled { opacity: .5; cursor: default; }
+.lab-print-panel summary { cursor: pointer; padding: 8px 0; }
+.lab-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The colour experiment must not cover the terrain panel's close button. */
+#root:has(.tb-terrain) .lab-theme-switcher { display: none; }

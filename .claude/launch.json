@@ -18,6 +18,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "planner-lab", "run", "dev"],
       "port": 3100
+    },
+    {
+      "name": "trailer",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "trailer", "run", "dev"],
+      "port": 3200
     }
   ]
 }

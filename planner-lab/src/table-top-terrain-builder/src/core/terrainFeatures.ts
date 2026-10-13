@@ -1,27 +1,6 @@
-// src/core/terrainFeatures.ts
-//
-// "Landforms" — the point-stamp layer of the hybrid terrain sculptor. A
-// feature is a parametric shape (hill / plateau) placed at a world position
-// with a radius and a height, kept as an editable, non-destructive list rather
-// than baked straight into a height grid. That's the actual fix for why
-// freehand brushing felt clunky: most of what a table needs is a small
-// vocabulary of shapes, not 40 careful mouse dabs — and a stamp can be
-// repositioned/resized after the fact instead of undo-redone into place.
-//
-// The ditch is NOT a circular stamp — it's a drawn polyline (click multiple
-// points, Manor-Lords-road style) with raised banks instead of a dug pit, so
-// it lives in terrainPaths.ts; compositeHeightmap() combines both layers.
-//
-// The detail brush (heightmap.ts) still exists as a *third*, additive layer
-// on top, for final blending/roughening — see compositeHeightmap.
-//
-// Framework-free (pure data + math), same spirit as heightmap.ts, so this can
-// ship to the backend later unchanged if tile export ever wants the feature
-// list instead of (or alongside) the composited grid.
-
 import type { Table } from '../state/store'
-import { type Heightmap, terrainDims, MAX_HEIGHT, MIN_HEIGHT, isFlat } from './heightmap'
-import { type TerrainPath, pathsHeightAt } from './terrainPaths'
+import { type Heightmap, terrainDims, MAX_HEIGHT, MIN_HEIGHT, isFlat, sampleHeight, heightmapFitsTable } from './heightmap'
+import { type TerrainPath, applyTerrainPaths } from './terrainPaths'
 
 export type TerrainFeatureType = 'hill' | 'plateau'
 
@@ -89,6 +68,11 @@ export function terraceHeight(h: number, step: number): number {
   return Math.round(h / step) * step
 }
 
+/** Authoritative surface evaluation in editor metres, shared by preview and manufacturing. */
+export function evaluateTerrainHeight(features: TerrainFeature[], paths: TerrainPath[], detail: Heightmap | null, table: Table, terraceStep: number, x: number, z: number): number {
+  return terraceHeight(applyTerrainPaths(paths, featuresHeightAt(features, x, z) + sampleHeight(detail, table, x, z), table, x, z), terraceStep)
+}
+
 export const TERRACE_STEPS: Array<{ value: number; label: string }> = [
   { value: 0, label: 'Off (smooth)' },
   { value: 0.005, label: 'Fine (5mm)' },
@@ -96,36 +80,49 @@ export const TERRACE_STEPS: Array<{ value: number; label: string }> = [
   { value: 0.02, label: 'Coarse (20mm)' },
 ]
 
-/**
- * Evaluate the final table surface = point stamps (additive) + ditch paths
- * (additive) + the freehand detail layer (additive) + optional terrace
- * quantisation, clamped to the printable range. Returns null for a table with
- * nothing authored at all (flat table — keeps the existing "no heightmap =
- * don't build a terrain mesh" fast path everywhere else untouched).
- *
- * `detail` must already be sized to `table` (heightmapFitsTable) if provided.
- */
+export interface TerrainBounds { minX: number; maxX: number; minZ: number; maxZ: number }
+export function featureBounds(f: TerrainFeature): TerrainBounds {
+  return { minX: f.x-f.radius, maxX: f.x+f.radius, minZ: f.z-f.radius, maxZ: f.z+f.radius }
+}
+export function unionBounds(a: TerrainBounds, b: TerrainBounds): TerrainBounds {
+  return { minX: Math.min(a.minX,b.minX), maxX: Math.max(a.maxX,b.maxX), minZ: Math.min(a.minZ,b.minZ), maxZ: Math.max(a.maxZ,b.maxZ) }
+}
+export function pathBounds(p: TerrainPath, table: Table): TerrainBounds {
+  // Edge paths offset whole regions, including beyond their endpoints.
+  if (p.kind === 'cliff' || p.kind === 'shoreline') return { minX:-table.width/2,maxX:table.width/2,minZ:-table.height/2,maxZ:table.height/2 }
+  const radius=p.channelWidth/2+p.bermWidth+Math.max(0.01,p.bermWidth)
+  return { minX:Math.min(...p.points.map(v=>v.x))-radius,maxX:Math.max(...p.points.map(v=>v.x))+radius,minZ:Math.min(...p.points.map(v=>v.z))-radius,maxZ:Math.max(...p.points.map(v=>v.z))+radius }
+}
+export function gridBounds(hm: Heightmap, table: Table, b: TerrainBounds, halo=0) {
+  return {
+    i0:Math.max(0,Math.floor((b.minX+table.width/2)/table.width*(hm.cols-1))-halo),
+    i1:Math.min(hm.cols-1,Math.ceil((b.maxX+table.width/2)/table.width*(hm.cols-1))+halo),
+    j0:Math.max(0,Math.floor((b.minZ+table.height/2)/table.height*(hm.rows-1))-halo),
+    j1:Math.min(hm.rows-1,Math.ceil((b.maxZ+table.height/2)/table.height*(hm.rows-1))+halo),
+  }
+}
+
+/** Sample the semantic surface into the interactive height cache. Hard-face rendering and export use the boundary-aware mesh builder. */
 export function compositeHeightmap(
   features: TerrainFeature[],
   paths: TerrainPath[],
   detail: Heightmap | null,
   table: Table,
   terraceStep: number,
+  update?: { target: Heightmap | null; bounds: TerrainBounds },
 ): Heightmap | null {
-  const hasDetail = !!detail && !isFlat(detail)
-  if (features.length === 0 && paths.length === 0 && !hasDetail) return null
+  if (!update && features.length === 0 && paths.length === 0 && (!detail || isFlat(detail))) return null
 
   const { cols, rows } = terrainDims(table)
-  const heights = new Float32Array(cols * rows)
-  for (let j = 0; j < rows; j++) {
+  const reuse = update && heightmapFitsTable(update.target,table)
+  const heights = reuse ? update.target!.heights : new Float32Array(cols * rows)
+  const bounds = reuse ? gridBounds({cols,rows,heights},table,update.bounds) : {i0:0,i1:cols-1,j0:0,j1:rows-1}
+  for (let j = bounds.j0; j <= bounds.j1; j++) {
     const z = -table.height / 2 + (j / (rows - 1)) * table.height
-    for (let i = 0; i < cols; i++) {
+    for (let i = bounds.i0; i <= bounds.i1; i++) {
       const x = -table.width / 2 + (i / (cols - 1)) * table.width
       const idx = j * cols + i
-      let h = featuresHeightAt(features, x, z) + pathsHeightAt(paths, x, z)
-      if (hasDetail) h += detail!.heights[idx]
-      h = terraceHeight(h, terraceStep)
-      heights[idx] = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, h))
+      heights[idx] = evaluateTerrainHeight(features, paths, detail, table, terraceStep, x, z)
     }
   }
   return { cols, rows, heights }

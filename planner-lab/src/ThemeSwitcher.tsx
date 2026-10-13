@@ -43,6 +43,7 @@ export default function ThemeSwitcher() {
 
   return (
     <div
+      className="lab-theme-switcher"
       style={{
         position: 'fixed',
         top: 14,

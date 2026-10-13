@@ -12,6 +12,7 @@
 // order.
 
 import type { Table } from '../state/store'
+import { distToPath, PATH_MATERIAL, pathWeight } from './terrainPaths'
 
 /** Grid cell size (metres) for painting. Coarser than the height field — texture
  *  regions are broad, and this keeps the overlay bake cheap. */
@@ -108,6 +109,43 @@ export function applyPaintBrush(
   return changed
 }
 
+/** Rasterize a material footprint into a derived map. Authored manual paint is not mutated. */
+export function paintAlongPath(
+  pm: PaintMap,
+  table: Table,
+  points: Array<{ x: number; z: number }>,
+  halfWidth: number,
+  materialId: string,
+): boolean {
+  if (halfWidth <= 0 || points.length < 2) return false
+  const value = indexFor(pm, materialId)
+  const dx = table.width / pm.cols, dz = table.height / pm.rows
+
+  // Grid-space bounding box of the polyline, expanded by halfWidth — avoids
+  // testing every cell on a large table for a short path.
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+  for (const p of points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x)
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z)
+  }
+  const i0 = Math.max(0, Math.floor((minX - halfWidth + table.width / 2) / dx))
+  const i1 = Math.min(pm.cols - 1, Math.ceil((maxX + halfWidth + table.width / 2) / dx))
+  const j0 = Math.max(0, Math.floor((minZ - halfWidth + table.height / 2) / dz))
+  const j1 = Math.min(pm.rows - 1, Math.ceil((maxZ + halfWidth + table.height / 2) / dz))
+  if (i0 > i1 || j0 > j1) return false
+
+  let changed = false
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const c = cellCentre(i, j, pm, table)
+      if (distToPath(points, c.x, c.z) > halfWidth) continue
+      const k = j * pm.cols + i
+      if (pm.cells[k] !== value) { pm.cells[k] = value; changed = true }
+    }
+  }
+  return changed
+}
+
 export function clonePaintMap(pm: PaintMap | null): PaintMap | null {
   if (!pm) return null
   return { cols: pm.cols, rows: pm.rows, cells: new Uint8Array(pm.cells), palette: [...pm.palette] }
@@ -136,4 +174,38 @@ export function deserializePaint(data: any, table: Table): PaintMap | null {
   const cells = new Uint8Array(cols * rows)
   for (let k = 0; k < cells.length; k++) cells[k] = Number(data.cells[k]) || 0
   return { cols, rows, cells, palette: data.palette.map((s: any) => String(s)) }
+}
+
+
+/** Feature materials are derived each frame; manual paint remains a separate authored layer. */
+export function compositePathPaint(manual:PaintMap|null,table:Table,paths:import('./terrainPaths').TerrainPath[]):PaintMap {
+  const pm:PaintMap={cols:Math.min(256,Math.max(1,Math.ceil(table.width/0.01))),rows:Math.min(256,Math.max(1,Math.ceil(table.height/0.01))),cells:new Uint8Array(),palette:[]}
+  pm.cells=new Uint8Array(pm.cols*pm.rows)
+  const ordered=[...paths.filter(p=>p.kind==='cliff'||p.kind==='shoreline'),...paths.filter(p=>p.kind==='road'),...paths.filter(p=>p.kind==='ditch'||p.kind==='trench')]
+  for(const p of ordered) {
+    const def=PATH_MATERIAL[p.kind]
+    if(p.crossing==='preserve-road'&&(p.kind==='ditch'||p.kind==='trench')) {
+      const layer={...pm,cells:new Uint8Array(pm.cells.length),palette:[...pm.palette]}
+      paintAlongPath(layer,table,p.points,def.halfWidth(p),def.materialId)
+      for(let i=0;i<pm.cells.length;i++)if(layer.cells[i]) {
+        const q=cellCentre(i%pm.cols,Math.floor(i/pm.cols),pm,table)
+        if(!paths.some(r=>r.kind==='road'&&pathWeight(r,q.x,q.z)>0.5))pm.cells[i]=indexFor(pm,layer.palette[layer.cells[i]-1])
+      }
+    }else paintAlongPath(pm,table,p.points,def.halfWidth(p),def.materialId)
+  }
+  if(manual&&paintFitsTable(manual,table))for(let j=0;j<pm.rows;j++)for(let i=0;i<pm.cols;i++) {
+    const source=manual.cells[Math.min(manual.rows-1,Math.floor((j+0.5)/pm.rows*manual.rows))*manual.cols+Math.min(manual.cols-1,Math.floor((i+0.5)/pm.cols*manual.cols))]
+    if(source)pm.cells[j*pm.cols+i]=indexFor(pm,manual.palette[source-1])
+  }
+  return pm
+}
+
+/** Texture invalidation depends on footprints/material ordering, not surface elevation. */
+export function pathPaintChanged(before:import('./terrainPaths').TerrainPath[],after:import('./terrainPaths').TerrainPath[]) {
+  if(before===after)return false
+  if(before.length!==after.length)return true
+  return before.some((p,i)=>{
+    const q=after[i]
+    return p.kind!==q.kind||p.points!==q.points||p.channelWidth!==q.channelWidth||p.bermWidth!==q.bermWidth||p.transitionWidth!==q.transitionWidth||p.crossing!==q.crossing
+  })
 }
