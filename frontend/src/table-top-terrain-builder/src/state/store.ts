@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import {
-  loadAssets, loadAssetsFromAPI, loadSetsFromAPI, loadMyModelsForPlanner, getAssetById,
+  loadAssets, loadAssetsFromAPI, loadMatchingSetIds, loadSetsFromAPI, loadMyModelsForPlanner, getAssetById,
   type Asset, type PlannerSetData, type PlannerMyModel,
 } from '../core/assets'
 import {
@@ -18,6 +18,8 @@ import { analyticsApi } from '@/api/endpoints/analytics'
 import { taxonomyApi, MODEL_CLASS_SLUG, type TaxFacet } from '@/api/endpoints/taxonomy'
 import type { SearchFilters } from '@/api/types'
 import type { CameraPose } from '../scene/BuilderCamera'
+
+let catalogueRequestSeq = 0
 
 /** Build the browse `terms` string from a class + facet-token selection. */
 function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
@@ -168,6 +170,7 @@ interface AppState {
   catalogueMinPrice: number | null
   catalogueMaxPrice: number | null
   catalogueLoading: boolean          // true while re-querying the catalogue
+  catalogueSetIds: Set<string> | null // sets matching class/facet/price filters (null = no filter)
   bundles: PlannerBundle[]           // published bundles (palette grouping)
   sets: PlannerSetData[]             // published multi-part "set" models (grouping)
   setPartAssets: Asset[]             // the sets' part assets (kept off the catalogue)
@@ -417,6 +420,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   catalogueTerms: [],
   catalogueFacets: [],
   catalogueLoading: false,
+  catalogueSetIds: null,
   bundles: [],
   sets: [],
   setPartAssets: [],
@@ -639,21 +643,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         catalogueLoading: true,
       })
 
+      // Rapid changes (typing, clicking several terms) overlap; only the newest
+      // request may write, or a slow earlier response would overwrite it.
+      const seq = ++catalogueRequestSeq
       const termsStr = buildCatalogueTerms(nextClass, nextTerms)
-      try {
-        const assets = await loadAssetsFromAPI({
-          terms: termsStr,
-          search: nextSearch || undefined,
-          sortBy: nextSort,
-          minPrice: nextMinPrice ?? undefined,
-          maxPrice: nextMaxPrice ?? undefined,
-        })
-        set({ assets })
-      } catch {
-        /* keep the previous catalogue on error */
+      const filter = {
+        terms: termsStr,
+        search: nextSearch || undefined,
+        sortBy: nextSort,
+        minPrice: nextMinPrice ?? undefined,
+        maxPrice: nextMaxPrice ?? undefined,
       }
-      set({ catalogueFacets: await loadCatalogueFacets(termsStr) })
-      set({ catalogueLoading: false })
+      const [assets, setIds, facets] = await Promise.all([
+        loadAssetsFromAPI(filter).catch(() => null),
+        loadMatchingSetIds(filter),
+        loadCatalogueFacets(termsStr),
+      ])
+      if (seq !== catalogueRequestSeq) return
+      set({
+        ...(assets ? { assets } : {}), // keep the previous catalogue on error
+        catalogueSetIds: setIds,
+        catalogueFacets: facets,
+        catalogueLoading: false,
+      })
     },
 
     loadStarterLayout: () => {

@@ -158,13 +158,40 @@ export const DEFAULT_GRID_SIZE = 0.3048
  * Maps TerrainModel records to the Asset type the planner expects.
  * Falls back to local manifest if the API is unreachable.
  */
-export async function loadAssetsFromAPI(filter?: {
+export type CatalogueFilter = {
   terms?: string
   search?: string
   sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
   minPrice?: number
   maxPrice?: number
-}): Promise<Asset[]> {
+}
+
+/**
+ * Ids of the multi-part "set" models matching a class / facet / price filter, or
+ * null when no such filter is active (show every set). Sets are dropped from the
+ * flat catalogue by loadAssetsFromAPI and listed from /models/sets, which knows
+ * nothing about filters — without this the Sets section ignored every filter, and
+ * since most of the catalogue is sets the filters looked broken.
+ *
+ * Free-text search is deliberately left out: the palette searches sets itself,
+ * down to piece names the browse endpoint doesn't index.
+ */
+export async function loadMatchingSetIds(filter: CatalogueFilter): Promise<Set<string> | null> {
+  if (!filter.terms && filter.minPrice == null && filter.maxPrice == null) return null
+  try {
+    const response = await browseApi.searchModels({
+      limit: 200,
+      terms: filter.terms,
+      minPrice: filter.minPrice,
+      maxPrice: filter.maxPrice,
+    })
+    return new Set(response.models.filter((m) => (m.partCount ?? 1) > 1).map((m) => m.id))
+  } catch {
+    return null
+  }
+}
+
+export async function loadAssetsFromAPI(filter?: CatalogueFilter): Promise<Asset[]> {
   // A comma-separated `facetSlug:termPath` selection (model class + facet filters)
   // plus free-text search / price bounds, forwarded to the same browse endpoint the
   // marketplace uses — this is what makes the palette reach the *whole* published

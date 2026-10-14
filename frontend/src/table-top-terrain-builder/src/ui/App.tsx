@@ -145,6 +145,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const catalogueMinPrice = useAppStore((s) => s.catalogueMinPrice)
   const catalogueMaxPrice = useAppStore((s) => s.catalogueMaxPrice)
   const catalogueLoading = useAppStore((s) => s.catalogueLoading)
+  const catalogueSetIds = useAppStore((s) => s.catalogueSetIds)
   const setCatalogueFilter = useAppStore((s) => s.actions.setCatalogueFilter)
   const bundles = useAppStore((s) => s.bundles)
   const sets = useAppStore((s) => s.sets)
@@ -732,13 +733,17 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // a set or model name keeps everything beneath it; a hit on a piece keeps just
   // that piece (and its ancestors, so the path is still readable).
   const searchQ = query.trim().toLowerCase()
+  // Class / facet / price filters come from the server (catalogueSetIds).
   const visibleCatalogueSets = React.useMemo(() => {
-    if (!searchQ) return catalogueSetGroups
-    return catalogueSetGroups.filter((g) => {
+    const byFilter = catalogueSetIds
+      ? catalogueSetGroups.filter((g) => catalogueSetIds.has(g.id))
+      : catalogueSetGroups
+    if (!searchQ) return byFilter
+    return byFilter.filter((g) => {
       const set = sets.find((x) => x.id === g.id)
       return set ? filterSetComponents(set, searchQ).length > 0 : false
     })
-  }, [catalogueSetGroups, sets, searchQ])
+  }, [catalogueSetGroups, catalogueSetIds, sets, searchQ])
 
   // Part assets (from "set" models) are resolvable for tiles but kept OFF the
   // flat catalogue — merge them here only for lookups.
