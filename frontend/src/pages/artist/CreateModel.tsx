@@ -395,7 +395,10 @@ const CreateModel: React.FC = () => {
       //     used for both jobs) — only upload NEW files for whatever's left
       //     of the cap, rather than re-uploading a picture that's already on
       //     R2 as a model thumbnail.
-      const galleryKeys: string[] = [...derivedGalleryKeys]
+      // Capped: a listing with more named models than gallery slots still gives
+      // every model its planner thumbnail, but only the first ten double as
+      // gallery photos (the API rejects the whole listing past the cap).
+      const galleryKeys: string[] = derivedGalleryKeys.slice(0, MAX_GALLERY_IMAGES)
       const remainingGallerySlots = Math.max(0, MAX_GALLERY_IMAGES - galleryKeys.length)
       for (const f of galleryFiles.slice(0, remainingGallerySlots)) {
         startFile(f.name)
@@ -439,7 +442,10 @@ const CreateModel: React.FC = () => {
         state: { justUploadedId: created.id, justUploadedName: name.trim() },
       })
     } catch (err) {
-      setError((err as Error).message || 'Something went wrong')
+      // Prefer the API's own reason ("Choose a value for: Scale", "file too large", …)
+      // over axios's generic "Request failed with status code 400".
+      const apiMessage = (err as any)?.response?.data?.message
+      setError((typeof apiMessage === 'string' && apiMessage) || (err as Error).message || 'Something went wrong')
       setPhase('error')
     }
   }
