@@ -87,7 +87,7 @@ function effectiveMaxTris(): number {
 }
 
 /** Refuse a source file this large outright, before parsing it. */
-const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 600 * 1024 * 1024)
+const MAX_SOURCE_BYTES = Number(process.env.FULL_GLB_MAX_SOURCE_BYTES ?? 1000 * 1024 * 1024)
 
 /**
  * Triangle count from an STL *without* parsing it — a binary STL states it in the

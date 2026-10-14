@@ -45,7 +45,7 @@ type Phase = 'form' | 'uploading' | 'processing' | 'done' | 'error'
 // the backend's separate triangle-count ceiling (fileProcessor.ts's
 // MAX_INGEST_TRIANGLES); this is just the fast client-side check so an
 // oversized file fails before wasting an upload.
-const MAX_MODEL_FILE_MB = 500
+const MAX_MODEL_FILE_MB = 900
 const MAX_MODEL_FILE_BYTES = MAX_MODEL_FILE_MB * 1024 * 1024
 
 // Caps mirrored from the backend (routes/models.ts).

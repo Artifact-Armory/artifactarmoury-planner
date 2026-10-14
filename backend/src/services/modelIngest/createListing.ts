@@ -30,7 +30,7 @@ export const VALID_PRINTER_TYPES = ['fdm', 'resin', 'both'];
 // A listing may bundle several named components ("Small Village" = tower +
 // tavern + well), each of several files. Caps are generous but bounded: every
 // extra file is a separate background conversion + preview bake.
-export const MAX_EXTRA_PARTS = 60;
+export const MAX_EXTRA_PARTS = 250;
 export const MAX_COMPONENTS = 20;
 // Store-page gallery photos (beyond the required thumbnail) — shared by the
 // initial upload and the standalone add-more-photos route so a model can't
@@ -186,7 +186,7 @@ export async function createListingFromUpload(
   const extraParts: Array<{
     rawKey: string; filename?: string; name?: string; groupIndex: number; groupName: string | null;
     isPresupported: boolean; displayRawKey: string | null; thumbnailKey: string | null;
-    keepPartsPlaceable: boolean; previewSkipped?: boolean;
+    keepPartsPlaceable: boolean; downloadOnly: boolean; previewSkipped?: boolean;
   }> = [];
   if (parts != null) {
     if (!Array.isArray(parts)) throw new ValidationError('parts must be an array');
@@ -258,6 +258,9 @@ export async function createListingFromUpload(
         rawKey: p.rawKey, filename: p.filename, name: p.name, groupIndex, groupName,
         isPresupported: partPresupported, displayRawKey: partDisplayRawKey, thumbnailKey: partThumbnailKey,
         keepPartsPlaceable: p.keepPartsPlaceable === true || p.keepPartsPlaceable === 'true',
+        // A single file that only belongs in the ZIP (e.g. a pre-supported print
+        // plate of pieces that are placeable on their own).
+        downloadOnly: p.downloadOnly === true || p.downloadOnly === 'true',
       });
     }
   }
@@ -271,7 +274,7 @@ export async function createListingFromUpload(
   for (const p of extraParts) {
     if (p.displayRawKey && !p.keepPartsPlaceable) skipGroups.add(p.groupIndex);
   }
-  for (const p of extraParts) p.previewSkipped = skipGroups.has(p.groupIndex) && !p.displayRawKey;
+  for (const p of extraParts) p.previewSkipped = p.downloadOnly || (skipGroups.has(p.groupIndex) && !p.displayRawKey);
   const partCount = 1 + extraParts.length;
   // Name of the component owning the primary file (NULL when the listing isn't
   // split into named models).

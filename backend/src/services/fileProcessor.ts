@@ -100,8 +100,11 @@ interface ParsedSTL {
  * ~10.48M triangles, so this keeps the byte cap meaningful for binary STL. The
  * isolated child needs ~650 bytes of heap per triangle (a 4.6M-tri file took
  * ~3GB), so ~7GB at the ceiling — the worker's INGEST_CHILD_HEAP_MB must cover it.
+ *
+ * 10.5M -> 18.9M on 2026-10-14, with the 900MB byte cap (900MB binary ≈ 18.87M
+ * triangles): ~12.3GB of child heap at the ceiling, inside INGEST_CHILD_HEAP_MB=16384.
  */
-export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 10_500_000)
+export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 18_900_000)
 
 /**
  * Stricter cap applied ONLY to an extra part of a grouped/multi-part listing
@@ -113,8 +116,11 @@ export const MAX_INGEST_TRIANGLES = Number(process.env.MAX_INGEST_TRIANGLES ?? 1
  * undecimated primary STL (and the raw file behind ANY part, previewable or
  * not) is untouched either way, since storing it is a plain R2 upload with no
  * parsing involved. Built 2026-09-04 after the "Japanese houses" incident.
+ * 3.5M -> 5M on 2026-10-14 (a 3.7M-tri windmill and a 4.65M-tri decimated house
+ * preview); the child heap is now sized to the container, and 5M is the most the
+ * Blender proxy bake has been exercised at.
  */
-export const MAX_PREVIEW_PART_TRIANGLES = Number(process.env.MAX_PREVIEW_PART_TRIANGLES ?? 3_500_000)
+export const MAX_PREVIEW_PART_TRIANGLES = Number(process.env.MAX_PREVIEW_PART_TRIANGLES ?? 5_000_000)
 
 /**
  * Triangle count from a binary STL *without* parsing it — the format states it

@@ -18,7 +18,9 @@ export type MeshFormat = 'stl' | 'obj' | '3mf'
 // a very large mesh exhausts the server's memory and crashes it. 500MB matches
 // MyMiniFactory's top (Store Manager) tier. Raised 150MB -> 250MB on 2026-09-03,
 // then 250MB -> 500MB on 2026-10-13 once the worker moved to Railway Pro (32GB
-// per replica) and the ingest child's heap became sized to the container. Enforced client-side (fast fail) and server-side (authoritative, from
+// per replica) and the ingest child's heap became sized to the container, then
+// 500MB -> 900MB on 2026-10-14 for an 887MB Wargame3D building (Canada House,
+// damaged). Enforced client-side (fast fail) and server-side (authoritative, from
 // the object's real R2 size).
 //
 // This byte cap alone doesn't bound memory for a dense mesh — see
@@ -28,7 +30,7 @@ export type MeshFormat = 'stl' | 'obj' | '3mf'
 // triangle ceiling ends up the binding constraint well under 500MB; the higher
 // byte cap mainly benefits large-but-lower-density files (ASCII STL, OBJ, 3MF)
 // and genuinely low-poly-but-physically-large terrain.
-export const MAX_MODEL_FILE_BYTES = 500 * 1024 * 1024
+export const MAX_MODEL_FILE_BYTES = 900 * 1024 * 1024
 export const MAX_MODEL_FILE_MB = Math.round(MAX_MODEL_FILE_BYTES / (1024 * 1024))
 
 interface V3 { x: number; y: number; z: number }

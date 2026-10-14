@@ -820,6 +820,13 @@ client-side fail before wasting an upload — must match) updated to match.
   **skips** rather than crash-looping; the worker needs `NODE_OPTIONS=--max-old-space-size=14336`
   to reach 10.5M. `MAX_PREVIEW_PART_TRIANGLES` (3.5M) left as-is. The Blender
   proxy bake has not been exercised above ~5M tris — watch worker memory on the first one.
+- **Raised again 2026-10-14** for the Wargames3D terrain batch: `MAX_MODEL_FILE_BYTES` **900MB**
+  (backend + `CreateModel.tsx`), `MAX_INGEST_TRIANGLES` **18.9M** (≈12.3 GB child heap, inside
+  `INGEST_CHILD_HEAP_MB=16384`), `MAX_PREVIEW_PART_TRIANGLES` **3.5M → 5M** (a part that drives a
+  planner preview; a 3.7M-tri windmill and a 4.65M-tri decimated house preview were over it),
+  `FULL_GLB_MAX_SOURCE_BYTES` 1000MB. `FULL_GLB_MAX_TRIS` stays 10.5M (owner GLB is skipped above
+  it). A ZIP download still buffers each file whole, so an 887MB entry briefly costs the API
+  server ~0.9 GB per concurrent download. `MAX_EXTRA_PARTS` (files per listing) is now **250**.
 
 ## Preview file replaces a named model's part files in the planner (built 2026-10-01, migration 067)
 The preview upload in `CreateModel.tsx` is no longer tied to "has supports" — it's an optional field on
