@@ -59,7 +59,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = (req as any).userId;
     await db.query(
-      'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2',
+      'UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, NOW()) WHERE id = $1 AND user_id = $2',
       [req.params.id, userId],
     );
     res.json({ ok: true });
@@ -79,8 +79,8 @@ router.post(
       : null;
     await db.query(
       types && types.length > 0
-        ? 'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false AND type = ANY($2::text[])'
-        : 'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false',
+        ? 'UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, NOW()) WHERE user_id = $1 AND is_read = false AND type = ANY($2::text[])'
+        : 'UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, NOW()) WHERE user_id = $1 AND is_read = false',
       types && types.length > 0 ? [userId, types] : [userId],
     );
     res.json({ ok: true });

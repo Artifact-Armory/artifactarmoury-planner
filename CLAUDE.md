@@ -1199,6 +1199,13 @@ single-model and bundle paths); the storefront shows "Display only" instead of A
 `artist_name`/`display_name` against "Tester Artist" and "wargame%3d%" — check which accounts it caught.
 To start selling: `UPDATE users SET sales_disabled = false WHERE email = '...';`
 
+## Read notifications self-delete after 12h (built 2026-10-14, migration 074)
+`notifications.read_at` is stamped when a notification is marked read (single or read-all).
+`services/notificationCleanup.ts` runs hourly on the API server and deletes rows read more than
+`NOTIFICATION_READ_TTL_HOURS` (default 12) ago; unread rows are never deleted. 074 sets
+`read_at = NOW()` on already-read rows so they go 12h after deploy, not all at once.
+Typechecks; **SQL not run against a real Postgres** (no local DB).
+
 ## Bundle store page fixes (built 2026-09-09)
 Three small buyer/artist-facing gaps on the bundle feature (see "Pricing model — DIGITAL STL ONLY
 + BUNDLES" above), fixed together in one session:

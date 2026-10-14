@@ -55,6 +55,7 @@ import emailPrefsRoutes from './routes/emailPrefs';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 import { startIntroCommissionScheduler } from './services/introCommission';
+import { startNotificationCleanupScheduler } from './services/notificationCleanup';
 import { startAnalyticsRollupScheduler } from './services/analyticsRollup';
 import { startFullGlbInlineDrainer } from './services/fullGlb/inline';
 import { startQueueAlarmScheduler } from './services/queueAlarm';
@@ -257,6 +258,9 @@ async function startServer() {
 
     // Revert any artist's introductory commission rate once its window has lapsed.
     startIntroCommissionScheduler();
+
+    // Delete notifications 12 hours after they were read.
+    startNotificationCleanupScheduler();
 
     // Keep the artist analytics rollups current. Without this, any day on which
     // no artist opened a dashboard never gets rolled up and reads as zero.
