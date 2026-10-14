@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -295,6 +295,11 @@ const ModelDetails: React.FC = () => {
     )
   }
 
+  // With no thumbnail, the hero falls back to the first gallery photo.
+  const firstImageSrc =
+    (model.images ?? []).map((image) => image.imageUrl ?? image.imagePath).find((src) => !!src) ?? null
+  const heroSrc = activeImage || model.thumbnailUrl || firstImageSrc
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <Seo
@@ -306,12 +311,40 @@ const ModelDetails: React.FC = () => {
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="min-w-0 space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
-            <div className="relative h-80 w-full bg-muted">
-              {activeImage || model.thumbnailUrl ? (
-                <img src={activeImage || model.thumbnailUrl} alt={model.name} className="h-full w-full object-cover" />
+            <div className="relative h-80 w-full bg-muted sm:h-[28rem]">
+              {heroSrc ? (
+                <img src={heroSrc} alt={model.name} className="h-full w-full object-contain" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-muted-foreground">No thumbnail available</div>
               )}
+              {(() => {
+                // Same order as the strip below: thumbnail (null) first, then each photo.
+                const gallery: (string | null)[] = [
+                  ...(model.thumbnailUrl ? [null] : []),
+                  ...(model.images ?? [])
+                    .map((image) => image.imageUrl ?? image.imagePath)
+                    .filter((src): src is string => !!src),
+                ]
+                if (gallery.length < 2) return null
+                const current = Math.max(0, gallery.indexOf(model.thumbnailUrl ? activeImage : heroSrc))
+                const step = (delta: number) =>
+                  setActiveImage(gallery[(current + delta + gallery.length) % gallery.length])
+                const arrowClass =
+                  'absolute top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white shadow transition hover:bg-black/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-white'
+                return (
+                  <>
+                    <button type="button" aria-label="Previous image" onClick={() => step(-1)} className={`${arrowClass} left-3`}>
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+                    <button type="button" aria-label="Next image" onClick={() => step(1)} className={`${arrowClass} right-3`}>
+                      <ChevronRight className="h-6 w-6" />
+                    </button>
+                    <span className="absolute bottom-3 right-3 rounded-full bg-black/45 px-2.5 py-0.5 text-xs font-medium text-white">
+                      {current + 1} / {gallery.length}
+                    </span>
+                  </>
+                )
+              })()}
             </div>
             {model.images && model.images.length > 0 && (
               <div className="flex gap-3 overflow-x-auto p-4">
@@ -336,7 +369,7 @@ const ModelDetails: React.FC = () => {
                       type="button"
                       onClick={() => src && setActiveImage(src)}
                       className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 ${
-                        activeImage === src ? 'border-primary' : 'border-transparent'
+                        (model.thumbnailUrl ? activeImage : heroSrc) === src ? 'border-primary' : 'border-transparent'
                       }`}
                     >
                       <img src={src} alt={image.caption ?? model.name} className="h-full w-full object-cover" />
