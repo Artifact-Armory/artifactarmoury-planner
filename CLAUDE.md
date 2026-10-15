@@ -58,7 +58,7 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
   `{rows:[]}` for everything, so routes doing `rows[0].x` crash — guard them).
 - `cd frontend && npm run dev` (Vite on :3000). `npm run typecheck` in each project.
 - Migrations: `backend/db/migrations/*.sql`, run by `scripts/migrate.ts` against
-  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–077**.
+  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–078**.
 
 ## Seller upload → anti-theft pipeline (built this session)
 1. **Upload (async, preferred):** browser presigns (`POST /api/uploads/presign`,
@@ -1118,7 +1118,8 @@ Pack listings (Wargame3D markers, stowage…) put dozens of placeable pieces und
 every palette tile showed the same pack shot. The worker now renders each piece itself:
 `services/pieceRender.ts` is a pure-Node software rasteriser (no GPU/Blender) that draws the piece's
 **owner GLB** (041, `full_glb_path` — no watermark emboss, not decimated like the proxy; 076 first used
-the proxy and showed the emboss, 077 cleared those renders) from a fixed 3/4 view, grey clay on light grey, 512px WebP, ~0.3–1.5 s. 
+the proxy and showed the emboss, 077 cleared those renders, but ran while the worker was still on 076 code and got redrawn from the
+proxy; 078 cleared them again. Lesson: the API's pre-deploy migration runs before the worker redeploys) from a fixed 3/4 view, grey clay on light grey, 512px WebP, ~0.3–1.5 s. 
 `services/pieceRenderBackfill.ts` runs one piece per idle worker cycle (after the fingerprint upgrade,
 same lowest-priority slot; the supervisor's `hasClaimableWork` counts these rows too), for every
 `model_parts` row without its own `thumbnail_path` and every multi-part listing's primary without
