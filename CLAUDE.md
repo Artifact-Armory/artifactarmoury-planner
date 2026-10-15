@@ -494,6 +494,17 @@ roof, ring mount and gunner off "Bunker Tobruk Regelbau 58c" (26% of the proxy) 
 deletion alone keeps the proxy unprintable. Only affects new bakes — re-bake damaged models
 (`/admin/queues` → Rebake). Spot misfires: `proxy_report.deletedInteriorFaces / proxyTriangles`.
 
+## Proxy normal maps were blank — UV margin fix (2026-10-15)
+Every decimated proxy's UVs had collapsed to ~0 area, so the baked normal map carried nothing and
+decimation loss was never baked back in (live Tiger: 348k tris covering 0.00% of its map; same on the
+Stryker, SU-76, Tobruk, markers, an August upload). Cause: `pack_islands(margin=0.02)` in Blender's
+default SCALED mode, against thousands of islands. `unwrap()` now uses `margin_method='FRACTION'` with
+`uvIslandMarginPx` (2 texels, replaces `uvIslandMargin`). Turret coverage 0.55% → 36%. Side effect: the
+normal-map PNG now holds detail, ~69 KB → ~6.5 MB, so a re-baked dense proxy grows by about that much.
+Only new/re-baked proxies change. The global `triangleBudgetCeiling` stays 300k; the Tiger
+(`6e520900-…`, 1.91M welded tris, wrecked at 18% retain) gets a per-model `proxy_bake_config`
+override of 1M — measured locally 989k tris / 15.7 MB / 127 s bake, close to the source.
+
 ## "Previews aren't your final print" popup (built 2026-08-30)
 The planner draws a decimated proxy, which reads to a buyer as "this model is low quality"
 rather than "this is a preview". `ui/PreviewQualityNotice.tsx` shows the two side by side once,

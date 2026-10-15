@@ -550,19 +550,28 @@ def unwrap(proxy):
     Corrected aspect + a repack keep stretching down and texel budget high, so the
     baked normal map resolves the fine detail rather than smearing it across seams."""
     angle = math.radians(float(CFG.get("uvAngleLimitDeg", 66.0)))
-    margin = float(CFG.get("uvIslandMargin", 0.02))
+    # The margin is a fixed number of TEXELS, passed as a fraction of the texture
+    # (margin_method FRACTION). The old 0.02 used Blender's default SCALED method,
+    # where every island gets a gap proportional to its size; a decimated sculpt
+    # unwraps into thousands of islands (7,159 on the Tiger turret, half of them
+    # single triangles), so the gaps used up the whole texture and every island
+    # shrank to a speck — the live Tiger's 348k triangles covered 0.00% of its
+    # normal map, so nothing the decimation removed was ever baked back in.
+    res = int(CFG.get("normalMapRes", 2048))
+    margin = float(CFG.get("uvIslandMarginPx", 2.0)) / max(1, res)
     deselect_all()
     proxy.select_set(True)
     set_active(proxy)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=angle, island_margin=margin, correct_aspect=True)
+    bpy.ops.uv.smart_project(angle_limit=angle, island_margin=0.0, correct_aspect=True)
     # Repack tightly so islands use the whole 0..1 space (more texels per feature).
     try:
-        bpy.ops.uv.pack_islands(margin=margin)
+        bpy.ops.uv.pack_islands(margin_method="FRACTION", margin=margin)
     except Exception as e:
         warn("UV pack_islands failed (continuing with smart-project layout): " + str(e))
     bpy.ops.object.mode_set(mode="OBJECT")
+    REPORT["uvIslandMarginFraction"] = round(margin, 6)
 
 
 def new_image(name, res):

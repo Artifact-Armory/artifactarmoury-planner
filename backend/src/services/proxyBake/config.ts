@@ -146,8 +146,10 @@ export interface ProxyBakeConfig {
   bakeDisplacementSafety: number
   /** Smart-UV-project angle limit (degrees) for the proxy unwrap. */
   uvAngleLimitDeg: number
-  /** Smart-UV-project / pack island margin (0..1 of UV space). */
-  uvIslandMargin: number
+  /** Gap between packed UV islands, in texels of the normal map. Fixed in texels
+   *  rather than scaled per island: a decimated sculpt unwraps into thousands of
+   *  islands, and the old scaled 0.02 margin left them no room at all. */
+  uvIslandMarginPx: number
   /** Emboss a watermark string into the PREVIEW proxy GEOMETRY so a mesh-rip carries
    *  it (a naive print is spoiled; the letters must be manually removed). The paid
    *  STL is never touched — only the preview proxy. */
@@ -732,7 +734,7 @@ export function loadDefaults(): ProxyBakeConfig {
     proxySmoothLambda: envNum('PROXY_BAKE_SMOOTH_LAMBDA'),
     bakeDisplacementSafety: envNum('PROXY_BAKE_DISPLACEMENT_SAFETY'),
     uvAngleLimitDeg: envNum('PROXY_BAKE_UV_ANGLE_DEG'),
-    uvIslandMargin: envNum('PROXY_BAKE_UV_MARGIN'),
+    uvIslandMarginPx: envNum('PROXY_BAKE_UV_MARGIN_PX'),
     embossHeightPct: envNum('PROXY_BAKE_EMBOSS_HEIGHT_PCT'),
     embossDepthPct: envNum('PROXY_BAKE_EMBOSS_DEPTH_PCT'),
     embossInsetPct: envNum('PROXY_BAKE_EMBOSS_INSET_PCT'),

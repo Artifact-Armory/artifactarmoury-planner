@@ -11,7 +11,7 @@
   "proxySmoothLambda": 0.4,
   "bakeDisplacementSafety": 1.5,
   "uvAngleLimitDeg": 66,
-  "uvIslandMargin": 0.02,
+  "uvIslandMarginPx": 2,
   "embossWatermarkEnabled": true,
   "embossWatermarkText": "PREVIEW",
   "embossStyle": "logo",
