@@ -6,6 +6,13 @@
 // slot as fingerprintUpgrade.ts. Covers the existing catalogue and every new
 // upload alike, so no script is needed.
 //
+// Drawn from the OWNER GLB (migration 041), never the public preview proxy: the
+// proxy carries the embossed watermark and is decimated, which is not what a
+// buyer should see as the picture of the piece. A piece whose owner GLB isn't
+// built yet waits; one whose build failed or was skipped (over FULL_GLB_MAX_TRIS)
+// is never rendered and keeps its photo. full_glb_path is a secret key, but only
+// the rendered picture is ever published, never the key.
+//
 // A piece that can't be rendered (GLB missing from R2, undecodable) gets
 // render_failed_at and is skipped from then on; clear it to retry.
 
@@ -20,18 +27,18 @@ export const isPieceRenderEnabled = () => process.env.PIECE_RENDER_ENABLED !== '
 /** Pieces that want a render. Mirrored (inlined) in worker/proxyBakeWorker.ts — keep in step. */
 export const PART_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
   AND thumbnail_path IS NULL AND preview_skipped = false
-  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
+  AND processing_status = 'ready' AND full_glb_status = 'ready' AND full_glb_path IS NOT NULL`
 export const MODEL_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
   AND primary_thumbnail_path IS NULL AND part_count > 1 AND deleted_at IS NULL
-  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
+  AND processing_status = 'ready' AND full_glb_status = 'ready' AND full_glb_path IS NOT NULL`
 
 type Table = 'models' | 'model_parts'
 
 async function pickRow(): Promise<{ table: Table; id: string; key: string } | null> {
   for (const [table, where] of [['models', MODEL_NEEDS_RENDER_SQL], ['model_parts', PART_NEEDS_RENDER_SQL]] as const) {
     // random() spreads replicas across different rows instead of all racing for one.
-    const { rows } = await db.query(`SELECT id, glb_file_path FROM ${table} WHERE ${where} ORDER BY random() LIMIT 1`)
-    if (rows[0]) return { table, id: rows[0].id, key: rows[0].glb_file_path }
+    const { rows } = await db.query(`SELECT id, full_glb_path FROM ${table} WHERE ${where} ORDER BY random() LIMIT 1`)
+    if (rows[0]) return { table, id: rows[0].id, key: rows[0].full_glb_path }
   }
   return null
 }

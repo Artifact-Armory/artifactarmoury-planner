@@ -35,10 +35,10 @@ const STALE_FINGERPRINT_SQL = `geometry_fingerprint IS NOT NULL
 const isPieceRenderEnabled = () => process.env.PIECE_RENDER_ENABLED !== 'false'
 const PART_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
   AND thumbnail_path IS NULL AND preview_skipped = false
-  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
+  AND processing_status = 'ready' AND full_glb_status = 'ready' AND full_glb_path IS NOT NULL`
 const MODEL_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
   AND primary_thumbnail_path IS NULL AND part_count > 1 AND deleted_at IS NULL
-  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
+  AND processing_status = 'ready' AND full_glb_status = 'ready' AND full_glb_path IS NOT NULL`
 
 /** Same upsert as queueHealth.recordWorkerHeartbeat (which the child uses). */
 async function beat(): Promise<void> {
