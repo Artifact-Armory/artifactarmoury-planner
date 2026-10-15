@@ -17,9 +17,29 @@ import { footprintCellsFor } from '@core/footprintMask'
 import {
   surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY,
 } from '@core/elevation'
-import { buildTableMaterial, bakePaintOverlayCanvas, makePaintOverlayTexture } from '@core/tableMaterials'
+import {
+  buildTableMaterial, bakePaintOverlayMaps, makePaintOverlayTextures, preloadGroundTextures, preparePaintSources,
+  emptyPaintOverlayMaps, type PaintOverlayCanvases, type PaintOverlayTextures,
+} from '@core/tableMaterials'
 import { buildTerrainGeometry, updateTerrainGeometry, heightmapFitsTable, sampleHeight, createHeightmap } from '@core/heightmap'
-import { paintFitsTable, isBlank as paintIsBlank } from '@core/paintmap'
+import { paintFitsTable, isBlank as paintIsBlank, type PaintMap } from '@core/paintmap'
+import {
+  featureDistance, featurePoint, featureBounds, featureLabel, evaluateTerrainHeight, FLAT_RATIO,
+  type TerrainFeature, type TerrainFeatureType,
+} from '@core/terrainFeatures'
+import { FrameQueue } from '@core/frameQueue'
+import { LatestPaintJob } from './latestPaintJob'
+
+// Outline / preview colour per landform type.
+const FEATURE_COLOR: Record<TerrainFeatureType, number> = {
+  hill: 0xffcc44,
+  plateau: 0x6cc4ff,
+}
+// Overlay bake size (longest edge, px): lighter while a stroke is in progress,
+// full detail once it settles; the no-worker fallback bakes on the main thread.
+const PAINT_LIVE_PX = 1024
+const PAINT_SETTLED_PX = 2048
+const PAINT_FALLBACK_PX = 512
 
 const DRAG_THRESHOLD = 4 // px before a press becomes a drag
 
@@ -41,6 +61,9 @@ type LeftDrag =
   | { kind: 'move'; startGround: THREE.Vector3; ids: string[]; orig: Map<string, { x: number; z: number }> }
   | { kind: 'box'; x: number; y: number; base: Set<string> }
   | { kind: 'pan'; x: number; y: number }
+  // Dragging a landform: the cursor is read off a horizontal plane at the grab
+  // height, and the original grab offset from its centre is kept throughout.
+  | { kind: 'moveFeature'; id: string; orig: { x: number; z: number }; start: THREE.Vector3; plane: THREE.Plane }
   | {
       kind: 'rotate'
       ids: string[]
@@ -55,6 +78,7 @@ type LeftDrag =
 export function ThreeStage() {
   const mountRef = useRef<HTMLDivElement>(null)
   const [boxRect, setBoxRect] = useState<{ l: number; t: number; w: number; h: number } | null>(null)
+  const [landformHint, setLandformHint] = useState('')
 
   // Engine refs (live outside React's render cycle).
   const engine = useRef<{
@@ -244,6 +268,13 @@ export function ThreeStage() {
     brushRing.renderOrder = 10
     scene.add(brushRing)
 
+    // Landform outlines: the selected landform's footprint + flat-top rings, and
+    // the translucent surface preview of an armed (not yet placed) one.
+    const featureGroup = new THREE.Group()
+    scene.add(featureGroup)
+    const landformPreview = new THREE.Group()
+    scene.add(landformPreview)
+
     // Deformable surface: the flat plane is swapped for a heightmap mesh once the
     // user starts sculpting (see buildTable / syncTerrain). A grid mesh is also used
     // (flat) when the surface is painted, so the overlay has known UVs.
@@ -252,8 +283,21 @@ export function ThreeStage() {
     // Painted-texture overlay: a transparent mesh sharing the surface geometry,
     // sitting a hair above it so the base material shows through unpainted areas.
     let paintMesh: THREE.Mesh | null = null
-    let paintTex: THREE.CanvasTexture | null = null
-    let paintCanvas: HTMLCanvasElement | null = null
+    let paintTex: PaintOverlayTextures | null = null
+    let paintCanvas: PaintOverlayCanvases | null = null
+    // Paint-bake job state (see "paint baking" below). Declared up here because
+    // buildTable() runs at mount, before the functions that use these.
+    const paintJobs = new LatestPaintJob()
+    let paintReady = false
+    let paintStarted = false
+    let paintFallbackTimer: ReturnType<typeof setTimeout> | undefined
+    let activePaint: { id: number; mesh: THREE.Mesh; paint: PaintMap | null } | null = null
+    let paintWorker: Worker | null = null
+    // Pointer input is applied at most once per frame (latest position wins);
+    // pointer-up flushes it so the last dab/position is never dropped.
+    const editQueue = new FrameQueue()
+    const cursorQueue = new FrameQueue()
+    let disposed = false
 
     const raycaster = new THREE.Raycaster()
     const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
@@ -308,7 +352,6 @@ export function ThreeStage() {
     ro.observe(mount)
 
     // ---- table snapshot (saved table thumbnail) ----
-    let disposed = false
     // rAF is paused in a background tab; the timer keeps a capture from stalling there.
     const nextFrame = () => new Promise<void>((r) => {
       const t = setTimeout(r, 100)
@@ -390,7 +433,7 @@ export function ThreeStage() {
       shot.updateProjectionMatrix()
 
       // Hide everything that is editor chrome rather than the table itself.
-      const hidden = [ghost.group, rotateHandle.group, gridGroup, cellHi, brushRing].filter((o) => o.visible)
+      const hidden = [ghost.group, rotateHandle.group, gridGroup, cellHi, brushRing, featureGroup, landformPreview].filter((o) => o.visible)
       hidden.forEach((o) => { o.visible = false })
       const selection = new Set(s.selectedInstanceIds)
       const hovered = engine.current?.hovered ?? null
@@ -439,12 +482,13 @@ export function ThreeStage() {
       const sculpted = !!(hm && heightmapFitsTable(hm, t))
       const painted = hasPaint()
       tableGroup.clear()
+      if (paintTex) Object.values(paintTex).forEach((texture) => texture.dispose())
       terrainMesh = null
       terrainGeo = null
       paintMesh = null
       paintTex = null
       paintCanvas = null
-      const mat = buildTableMaterial(store().tableMaterial, t)
+      const mat = buildTableMaterial(store().tableMaterial, t, requestRender)
 
       if (sculpted || painted) {
         // World-space grid mesh (Y up), known UVs 0..1 for the paint overlay. Uses
@@ -484,17 +528,21 @@ export function ThreeStage() {
     }
 
     // Build the transparent painted-texture overlay sharing the surface geometry.
+    // It starts empty; the colour/normal/roughness maps arrive from the bake.
     function buildPaintOverlay(geo: THREE.BufferGeometry, baseY: number) {
       const s = store()
       if (!paintFitsTable(s.paint, s.table)) return
-      paintCanvas = bakePaintOverlayCanvas(s.paint, s.table)
-      paintTex = makePaintOverlayTexture(paintCanvas)
+      paintCanvas = emptyPaintOverlayMaps()
+      paintTex = makePaintOverlayTextures(paintCanvas)
       const mat = new THREE.MeshStandardMaterial({
-        map: paintTex,
+        map: paintTex.albedo,
+        normalMap: paintTex.normal,
+        roughnessMap: paintTex.roughness,
+        normalScale: new THREE.Vector2(0.65, 0.65),
         transparent: true,
         alphaTest: 0.02,
         depthWrite: false,
-        roughness: 0.95,
+        roughness: 1,
         metalness: 0,
         side: THREE.DoubleSide,
         polygonOffset: true,
@@ -507,6 +555,126 @@ export function ThreeStage() {
       mesh.receiveShadow = true
       tableGroup.add(mesh)
       paintMesh = mesh
+      requestPaintPreview()
+    }
+
+    // ---- paint baking ----
+    // One bake runs at a time in a worker (OffscreenCanvas); while it runs, only
+    // "the latest state is wanted" is remembered — the paint map is read when a
+    // job is DISPATCHED, so a fast stroke never queues up stale copies. A result
+    // is dropped if the overlay was rebuilt (resize, material change) or the paint
+    // map was replaced (undo/redo, load) since the job went out.
+
+    // Lazily start the worker the first time a table actually has paint, so the
+    // ground photos are only fetched when they are needed.
+    function startPaintWorker() {
+      if (paintStarted) return
+      paintStarted = true
+      try {
+        if (typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function') {
+          paintWorker = new Worker(new URL('./paintPreview.worker.ts', import.meta.url), { type: 'module' })
+        }
+      } catch {
+        paintWorker = null
+      }
+      if (!paintWorker) {
+        // Main-thread fallback: re-bake once the photos land.
+        paintReady = true
+        void preloadGroundTextures().then(() => { if (!disposed) requestPaintPreview() })
+        return
+      }
+      paintWorker.onerror = failPaintWorker
+      paintWorker.onmessage = (event: MessageEvent<{ id: number; error?: string; bitmaps?: Record<'albedo' | 'normal' | 'roughness', ImageBitmap> }>) => {
+        const data = event.data
+        const job = activePaint
+        if (!paintJobs.finish(data.id)) {
+          if (data.bitmaps) Object.values(data.bitmaps).forEach((bitmap) => bitmap.close())
+          return
+        }
+        activePaint = null
+        if (data.error) { failPaintWorker(); return }
+        if (job && !disposed && job.mesh === paintMesh && job.paint === store().paint && paintCanvas && data.bitmaps) {
+          for (const channel of ['albedo', 'normal', 'roughness'] as const) {
+            const canvas = paintCanvas[channel], bitmap = data.bitmaps[channel]
+            if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) { canvas.width = bitmap.width; canvas.height = bitmap.height }
+            const ctx = canvas.getContext('2d')!
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            ctx.drawImage(bitmap, 0, 0)
+          }
+          uploadPaintMaps()
+        }
+        if (data.bitmaps) Object.values(data.bitmaps).forEach((bitmap) => bitmap.close())
+        sendPaintPreview()
+      }
+      void preparePaintSources().then((sources) => {
+        if (disposed || !paintWorker) { sources.forEach((source) => source.image.close()); return }
+        paintWorker.postMessage({ kind: 'init', sources }, sources.map((source) => source.image))
+        paintReady = true
+        sendPaintPreview()
+      }).catch(failPaintWorker)
+    }
+
+    function failPaintWorker() {
+      paintWorker?.terminate()
+      paintWorker = null
+      paintReady = true
+      if (activePaint) paintJobs.finish(activePaint.id)
+      activePaint = null
+      void preloadGroundTextures().then(() => { if (!disposed) requestPaintPreview() })
+      requestPaintPreview()
+    }
+
+    function requestPaintPreview() {
+      startPaintWorker()
+      paintJobs.request()
+      sendPaintPreview()
+    }
+
+    // Hand the baked canvases to the GPU (re-creating the textures on a size change).
+    function uploadPaintMaps() {
+      if (!paintCanvas || !paintTex || !paintMesh) return
+      const texture = paintTex.albedo
+      if (texture.userData.width !== paintCanvas.albedo.width || texture.userData.height !== paintCanvas.albedo.height) {
+        Object.values(paintTex).forEach((map) => map.dispose())
+        paintTex = makePaintOverlayTextures(paintCanvas)
+        const material = paintMesh.material as THREE.MeshStandardMaterial
+        material.map = paintTex.albedo
+        material.normalMap = paintTex.normal
+        material.roughnessMap = paintTex.roughness
+        material.needsUpdate = true
+      } else {
+        Object.values(paintTex).forEach((map) => { map.needsUpdate = true })
+      }
+      requestRender()
+    }
+
+    function sendPaintPreview() {
+      if (disposed || !paintReady || !paintMesh || !paintCanvas) return
+      if (!paintWorker) {
+        // Coalesced main-thread bake at reduced resolution.
+        if (paintFallbackTimer !== undefined) return
+        paintFallbackTimer = setTimeout(() => {
+          paintFallbackTimer = undefined
+          const id = paintJobs.take()
+          if (id === null) return
+          const state = store()
+          if (paintCanvas && paintMesh && !disposed && paintFitsTable(state.paint, state.table)) {
+            bakePaintOverlayMaps(state.paint, state.table, paintCanvas, PAINT_FALLBACK_PX)
+            uploadPaintMaps()
+          }
+          paintJobs.finish(id)
+          sendPaintPreview()
+        }, 50)
+        return
+      }
+      const state = store()
+      if (!paintFitsTable(state.paint, state.table)) return
+      const id = paintJobs.take()
+      if (id === null) return
+      const size = engine.current?.sculpting ? PAINT_LIVE_PX : PAINT_SETTLED_PX
+      activePaint = { id, mesh: paintMesh, paint: state.paint }
+      // Structured cloning copies the cell bytes once per dispatched job.
+      paintWorker.postMessage({ kind: 'paint', id, paint: state.paint, table: { width: state.table.width, height: state.table.height }, size })
     }
 
     // Re-sync the surface mesh after a sculpt (or when the heightmap appears/clears).
@@ -524,36 +692,163 @@ export function ThreeStage() {
     }
 
     // Re-bake the painted overlay after a paint stroke (or when it appears/clears).
+    // Paint never rebuilds the terrain geometry, except to add/remove the overlay.
     function syncPaint() {
       const painted = hasPaint()
       if (painted !== !!paintMesh) {
         buildTable() // add/remove the overlay (and switch flat plane ↔ grid mesh)
       } else if (painted && paintCanvas && paintTex) {
-        bakePaintOverlayCanvas(store().paint!, store().table, paintCanvas)
-        paintTex.needsUpdate = true
+        requestPaintPreview()
       }
       requestRender()
     }
+
+    function clearMarkers(group: THREE.Group) {
+      group.traverse((obj) => {
+        const m = obj as THREE.Mesh
+        if (m.geometry) m.geometry.dispose()
+        if (m.material) for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mat.dispose()
+      })
+      group.clear()
+    }
+
+    function markerLine(pts: THREE.Vector3[], color: number, opacity: number, dashed: boolean): THREE.Line {
+      const geo = new THREE.BufferGeometry().setFromPoints(pts)
+      const mat = dashed
+        ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 0.03, gapSize: 0.02, depthTest: false })
+        : new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthTest: false })
+      const line = new THREE.Line(geo, mat)
+      if (dashed) line.computeLineDistances()
+      line.renderOrder = 9
+      return line
+    }
+
+    /** Footprint + flat-top rings draped on the ground, a rise marker and a centre cross. */
+    function outlineFeature(f: TerrainFeature, group: THREE.Group, features: TerrainFeature[], preview = false) {
+      const state = store(), color = FEATURE_COLOR[f.type]
+      const height = (x: number, z: number) => evaluateTerrainHeight(features, state.terrainDetail, state.table, x, z)
+      for (const ring of [1, f.flatTop ?? FLAT_RATIO[f.type]]) {
+        if (ring <= 0) continue
+        const points = Array.from({ length: 65 }, (_, i) => {
+          const a = i / 64 * Math.PI * 2, p = featurePoint(f, Math.cos(a) * ring, Math.sin(a) * ring)
+          return new THREE.Vector3(p.x, height(p.x, p.z) + 0.004, p.z)
+        })
+        group.add(markerLine(points, color, ring === 1 ? 1 : 0.6, false))
+      }
+      const centreY = height(f.x, f.z)
+      const baseY = evaluateTerrainHeight(features.filter((v) => v.id !== f.id), state.terrainDetail, state.table, f.x, f.z)
+      group.add(markerLine([new THREE.Vector3(f.x, baseY + 0.004, f.z), new THREE.Vector3(f.x, centreY + 0.02, f.z)], color, 1, true))
+      for (const [u, v] of [[1, 0], [0, 1]]) {
+        const points = [-0.08, 0.08].map((t) => {
+          const p = featurePoint(f, u * t, v * t)
+          return new THREE.Vector3(p.x, height(p.x, p.z) + 0.006, p.z)
+        })
+        group.add(markerLine(points, color, preview ? 0.6 : 1, false))
+      }
+    }
+
+    function syncFeatureMarkers() {
+      clearMarkers(featureGroup)
+      const state = store(), f = state.terrainFeatures.find((v) => v.id === state.selectedFeatureId)
+      if (f) outlineFeature(f, featureGroup, state.terrainFeatures)
+      requestRender()
+    }
+
+    function hideLandformPreview() {
+      clearMarkers(landformPreview)
+      setLandformHint('')
+      requestRender()
+    }
+
+    /** Translucent surface of the armed landform under the cursor, before it is placed. */
+    function updateLandformPreview(e: { clientX: number; clientY: number }) {
+      const state = store(), draft = state.landformDraft
+      if (!draft || !state.landformArmed) { hideLandformPreview(); return }
+      const gp = groundPoint(e), hw = state.table.width / 2, hh = state.table.height / 2
+      if (!gp || Math.abs(gp.x) > hw || Math.abs(gp.z) > hh) { hideLandformPreview(); return }
+      const f = { ...draft, x: gp.x, z: gp.z }, features = [...state.terrainFeatures, f]
+      clearMarkers(landformPreview)
+      // Sample just the candidate footprint with the same evaluator the surface uses.
+      const rings = 12, segments = 48, positions: number[] = [], indices: number[] = []
+      for (let j = 0; j <= rings; j++) for (let i = 0; i <= segments; i++) {
+        const a = i / segments * Math.PI * 2, p = featurePoint(f, Math.cos(a) * j / rings, Math.sin(a) * j / rings)
+        p.x = Math.max(-hw, Math.min(hw, p.x)); p.z = Math.max(-hh, Math.min(hh, p.z))
+        positions.push(p.x, evaluateTerrainHeight(features, state.terrainDetail, state.table, p.x, p.z) + 0.003, p.z)
+      }
+      for (let j = 0; j < rings; j++) for (let i = 0; i < segments; i++) {
+        const a = j * (segments + 1) + i, b = a + segments + 1
+        indices.push(a, b, a + 1, a + 1, b, b + 1)
+      }
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      geo.setIndex(indices)
+      geo.computeVertexNormals()
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: FEATURE_COLOR[f.type], transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, roughness: 0.8,
+      }))
+      mesh.renderOrder = 8
+      landformPreview.add(mesh)
+      outlineFeature(f, landformPreview, features, true)
+      const b = featureBounds(f), cropped = b.minX < -hw || b.maxX > hw || b.minZ < -hh || b.maxZ > hh
+      setLandformHint(`${featureLabel(f)} · ${Math.round(f.radius * 2000)} × ${Math.round((f.radiusZ ?? f.radius) * 2000)} mm · rise ${Math.round(f.height * 1000)} mm · click to place${cropped ? ' · cropped at the table edge' : ''}`)
+      requestRender()
+    }
+
+    /** Nearest placed landform whose footprint contains the world point, or null. */
+    function pickFeatureAt(gp: THREE.Vector3 | null): string | null {
+      if (!gp) return null
+      let best: { id: string; dist: number } | null = null
+      for (const f of store().terrainFeatures) {
+        const dist = featureDistance(f, gp.x, gp.z)
+        if (dist <= 1 && (!best || dist < best.dist)) best = { id: f.id, dist }
+      }
+      return best?.id ?? null
+    }
+
 
     // Apply the active brush at the ground point under the cursor. Height tools
     // sculpt the field; paint/erase tools stamp the texture overlay. A changed dab
     // flags the stroke so pointer-up records one undo step.
     function sculptAt(e: { clientX: number; clientY: number }) {
+      const point = { clientX: e.clientX, clientY: e.clientY }, tool = store().terrainTool
+      editQueue.enqueue(() => {
+        if (!engine.current || store().terrainTool !== tool) return
+        applySculptAt(point)
+        updateBrushRing(point)
+      })
+    }
+    // Previous paint position in this stroke: each dab covers the segment from
+    // it, so a fast stroke (or an erase) is continuous rather than a dotted line.
+    let lastPaintPoint: { x: number; z: number; tool: string } | undefined
+    function applySculptAt(e: { clientX: number; clientY: number }) {
       const gp = groundPoint(e)
-      if (!gp) return
+      if (!gp) { lastPaintPoint = undefined; return }
       const tool = store().terrainTool
+      const painting = tool === 'paint' || tool === 'erase'
       // Geometry/overlay updates via the terrainRev/paintRev store subscriptions.
-      const changed = (tool === 'paint' || tool === 'erase')
-        ? store().actions.paintTerrain(gp.x, gp.z)
+      const changed = painting
+        ? store().actions.paintTerrain(gp.x, gp.z, lastPaintPoint?.tool === tool ? lastPaintPoint : undefined)
         : store().actions.sculptTerrain(gp.x, gp.z)
+      lastPaintPoint = painting ? { x: gp.x, z: gp.z, tool } : undefined
       if (changed) engine.current!.strokeChanged = true
+    }
+
+    /** End a brush stroke: apply the last dab, ask for a full-detail bake, one undo step. */
+    function finishStroke() {
+      const eng = engine.current!
+      editQueue.flush()
+      eng.sculpting = false
+      lastPaintPoint = undefined
+      if (hasPaint()) requestPaintPreview()
+      if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
     }
 
     function updateBrushRing(e: { clientX: number; clientY: number }) {
       const s = store()
+      if (s.landformArmed) { brushRing.visible = false; updateLandformPreview(e); return }
       const gp = s.terrainTool !== 'none' ? groundPoint(e) : null
       if (!gp) { if (brushRing.visible) { brushRing.visible = false; requestRender() } return }
-      brushRing.position.set(gp.x, 0.03, gp.z)
+      brushRing.position.set(gp.x, gp.y + 0.03, gp.z)
       brushRing.scale.set(s.brushRadius, s.brushRadius, s.brushRadius)
       brushRing.visible = true
       requestRender()
@@ -586,6 +881,12 @@ export function ThreeStage() {
     const ndcTmp = new THREE.Vector2()
     function groundPoint(e: { clientX: number; clientY: number }): THREE.Vector3 | null {
       raycaster.setFromCamera(ndc(e, ndcTmp), camera)
+      // Sculpted/landform tables: hit the actual surface, not the y=0 plane, so
+      // the brush, the landform preview and dabs land under the cursor on a hill.
+      if (terrainMesh) {
+        const hits = raycaster.intersectObject(terrainMesh, false)
+        if (hits.length) return hits[0].point.clone()
+      }
       const hit = new THREE.Vector3()
       return raycaster.ray.intersectPlane(ground, hit) ? hit : null
     }
@@ -697,6 +998,8 @@ export function ThreeStage() {
     // ---- left-button pointer state machine ----
     let lastGround: THREE.Vector3 | null = null
     function trackGround(e: PointerEvent) {
+      const s = store(), drag = engine.current!.drag
+      if (s.terrainTool !== 'none' || s.landformArmed || drag.kind === 'moveFeature') return
       lastGround = groundPoint(e)
     }
 
@@ -704,6 +1007,11 @@ export function ThreeStage() {
     // landed, so the camera owns the gesture now).
     function cancelDrag() {
       const eng = engine.current!
+      editQueue.flush()
+      if (eng.drag.kind === 'moveFeature') {
+        const drag = eng.drag, f = store().terrainFeatures.find((v) => v.id === drag.id)
+        if (f && (f.x !== drag.orig.x || f.z !== drag.orig.z)) store().actions.commitHistory()
+      }
       if (eng.drag.kind === 'move') inst.clearLive()
       if (eng.drag.kind === 'rotate') { inst.clearLive(); rotateHandle.setActive(false) }
       if (eng.drag.kind === 'box') setBoxRect(null)
@@ -711,10 +1019,7 @@ export function ThreeStage() {
       // A second finger also ends a terrain stroke — pointerup is swallowed while
       // the gesture latch is set, so close the undo step here or the brush would
       // stay "down" and keep sculpting after the pinch.
-      if (eng.sculpting) {
-        eng.sculpting = false
-        if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
-      }
+      if (eng.sculpting) finishStroke()
       requestRender()
     }
 
@@ -750,9 +1055,25 @@ export function ThreeStage() {
 
       // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.
       if (s.terrainTool !== 'none') {
+        lastPaintPoint = undefined
         eng.sculpting = true
         eng.strokeChanged = false
-        sculptAt(e)
+        // The press itself is applied now, not queued: a move in the same frame
+        // would otherwise replace it and the stroke would start late.
+        editQueue.clear()
+        applySculptAt(e)
+        updateBrushRing(e)
+        return
+      }
+
+      // An armed landform: this click places it (single-shot, one undo step) and
+      // leaves it selected for adjustment.
+      if (s.landformArmed) {
+        cursorQueue.clear()
+        const gp = groundPoint(e)
+        if (gp) s.actions.addTerrainFeature(s.landformArmed, gp.x, gp.z)
+        useAppStore.getState().setLandformArmed(null)
+        requestRender()
         return
       }
 
@@ -786,6 +1107,19 @@ export function ThreeStage() {
       }
       const pieceId = pickPiece(e)
       const gp = groundPoint(e)
+      // While the terrain panel is open, a click on a landform (not a model)
+      // selects it and starts dragging it from where it was grabbed.
+      const featureId = !pieceId && s.landformEditing && s.terrainFeatures.length ? pickFeatureAt(gp) : null
+      if (featureId && gp) {
+        const f = s.terrainFeatures.find((v) => v.id === featureId)!
+        useAppStore.getState().setSelectedFeature(featureId)
+        inst.setSelection(new Set())
+        eng.drag = { kind: 'moveFeature', id: featureId, orig: { x: f.x, z: f.z }, start: gp.clone(), plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -gp.y) }
+        setCursor('grabbing')
+        requestRender()
+        return
+      }
+      if (s.selectedFeatureId) useAppStore.getState().setSelectedFeature(null)
       if (pieceId) {
         const additive = e.shiftKey
         const sel = new Set(s.selectedInstanceIds)
@@ -810,6 +1144,7 @@ export function ThreeStage() {
 
     function onPointerMoveLeft(e: PointerEvent) {
       const eng = engine.current!
+      if (e.target === renderer.domElement) eng.lastPointer = { clientX: e.clientX, clientY: e.clientY }
       // Two fingers down: the camera is driving, nothing here should react.
       if (eng.touchIds.size >= 2) return
       const overCanvas = e.target === renderer.domElement
@@ -836,8 +1171,38 @@ export function ThreeStage() {
 
       // Terrain sculpt mode: brush ring follows the cursor; drag paints the surface.
       if (store().terrainTool !== 'none') {
-        if (overCanvas || eng.sculpting) updateBrushRing(e)
+        if (!eng.sculpting && overCanvas) {
+          const point = { clientX: e.clientX, clientY: e.clientY }
+          cursorQueue.enqueue(() => updateBrushRing(point))
+        }
         if (eng.sculpting && (e.buttons & 1)) sculptAt(e)
+        return
+      }
+
+      // Armed landform: preview its surface under the cursor.
+      if (store().landformArmed) {
+        if (overCanvas) {
+          const point = { clientX: e.clientX, clientY: e.clientY }
+          cursorQueue.enqueue(() => updateLandformPreview(point))
+        } else {
+          cursorQueue.clear()
+          hideLandformPreview()
+        }
+        return
+      }
+
+      if (eng.drag.kind === 'moveFeature') {
+        const point = { clientX: e.clientX, clientY: e.clientY }
+        editQueue.enqueue(() => {
+          const drag = engine.current!.drag
+          if (drag.kind !== 'moveFeature') return
+          raycaster.setFromCamera(ndc(point, ndcTmp), camera)
+          const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3())
+          if (!hit) return
+          const pos = snapWorld(drag.orig.x + hit.x - drag.start.x, drag.orig.z + hit.z - drag.start.z)
+          store().actions.updateTerrainFeatureLive(drag.id, pos)
+        })
+        setCursor('grabbing')
         return
       }
 
@@ -975,14 +1340,23 @@ export function ThreeStage() {
         }
       }
       if (eng.sculpting) {
-        eng.sculpting = false
         // Record the whole stroke as one undoable step (terrain + paint are in the
         // same timeline as placement).
-        if (eng.strokeChanged) { store().actions.commitHistory(); eng.strokeChanged = false }
+        finishStroke()
         return
       }
+      editQueue.flush()
       const d = eng.drag
       eng.drag = { kind: 'none' }
+
+      if (d.kind === 'moveFeature') {
+        // A plain click (no movement) just leaves it selected — no no-op undo step.
+        const f = store().terrainFeatures.find((v) => v.id === d.id)
+        if (f && (f.x !== d.orig.x || f.z !== d.orig.z)) store().actions.commitHistory()
+        setCursor('default')
+        requestRender()
+        return
+      }
 
       if (d.kind === 'pan') return
       if (d.kind === 'maybePlace') {
@@ -1345,6 +1719,9 @@ export function ThreeStage() {
       }
 
       if (e.key === 'Escape') {
+        // Cancels a pending landform placement (and any landform selection).
+        if (s.landformArmed) s.setLandformArmed(null)
+        if (s.selectedFeatureId) s.setSelectedFeature(null)
         if (s.selectedAssetId) { useAppStore.getState().setSelectedAsset(null); ghost.setAsset(null); cellHi.visible = false }
         else { useAppStore.getState().setSelectedInstances([]); inst.setSelection(new Set()) }
         eng.levelOverride = null
@@ -1395,6 +1772,10 @@ export function ThreeStage() {
       if (k === 'g') { s.toggleSnapBaseline(); applySnapVisual(); return }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (s.selectedFeatureId && !s.selectedInstanceIds.length) {
+          s.actions.removeTerrainFeature(s.selectedFeatureId)
+          return
+        }
         if (s.selectedInstanceIds.length) {
           s.actions.removeInstances(s.selectedInstanceIds)
           inst.setSelection(new Set())
@@ -1455,6 +1836,20 @@ export function ThreeStage() {
       if (s.terrainRev !== prev.terrainRev || s.heightmap !== prev.heightmap) {
         syncTerrain()
         inst.refreshTransforms() // pieces ride the sculpted surface
+        syncFeatureMarkers()     // outlines follow the ground
+      } else if (s.selectedFeatureId !== prev.selectedFeatureId) {
+        syncFeatureMarkers()
+      }
+      if (s.table !== prev.table || s.historyIndex !== prev.historyIndex || s.terrainTool !== prev.terrainTool) editQueue.clear()
+      if (s.landformDraft !== prev.landformDraft && s.landformDraft && engine.current!.lastPointer) {
+        const point = engine.current!.lastPointer
+        cursorQueue.enqueue(() => updateLandformPreview(point))
+      }
+      if (s.landformArmed !== prev.landformArmed) {
+        cursorQueue.clear()
+        hideLandformPreview()
+        brushRing.visible = false
+        setCursor(s.landformArmed ? 'crosshair' : (s.selectedAssetId ? 'cell' : 'default'))
       }
       if (s.paintRev !== prev.paintRev || s.paint !== prev.paint) {
         syncPaint()
@@ -1511,6 +1906,14 @@ export function ThreeStage() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       disposed = true
+      paintJobs.stop()
+      paintWorker?.terminate()
+      if (paintFallbackTimer !== undefined) clearTimeout(paintFallbackTimer)
+      editQueue.clear()
+      cursorQueue.clear()
+      clearMarkers(featureGroup)
+      clearMarkers(landformPreview)
+      if (paintTex) Object.values(paintTex).forEach((texture) => texture.dispose())
       useAppStore.getState().setStageApi(null)
       useAppStore.getState().setCameraApi(null)
       cam.dispose()
@@ -1525,6 +1928,7 @@ export function ThreeStage() {
   return (
     <>
       <div className="tb-canvas-wrap" ref={mountRef} />
+      {landformHint && <div role="status" className="tb-landform-preview-hint">{landformHint}</div>}
       {boxRect && (
         <div
           style={{

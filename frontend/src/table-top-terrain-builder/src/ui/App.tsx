@@ -6,9 +6,14 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer,
+  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer, Triangle,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
+import {
+  FEATURE_DEFAULTS, RIDGE_PRESET, featureLabel, type TerrainFeatureType,
+} from '@core/terrainFeatures'
+import { FrameQueue } from '@core/frameQueue'
+import { LandformControls } from './LandformControls'
 import { FEATURES } from '@/config/features'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
@@ -248,6 +253,53 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const resetPaint = useAppStore((s) => s.actions.resetPaint)
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
   const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
+
+  // Landforms (editable hills / plateaus / ridges — see core/terrainFeatures.ts).
+  const terrainFeatures = useAppStore((s) => s.terrainFeatures)
+  const landformArmed = useAppStore((s) => s.landformArmed)
+  const landformDraft = useAppStore((s) => s.landformDraft)
+  const setLandformArmed = useAppStore((s) => s.setLandformArmed)
+  const setLandformDraft = useAppStore((s) => s.setLandformDraft)
+  const selectedFeatureId = useAppStore((s) => s.selectedFeatureId)
+  const setSelectedFeature = useAppStore((s) => s.setSelectedFeature)
+  const applyFeatureLive = useAppStore((s) => s.actions.updateTerrainFeatureLive)
+  const removeFeature = useAppStore((s) => s.actions.removeTerrainFeature)
+  const commitTerrainHistory = useAppStore((s) => s.actions.commitHistory)
+  const setLandformEditing = useAppStore((s) => s.setLandformEditing)
+  const selectedFeature = selectedFeatureId ? terrainFeatures.find((f) => f.id === selectedFeatureId) ?? null : null
+  // Slider/number input fires far faster than frames; apply the latest value
+  // once per frame, and flush it before the interaction's single undo step.
+  const landformInputs = React.useRef<FrameQueue | null>(null)
+  if (!landformInputs.current) landformInputs.current = new FrameQueue()
+  const updateFeatureLive: typeof applyFeatureLive = (id, patch) => {
+    landformInputs.current!.enqueue(() => applyFeatureLive(id, patch))
+  }
+  const commitFeatureEdit = () => {
+    landformInputs.current!.flush()
+    commitTerrainHistory()
+  }
+  React.useEffect(() => {
+    // A queued edit must never land on a different landform/table/history state.
+    const unsubscribe = useAppStore.subscribe((s, p) => {
+      if (s.table !== p.table || s.historyIndex !== p.historyIndex || s.selectedFeatureId !== p.selectedFeatureId) {
+        landformInputs.current?.clear()
+      }
+    })
+    return () => { unsubscribe(); landformInputs.current?.clear() }
+  }, [])
+  // Landforms are only pickable on the table while the terrain panel is open.
+  React.useEffect(() => {
+    setLandformEditing(FEATURES.terrainLandforms && terrainPanelOpen)
+  }, [terrainPanelOpen, setLandformEditing])
+  const ridgeArmed = landformArmed === 'hill' && !!landformDraft && featureLabel(landformDraft) === 'Ridge'
+  const LANDFORM_ICON: Record<TerrainFeatureType, React.ReactNode> = {
+    hill: <Triangle size={16} />, plateau: <Layers size={16} />,
+  }
+  const closeTerrainPanel = () => {
+    setTerrainPanelOpen(false)
+    setLandformArmed(null)
+    setTerrainTool('none')
+  }
   const [exportingTiles, setExportingTiles] = React.useState(false)
 
   // Quote (tile count + price) for the saved table's sculpted surface. Reflects
@@ -613,12 +665,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           ? await tablesApi.getSharedTable(shareToken)
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
-        const { table, tableMaterial, instances, heightmap, paint } = deserializeLayout(t.tableConfig, t.layoutData)
+        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, paint } = deserializeLayout(t.tableConfig, t.layoutData)
         // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
         // artist's unpublished piece) so every placed model renders, not a grey box.
         await resolveAssetsByIds(instances.map((i) => i.assetId))
         if (cancelled) return
-        applyLayout({ table, tableMaterial, instances, heightmap, paint })
+        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint })
         // Pull every distinct model's geometry BEFORE lifting the loading gate
         // (see tableAssetsReady above). ensureTemplate is the same cache the
         // scene uses, so this is not an extra download — it just lets us wait
@@ -1191,7 +1243,9 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     if (saving) return
 
     const s = useAppStore.getState()
-    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, s.heightmap, s.paint)
+    const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, {
+      terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
+    })
     const email = user.email
 
     setSaving(true)
@@ -1373,7 +1427,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <button
               className={`tb-icon ${!selectedAssetId ? 'is-active' : ''}`}
               title="Select / move (Esc)"
-              onClick={() => setSelectedAsset(null)}
+              onClick={() => { setLandformArmed(null); setTerrainTool('none'); setSelectedAsset(null) }}
             >
               <MousePointer2 size={18} />
             </button>
@@ -1398,17 +1452,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             <div className="tb-sep" />
             <button
               className={`tb-icon ${terrainPanelOpen || terrainTool !== 'none' ? 'is-active' : ''}`}
-              title={FEATURES.terrainSculpt
-                ? 'Sculpt the terrain (hills, cliffs, rivers, trenches)'
+              title={FEATURES.terrainSculpt || FEATURES.terrainLandforms
+                ? 'Shape the terrain (hills, plateaus, ridges) and paint the ground'
                 : 'Paint the ground texture (grass, sand, snow…)'}
               onClick={() => {
                 const open = !terrainPanelOpen
-                setTerrainPanelOpen(open)
-                if (open) setSelectedAsset(null)
-                else setTerrainTool('none')
+                if (open) { setTerrainPanelOpen(true); setSelectedAsset(null) }
+                else closeTerrainPanel()
               }}
             >
-              {FEATURES.terrainSculpt ? <Mountain size={18} /> : <Paintbrush size={18} />}
+              {FEATURES.terrainSculpt || FEATURES.terrainLandforms ? <Mountain size={18} /> : <Paintbrush size={18} />}
             </button>
             {selectedInstanceIds.length > 0 && (
               <>
@@ -1584,17 +1637,97 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {terrainPanelOpen && (
             <div className="tb-terrain">
               <div className="tb-terrain-head">
-                {FEATURES.terrainSculpt
-                  ? <span><Mountain size={14} /> Terrain sculpt</span>
+                {FEATURES.terrainSculpt || FEATURES.terrainLandforms
+                  ? <span><Mountain size={14} /> Terrain</span>
                   : <span><Paintbrush size={14} /> Ground texture</span>}
                 <button
                   className="tb-icon"
-                  title={FEATURES.terrainSculpt ? 'Close terrain tools' : 'Close texture tools'}
-                  onClick={() => { setTerrainPanelOpen(false); setTerrainTool('none') }}
+                  title={FEATURES.terrainSculpt || FEATURES.terrainLandforms ? 'Close terrain tools' : 'Close texture tools'}
+                  onClick={closeTerrainPanel}
                 >
                   <X size={14} />
                 </button>
               </div>
+              {FEATURES.terrainLandforms && (
+                <div className="tb-terrain-landforms">
+                  <div className="tb-terrain-export-head">Landforms</div>
+                  <div className="tb-terrain-tools">
+                    {(['hill', 'plateau'] as TerrainFeatureType[]).map((type) => {
+                      const active = landformArmed === type && !(type === 'hill' && ridgeArmed)
+                      return (
+                        <button
+                          key={type}
+                          className={`tb-terrain-tool ${active ? 'is-active' : ''}`}
+                          onClick={() => setLandformArmed(active ? null : type)}
+                        >
+                          {LANDFORM_ICON[type]}<span>{FEATURE_DEFAULTS[type].label}</span>
+                        </button>
+                      )
+                    })}
+                    <button
+                      className={`tb-terrain-tool ${ridgeArmed ? 'is-active' : ''}`}
+                      onClick={() => {
+                        if (ridgeArmed) { setLandformArmed(null); return }
+                        setLandformArmed('hill')
+                        setLandformDraft(RIDGE_PRESET)
+                      }}
+                    >
+                      <Mountain size={16} /><span>Ridge</span>
+                    </button>
+                  </div>
+                  <p className="tb-small tb-terrain-sub">
+                    {landformArmed
+                      ? 'Move over the table to preview. Click to place; Esc to cancel.'
+                      : selectedFeature
+                        ? 'Drag it on the table to move it, or use the controls below.'
+                        : 'Pick a shape, set its size, then click the table. Click a placed one to edit it.'}
+                  </p>
+                  {landformDraft && landformArmed && (
+                    <div className="tb-terrain-feature-props">
+                      <div className="tb-terrain-feature-head">
+                        <span>Before placing</span>
+                        <button className="tb-icon" title="Cancel landform placement" onClick={() => setLandformArmed(null)}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <LandformControls key={`draft-${landformDraft.id}`} feature={landformDraft} onChange={setLandformDraft} onCommit={() => {}} />
+                    </div>
+                  )}
+                  {terrainFeatures.length > 0 && (
+                    <label className="tb-landform-value tb-landform-picker">
+                      <span>Edit existing</span>
+                      <select
+                        aria-label="Edit existing landform"
+                        value={selectedFeatureId ?? ''}
+                        onChange={(e) => { setTerrainTool('none'); setSelectedFeature(e.target.value || null) }}
+                      >
+                        <option value="">Choose a landform</option>
+                        {terrainFeatures.map((f, i) => (
+                          <option key={f.id} value={f.id}>{featureLabel(f)} {i + 1} · {Math.round(f.height * 1000)} mm</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {selectedFeature && (
+                    <div className="tb-terrain-feature-props">
+                      <div className="tb-terrain-feature-head">
+                        <span>{LANDFORM_ICON[selectedFeature.type]} {featureLabel(selectedFeature)}</span>
+                        <button className="tb-icon" title="Deselect" onClick={() => setSelectedFeature(null)}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <LandformControls
+                        key={selectedFeature.id} feature={selectedFeature} placed
+                        onChange={(patch) => updateFeatureLive(selectedFeature.id, patch)}
+                        onCommit={commitFeatureEdit}
+                      />
+                      <button className="tb-terrain-reset" onClick={() => removeFeature(selectedFeature.id)}>
+                        <Trash2 size={14} /> Delete {featureLabel(selectedFeature).toLowerCase()}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               {FEATURES.terrainSculpt && (
                 <div className="tb-terrain-tools">
                   {([

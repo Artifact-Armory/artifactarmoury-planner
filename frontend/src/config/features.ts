@@ -41,4 +41,17 @@ export const FEATURES = {
    * Note: ground-texture painting is a separate, working feature and stays on.
    */
   terrainSculpt: false,
+
+  /**
+   * Landforms: placeable, editable hills / plateaus / ridges (length, width,
+   * rise, rotation, flat top, merge vs add) with a surface preview before
+   * placement. Ported from the planner topography lab 2026-10-15.
+   *
+   * On in local dev (`npm run dev`) so it can be tested; off in production
+   * builds unless VITE_ENABLE_TERRAIN_LANDFORMS=true is set on Cloudflare Pages.
+   * Like terrainSculpt, saved landforms always load and render either way.
+   */
+  terrainLandforms:
+    import.meta.env.DEV ||
+    (import.meta.env.VITE_ENABLE_TERRAIN_LANDFORMS ?? 'false').toLowerCase() === 'true',
 } as const

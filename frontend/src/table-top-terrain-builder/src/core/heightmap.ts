@@ -134,6 +134,8 @@ export function updateTerrainGeometry(geo: THREE.BufferGeometry, hm: Heightmap) 
  * Apply one brush dab centred at world (wx, wz). `strength` is 0..1 from the UI;
  * `radius` is in metres. Returns true if any height changed.
  */
+let smoothScratch = new Float32Array(0)
+
 export function applyBrush(
   hm: Heightmap,
   table: Table,
@@ -142,6 +144,9 @@ export function applyBrush(
   tool: TerrainTool,
   radius: number,
   strength: number,
+  /** Called for each changed vertex — lets a caller brush a derived surface and
+   *  carry the delta back into the layer it actually stores. */
+  onChange?: (index: number, before: number, after: number) => void,
 ): boolean {
   if (tool === 'none' || tool === 'paint' || tool === 'erase' || radius <= 0) return false
   const { cols, rows } = hm
@@ -162,6 +167,13 @@ export function applyBrush(
   // Per-dab magnitude in metres (scaled by the surface range so the slider feels
   // consistent across brushes).
   const amount = strength * 0.05
+  // Smooth reads the field as it was before this dab, so the result doesn't
+  // depend on the order vertices are visited in.
+  if (tool === 'smooth') {
+    if (smoothScratch.length !== hm.heights.length) smoothScratch = new Float32Array(hm.heights.length)
+    smoothScratch.set(hm.heights)
+  }
+  const original = smoothScratch
   const centreH = hm.heights[Math.round(cj) * cols + Math.round(ci)] ?? 0
   let changed = false
 
@@ -185,16 +197,16 @@ export function applyBrush(
         // Blend toward the average of the 4-neighbourhood.
         let sum = 0
         let n = 0
-        if (i > 0) { sum += hm.heights[idx - 1]; n++ }
-        if (i < cols - 1) { sum += hm.heights[idx + 1]; n++ }
-        if (j > 0) { sum += hm.heights[idx - cols]; n++ }
-        if (j < rows - 1) { sum += hm.heights[idx + cols]; n++ }
+        if (i > 0) { sum += original[idx - 1]; n++ }
+        if (i < cols - 1) { sum += original[idx + 1]; n++ }
+        if (j > 0) { sum += original[idx - cols]; n++ }
+        if (j < rows - 1) { sum += original[idx + cols]; n++ }
         const avg = n ? sum / n : h
         next = h + (avg - h) * falloff * Math.min(1, strength)
       }
 
       next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, next))
-      if (next !== h) { hm.heights[idx] = next; changed = true }
+      if (next !== h) { hm.heights[idx] = next; onChange?.(idx, h, next); changed = true }
     }
   }
   return changed

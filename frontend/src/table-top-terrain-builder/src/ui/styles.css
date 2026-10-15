@@ -1034,6 +1034,71 @@
 .tb-terrain-reset:hover { background: rgba(60, 16, 16, 0.8); }
 .tb-terrain-hint { line-height: 1.4; }
 
+/* The panel can outgrow short screens once landform controls are open, and
+   needs room for a number box plus its unit beside each label. */
+.tb-terrain { width: 252px; max-height: calc(100% - 28px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* Landforms (hill / plateau / ridge) */
+.tb-terrain-landforms { display: flex; flex-direction: column; gap: 8px; }
+.tb-terrain-feature-props {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--tb-border);
+  border-radius: 10px;
+  background: rgba(10, 15, 22, 0.55);
+}
+.tb-terrain-feature-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tb-terrain-feature-head > span { display: inline-flex; align-items: center; gap: 6px; }
+.tb-landform-controls { display: grid; gap: 10px; min-width: 0; }
+.tb-landform-measurements { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(77, 163, 255, 0.08); }
+.tb-landform-measurements strong { color: var(--tb-accent-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.tb-landform-measurements span { font-size: 11px; color: var(--tb-muted); }
+.tb-landform-dimension { display: grid; gap: 4px; }
+.tb-landform-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.tb-landform-value > span:last-child { white-space: nowrap; color: var(--tb-muted); }
+.tb-landform-value input, .tb-landform-value select {
+  background: #0c1219;
+  color: var(--tb-text);
+  border: 1px solid var(--tb-border);
+  border-radius: 6px;
+  min-width: 0;
+  font: inherit;
+}
+.tb-landform-value input { width: 64px; padding: 3px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.tb-landform-value select { padding: 5px 6px; max-width: 130px; }
+.tb-landform-value input:focus-visible, .tb-landform-value select:focus-visible { outline: 2px solid var(--tb-accent); outline-offset: 1px; }
+.tb-landform-dimension > input[type="range"] { width: 100%; accent-color: var(--tb-accent); }
+.tb-landform-picker { padding: 2px 0; }
+.tb-landform-position summary { cursor: pointer; color: var(--tb-muted); font-size: 12px; padding: 2px 0; }
+.tb-landform-position[open] { display: grid; gap: 10px; }
+.tb-landform-preview-hint {
+  position: absolute;
+  top: 92px; /* under the toolbar, clear of the table-size and surface bars */
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 8px 14px;
+  border: 1px solid var(--tb-border);
+  border-radius: 8px;
+  background: rgba(12, 18, 25, 0.92);
+  color: var(--tb-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 19;
+}
+
 .tb-terrain-export {
   display: flex;
   flex-direction: column;

@@ -1102,6 +1102,36 @@ setting it out on a real table. `ui/layoutPdf.ts`, jsPDF (lazy-loaded on click, 
 - Footprints are bounding boxes, not true silhouettes, so gaps are measured box-to-box.
 - Verified by generating a PDF in Chromium with demo assets and checking the rendered pages.
 
+## Landforms + ground-paint overhaul in the main planner (built 2026-10-15, frontend only)
+Ported from the topography lab (`OneDrive/Documents/ChatGPT/Planner lab/topography-lab`), minus the
+lab's routes/edges, terracing and manufacturing compiler.
+- **Landforms** (`core/terrainFeatures.ts`, `ui/LandformControls.tsx`): hill / plateau / ridge (a
+  stretched hill), each with length, width, rise, rotation, flat top (mm / ° / %) and Merge vs Add
+  heights. Translucent surface preview + footprint/flat-top rings before placing; placed ones stay
+  selected, drag keeping the grab offset, and have an "Edit existing" picker. Escape, Select and
+  closing the panel cancel placement. **Behind `FEATURES.terrainLandforms`: on in `npm run dev`,
+  off in production builds unless `VITE_ENABLE_TERRAIN_LANDFORMS=true`.** Saved landforms always
+  render either way.
+- **Surface = two layers.** `terrainDetail` (freehand brushes) + `terrainFeatures`; the store's
+  `heightmap` is their composite (what the scene draws and pieces sit on), rewritten in place over
+  the changed footprint only. Undo snapshots hold the layers, not the composite.
+- **Save format (`state/tableMapping.ts`, layout_data v4):** `heightmap` is still the full
+  composite, so the backend tile export and older builds see the whole surface; `terrainFeatures`
+  + `terrainDetail` carry the layers. No `terrainFeatures` key = a pre-landform table, whose
+  `heightmap` is the detail layer. Tables without landforms still save as v3, byte-for-byte as before.
+- **Paint:** 5 mm grid (≤512² cells, was 4 cm), segment-covering dabs so fast strokes/erases have no
+  gaps, soft world-space edge warp + feather (`core/groundCoverage.ts`), colour/normal/roughness
+  overlay maps baked in `scene/paintPreview.worker.ts` (OffscreenCanvas; 1024 px live, 2048 settled,
+  512 px main-thread fallback). One bake in flight + latest-wins (`scene/latestPaintJob.ts`); stale
+  results dropped after undo/load/resize/dispose. Old 4 cm maps upsample on load. Saved as RLE
+  (`rle`), which **older builds can't read** — they'd show those tables unpainted.
+- **Textures:** paint uses bundled CC0 Poly Haven grass/dirt/sand (`frontend/public/textures/ground`,
+  ~5.9 MB, fetched only once a table has paint; checksums in `sources.json`), warm-graded sand and
+  generated water. New swatches Dirt + Water. The **base table surface still uses the R2 set**, so
+  existing tables look unchanged (dirt/water as a base use the bundled maps).
+- `npm run test:terrain` (frontend) — 18 checks. Verified in a browser on demo assets; **save/reopen
+  verified via the same serialize→JSON→apply path, not against the real backend** (no local DB).
+
 ## Table thumbnails are a render of the table (built 2026-10-15, migration 075)
 Table cards used to show a mosaic of the placed models' product photos. Now every save in the
 planner also photographs the table: `stageApi.captureTable()` (`scene/ThreeStage.tsx`) waits for

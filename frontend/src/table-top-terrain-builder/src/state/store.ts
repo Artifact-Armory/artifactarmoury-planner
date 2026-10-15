@@ -11,6 +11,10 @@ import {
 import {
   type PaintMap, createPaintMap, paintFitsTable, applyPaintBrush, clonePaintMap,
 } from '../core/paintmap'
+import {
+  type TerrainFeature, type TerrainFeatureType, type TerrainFeaturePatch, type TerrainBounds,
+  clampFeaturePatch, defaultFeature, compositeHeightmap, featureBounds, unionBounds, cloneFeatures,
+} from '../core/terrainFeatures'
 import { useCartStore } from '@/store/cartStore'
 import { bundlesApi } from '@/api/endpoints/bundles'
 import { ordersApi } from '@/api/endpoints/orders'
@@ -20,6 +24,31 @@ import type { SearchFilters } from '@/api/types'
 import type { CameraPose } from '../scene/BuilderCamera'
 
 let catalogueRequestSeq = 0
+
+// Scratch copy of the rendered surface that smooth/flatten dabs read from.
+let brushSurface: Float32Array = new Float32Array(0)
+
+/** Detail layer only if it matches the current table's grid. */
+function fittingDetail(s: { terrainDetail: Heightmap | null; table: Table }): Heightmap | null {
+  return heightmapFitsTable(s.terrainDetail, s.table) ? s.terrainDetail : null
+}
+
+/**
+ * Recomposite the rendered surface after the landform list changes, rewriting
+ * only the area any added/removed/changed landform covers (old and new
+ * footprints), in place.
+ */
+function compositeEdit(
+  s: { terrainFeatures: TerrainFeature[]; terrainDetail: Heightmap | null; table: Table; heightmap: Heightmap | null },
+  features: TerrainFeature[],
+): Heightmap | null {
+  let bounds: TerrainBounds | undefined
+  const include = (b: TerrainBounds) => { bounds = bounds ? unionBounds(bounds, b) : b }
+  for (const f of s.terrainFeatures) if (!features.includes(f)) include(featureBounds(f))
+  for (const f of features) if (!s.terrainFeatures.includes(f)) include(featureBounds(f))
+  if (!bounds) return s.heightmap
+  return compositeHeightmap(features, fittingDetail(s), s.table, { target: s.heightmap, bounds })
+}
 
 /** Build the browse `terms` string from a class + facet-token selection. */
 function buildCatalogueTerms(modelClass: string | null, terms: string[]): string | undefined {
@@ -133,9 +162,11 @@ export type SavedLayout = {
 interface HistoryState {
   instances: Instance[]
   selectedInstanceId: string | null
-  // Terrain sculpt + texture painting are part of the same undo timeline as
-  // placement, so a snapshot carries all three.
-  heightmap: Heightmap | null
+  // Terrain sculpt, landforms + texture painting are part of the same undo
+  // timeline as placement, so a snapshot carries all of them. The rendered
+  // `heightmap` is derived (detail + landforms) and recomposited on restore.
+  terrainDetail: Heightmap | null
+  terrainFeatures: TerrainFeature[]
   paint: PaintMap | null
 }
 
@@ -198,7 +229,16 @@ interface AppState {
   // Terrain sculpting (deformable table surface → printable tiles later).
   // The sculpt UI is hidden behind FEATURES.terrainSculpt; existing sculpted
   // tables still load and render, so no saved data is lost while it's off.
+  // The surface is two layers: freehand sculpt `terrainDetail` + editable
+  // landforms `terrainFeatures`. `heightmap` is their composite: what the scene
+  // renders and pieces sit on. Never edit it directly; it is rebuilt from the layers.
   heightmap: Heightmap | null  // null = flat table (no surface edits yet)
+  terrainDetail: Heightmap | null
+  terrainFeatures: TerrainFeature[]
+  selectedFeatureId: string | null     // landform shown in the property panel
+  landformArmed: TerrainFeatureType | null // next table click places this
+  landformDraft: TerrainFeature | null // dimensions of the armed landform (not on the table yet)
+  landformEditing: boolean             // terrain panel open: landforms are pickable on the table
   terrainTool: TerrainTool     // 'none' = placement mode; otherwise a sculpt/paint brush
   brushRadius: number          // metres
   brushStrength: number        // 0..1
@@ -253,6 +293,13 @@ interface AppState {
   setTerrainTool: (tool: TerrainTool) => void
   setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
   setPaintMaterial: (id: string) => void
+  /** Arm a landform: its draft previews under the cursor and the next table click places it. null cancels. */
+  setLandformArmed: (type: TerrainFeatureType | null) => void
+  /** Edit the armed landform's draft dimensions (nothing on the table changes). */
+  setLandformDraft: (patch: TerrainFeaturePatch) => void
+  /** Select a placed landform for the property panel (null = none). */
+  setSelectedFeature: (id: string | null) => void
+  setLandformEditing: (on: boolean) => void
 
   // Collaboration gate
   setCurrentUser: (id: string | null, isArtist: boolean) => void
@@ -265,8 +312,15 @@ interface AppState {
   actions: {
     /** Sculpt the surface at a world position with the active brush. Returns true if changed. */
     sculptTerrain: (worldX: number, worldZ: number) => boolean
-    /** Paint (or erase) the active ground texture at a world position. Returns true if changed. */
-    paintTerrain: (worldX: number, worldZ: number) => boolean
+    /** Paint (or erase) the active ground texture at a world position; `from` covers
+     *  the whole segment since the previous position. Returns true if changed. */
+    paintTerrain: (worldX: number, worldZ: number, from?: { x: number; z: number }) => boolean
+    /** Place a landform (the draft's dimensions if armed), select it, one undo step. */
+    addTerrainFeature: (type: TerrainFeatureType, worldX: number, worldZ: number) => string
+    /** Change a landform without an undo step (drag / slider). Call commitHistory when done. */
+    updateTerrainFeatureLive: (id: string, patch: TerrainFeaturePatch) => void
+    /** Delete a landform (one undo step). */
+    removeTerrainFeature: (id: string) => void
     /** Reset the surface back to flat. */
     resetTerrain: () => void
     /** Clear all painted ground texture. */
@@ -330,7 +384,7 @@ interface AppState {
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
-    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; heightmap?: Heightmap | null; paint?: PaintMap | null }) => void
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail?: Heightmap | null; terrainFeatures?: TerrainFeature[]; paint?: PaintMap | null }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -354,7 +408,8 @@ function saveHistory(state: AppState): Partial<AppState> {
   newHistory.push({
     instances: JSON.parse(JSON.stringify(state.instances)),
     selectedInstanceId: state.selectedInstanceId,
-    heightmap: cloneHeightmap(state.heightmap),
+    terrainDetail: cloneHeightmap(state.terrainDetail),
+    terrainFeatures: cloneFeatures(state.terrainFeatures),
     paint: clonePaintMap(state.paint),
   })
   
@@ -367,6 +422,19 @@ function saveHistory(state: AppState): Partial<AppState> {
   return { 
     history: newHistory,
     historyIndex: newHistory.length - 1
+  }
+}
+
+/** Terrain fields to set when restoring a history snapshot (undo/redo). */
+function restoreTerrain(s: AppState, state: HistoryState): Partial<AppState> {
+  const terrainDetail = cloneHeightmap(state.terrainDetail)
+  const terrainFeatures = cloneFeatures(state.terrainFeatures)
+  return {
+    terrainDetail,
+    terrainFeatures,
+    heightmap: compositeHeightmap(terrainFeatures, fittingDetail({ terrainDetail, table: s.table }), s.table),
+    // Undoing an edit keeps the landform you were editing selected.
+    selectedFeatureId: terrainFeatures.some(f => f.id === s.selectedFeatureId) ? s.selectedFeatureId : null,
   }
 }
 
@@ -445,6 +513,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   tableMaterial: 'grass',
 
   heightmap: null,
+  terrainDetail: null,
+  terrainFeatures: [],
+  selectedFeatureId: null,
+  landformArmed: null,
+  landformDraft: null,
+  landformEditing: false,
   terrainTool: 'none',
   brushRadius: 0.12,
   brushStrength: 0.5,
@@ -485,11 +559,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ pendingCollab: null })
   },
 
-  setTable: (t) => set(s => ({ table: { ...s.table, ...t } })),
+  setTable: (t) => set(s => {
+    const table = { ...s.table, ...t }
+    if (table.width === s.table.width && table.height === s.table.height) return { table }
+    // Landforms live in world space, so they survive a resize; the detail layer
+    // only renders while its grid still fits (unchanged pre-landform behaviour).
+    const heightmap = compositeHeightmap(s.terrainFeatures, fittingDetail({ ...s, table }), table)
+    return { table, heightmap, terrainRev: s.terrainRev + 1, paintRev: s.paintRev + 1 }
+  }),
   setRefs: (refs) => set(refs as any),
   // Placement and terrain sculpting are mutually exclusive — picking a model to
   // place leaves sculpt mode.
-  setSelectedAsset: (id) => set(s => ({ selectedAssetId: id, terrainTool: id ? 'none' : s.terrainTool })),
+  setSelectedAsset: (id) => set(s => ({
+    selectedAssetId: id,
+    terrainTool: id ? 'none' : s.terrainTool,
+    ...(id ? { landformArmed: null, landformDraft: null, selectedFeatureId: null } : {}),
+  })),
   setSelectedInstance: (id) =>
     set(s => {
       const ids = id ? expandGroups(s.instances, [id]) : []
@@ -523,30 +608,139 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.ensurePaintMap()
       set({ selectedAssetId: null })
     }
-    set({ terrainTool: tool })
+    // Brushes, landform placement and model placement are mutually exclusive.
+    set(tool === 'none'
+      ? { terrainTool: tool }
+      : { terrainTool: tool, landformArmed: null, landformDraft: null, selectedFeatureId: null })
   },
   setBrush: (patch) => set(s => ({
     brushRadius: patch.radius != null ? patch.radius : s.brushRadius,
     brushStrength: patch.strength != null ? patch.strength : s.brushStrength,
   })),
   setPaintMaterial: (id) => set({ paintMaterial: id }),
+  setLandformArmed: (type) => set(() => {
+    if (!type) return { landformArmed: null, landformDraft: null }
+    const base = defaultFeature(type, 0, 0)
+    return {
+      landformArmed: type,
+      // New landforms merge by default, so overlapping hills join rather than stack.
+      landformDraft: { ...base, radiusZ: base.radius, blend: 'merge' as const },
+      selectedFeatureId: null,
+      terrainTool: 'none' as const,
+      selectedAssetId: null,
+      selectedInstanceId: null,
+      selectedInstanceIds: [],
+    }
+  }),
+  setLandformDraft: (patch) => set(s => ({
+    landformDraft: s.landformDraft ? { ...s.landformDraft, ...clampFeaturePatch(patch) } : null,
+  })),
+  setSelectedFeature: (id) => set(s => ({
+    selectedFeatureId: id && s.terrainFeatures.some(f => f.id === id) ? id : null,
+    ...(id ? {
+      landformArmed: null, landformDraft: null, terrainTool: 'none' as const,
+      selectedAssetId: null, selectedInstanceId: null, selectedInstanceIds: [],
+    } : {}),
+  })),
+  setLandformEditing: (on) => set(() => on
+    ? { landformEditing: true }
+    : { landformEditing: false, landformArmed: null, landformDraft: null, selectedFeatureId: null }),
 
   actions: {
     ensureHeightmap: () => {
       const s = get()
-      if (!heightmapFitsTable(s.heightmap, s.table)) {
-        set({ heightmap: createHeightmap(s.table), terrainRev: s.terrainRev + 1 })
+      if (!heightmapFitsTable(s.terrainDetail, s.table)) {
+        const terrainDetail = createHeightmap(s.table)
+        set({
+          terrainDetail,
+          // A flat field still switches the scene to the editable grid mesh.
+          heightmap: compositeHeightmap(s.terrainFeatures, terrainDetail, s.table) ?? createHeightmap(s.table),
+          terrainRev: s.terrainRev + 1,
+        })
       }
     },
 
     sculptTerrain: (worldX, worldZ) => {
       const s = get()
       if (s.terrainTool === 'none') return false
-      let hm = s.heightmap
-      if (!heightmapFitsTable(hm, s.table)) hm = createHeightmap(s.table)
-      const changed = applyBrush(hm, s.table, worldX, worldZ, s.terrainTool, s.brushRadius, s.brushStrength)
-      if (changed) set({ heightmap: hm, terrainRev: s.terrainRev + 1 })
+      const detail = fittingDetail(s) ?? createHeightmap(s.table)
+      // Brush the rendered surface (landforms included, so smooth/flatten act on
+      // what you see) in a scratch copy, and carry each change into the detail layer.
+      const surface = heightmapFitsTable(s.heightmap, s.table)
+        ? s.heightmap
+        : compositeHeightmap(s.terrainFeatures, detail, s.table) ?? createHeightmap(s.table)
+      if (brushSurface.length !== surface.heights.length) brushSurface = new Float32Array(surface.heights.length)
+      brushSurface.set(surface.heights)
+      const scratch: Heightmap = { cols: surface.cols, rows: surface.rows, heights: brushSurface }
+      const changed = applyBrush(scratch, s.table, worldX, worldZ, s.terrainTool, s.brushRadius, s.brushStrength,
+        (k, before, after) => { detail.heights[k] += after - before })
+      if (changed) {
+        const r = s.brushRadius
+        const bounds = { minX: worldX - r, maxX: worldX + r, minZ: worldZ - r, maxZ: worldZ + r }
+        set({
+          terrainDetail: detail,
+          heightmap: compositeHeightmap(s.terrainFeatures, detail, s.table, { target: s.heightmap, bounds }),
+          terrainRev: s.terrainRev + 1,
+        })
+      }
       return changed
+    },
+
+    addTerrainFeature: (type, worldX, worldZ) => {
+      const t = get().table
+      const hw = t.width / 2, hh = t.height / 2
+      const draft = get().landformDraft
+      const fresh = defaultFeature(type, 0, 0)
+      const f: TerrainFeature = {
+        ...fresh,
+        ...(draft?.type === type ? draft : {}),
+        id: fresh.id,
+        x: THREE.MathUtils.clamp(worldX, -hw, hw),
+        z: THREE.MathUtils.clamp(worldZ, -hh, hh),
+      }
+      set(s => {
+        const terrainFeatures = [...s.terrainFeatures, f]
+        const next = {
+          terrainFeatures,
+          heightmap: compositeEdit(s, terrainFeatures),
+          terrainRev: s.terrainRev + 1,
+          // The new landform stays selected so it can be adjusted straight away.
+          selectedFeatureId: f.id,
+        }
+        return { ...next, ...saveHistory({ ...s, ...next }) }
+      })
+      return f.id
+    },
+
+    updateTerrainFeatureLive: (id, patch) => {
+      set(s => {
+        const hw = s.table.width / 2, hh = s.table.height / 2
+        const clamped = clampFeaturePatch(patch)
+        // A drag past the table edge reads the cursor off an unbounded plane; keep
+        // the centre on the table.
+        if (clamped.x != null) clamped.x = THREE.MathUtils.clamp(clamped.x, -hw, hw)
+        if (clamped.z != null) clamped.z = THREE.MathUtils.clamp(clamped.z, -hh, hh)
+        const terrainFeatures = s.terrainFeatures.map(f => f.id === id ? { ...f, ...clamped } : f)
+        return {
+          terrainFeatures,
+          heightmap: compositeEdit(s, terrainFeatures),
+          terrainRev: s.terrainRev + 1,
+        }
+      })
+    },
+
+    removeTerrainFeature: (id) => {
+      set(s => {
+        if (!s.terrainFeatures.some(f => f.id === id)) return {}
+        const terrainFeatures = s.terrainFeatures.filter(f => f.id !== id)
+        const next = {
+          terrainFeatures,
+          heightmap: compositeEdit(s, terrainFeatures),
+          terrainRev: s.terrainRev + 1,
+          selectedFeatureId: s.selectedFeatureId === id ? null : s.selectedFeatureId,
+        }
+        return { ...next, ...saveHistory({ ...s, ...next }) }
+      })
     },
 
     ensurePaintMap: () => {
@@ -556,19 +750,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     },
 
-    paintTerrain: (worldX, worldZ) => {
+    paintTerrain: (worldX, worldZ, from) => {
       const s = get()
       let pm = s.paint
       if (!paintFitsTable(pm, s.table)) pm = createPaintMap(s.table)
       const material = s.terrainTool === 'erase' ? null : s.paintMaterial
-      const changed = applyPaintBrush(pm, s.table, worldX, worldZ, material, s.brushRadius)
+      const changed = applyPaintBrush(pm, s.table, worldX, worldZ, material, s.brushRadius, from)
       if (changed) set({ paint: pm, paintRev: s.paintRev + 1 })
       return changed
     },
 
-    resetTerrain: () => set(s => ({ heightmap: createHeightmap(s.table), terrainRev: s.terrainRev + 1 })),
+    // Clears both layers (freehand detail AND every landform) as one undo step.
+    resetTerrain: () => set(s => {
+      const next = {
+        terrainDetail: createHeightmap(s.table),
+        terrainFeatures: [] as TerrainFeature[],
+        heightmap: createHeightmap(s.table),
+        selectedFeatureId: null,
+        terrainRev: s.terrainRev + 1,
+      }
+      return { ...next, ...saveHistory({ ...s, ...next }) }
+    }),
 
-    resetPaint: () => set(s => ({ paint: createPaintMap(s.table), paintRev: s.paintRev + 1 })),
+    resetPaint: () => set(s => {
+      const paint = createPaintMap(s.table)
+      return { paint, paintRev: s.paintRev + 1, ...saveHistory({ ...s, paint }) }
+    }),
 
     // Camera framing is owned by the constrained BuilderCamera in ThreeStage.
     fitView: () => {
@@ -871,6 +1078,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           instances: [] as Instance[],
           selectedInstanceId: null,
           heightmap: hm,
+          terrainDetail: null,
+          terrainFeatures: [] as TerrainFeature[],
           paint: pm,
           history: [] as HistoryState[],
           historyIndex: -1,
@@ -880,6 +1089,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           selectedInstanceId: null,
           selectedInstanceIds: [],
           heightmap: hm,
+          terrainDetail: null,
+          terrainFeatures: [],
+          selectedFeatureId: null,
+          landformArmed: null,
+          landformDraft: null,
           paint: pm,
           terrainRev: s.terrainRev + 1,
           paintRev: s.paintRev + 1,
@@ -983,7 +1197,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
-        heightmap: cloneHeightmap(state.heightmap),
+        ...restoreTerrain(s, state),
         paint: clonePaintMap(state.paint),
         terrainRev: s.terrainRev + 1,
         paintRev: s.paintRev + 1,
@@ -1003,7 +1217,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         instances: JSON.parse(JSON.stringify(state.instances)),
         selectedInstanceId: state.selectedInstanceId,
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
-        heightmap: cloneHeightmap(state.heightmap),
+        ...restoreTerrain(s, state),
         paint: clonePaintMap(state.paint),
         terrainRev: s.terrainRev + 1,
         paintRev: s.paintRev + 1,
@@ -1063,15 +1277,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.fitView()
     },
 
-    applyLayout: ({ table, tableMaterial, instances, heightmap, paint }) => {
+    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
-      const hm = heightmap ?? null
+      const detail = terrainDetail ?? null
+      const features = cloneFeatures(terrainFeatures ?? [])
+      const hm = compositeHeightmap(features, detail, table)
       const pm = paint ?? null
       set((s) => ({
         table: { ...table },
         tableMaterial: tableMaterial ?? s.tableMaterial,
         instances: clean,
         heightmap: hm,
+        terrainDetail: detail,
+        terrainFeatures: features,
+        selectedFeatureId: null,
+        landformArmed: null,
+        landformDraft: null,
         paint: pm,
         terrainRev: s.terrainRev + 1,
         paintRev: s.paintRev + 1,
@@ -1081,7 +1302,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Reset the timeline to this loaded state as the baseline.
         history: [],
         historyIndex: -1,
-        ...saveHistory({ ...s, instances: clean, selectedInstanceId: null, heightmap: hm, paint: pm, history: [], historyIndex: -1 }),
+        ...saveHistory({ ...s, table, instances: clean, selectedInstanceId: null, terrainDetail: detail, terrainFeatures: features, paint: pm, history: [], historyIndex: -1 }),
       }))
       get().actions.syncBasketWithTable()
       get().actions.fitView()
