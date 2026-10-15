@@ -3503,7 +3503,10 @@ def poison_pills(proxy):
         bm.faces.ensure_lookup_table()
         total_faces = len(bm.faces)
         selected = sum(1 for f in bm.faces if f.select)
-        max_frac = float(CFG.get("interiorFaceMaxDeleteFrac", 0.5))
+        # 0.05 since 2026-10-15: the 0.5 ceiling let a misfire strip a bunker's roof
+        # (26% of the mesh) and another bunker lost 44%, while every genuine run across
+        # the catalogue removed 1.3% or less. Anything above this is a misfire.
+        max_frac = float(CFG.get("interiorFaceMaxDeleteFrac", 0.05))
         if total_faces > 0 and selected > total_faces * max_frac:
             interior_skipped = True
             bpy.ops.mesh.select_all(action="DESELECT")

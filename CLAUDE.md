@@ -485,6 +485,15 @@ worse than the product it sells. **No claim anywhere depended on it** — `Creat
 promises the proxy is *unprintable*, never that it is visibly marked, so that page stayed true
 as written; check it again before reinstating or removing any other protection.
 
+## Interior-face guard tightened 0.5 → 0.05 (2026-10-15)
+The bake's poison-pill step deletes whatever Blender's `select_interior_faces()` calls interior,
+skipping the delete only if it exceeds `interiorFaceMaxDeleteFrac`. At 0.5 a misfire stripped the
+roof, ring mount and gunner off "Bunker Tobruk Regelbau 58c" (26% of the proxy) and 44% off
+"Bunker Regelbau 611", both reporting success; every other listing's genuine run was ≤1.3%. Now
+0.05 (defaults JSON + the `bake_proxy.py` fallback). Above it the step is skipped and the base-face
+deletion alone keeps the proxy unprintable. Only affects new bakes — re-bake damaged models
+(`/admin/queues` → Rebake). Spot misfires: `proxy_report.deletedInteriorFaces / proxyTriangles`.
+
 ## "Previews aren't your final print" popup (built 2026-08-30)
 The planner draws a decimated proxy, which reads to a buyer as "this model is low quality"
 rather than "this is a preview". `ui/PreviewQualityNotice.tsx` shows the two side by side once,
