@@ -4,10 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useAuthStore } from './store/authStore';
 import { useTaxStore } from './store/taxStore';
-import { useInviteGateStore } from './store/inviteGateStore';
 import { authApi } from './api/endpoints/auth';
 import { Toaster } from 'react-hot-toast';
-import InviteGate from './components/common/InviteGate';
 
 // Layouts
 import MainLayout from './components/layout/MainLayout';
@@ -121,10 +119,6 @@ const queryClient = new QueryClient({
 function App() {
   const { setUser, setLoading, isAuthenticated, token, clearAuth } = useAuthStore();
   const loadTaxCountries = useTaxStore((s) => s.loadCountries);
-  // Private/invite-only period: signed-in users bypass automatically, everyone
-  // else needs a code (remembered on this device thereafter). See InviteGate.
-  const inviteUnlocked = useInviteGateStore((s) => s.unlocked);
-  const gateOpen = !isAuthenticated && !inviteUnlocked;
 
   // VAT rates drive every price on the storefront, so fetch them once at boot rather
   // than per page — a product card must be able to render its gross price straight
@@ -161,14 +155,6 @@ function App() {
     window.addEventListener('terrain_builder_logout', handleExternalLogout);
     return () => window.removeEventListener('terrain_builder_logout', handleExternalLogout);
   }, [clearAuth]);
-
-  if (gateOpen) {
-    return (
-      <ErrorBoundary>
-        <InviteGate />
-      </ErrorBoundary>
-    );
-  }
 
   return (
     <ErrorBoundary>

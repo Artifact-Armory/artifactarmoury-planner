@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { SITE_NAME, SITE_DOMAIN } from '../../config/brand'
+import { SITE_NAME, SITE_URL } from '../../config/brand'
 
 /**
  * Per-page <title>/meta description/canonical/OG tags.
@@ -64,7 +64,7 @@ const Seo: React.FC<SeoProps> = ({ title, description, path, noindex, image }) =
   useEffect(() => {
     const fullTitle = title === SITE_NAME ? title : `${title} | ${SITE_NAME}`
     const desc = description ?? DEFAULT_DESCRIPTION
-    const origin = window.location.origin
+    const origin = SITE_URL
     const canonicalPath = path ?? window.location.pathname
     const canonicalUrl = `${origin}${canonicalPath}`
     const ogImage = image ?? `${origin}/og-image.png`

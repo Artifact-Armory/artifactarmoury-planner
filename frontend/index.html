@@ -11,6 +11,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://artifactarmoury.com/" />
+    <meta name="application-name" content="Artifact Armoury" />
+    <meta name="apple-mobile-web-app-title" content="Artifact Armoury" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Artifact Armoury" />
     <meta property="og:title" content="Artifact Armoury" />
@@ -18,9 +21,56 @@
       property="og:description"
       content="A marketplace and 3D planner for tabletop terrain. Buy printable STL terrain from independent artists and lay out your table before you print."
     />
-    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:url" content="https://artifactarmoury.com/" />
+    <meta property="og:image" content="https://artifactarmoury.com/og-image.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <title>Artifact Armoury</title>
+    <!--
+      Google takes the name it prints above a result (the "site name") from
+      WebSite structured data on the HOMEPAGE. Without it, a new site gets its
+      bare domain ("artifactarmoury.com") instead of the brand. The URL must be
+      the canonical homepage, exactly. alternateName covers the spellings people
+      actually type; "Artifact Armory" is a different, unrelated business.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://artifactarmoury.com/#website",
+            "name": "Artifact Armoury",
+            "alternateName": ["ArtifactArmoury", "Artifact Armoury Ltd"],
+            "url": "https://artifactarmoury.com/",
+            "publisher": { "@id": "https://artifactarmoury.com/#organization" },
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://artifactarmoury.com/browse?search={search_term_string}"
+              },
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://artifactarmoury.com/#organization",
+            "name": "Artifact Armoury",
+            "legalName": "Artifact Armoury Ltd",
+            "url": "https://artifactarmoury.com/",
+            "logo": "https://artifactarmoury.com/icon-512.png",
+            "description": "A marketplace and 3D planner for tabletop terrain. Buy printable STL terrain from independent artists and lay out your table before you print.",
+            "address": {
+              "@type": "PostalAddress",
+              "streetAddress": "Unit A, 82 James Carter Road",
+              "addressLocality": "Mildenhall",
+              "postalCode": "IP28 7DE",
+              "addressCountry": "GB"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
