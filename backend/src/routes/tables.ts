@@ -9,6 +9,8 @@ import { buildWatermarkHeader, WATERMARK_ZERO_ORDER, type WatermarkPayload } fro
 import { generateTerrainTiles, quoteTiles, type HeightField, type TileOptions, type TileQuote, type GeneratedTile } from '../services/terrainTiles'
 import { syncTableModels } from '../services/tableModels'
 import { reconcileCollaborations, publishBlockers } from '../services/collaborations'
+import { isR2Enabled, uploadObject, deleteObject } from '../services/r2'
+import { tableThumbnailRateLimit } from '../middleware/security'
 import type { Archiver } from 'archiver'
 // Using untyped request body locally to avoid cross-package imports during build
 const createArchive: (format: string, options?: any) => Archiver = require('archiver')
@@ -247,6 +249,59 @@ router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
 })
 
 // ============================================================================
+// TABLE THUMBNAIL (rendered by the planner on save)
+// ============================================================================
+
+const MAX_TABLE_THUMBNAIL_BYTES = 5 * 1024 * 1024
+
+/** Image type from the file's own magic bytes; the Content-Type header is not trusted. */
+function sniffImage(buf: Buffer): { ext: string; type: string } | null {
+  if (buf.length < 12) return null
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return { ext: 'webp', type: 'image/webp' }
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: 'jpg', type: 'image/jpeg' }
+  if (buf.readUInt32BE(0) === 0x89504e47) return { ext: 'png', type: 'image/png' }
+  return null
+}
+
+/** Best-effort removal of a replaced/deleted thumbnail; a leftover object is harmless. */
+async function dropThumbnail(key: string | null | undefined) {
+  if (!key || !isR2Enabled()) return
+  try { await deleteObject(key) } catch (error) { tablesLogger.warn('Old table thumbnail not deleted', { key, error }) }
+}
+
+router.post(
+  '/:id/thumbnail',
+  authenticate,
+  tableThumbnailRateLimit,
+  express.raw({ type: ['image/webp', 'image/jpeg', 'image/png'], limit: MAX_TABLE_THUMBNAIL_BYTES }),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const { id } = req.params
+      const owner = await db.query('SELECT user_email, thumbnail_path FROM user_tables WHERE id = $1', [id])
+      if (owner.rows.length === 0) return res.status(404).json({ error: 'Table not found' })
+      if (!canModifyTable(req, owner.rows[0].user_email)) return res.status(403).json({ error: 'Forbidden' })
+
+      const body = Buffer.isBuffer(req.body) ? req.body : null
+      const kind = body ? sniffImage(body) : null
+      if (!body || !kind) return res.status(400).json({ error: 'Expected a WebP, JPEG or PNG image' })
+      if (!isR2Enabled()) return res.status(503).json({ error: 'Image storage is not configured' })
+
+      // A fresh key per capture, so the CDN's immutable cache never serves an old picture.
+      const key = `table-thumbs/${id}/${crypto.randomBytes(8).toString('hex')}.${kind.ext}`
+      await uploadObject(key, body, kind.type)
+      await db.query('UPDATE user_tables SET thumbnail_path = $1 WHERE id = $2', [key, id])
+      await dropThumbnail(owner.rows[0].thumbnail_path)
+
+      tablesLogger.info('Table thumbnail updated', { tableId: id, bytes: body.length })
+      res.json({ thumbnail_path: key })
+    } catch (error) {
+      tablesLogger.error('Table thumbnail upload failed', { error, tableId: req.params.id })
+      next(error)
+    }
+  },
+)
+
+// ============================================================================
 // TABLE CONTRIBUTORS (multi-artist BOM credit)
 // ============================================================================
 
@@ -347,6 +402,7 @@ router.get('/user/:email', authenticate, async (req: AuthRequest, res, next) => 
         table_config,
         share_token,
         is_public,
+        thumbnail_path,
         created_at,
         updated_at,
         jsonb_array_length(layout_data->'models') as model_count
@@ -458,7 +514,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
     const { id } = req.params
 
     // Look up the owner, then verify against the verified token.
-    const owner = await db.query('SELECT user_email FROM user_tables WHERE id = $1', [id])
+    const owner = await db.query('SELECT user_email, thumbnail_path FROM user_tables WHERE id = $1', [id])
     if (owner.rows.length === 0) {
       return res.status(404).json({ error: 'Table not found' })
     }
@@ -474,6 +530,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Table not found' })
     }
+    await dropThumbnail(owner.rows[0].thumbnail_path)
 
     tablesLogger.info('Table deleted', {
       tableId: id,
@@ -664,6 +721,7 @@ router.get('/public/list', async (req, res, next) => {
         t.share_token,
         t.view_count,
         t.clone_count,
+        t.thumbnail_path,
         t.created_at,
         t.updated_at,
         CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'

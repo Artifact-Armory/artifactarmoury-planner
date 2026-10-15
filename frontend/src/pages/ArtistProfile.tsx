@@ -396,15 +396,17 @@ const ArtistProfile: React.FC = () => {
   )
 }
 
-// A card linking to one of the artist's public showcase planner tables, with a
-// mosaic of the pieces it contains.
+// A card linking to one of the artist's public showcase planner tables, showing the
+// rendered table (or a mosaic of its pieces until one has been captured).
 const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ table, accent }) => (
   <Link
     to={`/planner/view/${table.id}`}
     className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:shadow-md"
   >
     <div className="relative aspect-video w-full bg-muted">
-      {table.thumbnails.length > 0 ? (
+      {table.thumbnailUrl ? (
+        <img src={table.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+      ) : table.thumbnails.length > 0 ? (
         <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px">
           {table.thumbnails.slice(0, 4).map((src, i) => (
             <img key={i} src={src} alt="" className="h-full w-full object-cover" />

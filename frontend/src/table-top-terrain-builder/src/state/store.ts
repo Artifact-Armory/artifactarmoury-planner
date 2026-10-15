@@ -75,6 +75,12 @@ export interface StageApi {
   rotate: (dir: 1 | -1) => void
   /** Raise (+1) / lower (-1) the placement level, overriding auto-surface. */
   nudgeLevel: (delta: 1 | -1) => void
+  /**
+   * Render the whole table from a fixed 3/4 view into an off-screen image of the
+   * given size (no grid, ghost, selection or hover glow). Waits for in-flight model
+   * and texture loads first. Resolves null if the stage went away meanwhile.
+   */
+  captureTable: (width: number, height: number) => Promise<HTMLCanvasElement | null>
 }
 
 export type Unit = 'm'|'cm'|'ft'|'in'

@@ -487,9 +487,12 @@ const ModelDetails: React.FC = () => {
                   <Link
                     key={t.id}
                     to={`/planner/view/${t.id}`}
-                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3 hover:border-primary/40 hover:bg-primary/10"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3 hover:border-primary/40 hover:bg-primary/10"
                   >
-                    <span className="text-sm font-medium text-foreground">{t.name}</span>
+                    {t.thumbnailUrl && (
+                      <img src={t.thumbnailUrl} alt="" className="h-10 w-16 flex-none rounded-sm object-cover" loading="lazy" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{t.name}</span>
                     <span className="text-xs text-muted-foreground">{t.modelCount} pieces</span>
                   </Link>
                 ))}

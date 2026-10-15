@@ -109,7 +109,7 @@ export const modelsApi = {
     /**
      * Extra store-page photos, already uploaded direct-to-R2 via
      * uploadsApi.uploadDirect(file, 'images') — same convention as thumbnailKey.
-     * Capped at 10 (matches addGalleryImages' MAX_GALLERY_IMAGES).
+     * Capped at 40 (matches addGalleryImages' MAX_GALLERY_IMAGES).
      */
     galleryKeys?: string[]
   }): Promise<{ id: string; name: string; status: string; processingStatus: string; createdAt: string }> => {
@@ -535,13 +535,14 @@ export const modelsApi = {
   getModelTables: async (
     modelId: string,
     limit = 12,
-  ): Promise<Array<{ id: string; name: string; modelCount: number; viewCount: number }>> => {
+  ): Promise<Array<{ id: string; name: string; modelCount: number; viewCount: number; thumbnailUrl?: string }>> => {
     const response = await apiClient.get(`${BASE_URL}/${modelId}/tables`, { params: { limit } })
     return (response.data?.tables ?? []).map((t: any) => ({
       id: t.id,
       name: t.name,
       modelCount: Number(t.model_count ?? 0),
       viewCount: Number(t.view_count ?? 0),
+      thumbnailUrl: t.thumbnail_path ? assetUrl(t.thumbnail_path) : undefined,
     }))
   },
 

@@ -304,6 +304,21 @@ export const uploadRateLimit = rateLimit({
 });
 
 /**
+ * Table thumbnail uploads (the planner sends one per save). Its own bucket so
+ * frequent saving can't use up the model-upload allowance above.
+ */
+export const tableThumbnailRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  message: 'Too many table thumbnail uploads, please try again later',
+  handler: rateLimitHandler,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyGenerator,
+  ...storeFor('rl:tablethumb:')
+});
+
+/**
  * Payment/checkout rate limit
  * 10 payment attempts per hour per user
  */

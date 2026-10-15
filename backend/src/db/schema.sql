@@ -482,6 +482,7 @@ CREATE TABLE user_tables (
     is_artist_display BOOLEAN DEFAULT false,
     view_count INTEGER DEFAULT 0,
     clone_count INTEGER DEFAULT 0,
+    thumbnail_path VARCHAR(500), -- rendered table image (075)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

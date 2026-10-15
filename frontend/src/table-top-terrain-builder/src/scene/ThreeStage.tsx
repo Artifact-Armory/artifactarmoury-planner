@@ -8,7 +8,7 @@ import { InstancedScene } from './InstancedScene'
 import { Ghost } from './ghost'
 import { RotateHandle } from './rotateHandle'
 import { ensureTemplate } from './loaders'
-import { subscribeLoading } from './loadManager'
+import { subscribeLoading, getLoadProgress } from './loadManager'
 import {
   worldToCell, aabbFootprint,
   inBounds, snapRotationForFootprint,
@@ -287,6 +287,7 @@ export function ThreeStage() {
     useAppStore.getState().setStageApi({
       rotate: (dir) => rotateActive(dir),
       nudgeLevel: (delta) => nudgeLevel(delta),
+      captureTable: (w, h) => captureTable(w, h),
     })
 
     buildTable()
@@ -305,6 +306,125 @@ export function ThreeStage() {
     }
     const ro = new ResizeObserver(onResize)
     ro.observe(mount)
+
+    // ---- table snapshot (saved table thumbnail) ----
+    let disposed = false
+    // rAF is paused in a background tab; the timer keeps a capture from stalling there.
+    const nextFrame = () => new Promise<void>((r) => {
+      const t = setTimeout(r, 100)
+      requestAnimationFrame(() => { clearTimeout(t); r() })
+    })
+    async function waitForAssets(timeoutMs: number) {
+      const start = performance.now()
+      while (!disposed && getLoadProgress().active && performance.now() - start < timeoutMs) {
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      // Finished templates are folded into the scene on the next animation frame.
+      await nextFrame()
+      await nextFrame()
+    }
+
+    /** Pull a camera back along `dir` until every corner of `box` sits inside the frame. */
+    function fitCamera(cam: THREE.PerspectiveCamera, box: THREE.Box3, dir: THREE.Vector3) {
+      const corners: THREE.Vector3[] = []
+      for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z))
+      const target = box.getCenter(new THREE.Vector3())
+      const p = new THREE.Vector3()
+      const place = (d: number) => {
+        cam.position.copy(target).addScaledVector(dir, d)
+        cam.lookAt(target)
+        cam.updateMatrixWorld()
+      }
+      const extent = () => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const c of corners) {
+          p.copy(c).project(cam)
+          minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y)
+        }
+        return { minX, maxX, minY, maxY }
+      }
+      const MARGIN = 0.94 // fraction of the frame the table may fill
+      for (let pass = 0; pass < 3; pass++) {
+        let lo = 0.1, hi = 100
+        for (let i = 0; i < 40; i++) {
+          const mid = (lo + hi) / 2
+          place(mid)
+          const e = extent()
+          const fits = Math.max(-e.minX, e.maxX, -e.minY, e.maxY) <= MARGIN
+          if (fits) hi = mid; else lo = mid
+        }
+        place(hi)
+        // Centre the projected bounds (perspective makes the near edge loom larger).
+        const e = extent()
+        const cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2
+        if (Math.abs(cx) < 0.005 && Math.abs(cy) < 0.005) break
+        const ndc = new THREE.Vector3(cx, cy, new THREE.Vector3().copy(target).project(cam).z).unproject(cam)
+        target.add(ndc.sub(target))
+      }
+    }
+
+    async function captureTable(width: number, height: number): Promise<HTMLCanvasElement | null> {
+      await waitForAssets(20000)
+      if (disposed) return null
+      const s = store()
+
+      const box = tableBox()
+      box.max.y = 0
+      box.union(inst.getBox())
+      // Terrain can rise above the table top; keep peaks in shot.
+      const hm = s.heightmap
+      if (hm && heightmapFitsTable(hm, s.table)) {
+        let peak = 0
+        for (let k = 0; k < hm.heights.length; k++) peak = Math.max(peak, hm.heights[k])
+        box.max.y = Math.max(box.max.y, peak)
+      }
+
+      const shot = new THREE.PerspectiveCamera(30, width / height, 0.05, 500)
+      const az = 30 * (Math.PI / 180), polar = 52 * (Math.PI / 180)
+      const dir = new THREE.Vector3(Math.sin(polar) * Math.sin(az), Math.cos(polar), Math.sin(polar) * Math.cos(az))
+      fitCamera(shot, box, dir)
+      const radius = box.getBoundingSphere(new THREE.Sphere()).radius
+      shot.near = Math.max(0.01, shot.position.distanceTo(box.getCenter(new THREE.Vector3())) - radius * 2)
+      shot.far = shot.position.distanceTo(box.getCenter(new THREE.Vector3())) + radius * 2
+      shot.updateProjectionMatrix()
+
+      // Hide everything that is editor chrome rather than the table itself.
+      const hidden = [ghost.group, rotateHandle.group, gridGroup, cellHi, brushRing].filter((o) => o.visible)
+      hidden.forEach((o) => { o.visible = false })
+      const selection = new Set(s.selectedInstanceIds)
+      const hovered = engine.current?.hovered ?? null
+      if (selection.size) inst.setSelection(new Set())
+      if (hovered) inst.setHover(null)
+
+      // Supersample 2x (when the GPU allows) and scale down, for clean edges.
+      const maxSize = renderer.capabilities.maxTextureSize
+      const ss = Math.max(1, Math.min(2, maxSize / width, maxSize / height))
+      const out = document.createElement('canvas')
+      out.width = width
+      out.height = height
+      try {
+        renderer.setPixelRatio(ss)
+        renderer.setSize(width, height, false)
+        inst.updateLod(shot, height * ss)
+        renderer.render(scene, shot)
+        const ctx = out.getContext('2d')!
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        // preserveDrawingBuffer keeps the frame readable after render().
+        ctx.drawImage(renderer.domElement, 0, 0, width, height)
+      } finally {
+        hidden.forEach((o) => { o.visible = true })
+        if (selection.size) inst.setSelection(selection)
+        if (hovered) inst.setHover(hovered)
+        renderer.setPixelRatio(FULL_DPR)
+        lowRes = false
+        renderer.setSize(mount.clientWidth, mount.clientHeight, false)
+        inst.updateLod(camera, mount.clientHeight * FULL_DPR)
+        requestRender()
+      }
+      return out
+    }
 
     // ---- helpers ----
     // Is the surface painted? (a fitting, non-blank paint map)
@@ -1390,6 +1510,8 @@ export function ThreeStage() {
       window.removeEventListener('pointercancel', onPointerCancel)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      disposed = true
+      useAppStore.getState().setStageApi(null)
       useAppStore.getState().setCameraApi(null)
       cam.dispose()
       inst.dispose()

@@ -1331,7 +1331,7 @@ router.get('/:id/tables',
     const { id } = req.params;
     const limit = Math.min(Number(req.query.limit) || 12, 40);
     const result = await db.query(
-      `SELECT ut.id, ut.name, ut.share_token, ut.view_count, ut.created_at,
+      `SELECT ut.id, ut.name, ut.share_token, ut.view_count, ut.created_at, ut.thumbnail_path,
               jsonb_array_length(COALESCE(ut.layout_data->'models', '[]'::jsonb)) AS model_count
        FROM table_models tm
        JOIN user_tables ut ON ut.id = tm.table_id

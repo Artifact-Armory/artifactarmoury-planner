@@ -103,6 +103,9 @@ const MyTables: React.FC = () => {
             const busy = busyId === t.id
             return (
               <li key={t.id} className="flex items-center gap-4 p-4">
+                <div className="hidden aspect-video w-32 flex-none overflow-hidden rounded-sm bg-muted sm:block">
+                  {t.thumbnailUrl && <img src={t.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />}
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <TableNameEditor

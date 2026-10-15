@@ -132,9 +132,11 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
   return (
     <li className="group overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:-translate-y-0.5 hover:shadow-md">
       <Link to={`/planner/view/${table.id}`} className="block">
-        {/* Mosaic preview built from the pieces on the table */}
+        {/* The rendered table; a mosaic of its pieces until one has been captured */}
         <div className="relative aspect-4/3 w-full bg-muted">
-          {thumbs.length > 0 ? (
+          {table.thumbnailUrl ? (
+            <img src={table.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : thumbs.length > 0 ? (
             <div
               className={`grid h-full w-full gap-0.5 ${
                 thumbs.length === 1 ? 'grid-cols-1' : 'grid-cols-2'

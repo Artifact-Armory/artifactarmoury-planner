@@ -114,6 +114,7 @@ export const artistsApi = {
       description: s.description ?? undefined,
       modelCount: Number(s.model_count ?? s.piece_count ?? 0),
       viewCount: Number(s.view_count ?? 0),
+      thumbnailUrl: s.thumbnail_path ? assetUrl(s.thumbnail_path) : undefined,
       thumbnails: (Array.isArray(s.thumbnails) ? s.thumbnails : [])
         .map((t: string) => assetUrl(t))
         .filter(Boolean) as string[],

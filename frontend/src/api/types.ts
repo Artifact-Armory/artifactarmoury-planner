@@ -320,6 +320,8 @@ export interface ArtistShowcase {
   description?: string
   modelCount: number
   viewCount: number
+  /** Rendered image of the whole table, when one has been captured. */
+  thumbnailUrl?: string
   thumbnails: string[]
   updatedAt?: string
 }
@@ -369,6 +371,8 @@ export interface TableLayout {
   status?: string
   plan?: string
   maxAssets?: number
+  /** Rendered image of the table (075); undefined until the planner has captured one. */
+  thumbnailUrl?: string
   createdAt: string
   updatedAt: string
 }

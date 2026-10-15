@@ -26,6 +26,7 @@ const mapTable = (table: any): TableLayout => ({
   status: table.status ?? undefined,
   plan: table.plan ?? undefined,
   maxAssets: table.max_assets ?? undefined,
+  thumbnailUrl: table.thumbnail_path ? assetUrl(table.thumbnail_path) : undefined,
   createdAt: table.created_at ?? table.createdAt,
   updatedAt: table.updated_at ?? table.updatedAt
 })
@@ -41,6 +42,8 @@ export interface PublicTableCard {
   creatorId: string | null
   creatorName: string
   creatorIsArtist: boolean
+  /** Rendered image of the whole table, when one has been captured. */
+  thumbnailUrl?: string
   thumbnails: string[]
   createdAt?: string
   updatedAt?: string
@@ -56,6 +59,7 @@ const mapPublicTableCard = (t: any): PublicTableCard => ({
   creatorId: t.creator_id ?? null,
   creatorName: t.creator_name ?? 'Anonymous',
   creatorIsArtist: Boolean(t.creator_is_artist),
+  thumbnailUrl: t.thumbnail_path ? assetUrl(t.thumbnail_path) : undefined,
   thumbnails: (Array.isArray(t.thumbnails) ? t.thumbnails : [])
     .map((p: string) => assetUrl(p))
     .filter((u: string | undefined): u is string => Boolean(u)),
@@ -148,6 +152,15 @@ export const tablesApi = {
   async updateTable(id: string, payload: Partial<SaveTablePayload>) {
     const response = await apiClient.put<ApiResponse<TableLayout>>(`${BASE_URL}/${id}`, toServerPayload(payload))
     return mapTable(pickTable(response.data ?? response))
+  },
+
+  /** Replace the table's rendered thumbnail (owner only; the image goes up as the raw body). */
+  async uploadThumbnail(id: string, image: Blob): Promise<string | undefined> {
+    const response = await apiClient.post(`${BASE_URL}/${id}/thumbnail`, image, {
+      headers: { 'Content-Type': image.type },
+    })
+    const path = (response.data as any)?.thumbnail_path
+    return path ? assetUrl(path) : undefined
   },
 
   // Ownership is enforced server-side from the JWT; the `_payload` (userId/email)

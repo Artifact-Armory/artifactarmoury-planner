@@ -58,7 +58,7 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
   `{rows:[]}` for everything, so routes doing `rows[0].x` crash — guard them).
 - `cd frontend && npm run dev` (Vite on :3000). `npm run typecheck` in each project.
 - Migrations: `backend/db/migrations/*.sql`, run by `scripts/migrate.ts` against
-  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–007**.
+  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–075**.
 
 ## Seller upload → anti-theft pipeline (built this session)
 1. **Upload (async, preferred):** browser presigns (`POST /api/uploads/presign`,
@@ -826,7 +826,7 @@ client-side fail before wasting an upload — must match) updated to match.
   planner preview; a 3.7M-tri windmill and a 4.65M-tri decimated house preview were over it),
   `FULL_GLB_MAX_SOURCE_BYTES` 1000MB. `FULL_GLB_MAX_TRIS` stays 10.5M (owner GLB is skipped above
   it). A ZIP download still buffers each file whole, so an 887MB entry briefly costs the API
-  server ~0.9 GB per concurrent download. `MAX_EXTRA_PARTS` (files per listing) is now **250**.
+  server ~0.9 GB per concurrent download. `MAX_EXTRA_PARTS` (files per listing) is now **250** and `MAX_GALLERY_IMAGES` **40** (backend `createListing.ts` + `CreateModel.tsx`/`EditModel.tsx`, which mirror both).
 
 ## Preview file replaces a named model's part files in the planner (built 2026-10-01, migration 067)
 The preview upload in `CreateModel.tsx` is no longer tied to "has supports" — it's an optional field on
@@ -1092,6 +1092,26 @@ setting it out on a real table. `ui/layoutPdf.ts`, jsPDF (lazy-loaded on click, 
   nearest gap. Inches for imperial, cm for metric (the planner's units toggle).
 - Footprints are bounding boxes, not true silhouettes, so gaps are measured box-to-box.
 - Verified by generating a PDF in Chromium with demo assets and checking the rendered pages.
+
+## Table thumbnails are a render of the table (built 2026-10-15, migration 075)
+Table cards used to show a mosaic of the placed models' product photos. Now every save in the
+planner also photographs the table: `stageApi.captureTable()` (`scene/ThreeStage.tsx`) waits for
+in-flight model/texture loads, renders a fixed 3/4 view (az 30°, polar 52°, fov 30, fitted to the
+table + pieces + terrain peaks) at **1920×1080, 2× supersampled**, with grid/ghost/rotate
+handle/brush/selection/hover hidden, then restores the live view. `ui/tableSnapshot.ts` encodes it
+(WebP 0.9, JPEG where the browser can't encode WebP — Safari) and uploads it **after** the save
+succeeds; a failed upload never fails the save. ~110–140 KB, ~0.5 s.
+- **Backend:** `POST /api/tables/:id/thumbnail` (owner/admin, raw image body ≤5 MB, type sniffed
+  from magic bytes, own `tableThumbnailRateLimit` 60/h so saving can't eat the model-upload limit).
+  Stored at `table-thumbs/<tableId>/<random>.<ext>` (fresh key per capture, old one deleted;
+  deleted with the table). `user_tables.thumbnail_path` is returned by `/user/:email`,
+  `/public/list`, `/artists/:id/showcases` and `/models/:id/tables`. Duplicates don't copy it.
+- **Backfill is automatic:** when an owner opens a table that has no thumbnail, the planner
+  captures and uploads one once the table has loaded. No script.
+- Cards (Public tables, artist showcases, My Tables, product page "Featured in") use it and fall
+  back to the old mosaic when it's missing.
+- Capture verified in a browser (demo grey-box pieces): framing, hidden editor chrome, 1920×1080
+  WebP, live canvas restored. **Upload route + 075 untested against a real Postgres/R2** (DB_MOCK).
 
 ## Code-review fixes (2026-10-12, migration 070)
 Five bugs found by running every migration and every backend SQL query against a real local

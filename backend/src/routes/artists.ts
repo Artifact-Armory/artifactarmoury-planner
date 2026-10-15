@@ -320,6 +320,7 @@ router.get('/:id/showcases', async (req, res, next) => {
         t.description,
         t.share_token,
         t.view_count,
+        t.thumbnail_path,
         t.updated_at,
         CASE WHEN jsonb_typeof(t.layout_data->'models') = 'array'
              THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,

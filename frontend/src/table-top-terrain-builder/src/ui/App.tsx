@@ -16,6 +16,7 @@ import { useCartStore, cartKey } from '@/store/cartStore'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
+import { captureTableImage, uploadTableSnapshot } from './tableSnapshot'
 import { assetUrl } from '@/api/transformers'
 import { collaborationsApi, type TableCollaboration } from '@/api/endpoints/collaborations'
 import CollabRequestModal from './CollabRequestModal'
@@ -463,6 +464,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // The single condition the overlay is keyed off.
   const showTable = sceneReady && tableAssetsReady
 
+  // A table its owner opened that has no rendered thumbnail yet (set by the load
+  // effect). Once every piece is on screen it is photographed and uploaded, once.
+  const backfillThumbFor = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const id = backfillThumbFor.current
+    if (!showTable || !id || id !== savedTableId) return
+    backfillThumbFor.current = null
+    void uploadTableSnapshot(id, captureTableImage())
+  }, [showTable, savedTableId])
+
   // Progress for the bar. Counting finished models alone leaves it at 0% for the
   // whole wait and then jumps to done — every GLB is requested at once, so they
   // land in a clump at the end, and a frozen bar reads as a hung page. So each
@@ -618,6 +629,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           setSavedTableId(t.id)
           // Own it only if it's yours; otherwise Save makes a copy under your account.
           const owned = !!user?.email && t.userEmail === user.email
+          // Tables saved before thumbnails existed get one the first time their owner opens them.
+          backfillThumbFor.current = owned && !t.thumbnailUrl ? t.id : null
           setIsOwner(owned)
           setOwnsViewedTable(owned)
           refreshCollabs(t.id, owned)
@@ -1184,6 +1197,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     setSaving(true)
     try {
       if (savedTableId && isOwner) {
+        // Photograph the table as saved; it uploads alongside, not in the save's way.
+        const snapshot = captureTableImage()
         // Update the table you already own.
         await tablesApi.updateTable(savedTableId, {
           name: savedTableName ?? 'My table',
@@ -1192,17 +1207,20 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           userEmail: email,
         })
         hotToast.success('Table saved')
+        void uploadTableSnapshot(savedTableId, snapshot)
         // Saving raises/refreshes collaboration requests for any foreign models.
         await refreshCollabs(savedTableId, true)
       } else {
         // New table, or a copy of a shared one → create under your account.
         const name = window.prompt('Name this table:', savedTableName ?? `Table ${new Date().toLocaleDateString()}`)
         if (!name) { setSaving(false); return }
+        const snapshot = captureTableImage()
         const created = await tablesApi.createTable({ name, tableConfig: tableConfig as any, layoutData: layoutData as any, userEmail: email })
         setSavedTableId(created.id)
         setSavedTableName(created.name)
         setIsOwner(true)
         hotToast.success('Saved to your tables')
+        void uploadTableSnapshot(created.id, snapshot)
         await refreshCollabs(created.id, true)
         navigate(`/planner/t/${created.id}`)
       }
