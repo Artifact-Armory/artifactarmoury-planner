@@ -155,6 +155,9 @@ CREATE TABLE models (
     -- often a group shot of every model in the listing together. Falls back
     -- to thumbnail_path when unset.
     primary_thumbnail_path VARCHAR(500),
+    -- Site-generated render of the primary piece (076, services/pieceRender.ts).
+    render_thumbnail_path VARCHAR(500),
+    render_failed_at TIMESTAMPTZ,
     -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
     -- is the artist's original file (delivered to the buyer alongside the STL).
     source_format VARCHAR(10) NOT NULL DEFAULT 'stl',
@@ -341,6 +344,9 @@ CREATE TABLE model_parts (
     -- Per-component planner thumbnail (migration 058). Only meaningful on a
     -- component's first/primary part — see that migration's comment.
     thumbnail_path VARCHAR(500),
+    -- Site-generated render of this piece (076, services/pieceRender.ts).
+    render_thumbnail_path VARCHAR(500),
+    render_failed_at TIMESTAMPTZ,
     -- Download-only part (migration 067): a sibling preview file stands in for its
     -- whole named model on the planner, so no GLB/bake is built for this one.
     preview_skipped BOOLEAN NOT NULL DEFAULT false,

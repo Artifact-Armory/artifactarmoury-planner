@@ -58,7 +58,7 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
   `{rows:[]}` for everything, so routes doing `rows[0].x` crash — guard them).
 - `cd frontend && npm run dev` (Vite on :3000). `npm run typecheck` in each project.
 - Migrations: `backend/db/migrations/*.sql`, run by `scripts/migrate.ts` against
-  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–075**.
+  `DATABASE_URL` (skipped when `DB_MOCK`). Current: **001–076**.
 
 ## Seller upload → anti-theft pipeline (built this session)
 1. **Upload (async, preferred):** browser presigns (`POST /api/uploads/presign`,
@@ -1112,6 +1112,23 @@ succeeds; a failed upload never fails the save. ~110–140 KB, ~0.5 s.
   back to the old mosaic when it's missing.
 - Capture verified in a browser (demo grey-box pieces): framing, hidden editor chrome, 1920×1080
   WebP, live canvas restored. **Upload route + 075 untested against a real Postgres/R2** (DB_MOCK).
+
+## Planner palette renders of each piece (built 2026-10-15, migration 076)
+Pack listings (Wargame3D markers, stowage…) put dozens of placeable pieces under ONE store photo, so
+every palette tile showed the same pack shot. The worker now renders each piece itself:
+`services/pieceRender.ts` is a pure-Node software rasteriser (no GPU/Blender) that draws the piece's
+preview GLB from a fixed 3/4 view, grey clay on light grey, 512px WebP, ~0.3–1.5 s. 
+`services/pieceRenderBackfill.ts` runs one piece per idle worker cycle (after the fingerprint upgrade,
+same lowest-priority slot; the supervisor's `hasClaimableWork` counts these rows too), for every
+`model_parts` row without its own `thumbnail_path` and every multi-part listing's primary without
+`primary_thumbnail_path`. Stored in `render_thumbnail_path` (`thumbnails/render-<random>.webp`);
+failures set `render_failed_at` (clear it to retry). `PIECE_RENDER_ENABLED=false` turns it off.
+Existing catalogue and new uploads are both covered — no script.
+- **Which image the palette shows** (`GET /api/models/sets`): the piece's own photo; else a shared
+  photo (named model's or listing's) only if it covers just that one piece; else the render; else the
+  shared photo. So a single-piece named model keeps its photo, a pack shows renders.
+- Verified the renderer on 6 real GLBs (proxies with Draco + normal maps). **Worker loop, SQL and
+  the /sets change untested against a real Postgres** — watch worker logs for `Piece render stored`.
 
 ## Code-review fixes (2026-10-12, migration 070)
 Five bugs found by running every migration and every backend SQL query against a real local

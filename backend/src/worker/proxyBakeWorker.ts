@@ -31,6 +31,14 @@ const STALE_FINGERPRINT_SQL = `geometry_fingerprint IS NOT NULL
   AND COALESCE(geometry_fingerprint->>'v', '1') <> '2'
   AND geometry_fingerprint->>'upgradeFailedAt' IS NULL
   AND stl_file_path IS NOT NULL`
+// Mirrors services/pieceRenderBackfill.ts (PART_/MODEL_NEEDS_RENDER_SQL).
+const isPieceRenderEnabled = () => process.env.PIECE_RENDER_ENABLED !== 'false'
+const PART_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
+  AND thumbnail_path IS NULL AND preview_skipped = false
+  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
+const MODEL_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
+  AND primary_thumbnail_path IS NULL AND part_count > 1 AND deleted_at IS NULL
+  AND processing_status = 'ready' AND glb_file_path IS NOT NULL`
 
 /** Same upsert as queueHealth.recordWorkerHeartbeat (which the child uses). */
 async function beat(): Promise<void> {
@@ -92,6 +100,10 @@ async function hasClaimableWork(): Promise<boolean> {
   if (isFingerprintUpgradeEnabled()) {
     queries.push(`SELECT 1 FROM models WHERE ${STALE_FINGERPRINT_SQL}`)
     queries.push(`SELECT 1 FROM model_parts WHERE ${STALE_FINGERPRINT_SQL}`)
+  }
+  if (isPieceRenderEnabled()) {
+    queries.push(`SELECT 1 FROM models WHERE ${MODEL_NEEDS_RENDER_SQL}`)
+    queries.push(`SELECT 1 FROM model_parts WHERE ${PART_NEEDS_RENDER_SQL}`)
   }
   const sql = queries.join(' UNION ALL ')
   const { rows } = await db.query(`SELECT EXISTS (${sql}) AS work`, [STALE_LOCK_MS])

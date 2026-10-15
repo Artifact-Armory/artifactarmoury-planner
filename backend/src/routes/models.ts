@@ -985,7 +985,7 @@ router.get('/sets',
     const models = (await db.query(
       `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.primary_thumbnail_path, m.artist_id,
               m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg, m.default_roll_deg,
-              m.primary_group_name,
+              m.primary_group_name, m.render_thumbnail_path,
               (SELECT u.sales_disabled FROM users u WHERE u.id = m.artist_id) AS sales_disabled
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
@@ -1001,7 +1001,7 @@ router.get('/sets',
       // with no base rather than a model that's simply not on the planner yet.
       const allParts = (await db.query(
         `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name,
-                thumbnail_path, processing_status
+                thumbnail_path, render_thumbnail_path, processing_status
          FROM model_parts
          WHERE model_id = $1 AND preview_skipped = false
          ORDER BY group_index ASC, display_order ASC`,
@@ -1041,14 +1041,16 @@ router.get('/sets',
       // frontend which signed route to use. thumbnail_path (migration 058) is a
       // public R2 key already (same convention as the listing's own thumbnail) —
       // safe to expose directly, unlike glb_file_path.
-      const parts = [
+      const rawParts = [
         {
           id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
           width: m.width, depth: m.depth, height: m.height,
           group_index: 0, group_name: m.primary_group_name ?? null,
           // Model 1's OWN thumbnail (migration 059) — falls back to the
           // listing's main store image only if it has none of its own.
-          thumbnail_path: m.primary_thumbnail_path ?? m.thumbnail_path ?? null,
+          own_thumb: m.primary_thumbnail_path ?? null,
+          shared_thumb: m.thumbnail_path ?? null,
+          render: m.render_thumbnail_path ?? null,
         },
         ...allParts.map((p: any) => ({
           id: p.id, name: p.name, is_primary: false, has_glb: !!p.glb_file_path,
@@ -1057,9 +1059,24 @@ router.get('/sets',
           // Own photo, else this NAMED MODEL's own photo (its primary part),
           // else null — the frontend's own final fallback to the listing's
           // overall photo (core/assets.ts) only kicks in once neither exists.
-          thumbnail_path: p.thumbnail_path ?? groupThumbnail.get(p.group_index ?? 0) ?? null,
+          own_thumb: p.thumbnail_path ?? null,
+          shared_thumb: groupThumbnail.get(p.group_index ?? 0) ?? null,
+          render: p.render_thumbnail_path ?? null,
         })),
       ].filter((p) => p.has_glb && !incompleteGroups.has(p.group_index));
+      // A shared photo (the named model's, or the listing's) only identifies a
+      // piece when that piece is the only one it covers. A pack of 30 markers
+      // all showing the pack shot is useless in the palette, so there the
+      // site-generated render of the piece itself (migration 076) is used.
+      const piecesInGroup = new Map<number, number>();
+      for (const p of rawParts) piecesInGroup.set(p.group_index, (piecesInGroup.get(p.group_index) ?? 0) + 1);
+      const parts = rawParts.map(({ own_thumb, shared_thumb, render, ...p }) => {
+        const sharedCovers = shared_thumb === m.thumbnail_path ? rawParts.length : piecesInGroup.get(p.group_index) ?? 0;
+        const thumbnail_path = own_thumb
+          ?? (shared_thumb && sharedCovers <= 1 ? shared_thumb : null)
+          ?? render ?? shared_thumb ?? null;
+        return { ...p, thumbnail_path };
+      });
       return {
         id: m.id,
         name: m.name,

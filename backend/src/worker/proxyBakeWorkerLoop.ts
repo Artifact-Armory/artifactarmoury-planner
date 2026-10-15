@@ -45,6 +45,7 @@ import { runOneFullGlbJob, releaseInFlightFullGlbJob } from '../services/fullGlb
 import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
 import { upgradeOneStaleFingerprint, isFingerprintUpgradeEnabled } from '../services/fingerprintUpgrade'
+import { renderOneMissingPiece, isPieceRenderEnabled } from '../services/pieceRenderBackfill'
 import { isLargeJobLockHeld } from '../services/modelIngest/queue'
 import { recordWorkerHeartbeat } from '../services/queueHealth'
 import { closeDatabase } from '../db'
@@ -167,6 +168,11 @@ async function main(): Promise<void> {
       // (services/fingerprintUpgrade.ts). Only ever runs with every queue empty.
       if (!didWork && !stopping && !largeJobInProgress && isFingerprintUpgradeEnabled()) {
         didWork = await upgradeOneStaleFingerprint()
+      }
+      // Then a planner-palette picture for a piece that has no photo of its own
+      // (services/pieceRenderBackfill.ts).
+      if (!didWork && !stopping && !largeJobInProgress && isPieceRenderEnabled()) {
+        didWork = await renderOneMissingPiece()
       }
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })
