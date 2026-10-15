@@ -49,9 +49,9 @@ const MAX_MODEL_FILE_MB = 900
 const MAX_MODEL_FILE_BYTES = MAX_MODEL_FILE_MB * 1024 * 1024
 
 // Caps mirrored from the backend (routes/models.ts).
-const MAX_EXTRA_FILES = 60
+const MAX_EXTRA_FILES = 250
 const MAX_COMPONENTS = 20
-const MAX_GALLERY_IMAGES = 10
+const MAX_GALLERY_IMAGES = 40
 
 const MESH_FILE_RE = /\.(stl|obj|3mf)$/i
 const baseName = (filename: string) => filename.replace(MESH_FILE_RE, '')

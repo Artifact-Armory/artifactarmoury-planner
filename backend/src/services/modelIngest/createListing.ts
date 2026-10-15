@@ -35,7 +35,7 @@ export const MAX_COMPONENTS = 20;
 // Store-page gallery photos (beyond the required thumbnail) — shared by the
 // initial upload and the standalone add-more-photos route so a model can't
 // exceed the cap via either path.
-export const MAX_GALLERY_IMAGES = 10;
+export const MAX_GALLERY_IMAGES = 40;
 
 // The type facet a model must be tagged with, per model class. A model's headline
 // classification is class-conditional (a Vehicle needs vehicle-type, not terrain-type).

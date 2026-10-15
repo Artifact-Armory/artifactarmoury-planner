@@ -27,7 +27,7 @@ const CATEGORIES = [
 
 // Must match backend MAX_GALLERY_IMAGES (routes/models.ts) — fast client-side
 // fail before wasting an upload, same convention as the model-file size cap.
-const MAX_GALLERY_IMAGES = 10
+const MAX_GALLERY_IMAGES = 40
 
 function errMessage(err: unknown, fallback: string): string {
   const anyErr = err as any
