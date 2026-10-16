@@ -16,6 +16,7 @@
 import 'dotenv/config'
 import os from 'os'
 import fs from 'fs'
+import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import logger from '../utils/logger'
 import { db, closeDatabase } from '../db'
@@ -86,6 +87,62 @@ function memoryReport(): Record<string, number | string> {
   return out
 }
 
+const isReleaseFileCacheEnabled = () => process.env.WORKER_RELEASE_FILE_CACHE !== 'false'
+
+function readCgroupFileBytes(): number {
+  try {
+    const stat = fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8')
+    return Number(/^file ([0-9]+)/m.exec(stat)?.[1] ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+/** Run a command, resolving when it exits (never rejects). */
+function run(cmd: string, args: string[]): Promise<number | null> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { stdio: 'ignore' })
+    p.on('exit', (code) => resolve(code))
+    p.on('error', () => resolve(null))
+  })
+}
+
+/**
+ * Hand the page cache a job process left behind back to the OS. The kernel only
+ * evicts cache under memory pressure, and a 32 GB replica never has any, so after
+ * one Blender bake a replica sat at ~600 MB of cache (fileMB 539-628, anonMB 19)
+ * for the rest of the night (2026-10-15) - billed, and doing nothing.
+ *
+ * First choice is cgroup v2's memory.reclaim, which evicts this container's cache
+ * whatever files it came from. If that file is missing or read-only, fall back to
+ * per-file POSIX_FADV_DONTNEED via GNU dd's `iflag=nocache count=0` on the files the
+ * job process reads: the Blender install, the app's node_modules and the temp dir.
+ * Pages still mapped by a live process are left alone by the kernel either way, so
+ * this can't hurt the supervisor. The next job just reads those files from disk again.
+ */
+async function releaseFileCache(): Promise<string> {
+  const fileBytes = readCgroupFileBytes()
+  if (fileBytes < 64 * 1048576) return 'skipped'
+  try {
+    fs.writeFileSync('/sys/fs/cgroup/memory.reclaim', String(fileBytes))
+    return 'memory.reclaim'
+  } catch (err: any) {
+    // EAGAIN = reclaimed less than asked, which still freed what it could.
+    if (err?.code === 'EAGAIN') return 'memory.reclaim (partial)'
+  }
+  const blenderDir = path.dirname(process.env.BLENDER_PATH || '/opt/blender/blender')
+  const dirs = [blenderDir, path.join(process.cwd(), 'node_modules'), os.tmpdir()].filter(
+    (d) => d !== '.' && fs.existsSync(d),
+  )
+  if (!dirs.length) return 'no dirs'
+  const code = await run('find', [
+    ...dirs,
+    '-type', 'f', '-size', '+64k',
+    '-exec', 'sh', '-c', 'for f do dd if="$f" iflag=nocache count=0 status=none 2>/dev/null; done', 'sh', '{}', '+',
+  ])
+  return code === 0 ? 'fadvise' : `fadvise (find exit ${code})`
+}
+
 let child: ChildProcess | null = null
 let stopping = false
 
@@ -119,7 +176,16 @@ function startChild(): void {
   child = c
   c.on('exit', (code, signal) => {
     if (child === c) child = null
-    logger.info('Worker memory after job process exit', memoryReport())
+    logger.info('Worker memory after job process exit', { workerId: WORKER_ID, ...memoryReport() })
+    if (isReleaseFileCacheEnabled() && !stopping) {
+      void releaseFileCache()
+        .then((method) => {
+          if (method !== 'skipped') {
+            logger.info('Worker memory after releasing file cache', { workerId: WORKER_ID, method, ...memoryReport() })
+          }
+        })
+        .catch((err) => logger.warn('Worker file cache release failed', { workerId: WORKER_ID, err }))
+    }
     if (code !== 0 && !stopping) {
       logger.error('Worker job process exited abnormally', { code, signal })
     } else {
@@ -134,7 +200,7 @@ function startChild(): void {
 
 async function main(): Promise<void> {
   logger.info('Proxy bake worker supervisor started', { workerId: WORKER_ID, pollMs: POLL_INTERVAL_MS })
-  logger.info('Worker memory at start', memoryReport())
+  logger.info('Worker memory at start', { workerId: WORKER_ID, ...memoryReport() })
   while (!stopping) {
     try {
       // The child heartbeats too while it runs; this keeps the beacon alive while
