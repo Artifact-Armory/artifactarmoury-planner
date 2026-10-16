@@ -27,6 +27,11 @@ import { invalidateUserTokens } from '../middleware/auth';
 
 const router = Router();
 
+// Platform revenue figures only count orders placed on or after this instant.
+// Everything before it was test purchases (set 2026-10-16). Orders, downloads and
+// artist earnings are untouched — this only moves where the admin totals start.
+const REVENUE_START_AT = new Date(process.env.REVENUE_START_AT || '2026-10-17T00:00:00Z');
+
 // All admin routes require authentication and admin role
 router.use(authenticate, requireAdmin);
 
@@ -43,10 +48,10 @@ router.get('/dashboard',
         (SELECT COUNT(*) FROM users WHERE role = 'artist') as artist_count,
         (SELECT COUNT(*) FROM models WHERE status = 'published') as published_models,
         (SELECT COUNT(*) FROM orders) as total_orders,
-        (SELECT SUM(total) FROM orders WHERE payment_status = 'succeeded') as total_revenue,
+        (SELECT SUM(total) FROM orders WHERE payment_status = 'succeeded' AND created_at >= $1) as total_revenue,
         (SELECT COUNT(*) FROM orders WHERE created_at > CURRENT_DATE - INTERVAL '7 days') as orders_last_7_days,
         (SELECT COUNT(*) FROM models WHERE created_at > CURRENT_DATE - INTERVAL '7 days') as models_last_7_days
-    `);
+    `, [REVENUE_START_AT]);
 
     // Recent activity
     const activityResult = await db.query(
@@ -1676,19 +1681,22 @@ router.get('/analytics/overview',
       // Gross revenue + platform's cut (total_price minus the artist's share).
       db.query(`
         SELECT
-          COALESCE(SUM(o.total), 0) AS total_revenue,
+          -- Order totals summed per ORDER, not per joined item row (which counted a
+          -- 3-item order's total three times).
+          (SELECT COALESCE(SUM(total), 0) FROM orders
+            WHERE payment_status = 'succeeded' AND created_at >= $1) AS total_revenue,
           COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS site_revenue,
           COUNT(DISTINCT o.id) AS paid_orders
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.payment_status = 'succeeded'
+        WHERE o.payment_status = 'succeeded' AND o.created_at >= $1
         -- NB: a PARTIAL refund (one item out of several) isn't backed out of these
         -- two figures — o.total/oi.total_price stay as originally charged unless
         -- every item in the order is refunded (which flips payment_status to
         -- 'refunded' and excludes it here). Pre-existing coarseness, not something
         -- this pass fixes; site_revenue would need order-level refund totals to do
         -- properly. Low-stakes: superadmin-only dashboard, not customer/artist-facing.
-      `),
+      `, [REVENUE_START_AT]),
       // Headline catalogue / user counts (all-time).
       db.query(`
         SELECT
@@ -1794,8 +1802,10 @@ router.get('/analytics/revenue',
        FROM orders
        WHERE paid_at > CURRENT_DATE - INTERVAL '${days} days'
          AND payment_status = 'succeeded'
+         AND created_at >= $1
        GROUP BY DATE(paid_at)
-       ORDER BY date DESC`
+       ORDER BY date DESC`,
+      [REVENUE_START_AT]
     );
 
     // Revenue by category
@@ -1809,8 +1819,10 @@ router.get('/analytics/revenue',
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
          AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
+         AND o.created_at >= $1
        GROUP BY m.category
-       ORDER BY revenue DESC`
+       ORDER BY revenue DESC`,
+      [REVENUE_START_AT]
     );
 
     // Top selling models
@@ -1826,9 +1838,11 @@ router.get('/analytics/revenue',
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
          AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
+         AND o.created_at >= $1
        GROUP BY m.id, u.artist_name
        ORDER BY sales_count DESC
-       LIMIT 10`
+       LIMIT 10`,
+      [REVENUE_START_AT]
     );
 
     // Top artists
@@ -1842,9 +1856,11 @@ router.get('/analytics/revenue',
        JOIN orders o ON oi.order_id = o.id
        WHERE o.paid_at > CURRENT_DATE - INTERVAL '${days} days'
          AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
+         AND o.created_at >= $1
        GROUP BY u.id
        ORDER BY sales_count DESC
-       LIMIT 10`
+       LIMIT 10`,
+      [REVENUE_START_AT]
     );
 
     res.json({

@@ -37,6 +37,17 @@ function canModifyTable(req: AuthRequest, ownerEmail: string): boolean {
  * compares it with the signed-in user's email to decide whether Save updates the table
  * or makes a copy, so for everyone else its absence correctly reads as "not yours".
  */
+/**
+ * Count a view of a public table by anyone other than its owner (or an admin).
+ * Nothing incremented user_tables.view_count before, so every table read 0.
+ * Fire-and-forget: a failed count must never fail the page load.
+ */
+function countTableView(req: AuthRequest, table: any) {
+  if (!table.is_public || canModifyTable(req, table.user_email)) return
+  db.query('UPDATE user_tables SET view_count = COALESCE(view_count, 0) + 1 WHERE id = $1', [table.id])
+    .catch((error) => tablesLogger.error('Failed to count table view', { error, tableId: table.id }))
+}
+
 function tableForViewer(req: AuthRequest, table: any) {
   if (canModifyTable(req, table.user_email)) return table
   const { user_email: _ownerEmail, ...rest } = table
@@ -462,6 +473,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       isPublic: table.is_public
     })
 
+    countTableView(req, table)
     res.json({ table: tableForViewer(req, table) })
   } catch (error) {
     tablesLogger.error('Get table failed', { error, tableId: req.params.id })
@@ -498,6 +510,7 @@ router.get('/shared/:token', optionalAuth, async (req: AuthRequest, res, next) =
       shareToken: token
     })
 
+    countTableView(req, table)
     res.json({ table: tableForViewer(req, table) })
   } catch (error) {
     tablesLogger.error('Get shared table failed', { error, token: req.params.token })

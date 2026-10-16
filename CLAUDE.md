@@ -45,7 +45,9 @@ auto-rebuilds the frontend. There is **no Dockerfile** (Nixpacks/Railpack).
 Stripe payments, real Connect payouts; a real test payment has gone through in production. Live
 `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` are set and the webhook is registered), `PRINT_FARM_PROVIDER=mock`,
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL`,
-and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). Do **not** set `PORT` or `DB_MOCK`.
+and `WATERMARK_SECRET` (falls back to `JWT_SECRET` if unset). `REVENUE_START_AT` (default
+`2026-10-17T00:00:00Z`): admin revenue totals/reports ignore orders created before it (pre-launch
+test purchases); orders, downloads and artist earnings are unaffected. Do **not** set `PORT` or `DB_MOCK`.
 Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (`false` disables),
 `FULL_GLB_INLINE` (force the API server to drain the queue; defaults to on only when
 `PROXY_BAKE_ENABLED` is off), `FULL_GLB_MAX_TRIS` (1M — a memory ceiling, ~1.1 KB RSS/triangle) and
