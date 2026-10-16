@@ -501,9 +501,19 @@ Stryker, SU-76, Tobruk, markers, an August upload). Cause: `pack_islands(margin=
 default SCALED mode, against thousands of islands. `unwrap()` now uses `margin_method='FRACTION'` with
 `uvIslandMarginPx` (2 texels, replaces `uvIslandMargin`). Turret coverage 0.55% → 36%. Side effect: the
 normal-map PNG now holds detail, ~69 KB → ~6.5 MB, so a re-baked dense proxy grows by about that much.
-Only new/re-baked proxies change. The global `triangleBudgetCeiling` stays 300k; the Tiger
-(`6e520900-…`, 1.91M welded tris, wrecked at 18% retain) gets a per-model `proxy_bake_config`
-override of 1M — measured locally 989k tris / 15.7 MB / 127 s bake, close to the source.
+Only new/re-baked proxies change.
+
+**Proxy decimation moved to meshoptimizer (same day).** Even at 1M, Blender's DECIMATE(COLLAPSE)
+left the Tiger I's road wheels and tracks shredded, while meshopt at 240k (the owner-GLB path) was
+hard to tell from the source. Blender's 0.05 mm `weldMergeDistanceMm` also merged that 5.12M-tri STL
+down to 1.91M before decimating. Now `services/proxyBake/meshoptProxy.ts` decimates a **binary STL**
+in Node (exact-position weld, `MeshoptSimplifier.simplify`, budget from the same formula as
+`compute_adaptive_budget` — keep them in step) and passes it to `bake_proxy.py` as `--proxy-input`;
+`make_proxy` then imports it instead of decimating (`remeshStrategy` = `meshopt` in the report, plus
+`report.meshoptProxy`). Unwrap, normal/AO bake from the full source, emboss and poison pills are
+unchanged. Config: `proxyDecimator` (`meshopt` | `blender`), `proxyMeshoptError` (0.01). ASCII STL,
+OBJ, `voxel` and a failed meshopt step fall back to Blender. Tiger, measured locally: 6.6 s meshopt,
+92 s bake, 300k tris, 10.6 MB. The global ceiling stays 300k and the Tiger needs no override.
 
 ## "Previews aren't your final print" popup (built 2026-08-30)
 The planner draws a decimated proxy, which reads to a buyer as "this model is low quality"

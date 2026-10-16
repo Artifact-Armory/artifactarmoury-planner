@@ -61,6 +61,9 @@ ARGS = parse_args(sys.argv)
 CONFIG_PATH = ARGS.get("config")
 INPUT_PATH = ARGS.get("input")
 OUT_DIR = ARGS.get("out-dir")
+# Optional: a proxy already decimated in Node with meshoptimizer (meshoptProxy.ts).
+# When present, make_proxy uses it instead of running DECIMATE(COLLAPSE).
+PROXY_INPUT_PATH = ARGS.get("proxy-input") or None
 
 REPORT = {
     "status": "failed",
@@ -331,6 +334,12 @@ def make_proxy(src, src_tris):
     (proxy, strategy)."""
     budget = compute_adaptive_budget(src_tris)
 
+    if PROXY_INPUT_PATH:
+        proxy = import_premade_proxy(PROXY_INPUT_PATH)
+        strategy = "meshopt"
+        REPORT["proxyStrategyDetail"] = "decimated in Node with meshoptimizer"
+        return finish_proxy(proxy, strategy)
+
     deselect_all()
     src.select_set(True)
     set_active(src)
@@ -393,6 +402,37 @@ def make_proxy(src, src_tris):
                 decimate(proxy, budget / float(triangle_count(proxy)))
             strategy = "voxel"
 
+    return finish_proxy(proxy, strategy)
+
+
+def import_premade_proxy(path):
+    """Import the meshopt-decimated proxy as its own object. Its vertices were welded
+    by exact position in Node; the tiny merge here only re-joins what the STL format
+    split apart, it never moves geometry (unlike the source's weldMergeDistanceMm)."""
+    before = set(o.name for o in bpy.context.scene.objects)
+    import_mesh(path)
+    new = [o for o in mesh_objects() if o.name not in before]
+    if not new:
+        fail("Pre-decimated proxy file contained no mesh")
+    deselect_all()
+    for o in new:
+        o.select_set(True)
+    set_active(new[0])
+    if len(new) > 1:
+        bpy.ops.object.join()
+    proxy = bpy.context.view_layer.objects.active
+    proxy.name = "proxy"
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.remove_doubles(threshold=1e-6)
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return proxy
+
+
+def finish_proxy(proxy, strategy):
+    """Detail removal, cleanup and crease shading, shared by every proxy strategy."""
     # --- Detail removal (the anti-theft core) ---------------------------------
     # Decimation preserves surface relief (that's its job), so a decimated proxy is
     # still printable. Smooth the geometry to melt the fine detail OUT of the mesh;

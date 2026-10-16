@@ -21,6 +21,7 @@ import logger from '../../utils/logger'
 import { downloadObject, uploadObject } from '../r2'
 import { loadBakeConfig, type ProxyBakeConfig, type ProxyBakeConfigOverrides } from './config'
 import { buildPlannerLod } from './lod'
+import { buildMeshoptProxy } from './meshoptProxy'
 
 // @gltf-transform/* is ESM-only; the CommonJS build must import it dynamically
 // (same shim used in services/fileProcessor.ts).
@@ -264,24 +265,36 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
     const cfgPath = path.join(work, 'config.json')
     await fsp.writeFile(cfgPath, JSON.stringify({ ...cfg, embossSeed }))
 
-    // 2. Blender bake with a hard timeout.
+    // 2. Decimate in Node with meshoptimizer when the source is over budget (see
+    // meshoptProxy.ts). A failure here only means Blender decimates as before.
+    const proxyPath = path.join(work, 'proxy_input.stl')
+    let meshoptProxy = null as Awaited<ReturnType<typeof buildMeshoptProxy>>
+    try {
+      meshoptProxy = await buildMeshoptProxy(srcPath, proxyPath, cfg)
+      if (meshoptProxy) log.info('Meshopt proxy built', { jobId: input.jobId, ...meshoptProxy })
+    } catch (err) {
+      log.warn('Meshopt proxy failed; Blender will decimate', { jobId: input.jobId, error: String(err) })
+      meshoptProxy = null
+    }
+
+    // 3. Blender bake with a hard timeout.
     const timeoutMs = Math.max(1, cfg.bakeTimeoutMinutes) * 60_000
     log.info('Bake starting', { jobId: input.jobId, modelId: input.modelId, partId: input.partId })
-    const res = await runBlender(
-      ['-b', '-P', BAKE_SCRIPT_PATH, '--', '--config', cfgPath, '--input', srcPath, '--out-dir', outDir],
-      timeoutMs,
-    )
+    const blenderArgs = ['-b', '-P', BAKE_SCRIPT_PATH, '--', '--config', cfgPath, '--input', srcPath, '--out-dir', outDir]
+    if (meshoptProxy) blenderArgs.push('--proxy-input', proxyPath)
+    const res = await runBlender(blenderArgs, timeoutMs)
     if (res.timedOut) {
       throw new Error(`Bake timed out after ${cfg.bakeTimeoutMinutes} min`)
     }
 
-    // 3. Read the report the script wrote (present on both success and failure).
+    // 4. Read the report the script wrote (present on both success and failure).
     let report: any = null
     try {
       report = JSON.parse(await fsp.readFile(path.join(outDir, 'report.json'), 'utf8'))
     } catch {
       /* fall through to the exit-code / stderr diagnosis below */
     }
+    if (report && meshoptProxy) report.meshoptProxy = meshoptProxy
     if (!report || report.status !== 'ok') {
       const reason =
         (report && report.error) ||
@@ -290,7 +303,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       throw new Error(`Bake failed: ${reason}`)
     }
 
-    // 4. Post-process the GLB (prune, texture recompress, Draco).
+    // 5. Post-process the GLB (prune, texture recompress, Draco).
     const rawGlb = path.join(outDir, 'proxy_raw.glb')
     const finalGlb = path.join(outDir, 'proxy.glb')
     await postProcessGlb(rawGlb, finalGlb, cfg)
@@ -341,7 +354,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       }
     }
 
-    // 5. Comparison PNG (QA aid; best-effort). Skipped unless the config opts in —
+    // 6. Comparison PNG (QA aid; best-effort). Skipped unless the config opts in —
     // Blender didn't produce render_source_*/render_proxy_* files in that case, so
     // don't bother probing for them.
     const comparePng = path.join(outDir, 'compare.png')
@@ -349,7 +362,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
       ? await compositeComparison(outDir, comparePng, cfg.validationRenderPx).catch(() => null)
       : null
 
-    // 6. Publish to R2 under stable keys (overwrite on re-run — idempotent).
+    // 7. Publish to R2 under stable keys (overwrite on re-run — idempotent).
     const prefix = artefactPrefix(input)
     const glbKey = `${prefix}/proxy.glb`
     const reportKey = `${prefix}/report.json`

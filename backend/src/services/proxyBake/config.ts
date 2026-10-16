@@ -42,6 +42,16 @@ export interface ProxyBakeConfig {
    *  emboss watermark (embossStyle) and the download-time AES header watermark
    *  on the paid STL instead. */
   proxyDecimationEnabled: boolean
+  /** Which decimator builds the proxy. 'meshopt' (default since 2026-10-15)
+   *  simplifies a binary STL in Node (meshoptProxy.ts) and hands Blender the
+   *  result; 'blender' is the old DECIMATE(COLLAPSE) inside bake_proxy.py. On the
+   *  Tiger I, Blender's collapse shredded the wheels and tracks even at 1M
+   *  triangles while meshopt at 240k was close to the source. ASCII STL and OBJ
+   *  sources always use Blender. */
+  proxyDecimator: 'meshopt' | 'blender'
+  /** meshopt's error bound, relative to the mesh extent. Only binds when it
+   *  would stop simplification short of the budget. */
+  proxyMeshoptError: number
   /** FLOOR on the decimated proxy's triangle count — the minimum target regardless
    *  of source complexity. Sources at/under this skip decimation entirely (unchanged
    *  from before adaptive budgeting). For anything above it, the actual target is

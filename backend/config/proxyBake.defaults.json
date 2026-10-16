@@ -1,5 +1,7 @@
 {
   "proxyDecimationEnabled": true,
+  "proxyDecimator": "meshopt",
+  "proxyMeshoptError": 0.01,
   "triangleBudget": 80000,
   "triangleRetainRatio": 0.6,
   "triangleBudgetCeiling": 300000,
