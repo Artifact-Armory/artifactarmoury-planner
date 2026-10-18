@@ -1441,6 +1441,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         <>
           {/* Top toolbar */}
           <div className="tb-toolbar">
+            <button className="tb-icon" title="Back to Artifact Armoury" onClick={() => navigate('/')}>
+              <ArrowLeft size={18} />
+            </button>
+            <div className="tb-sep" />
             <button
               className={`tb-icon ${!selectedAssetId ? 'is-active' : ''}`}
               title="Select / move (Esc)"
