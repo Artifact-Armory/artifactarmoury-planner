@@ -88,15 +88,16 @@ export class Ghost {
       const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
       if (aabb) clone.position.y = groundOffset(clone.quaternion, aabb)
     }
-    // Mirror in the model's own frame, like InstancedScene.composeMatrix.
-    clone.scale.x = this.mirrored ? -1 : 1
+    // Mirror in the model's own frame, like InstancedScene.composeMatrix. Only the
+    // sign changes: the template root already carries its fit-to-size scale.
+    clone.scale.x = Math.abs(clone.scale.x) * (this.mirrored ? -1 : 1)
     this.model = clone
     this.group.add(clone)
   }
 
   setMirror(mirrored: boolean) {
     this.mirrored = mirrored
-    if (this.model) this.model.scale.x = mirrored ? -1 : 1
+    if (this.model) this.model.scale.x = Math.abs(this.model.scale.x) * (mirrored ? -1 : 1)
   }
 
   setTransform(x: number, z: number, rotDeg: number, y = 0) {
