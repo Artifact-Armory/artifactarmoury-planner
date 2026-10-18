@@ -216,14 +216,14 @@ async function notifyAdmins(input: Omit<NotificationInput, 'userId'>): Promise<v
 }
 
 /**
- * A model marked as a real-world subject matched another artist's model and was
- * let through (migration 072) — an admin needs to compare the two.
+ * An upload's geometry fingerprint matched another artist's model. It was NOT
+ * rejected and the artist has not been told — an admin needs to compare the two.
  */
 export async function notifyAdminsOfGeometryReview(uploadName: string, matchedName: string, modelId: string): Promise<void> {
   await notifyAdmins({
     type: 'admin.geometry_review',
     title: 'Similar model needs a look',
-    body: `"${uploadName}" (marked as a real-world subject) closely matches "${matchedName}" by another artist. It has gone live — check it isn't a copy.`,
+    body: `"${uploadName}" closely matches "${matchedName}" by another artist. The artist hasn't been told — check it isn't a copy.`,
     link: '/admin/similar-models',
     modelId,
   })

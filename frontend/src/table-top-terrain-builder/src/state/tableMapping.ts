@@ -56,6 +56,8 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
         pitchDeg: i.pitchDeg ?? 0,
         level: i.level ?? 0,
         groupId: i.groupId ?? null,
+        // Only written when set, so tables without mirrored pieces save as before.
+        ...(i.mirrored ? { mirrored: true } : {}),
       })),
       // Sculpted surface (null/omitted when the table is flat).
       heightmap: serializeHeightmap(surface),
@@ -94,6 +96,7 @@ export function deserializeLayout(
       pitchDeg: Number(m.pitchDeg ?? 0),
       level: Number(m.level ?? 0),
       groupId: m.groupId ?? undefined,
+      ...(m.mirrored === true ? { mirrored: true } : {}),
     }))
     .filter((i: Instance) => i.assetId)
 

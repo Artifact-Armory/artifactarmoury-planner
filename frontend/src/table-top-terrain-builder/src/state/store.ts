@@ -104,6 +104,8 @@ export interface StageApi {
   rotate: (dir: 1 | -1) => void
   /** Raise (+1) / lower (-1) the placement level, overriding auto-surface. */
   nudgeLevel: (delta: 1 | -1) => void
+  /** Mirror the ghost if placing, else the current selection (M key). */
+  mirror: () => void
   /**
    * Render the whole table from a fixed 3/4 view into an off-screen image of the
    * given size (no grid, ghost, selection or hover glow). Waits for in-flight model
@@ -121,6 +123,7 @@ export type Instance = {
   position: { x: number; z: number }
   rotationDeg: number  // yaw about the vertical (Y) axis
   pitchDeg?: number    // tilt about the X axis (stand a model up / lay it flat); 0 = default
+  mirrored?: boolean   // flipped left-to-right in its own frame (M key); undefined = not mirrored
   level: number        // discrete elevation level of the piece's base (0 = table)
   /** Shared id linking pieces "fused" together (e.g. a stack) so they select,
    *  drag, and rotate as one unit. undefined = not fused to anything. */
@@ -356,6 +359,7 @@ interface AppState {
     updateInstances: (patches: Array<{ id: string; patch: Partial<Omit<Instance,'id'|'assetId'>> }>) => void
     /** Tilt the current selection by deltaDeg about X (e.g. ±90 to stand up / lay flat). */
     tiltSelected: (deltaDeg: number) => void
+    mirrorSelected: () => void
     /** Fuse the current selection (2+ pieces, e.g. a stack) into one group that
      *  selects, drags and rotates as a single piece. Merges any already-fused
      *  groups touched by the selection into one. */
@@ -972,6 +976,17 @@ export const useAppStore = create<AppState>((set, get) => ({
           return { id, patch: { pitchDeg: next } }
         })
         .filter((p): p is { id: string; patch: { pitchDeg: number } } => p !== null)
+      get().actions.updateInstances(patches)
+    },
+
+    // Mirror every selected piece in place (flip it left-to-right in its own
+    // frame). One undoable step.
+    mirrorSelected: () => {
+      const ids = new Set(get().selectedInstanceIds)
+      if (!ids.size) return
+      const patches = get().instances
+        .filter(i => ids.has(i.id))
+        .map(i => ({ id: i.id, patch: { mirrored: !i.mirrored } }))
       get().actions.updateInstances(patches)
     },
 

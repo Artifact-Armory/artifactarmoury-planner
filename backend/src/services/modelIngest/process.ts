@@ -1119,24 +1119,25 @@ export async function findGeometryDuplicate(
     matched: foreign?.name ?? null,
     ownMatch: own?.name ?? null,
   });
-  // Disabled: report what WOULD have matched (above) but never reject or notify.
+  // Disabled: report what WOULD have matched (above) but never flag or notify.
   if (!GEOMETRY_DEDUP_ENABLED) return { foreign: null, own: null };
-  // Real-world subjects (migration 072): two artists modelling the same tank can
-  // legitimately match, so the upload goes through and an admin reviews the pair.
-  if (foreign && foreignCmp && (await isRealSubject(excludeId))) {
+  // A match against ANOTHER artist is never rejected on the fingerprint alone —
+  // the fingerprint has produced false positives, so the upload goes through
+  // untouched and silently lands in the admin review queue (geometry_match_reviews,
+  // /admin/similar-models) with both models' images. The artist is told nothing;
+  // they only hear about it if an admin takes the model down. `foreign` is
+  // therefore always null here; the callers' reject branches are kept as a
+  // fallback should this ever be made strict again. (A byte-identical file is
+  // still rejected by the SHA-256 check, before this runs.)
+  if (foreign && foreignCmp) {
     await queueGeometryReview(excludeId, foreign, foreignCmp, fileLabel);
-    return { foreign: null, own };
   }
-  return { foreign, own };
-}
-
-async function isRealSubject(modelId: string): Promise<boolean> {
-  const { rows } = await db.query(`SELECT is_real_subject FROM models WHERE id::text = $1`, [modelId]);
-  return rows[0]?.is_real_subject === true;
+  return { foreign: null, own };
 }
 
 /**
- * Record a real-subject upload's match for admin review and ping the admins.
+ * Record a fingerprint match for admin review and ping the admins. SILENT towards
+ * the artist: nothing is written to their notifications or processing_error.
  * One open row per (upload, matched model) — every file of a multi-part upload
  * that matches the same listing collapses into it. A failure here must not
  * fail the upload: the artist did nothing wrong, so it is logged instead.

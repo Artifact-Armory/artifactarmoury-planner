@@ -2286,10 +2286,10 @@ router.post('/models/:id/rebake',
 );
 
 // ============================================================================
-// SIMILAR-MODEL REVIEWS (migration 072): uploads marked "scale model of a
-// real-world subject" that matched another artist's model on geometry. They went
-// live instead of being rejected; an admin compares the pair and either clears
-// it (independent work) or takes the upload down (a copy).
+// SIMILAR-MODEL REVIEWS (migration 072): uploads whose geometry fingerprint
+// matched another artist's model. They are not rejected and the artist is not
+// told; an admin compares the pair and either clears (approves) it as independent
+// work or takes the upload down (rejects it as a copy).
 // ============================================================================
 
 const REVIEW_MODEL_COLUMNS = (alias: string, prefix: string) => `

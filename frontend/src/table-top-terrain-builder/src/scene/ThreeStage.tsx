@@ -95,6 +95,7 @@ export function ThreeStage() {
     ground: THREE.Plane
     requestRender: () => void
     ghostRot: number
+    ghostMirror: boolean           // M pressed while placing: the next piece goes down mirrored
     drag: LeftDrag
     hovered: string | null
     levelOverride: number | null   // manual placement level (PageUp/Down), null = auto-surface
@@ -304,7 +305,7 @@ export function ThreeStage() {
 
     engine.current = {
       renderer, scene, camera, cam, inst, ghost, tableGroup, gridGroup, cellHi,
-      raycaster, ground, requestRender, ghostRot: 0, drag: { kind: 'none' }, hovered: null,
+      raycaster, ground, requestRender, ghostRot: 0, ghostMirror: false, drag: { kind: 'none' }, hovered: null,
       levelOverride: null, lastAutoLevel: 0, lastPointer: null, sculpting: false, strokeChanged: false,
       touchIds: new Set(), gestureLatch: false,
     }
@@ -331,6 +332,7 @@ export function ThreeStage() {
     useAppStore.getState().setStageApi({
       rotate: (dir) => rotateActive(dir),
       nudgeLevel: (delta) => nudgeLevel(delta),
+      mirror: () => mirrorActive(),
       captureTable: (w, h) => captureTable(w, h),
     })
 
@@ -930,16 +932,16 @@ export function ThreeStage() {
     }
 
     // Grid cells a footprint covers at the cursor.
-    function ghostCells(asset: Asset, x: number, z: number, rotDeg: number) {
+    function ghostCells(asset: Asset, x: number, z: number, rotDeg: number, mirrored = false) {
       const t = store().table
       const anchor = worldToCell(x, z, t)
-      return footprintCellsFor(asset, anchor, snapRotationForFootprint(rotDeg), t.gridSize)
+      return footprintCellsFor(asset, anchor, snapRotationForFootprint(rotDeg), t.gridSize, mirrored)
     }
 
     // Validity at a specific elevation level (3D occupancy: cell × level slab).
-    function validAtLevel(asset: Asset, x: number, z: number, rotDeg: number, base: number, exclude: Set<string>): boolean {
+    function validAtLevel(asset: Asset, x: number, z: number, rotDeg: number, base: number, exclude: Set<string>, mirrored = false): boolean {
       const t = store().table
-      const cells = ghostCells(asset, x, z, rotDeg)
+      const cells = ghostCells(asset, x, z, rotDeg, mirrored)
       if (!inBounds(cells, t)) return false
       if (!effSnap()) return true // free placement permits overlap
       const occ = buildOccupied3D(store().instances, assetMap(), t, exclude)
@@ -971,14 +973,14 @@ export function ThreeStage() {
       // Sit on top of whatever occupies the target cell(s): the table (level 0) or
       // the top of any height tiles already there — unless the user pinned a level.
       const t = store().table
-      const cells = ghostCells(asset, x, z, eng.ghostRot)
+      const cells = ghostCells(asset, x, z, eng.ghostRot, eng.ghostMirror)
       const auto = surfaceTop(store().instances, assetMap(), t, cells)
       eng.lastAutoLevel = auto
       const base = eng.levelOverride != null ? eng.levelOverride : auto
       const y = levelToY(base) + terrainHeightAt(x, z)
 
       ghost.setTransform(x, z, eng.ghostRot, y)
-      const valid = validAtLevel(asset, x, z, eng.ghostRot, base, new Set())
+      const valid = validAtLevel(asset, x, z, eng.ghostRot, base, new Set(), eng.ghostMirror)
       ghost.setValid(valid)
       useAppStore.getState().setPlacement(base, eng.levelOverride != null)
 
@@ -1442,13 +1444,14 @@ export function ThreeStage() {
       if (!gp) return
       const { x, z } = snapWorld(gp.x, gp.z)
       const t = store().table
-      const cells = ghostCells(asset, x, z, eng.ghostRot)
+      const cells = ghostCells(asset, x, z, eng.ghostRot, eng.ghostMirror)
       const base = eng.levelOverride != null ? eng.levelOverride : surfaceTop(store().instances, assetMap(), t, cells)
-      if (!validAtLevel(asset, x, z, eng.ghostRot, base, new Set())) return
+      if (!validAtLevel(asset, x, z, eng.ghostRot, base, new Set(), eng.ghostMirror)) return
 
       const commit = () => {
         const id = useAppStore.getState().actions.addInstance({
           assetId, position: { x, z }, rotationDeg: eng.ghostRot, level: base,
+          ...(eng.ghostMirror ? { mirrored: true } : {}),
         })
         inst.markPopped([id])
         requestRender()
@@ -1485,6 +1488,22 @@ export function ThreeStage() {
         requestRender()
       } else {
         rotateSelection(dir)
+      }
+    }
+
+    // Mirror whatever the M key would mirror: the ghost while placing, otherwise
+    // the selection. Shared by the key handler and the on-screen buttons.
+    function mirrorActive() {
+      const eng = engine.current!
+      const s = store()
+      if (s.selectedAssetId) {
+        eng.ghostMirror = !eng.ghostMirror
+        ghost.setMirror(eng.ghostMirror)
+        refreshGhost()
+        requestRender()
+      } else if (s.selectedInstanceIds.length) {
+        s.actions.mirrorSelected()
+        afterStateChange()
       }
     }
 
@@ -1761,6 +1780,11 @@ export function ThreeStage() {
         return
       }
 
+      if (k === 'm') {
+        mirrorActive()
+        return
+      }
+
       // Tilt the selected piece(s) about X (stand up / lay flat). Shift = opposite.
       if (k === 't' && s.selectedInstanceIds.length) {
         s.actions.tiltSelected(rotationStep() * (e.shiftKey ? -1 : 1))
@@ -1824,6 +1848,7 @@ export function ThreeStage() {
         if (a) ensureTemplate(a)
         ghost.setAsset(a ?? null)
         engine.current!.ghostRot = 0
+        engine.current!.ghostMirror = false // ghost.setAsset cleared its mirror too
         engine.current!.levelOverride = null // fresh tool starts on auto-surface
         setCursor(a ? 'cell' : 'default')
         if (!a) cellHi.visible = false

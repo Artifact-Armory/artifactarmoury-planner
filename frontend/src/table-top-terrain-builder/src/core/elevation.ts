@@ -68,12 +68,12 @@ export function isTile(asset: Asset): boolean {
 }
 
 function placedCells(
-  inst: { assetId: string; position: { x: number; z: number }; rotationDeg: number },
+  inst: { assetId: string; position: { x: number; z: number }; rotationDeg: number; mirrored?: boolean },
   asset: Asset,
   table: Table,
 ): Cell[] {
   const anchor = worldToCell(inst.position.x, inst.position.z, table)
-  return footprintCellsFor(asset, anchor, snapRotationForFootprint(inst.rotationDeg), table.gridSize)
+  return footprintCellsFor(asset, anchor, snapRotationForFootprint(inst.rotationDeg), table.gridSize, inst.mirrored)
 }
 
 type PlacedInstance = {
@@ -81,6 +81,7 @@ type PlacedInstance = {
   position: { x: number; z: number }
   rotationDeg: number
   level: number
+  mirrored?: boolean
 }
 
 /**

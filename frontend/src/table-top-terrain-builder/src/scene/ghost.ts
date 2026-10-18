@@ -17,6 +17,9 @@ export class Ghost {
   private asset: Asset | null = null
   private material: THREE.MeshStandardMaterial
   private rotDeg = 0
+  private mirrored = false
+  /** The model clone inside `group` (null while showing the box stand-in). */
+  private model: THREE.Object3D | null = null
   private onReady: () => void
 
   constructor(onReady: () => void) {
@@ -39,6 +42,7 @@ export class Ghost {
     this.asset = asset
     this.clearChildren()
     this.rotDeg = 0
+    this.mirrored = false
     if (!asset) {
       this.group.visible = false
       return
@@ -84,7 +88,15 @@ export class Ghost {
       const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
       if (aabb) clone.position.y = groundOffset(clone.quaternion, aabb)
     }
+    // Mirror in the model's own frame, like InstancedScene.composeMatrix.
+    clone.scale.x = this.mirrored ? -1 : 1
+    this.model = clone
     this.group.add(clone)
+  }
+
+  setMirror(mirrored: boolean) {
+    this.mirrored = mirrored
+    if (this.model) this.model.scale.x = mirrored ? -1 : 1
   }
 
   setTransform(x: number, z: number, rotDeg: number, y = 0) {
@@ -108,6 +120,7 @@ export class Ghost {
   }
 
   private clearChildren() {
+    this.model = null
     for (let i = this.group.children.length - 1; i >= 0; i--) {
       this.group.remove(this.group.children[i])
     }

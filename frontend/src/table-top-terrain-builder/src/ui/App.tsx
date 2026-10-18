@@ -6,7 +6,7 @@ import {
   HelpCircle, Trash2, X, Search, Box, Home, RotateCw, RotateCcw, ChevronDown,
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
-  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer, Triangle,
+  Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer, Triangle, FlipHorizontal2,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import {
@@ -93,6 +93,22 @@ const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '6×3', w: 6, h: 3 },
 ]
 
+// Grid square sizes (metres) — also the snap/move step. ½" is the default.
+const GRID_PRESETS: Record<'imperial' | 'metric', Array<{ label: string; m: number }>> = {
+  imperial: [
+    { label: '¼"', m: 0.00635 },
+    { label: '½"', m: 0.0127 },
+    { label: '1"', m: 0.0254 },
+    { label: '2"', m: 0.0508 },
+  ],
+  metric: [
+    { label: '5mm', m: 0.005 },
+    { label: '1cm', m: 0.01 },
+    { label: '2cm', m: 0.02 },
+    { label: '5cm', m: 0.05 },
+  ],
+}
+
 
 // Keep only the components/pieces of a set that match a search term. A hit on the
 // set name or a model name keeps everything beneath it; a piece hit keeps just it.
@@ -165,6 +181,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const instances = useAppStore((s) => s.instances)
   const selectedInstanceIds = useAppStore((s) => s.selectedInstanceIds)
   const tiltSelected = useAppStore((s) => s.actions.tiltSelected)
+  const mirrorSelected = useAppStore((s) => s.actions.mirrorSelected)
   const fuseSelected = useAppStore((s) => s.actions.fuseSelected)
   const unfuseSelected = useAppStore((s) => s.actions.unfuseSelected)
   const removeInstances = useAppStore((s) => s.actions.removeInstances)
@@ -1480,6 +1497,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 >
                   <RotateCcw size={18} />
                 </button>
+                <button
+                  className="tb-icon"
+                  title="Mirror selection (M)"
+                  onClick={() => mirrorSelected()}
+                >
+                  <FlipHorizontal2 size={18} />
+                </button>
                 {selectedInstanceIds.length > 1 && (
                   <button
                     className="tb-icon"
@@ -1573,6 +1597,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 onClick={() => useAppStore.getState().stageApi?.rotate(1)}
               >
                 <RotateCw size={18} />
+              </button>
+              <button
+                className="tb-icon"
+                title="Mirror"
+                onClick={() => useAppStore.getState().stageApi?.mirror()}
+              >
+                <FlipHorizontal2 size={18} />
               </button>
               {selectedAssetId && (
                 <>
@@ -2242,6 +2273,19 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 aria-label={`Table depth (${uLabel})`}
               />
               <button className="tb-preset" title="Fit view (F)" onClick={() => fitView()}>Fit</button>
+            </div>
+            <span className="tb-small">Grid square</span>
+            <div className="tb-preset-row">
+              {GRID_PRESETS[unitSystem].map((g) => (
+                <button
+                  key={g.label}
+                  className={`tb-preset ${Math.abs(table.gridSize - g.m) < 1e-6 ? 'is-active' : ''}`}
+                  onClick={() => setTable({ gridSize: g.m })}
+                  title={`${g.label} grid — pieces snap and move in ${g.label} steps`}
+                >
+                  {g.label}
+                </button>
+              ))}
             </div>
           </div>
 

@@ -13,16 +13,16 @@ import Spinner from '../../components/ui/Spinner'
 
 const FILTERS: Array<{ key: GeometryReviewStatus; label: string }> = [
   { key: 'open', label: 'To review' },
-  { key: 'cleared', label: 'Cleared' },
-  { key: 'taken_down', label: 'Taken down' },
+  { key: 'cleared', label: 'Approved' },
+  { key: 'taken_down', label: 'Rejected' },
 ]
 
 const mm = (v: number | string | null) => (v == null || v === '' ? '?' : Number(v).toFixed(0))
 
 /**
- * Uploads marked "scale model of a real-world subject" that matched another
- * artist's model on geometry (migration 072). They went live; this is where an
- * admin decides whether that was independent work or a copy.
+ * Uploads whose geometry fingerprint matched another artist's model
+ * (migration 072). They are not rejected and the artist is not told; this is
+ * where an admin decides whether it was independent work or a copy.
  */
 const AdminGeometryReviews: React.FC = () => {
   const [filter, setFilter] = useState<GeometryReviewStatus>('open')
@@ -41,10 +41,9 @@ const AdminGeometryReviews: React.FC = () => {
         )}
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Uploads the artist marked as a scale model of a real-world subject (a tank, aircraft, ship or building) whose shape
-        closely matches another artist's model. Two people modelling the same real thing can legitimately end up close, so
-        these went live instead of being rejected. Compare each pair: <b>clear</b> it if it's independent work, or <b>take down</b>{' '}
-        the upload if it's a copy.
+        Uploads whose shape closely matches another artist's model. The copy check can false-positive, so these were
+        not rejected and <b>the artist has not been told</b>. Compare each pair: <b>approve</b> it if it's independent
+        work, or <b>reject</b> it (takes the upload down and tells the artist why) if it's a copy.
       </p>
 
       <div className="mt-5 flex gap-2">
@@ -113,7 +112,7 @@ const ReviewCard: React.FC<{ review: GeometryReview }> = ({ review: r }) => {
   const decide = useMutation({
     mutationFn: (action: 'clear' | 'take_down') => adminGeometryReviewsApi.decide(r.id, action, note.trim() || undefined),
     onSuccess: (res, action) => {
-      toast.success(action === 'clear' ? 'Cleared — the upload stays live' : `Taken down${res.notes?.length ? ` (${res.notes.join('; ')})` : ''}`)
+      toast.success(action === 'clear' ? 'Approved — the upload stays as it is' : `Rejected and taken down${res.notes?.length ? ` (${res.notes.join('; ')})` : ''}`)
       qc.invalidateQueries({ queryKey: ['admin-geometry-reviews'] })
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Action failed'),
@@ -139,7 +138,7 @@ const ReviewCard: React.FC<{ review: GeometryReview }> = ({ review: r }) => {
       </div>
 
       <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-        <ModelSide side={r.upload} label="New upload (real-world subject)" earlier={uploadFirst} />
+        <ModelSide side={r.upload} label="New upload" earlier={uploadFirst} />
         <ModelSide side={r.matched} label="Matched existing model" earlier={!uploadFirst} />
       </div>
 
@@ -159,7 +158,7 @@ const ReviewCard: React.FC<{ review: GeometryReview }> = ({ review: r }) => {
               className="inline-flex items-center gap-1.5 rounded-lg border border-green-300 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
             >
               {decide.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              Independent work — clear
+              Approve — independent work
             </button>
             <button
               disabled={decide.isPending}
@@ -167,13 +166,13 @@ const ReviewCard: React.FC<{ review: GeometryReview }> = ({ review: r }) => {
               className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
             >
               <Ban size={14} />
-              It's a copy — take down the upload
+              Reject — it's a copy, take down
             </button>
           </div>
         </div>
       ) : (
         <div className="mt-4 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-          {r.status === 'cleared' ? 'Cleared' : 'Taken down'}
+          {r.status === 'cleared' ? 'Approved' : 'Rejected (taken down)'}
           {r.resolvedByName && <> by {r.resolvedByName}</>}
           {r.resolvedAt && <> on {new Date(r.resolvedAt).toLocaleString()}</>}
           {r.resolutionNote && <>: {r.resolutionNote}</>}

@@ -12,6 +12,9 @@ watermarked on download, and protected against re-upload.
 - Don't trust assumptions when verifiable information exists. Assess confidence
   before acting.
 - Do not apologize — just fix it and tell me what changed.
+- I commit and push from a VS Code terminal. Whenever you change files that need committing,
+  print the commands in order: `cd` to the repo, `git add` with each file path listed explicitly,
+  `git commit -m "..."`, then `git push origin main`.
 
 ## Stack (the real one — ignore any Ruby/Rails mentions in old docs)
 - **Frontend:** React 18 + Vite 5 + TypeScript + Tailwind. 3D planner uses
@@ -102,7 +105,19 @@ Owner full-fidelity GLBs (041) are on by default; knobs are `FULL_GLB_ENABLED` (
    - `findGeometryDuplicate` logs `Geometry dedup check {closestScore, closestDistances, incomparable,
      matched}` on every upload. Failed dedup does **not** store a fingerprint, so rejected uploads
      never become match candidates.
-   - **Real-world subjects (migration 072, 2026-10-13).** Two artists modelling the same real tank /
+   - **SILENT REVIEW FOR ALL FINGERPRINT MATCHES (2026-10-18) — supersedes the rejection and the
+     real-subject gate below.** The fingerprint false-positived, so a geometry match against another
+     artist is **never rejected any more, for any upload**: `findGeometryDuplicate` always queues a
+     `geometry_match_reviews` row + notifies admins (`admin.geometry_review`) and returns
+     `foreign: null`. **The artist is told nothing** (no notification, no `processing_error`); they only
+     hear if an admin rejects (take down + reason). The ticket page `/admin/similar-models` shows both
+     models' thumbnails side by side; Approve = `clear`, Reject = `take_down`. SHA-256 byte-identical
+     files are still rejected outright. The callers' `if (geoDup.foreign)` reject branches and
+     `duplicateMessage('geometry')` are now unreachable (kept as a fallback). The "real-world subject"
+     checkbox no longer changes behaviour — its helper text still describes the old flow and tells
+     artists a copy check exists; remove or reword it if the check should stay invisible.
+     **Untested against a real Postgres** (DB_MOCK) — verify on deploy by uploading a near-duplicate.
+   - **Real-world subjects (migration 072, 2026-10-13).** *(Gate removed 2026-10-18, see above.)* Two artists modelling the same real tank /
      plane / ship / building can legitimately match. The upload form (and Edit page) has a
      "Scale model of a real-world subject" checkbox → `models.is_real_subject`. When such a model
      matches **another artist's** model, `findGeometryDuplicate` does NOT reject: it writes a

@@ -45,6 +45,13 @@ const tmpRay = new THREE.Ray()
 const tmpSphere = new THREE.Sphere()
 const tmpHit = new THREE.Vector3()
 const tmpCentre = new THREE.Vector3()
+const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1)
+
+// Mirrored pieces are drawn by their own meshes, keyed `<assetId>|mirrored`.
+const MIRROR_BUCKET = '|mirrored'
+function assetOfBucket(bucket: string): string {
+  return bucket.endsWith(MIRROR_BUCKET) ? bucket.slice(0, -MIRROR_BUCKET.length) : bucket
+}
 
 /** Moving to a COARSER level needs this much margin under the limit, so a piece
  *  sitting right at a threshold doesn't flip levels on every frame. */
@@ -87,11 +94,12 @@ export class InstancedScene {
   private instances: Instance[] = []
   private assetsById = new Map<string, Asset>()
   private meshes: THREE.InstancedMesh[] = []
-  /** assetId → [part][level] instanced meshes; level 0 is the full mesh. Each mesh
+  /** bucket (assetId, or assetId + MIRROR_BUCKET) → [part][level] instanced meshes;
+   *  level 0 is the full mesh. Each mesh
    *  draws only the pieces currently at its level (`count`), listed in
    *  `userData.slots` (slot → planner instance id). */
   private meshesByAsset = new Map<string, THREE.InstancedMesh[][]>()
-  /** assetId → ordered planner instance ids. */
+  /** bucket → ordered planner instance ids. */
   private orderByAsset = new Map<string, string[]>()
   /** instance id → LOD level per part, as last drawn (the hysteresis needs it). */
   private levelById = new Map<string, number[]>()
@@ -198,11 +206,11 @@ export class InstancedScene {
     const instById = new Map(this.instances.map((i) => [i.id, i]))
     const bruteForce: THREE.InstancedMesh[] = []
 
-    for (const [assetId, perPart] of this.meshesByAsset) {
-      const asset = this.assetsById.get(assetId)
+    for (const [bucket, perPart] of this.meshesByAsset) {
+      const asset = this.assetsById.get(assetOfBucket(bucket))
       const template = asset ? getResolvedTemplate(asset) : null
       if (!template) continue
-      const order = this.orderByAsset.get(assetId) ?? []
+      const order = this.orderByAsset.get(bucket) ?? []
       perPart.forEach((levels, partIdx) => {
         const part = template.parts[partIdx]
         if (!part) return
@@ -249,11 +257,11 @@ export class InstancedScene {
     this.view = { camera, heightPx }
     let changed = false
     const instById = new Map(this.instances.map((i) => [i.id, i]))
-    for (const [assetId, perPart] of this.meshesByAsset) {
-      const asset = this.assetsById.get(assetId)
+    for (const [bucket, perPart] of this.meshesByAsset) {
+      const asset = this.assetsById.get(assetOfBucket(bucket))
       const template = asset ? getResolvedTemplate(asset) : null
       if (!template) continue
-      for (const id of this.orderByAsset.get(assetId) ?? []) {
+      for (const id of this.orderByAsset.get(bucket) ?? []) {
         const inst = instById.get(id)
         if (!inst) continue
         const prev = this.levelById.get(id)
@@ -345,14 +353,17 @@ export class InstancedScene {
     // group instances by asset
     const byAsset = new Map<string, Instance[]>()
     for (const inst of this.instances) {
-      if (!byAsset.has(inst.assetId)) byAsset.set(inst.assetId, [])
-      byAsset.get(inst.assetId)!.push(inst)
+      const bucket = inst.mirrored ? inst.assetId + MIRROR_BUCKET : inst.assetId
+      if (!byAsset.has(bucket)) byAsset.set(bucket, [])
+      byAsset.get(bucket)!.push(inst)
     }
 
-    for (const [assetId, list] of byAsset) {
+    for (const [bucket, list] of byAsset) {
+      const assetId = assetOfBucket(bucket)
+      const mirrored = bucket !== assetId
       const asset = this.assetsById.get(assetId)
       if (!asset) continue
-      this.orderByAsset.set(assetId, list.map((i) => i.id))
+      this.orderByAsset.set(bucket, list.map((i) => i.id))
 
       const template = getResolvedTemplate(asset)
       if (!template) {
@@ -363,10 +374,14 @@ export class InstancedScene {
       // One InstancedMesh per (part, level), each sized for every copy: any piece
       // can sit at any level. They share the part's vertex buffer, so the extra
       // levels cost index buffers and instance matrices, not geometry uploads.
-      this.meshesByAsset.set(assetId, template.parts.map((part, partIdx) =>
+      this.meshesByAsset.set(bucket, template.parts.map((part, partIdx) =>
         [part.geometry, ...part.lods.map((l) => l.geometry)].map((geometry, level) => {
           const im = new THREE.InstancedMesh(geometry, part.material, list.length)
-          im.userData = { assetId, partIdx, level, slots: [] as string[] }
+          im.userData = { assetId, partIdx, level, mirrored, slots: [] as string[] }
+          // three only reverses triangle winding when the OBJECT's own matrix is
+          // mirrored, not per instance, so a mirrored piece would draw inside out.
+          // Flip the mesh too; writeMatrices cancels it out of each instance matrix.
+          if (mirrored) im.scale.x = -1
           im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
           im.frustumCulled = false
           im.count = 0
@@ -412,7 +427,11 @@ export class InstancedScene {
     }
     tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z) + groundLift, z)
     tmpScale.set(scale, scale, scale)
-    out.compose(tmpPos, tmpQuat, tmpScale).multiply(partMatrix)
+    out.compose(tmpPos, tmpQuat, tmpScale)
+    // Mirror in the piece's own frame (before tilt and yaw). Its bounding box is
+    // centred on x, so the re-grounding above still holds.
+    if (inst.mirrored) out.multiply(MIRROR_X)
+    out.multiply(partMatrix)
   }
 
   /**
@@ -444,11 +463,11 @@ export class InstancedScene {
     // For each asset and part, bucket its pieces by LOD level and pack each
     // level's InstancedMesh with just the pieces it draws.
     const instById = new Map(this.instances.map((i) => [i.id, i]))
-    for (const [assetId, perPart] of this.meshesByAsset) {
-      const asset = this.assetsById.get(assetId)
+    for (const [bucket, perPart] of this.meshesByAsset) {
+      const asset = this.assetsById.get(assetOfBucket(bucket))
       const template = asset ? getResolvedTemplate(asset) : null
       if (!template) continue
-      const order = this.orderByAsset.get(assetId) ?? []
+      const order = this.orderByAsset.get(bucket) ?? []
       perPart.forEach((levels, partIdx) => {
         const part = template.parts[partIdx]
         if (!part) return
@@ -465,6 +484,7 @@ export class InstancedScene {
           this.levelById.set(id, chosen)
           const im = levels[level]
           this.composeMatrix(inst, part.matrix, tmpMat, template.aabb)
+          if (im.userData.mirrored) tmpMat.premultiply(MIRROR_X) // undo the mesh's own flip
           im.setMatrixAt(im.count, tmpMat)
           ;(im.userData.slots as string[]).push(id)
           im.count++

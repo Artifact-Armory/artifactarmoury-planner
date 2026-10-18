@@ -112,16 +112,19 @@ export function rotateMask(m: boolean[], cols: number, rows: number, rot: Rotati
  * have a bitmap for it, else the full bounding-box rectangle (unchanged behaviour
  * while the GLB is still loading, or for assets with no geometry).
  */
-export function footprintCellsFor(asset: Asset, anchor: Cell, rot: Rotation, gridSize: number): Cell[] {
+export function footprintCellsFor(asset: Asset, anchor: Cell, rot: Rotation, gridSize: number, mirrored = false): Cell[] {
   const bmp = bitmaps.get(asset.id)
   if (!bmp || !asset.aabb) return footprintCells(anchor, aabbFootprint(asset, rot, gridSize))
 
-  const key = `${asset.id}|${gridSize.toFixed(4)}|${rot}`
+  const key = `${asset.id}|${gridSize.toFixed(4)}|${rot}${mirrored ? '|m' : ''}`
   let offs = offsetCache.get(key)
   if (!offs) {
     const cols0 = Math.max(1, Math.ceil(asset.aabb.x / gridSize))
     const rows0 = Math.max(1, Math.ceil(asset.aabb.z / gridSize))
-    const { cols, rows, m } = rotateMask(deriveMask0(bmp, cols0, rows0), cols0, rows0, rot)
+    const mask0 = deriveMask0(bmp, cols0, rows0)
+    // A mirrored piece is flipped across its own X axis before it's rotated.
+    const local = mirrored ? mask0.map((_, i) => mask0[Math.floor(i / cols0) * cols0 + (cols0 - 1 - (i % cols0))]) : mask0
+    const { cols, rows, m } = rotateMask(local, cols0, rows0, rot)
     const baseC = -Math.floor(cols / 2), baseR = -Math.floor(rows / 2)
     offs = []
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (m[r * cols + c]) offs.push({ dc: baseC + c, dr: baseR + r })
