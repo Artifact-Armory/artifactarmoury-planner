@@ -80,24 +80,27 @@ export class Ghost {
     })
     // Preview the artist's baked default tilt (and re-ground it) so the ghost reads
     // the same as the placed piece — matches InstancedScene.composeMatrix. Yaw is
-    // applied to the whole group (setTransform); pitch tilts the clone within it.
+    // applied to the whole group (setTransform); tilt, then mirror, nest inside it
+    // as wrappers so the clone keeps its own fit-to-size scale and centring.
+    const tilt = new THREE.Group()
+    const mirror = new THREE.Group()
+    mirror.add(clone)
+    tilt.add(mirror)
     const pitchDeg = this.asset?.defaultPitchDeg ?? 0
     const rollDeg = this.asset?.defaultRollDeg ?? 0
     if (pitchDeg || rollDeg) {
-      tiltQuaternion(pitchDeg, rollDeg, clone.quaternion)
+      tiltQuaternion(pitchDeg, rollDeg, tilt.quaternion)
       const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
-      if (aabb) clone.position.y = groundOffset(clone.quaternion, aabb)
+      if (aabb) tilt.position.y = groundOffset(tilt.quaternion, aabb)
     }
-    // Mirror in the model's own frame, like InstancedScene.composeMatrix. Only the
-    // sign changes: the template root already carries its fit-to-size scale.
-    clone.scale.x = Math.abs(clone.scale.x) * (this.mirrored ? -1 : 1)
-    this.model = clone
-    this.group.add(clone)
+    mirror.scale.x = this.mirrored ? -1 : 1
+    this.model = mirror
+    this.group.add(tilt)
   }
 
   setMirror(mirrored: boolean) {
     this.mirrored = mirrored
-    if (this.model) this.model.scale.x = Math.abs(this.model.scale.x) * (mirrored ? -1 : 1)
+    if (this.model) this.model.scale.x = mirrored ? -1 : 1
   }
 
   setTransform(x: number, z: number, rotDeg: number, y = 0) {
