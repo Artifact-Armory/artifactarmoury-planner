@@ -1608,13 +1608,14 @@ export function ThreeStage() {
     // down inside/through another one instead of only ever resting on its surface.
     // Same no-collision-check free movement as the horizontal nudge; clamped at 0
     // so a piece can't be nudged beneath the table itself.
-    function nudgeSelectionLevel(dir: 1 | -1) {
+    // step is in levels: FINE_LEVEL_STEP for Alt+PgUp/PgDn, 1 for plain PgUp/PgDn.
+    const FINE_LEVEL_STEP = 0.0625 // ~0.8mm at the default 12.7mm/level — matches nudgeSelection's XZ step
+    function nudgeSelectionLevel(dir: 1 | -1, step = FINE_LEVEL_STEP) {
       const ids = useAppStore.getState().selectedInstanceIds
       if (!ids.length) return
-      const FINE_LEVEL_STEP = 0.0625 // ~0.8mm at the default 12.7mm/level — matches nudgeSelection's XZ step
       const patches = ids.map(id => {
         const i = store().instances.find(ii => ii.id === id)!
-        const level = Math.max(0, (i.level ?? 0) + dir * FINE_LEVEL_STEP)
+        const level = Math.max(0, (i.level ?? 0) + dir * step)
         return { id, patch: { level } }
       })
       useAppStore.getState().actions.updateInstances(patches)
@@ -1772,6 +1773,13 @@ export function ThreeStage() {
       if (e.altKey && s.selectedInstanceIds.length && (e.key === 'PageUp' || e.key === 'PageDown')) {
         e.preventDefault()
         nudgeSelectionLevel(e.key === 'PageUp' ? 1 : -1)
+        return
+      }
+
+      // Plain PgUp/PgDn with pieces selected: move them a whole level (½") per press.
+      if (s.selectedInstanceIds.length && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault()
+        nudgeSelectionLevel(e.key === 'PageUp' ? 1 : -1, 1)
         return
       }
 

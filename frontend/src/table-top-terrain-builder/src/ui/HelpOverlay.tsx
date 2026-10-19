@@ -76,6 +76,7 @@ const GROUPS: Group[] = [
       ['Tilt upright / lay flat', 'T'],
       ['Tilt the other way', 'Shift + T'],
       ['Fine-nudge (fits pieces inside each other)', 'Alt + Arrow keys'],
+      ['Move up / down a level', 'PgUp / PgDn'],
       ['Fine-nudge up / down', 'Alt + PgUp / PgDn'],
       ['Duplicate', 'Ctrl + D'],
       ['Fuse selection into one piece', 'Ctrl + G'],
