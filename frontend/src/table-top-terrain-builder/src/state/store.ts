@@ -979,14 +979,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.updateInstances(patches)
     },
 
-    // Mirror every selected piece in place (flip it left-to-right in its own
-    // frame). One undoable step.
+    // Mirror the selection left-to-right. A loose piece flips in place in its own
+    // frame; a fused group flips as one unit across its centre line (along X), so
+    // the arrangement mirrors too, not just each piece. One undoable step.
     mirrorSelected: () => {
       const ids = new Set(get().selectedInstanceIds)
       if (!ids.size) return
-      const patches = get().instances
-        .filter(i => ids.has(i.id))
-        .map(i => ({ id: i.id, patch: { mirrored: !i.mirrored } }))
+      const selected = get().instances.filter(i => ids.has(i.id))
+      const groups = new Map<string, Instance[]>()
+      for (const i of selected) if (i.groupId) groups.set(i.groupId, [...(groups.get(i.groupId) ?? []), i])
+      const patches: Array<{ id: string; patch: Partial<Instance> }> = []
+      for (const i of selected) {
+        if (i.groupId && (groups.get(i.groupId)?.length ?? 0) > 1) continue
+        patches.push({ id: i.id, patch: { mirrored: !i.mirrored } })
+      }
+      for (const members of groups.values()) {
+        if (members.length < 2) continue
+        // Reflect about the midpoint of the members' x extent: min+max-x keeps
+        // grid-aligned pieces on the grid. A world X reflection of a yawed piece
+        // equals the opposite yaw plus a flip in its own frame (pitch is unchanged).
+        const xs = members.map(m => m.position.x)
+        const sum = Math.min(...xs) + Math.max(...xs)
+        for (const m of members) {
+          patches.push({ id: m.id, patch: {
+            position: { x: sum - m.position.x, z: m.position.z },
+            rotationDeg: ((360 - m.rotationDeg) % 360 + 360) % 360,
+            mirrored: !m.mirrored,
+          } })
+        }
+      }
       get().actions.updateInstances(patches)
     },
 

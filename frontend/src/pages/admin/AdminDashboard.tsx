@@ -136,8 +136,13 @@ const AdminDashboard: React.FC = () => {
                       <span className="text-xs text-muted-foreground"> · {a.display_name}</span>
                     )}
                   </div>
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                    {new Date(a.created_at).toLocaleDateString('en-GB')}
+                  <span
+                    className="text-xs text-muted-foreground whitespace-nowrap"
+                    title={new Date(a.created_at).toLocaleString('en-GB')}
+                  >
+                    {new Date(a.created_at).toLocaleString('en-GB', {
+                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                    })}
                   </span>
                 </div>
               ))

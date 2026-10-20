@@ -290,11 +290,13 @@ export const presignRateLimit = rateLimit({
 
 /**
  * File upload rate limit
- * 20 uploads per hour per user
+ * 100 uploads per hour per user. Shared by every model upload/edit route
+ * (new model, extra parts, new version, previews, images), so a multi-model
+ * listing can use dozens in one sitting.
  */
 export const uploadRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 20,
+  max: 100,
   message: 'Upload limit exceeded, please try again later',
   handler: rateLimitHandler,
   standardHeaders: true,

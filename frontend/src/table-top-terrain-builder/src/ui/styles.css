@@ -352,6 +352,8 @@
 }
 .tb-tab:hover { color: var(--tb-text); background: #131c28; }
 .tb-tab.is-active { color: var(--tb-text); border-bottom-color: var(--tb-accent); }
+/* Exit-to-site button pinned to the left of the Catalogue tab. */
+.tb-tab.tb-tab-home { flex: 0 0 auto; padding: 12px 12px; border-right: 1px solid var(--tb-border); }
 
 /* Model-class chip row (All / Terrain / Vehicles / Characters & Units) */
 .tb-class-row {

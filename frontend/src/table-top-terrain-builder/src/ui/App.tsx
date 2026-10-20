@@ -93,15 +93,31 @@ const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '6×3', w: 6, h: 3 },
 ]
 
+// Reset-camera icon: a small camera inside a circular arrow, drawn in lucide's
+// stroke style (lucide has no such glyph). The Home icon now means "exit".
+function ResetCameraIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M8 11.5h1.5l1-1.5h3l1 1.5H16v5H8z" strokeWidth={1.6} />
+      <circle cx="12" cy="13.75" r="1.4" strokeWidth={1.6} />
+    </svg>
+  )
+}
+
 // Grid square sizes (metres) — also the snap/move step. ½" is the default.
 const GRID_PRESETS: Record<'imperial' | 'metric', Array<{ label: string; m: number }>> = {
   imperial: [
+    { label: '1/16"', m: 0.0015875 },
     { label: '¼"', m: 0.00635 },
     { label: '½"', m: 0.0127 },
     { label: '1"', m: 0.0254 },
     { label: '2"', m: 0.0508 },
   ],
   metric: [
+    { label: '1mm', m: 0.001 },
     { label: '5mm', m: 0.005 },
     { label: '1cm', m: 0.01 },
     { label: '2cm', m: 0.02 },
@@ -149,6 +165,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
    */
   const [ownsViewedTable, setOwnsViewedTable] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  // Serialized layout as last loaded/saved, so autosave only writes real changes.
+  const lastSavedLayout = React.useRef<string | null>(null)
   /** In-flight guard for "Edit a copy" on a read-only table. */
   const [copying, setCopying] = React.useState(false)
 
@@ -702,6 +720,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           backfillThumbFor.current = owned && !t.thumbnailUrl ? t.id : null
           setIsOwner(owned)
           setOwnsViewedTable(owned)
+          lastSavedLayout.current = owned ? currentLayoutJson() : null
           refreshCollabs(t.id, owned)
         } else {
           // A shared copy starts with no collaborations of its own; foreign models
@@ -1250,7 +1269,27 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }
 
-  async function handleSave() {
+  function currentLayoutJson() {
+    const s = useAppStore.getState()
+    return JSON.stringify(serializeLayout(s.table, s.tableMaterial, s.instances, {
+      terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
+    }))
+  }
+
+  // Autosave: every 5 minutes, quietly save a table you own if it changed since
+  // the last save. New/unsaved tables are skipped (saving those asks for a name).
+  const autosaveRef = React.useRef<() => void>(() => {})
+  autosaveRef.current = () => {
+    if (readOnly || saving || !isAuthenticated || !user?.email || !savedTableId || !isOwner) return
+    if (currentLayoutJson() === lastSavedLayout.current) return
+    void handleSave({ auto: true })
+  }
+  React.useEffect(() => {
+    const id = setInterval(() => autosaveRef.current(), 5 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  async function handleSave(opts: { auto?: boolean } = {}) {
     if (readOnly) return // view-only: nothing to save (only the owner edits, via their dashboard)
     if (!isAuthenticated || !user?.email) {
       hotToast.error('Log in to save this table to your account')
@@ -1264,12 +1303,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
       terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
     })
     const email = user.email
+    const layoutJson = JSON.stringify({ tableConfig, layoutData })
 
     setSaving(true)
     try {
       if (savedTableId && isOwner) {
         // Photograph the table as saved; it uploads alongside, not in the save's way.
-        const snapshot = captureTableImage()
+        // Autosave skips it so it never causes a hitch mid-edit.
+        const snapshot = opts.auto ? Promise.resolve(null) : captureTableImage()
         // Update the table you already own.
         await tablesApi.updateTable(savedTableId, {
           name: savedTableName ?? 'My table',
@@ -1277,8 +1318,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           layoutData: layoutData as any,
           userEmail: email,
         })
-        hotToast.success('Table saved')
-        void uploadTableSnapshot(savedTableId, snapshot)
+        lastSavedLayout.current = layoutJson
+        if (opts.auto) {
+          hotToast.success('Autosaved', { duration: 1500 })
+        } else {
+          hotToast.success('Table saved')
+          void uploadTableSnapshot(savedTableId, snapshot)
+        }
         // Saving raises/refreshes collaboration requests for any foreign models.
         await refreshCollabs(savedTableId, true)
       } else {
@@ -1290,13 +1336,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         setSavedTableId(created.id)
         setSavedTableName(created.name)
         setIsOwner(true)
+        lastSavedLayout.current = layoutJson
         hotToast.success('Saved to your tables')
         void uploadTableSnapshot(created.id, snapshot)
         await refreshCollabs(created.id, true)
         navigate(`/planner/t/${created.id}`)
       }
     } catch {
-      hotToast.error('Save failed')
+      hotToast.error(opts.auto ? 'Autosave failed' : 'Save failed')
     } finally {
       setSaving(false)
     }
@@ -1441,10 +1488,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
         <>
           {/* Top toolbar */}
           <div className="tb-toolbar">
-            <button className="tb-icon" title="Back to Artifact Armoury" onClick={() => navigate('/')}>
-              <ArrowLeft size={18} />
-            </button>
-            <div className="tb-sep" />
+            {/* On desktop the exit button lives on the Catalogue tab row; keep it
+                here only when the palette is a hidden drawer. */}
+            {compact && (
+              <>
+                <button className="tb-icon" title="Back to Artifact Armoury" onClick={() => navigate('/')}>
+                  <Home size={18} />
+                </button>
+                <div className="tb-sep" />
+              </>
+            )}
             <button
               className={`tb-icon ${!selectedAssetId ? 'is-active' : ''}`}
               title="Select / move (Esc)"
@@ -1541,7 +1594,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </>
             )}
             <div className="tb-sep" />
-            <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={handleSave}>
+            <button className="tb-icon" data-tour="planner-save" title="Save map (Ctrl+S)" onClick={() => handleSave()}>
               <Save size={18} />
             </button>
             {savedTableId && isOwner && (
@@ -1564,10 +1617,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             </button>
             <button
               className="tb-icon"
-              title="Reset view (Home)"
+              title="Reset camera (Home)"
               onClick={() => useAppStore.getState().cameraApi?.home()}
             >
-              <Home size={18} />
+              <ResetCameraIcon size={18} />
             </button>
             <button className="tb-icon tb-help-btn" title="Controls & keyboard help (?)" onClick={() => setShowHelp(true)}>
               <HelpCircle size={18} /><span>Help</span>
@@ -1888,6 +1941,14 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </button>
             )}
             <div className="tb-palette-tabs" data-tour="planner-tabs">
+              <button
+                className="tb-tab tb-tab-home"
+                title="Back to Artifact Armoury"
+                aria-label="Back to Artifact Armoury"
+                onClick={() => navigate('/')}
+              >
+                <Home size={16} />
+              </button>
               <button
                 className={`tb-tab ${paletteTab === 'catalogue' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('catalogue')}
@@ -2353,10 +2414,10 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               </button>
               <button
                 className="tb-icon"
-                title="Reset view (Home)"
+                title="Reset camera (Home)"
                 onClick={() => useAppStore.getState().cameraApi?.home()}
               >
-                <Home size={18} />
+                <ResetCameraIcon size={18} />
               </button>
               <button className="tb-icon tb-help-btn" title="Controls & keyboard help (?)" onClick={() => setShowHelp(true)}>
                 <HelpCircle size={18} /><span>Help</span>
