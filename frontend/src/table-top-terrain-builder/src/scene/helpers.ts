@@ -16,10 +16,14 @@ export function GridHelper(width: number, height: number, cell: number) {
   const minorVerts: number[] = []
   const majorVerts: number[] = []
 
+  // Major line every 5 cells, or every 10 on sub-5mm grids so 1mm reads as a
+  // 1cm grid (rather than a solid wash) once the minor lines fade out.
+  const every = cell < 0.005 ? 10 : 5
+
   const cols = Math.floor(width / cell)
   for (let i = -Math.floor(cols / 2); i <= Math.floor(cols / 2); i++) {
     const x = i * cell
-    const verts = i % 5 === 0 ? majorVerts : minorVerts
+    const verts = i % every === 0 ? majorVerts : minorVerts
     // vertical lines along Z on the XZ plane (y = 0)
     verts.push(x, 0, -hh, x, 0, hh)
   }
@@ -27,7 +31,7 @@ export function GridHelper(width: number, height: number, cell: number) {
   const rows = Math.floor(height / cell)
   for (let j = -Math.floor(rows / 2); j <= Math.floor(rows / 2); j++) {
     const z = j * cell
-    const verts = j % 5 === 0 ? majorVerts : minorVerts
+    const verts = j % every === 0 ? majorVerts : minorVerts
     // horizontal lines along X on the XZ plane (y = 0)
     verts.push(-hw, 0, z, hw, 0, z)
   }

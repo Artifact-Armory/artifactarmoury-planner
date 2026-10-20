@@ -15,7 +15,7 @@ import {
   worldToCell, snapRotationForFootprint,
   type Cell,
 } from './occupancy'
-import { footprintCellsFor } from './footprintMask'
+import { footprintCellsFor, footprintVersion } from './footprintMask'
 
 /** Metres per elevation level (a half-block step). A full 1-inch block is 2 levels. */
 export const LEVEL_HEIGHT = 0.0127
@@ -63,6 +63,18 @@ export function occupyUnitsAt(asset: Asset, base: number): number {
   return Math.max(1, top - b)
 }
 
+/**
+ * Smallest cell used for collision/stacking checks. Snapping can go finer (1mm),
+ * but a footprint's cell count grows with 1/size², so checking at 1mm made every
+ * mouse move test ~10,000 cells per piece. Checks run at this size instead.
+ */
+export const COLLISION_MIN_CELL = 0.005
+
+/** `table` with its grid coarsened to the collision cell size (same object if already coarse). */
+export function collisionTable(table: Table): Table {
+  return table.gridSize >= COLLISION_MIN_CELL ? table : { ...table, gridSize: COLLISION_MIN_CELL }
+}
+
 export function isTile(asset: Asset): boolean {
   return heightUnits(asset) > 0
 }
@@ -96,22 +108,59 @@ export function surfaceTop(
   targetCells: Cell[],
   excludeIds?: Set<string>,
 ): number {
+  const tops = surfaceTopMap(instances, assetsById, table, excludeIds)
   let top = 0
+  for (const c of targetCells) {
+    const t = tops.get(key2(c.c, c.r))
+    if (t != null && t > top) top = t
+  }
+  return top
+}
+
+const key2 = (c: number, r: number) => `${c},${r}`
+const key3 = (c: number, r: number, l: number) => `${c},${r},${l}`
+
+// The ghost asks these on every mouse move, but the answer only changes when
+// the pieces, catalogue, grid or a footprint bitmap does, so keep the last one.
+type CacheKey = { instances: unknown; assets: unknown; w: number; h: number; g: number; v: number; ex: string }
+const sameKey = (a: CacheKey, b: CacheKey) =>
+  a.instances === b.instances && a.assets === b.assets && a.w === b.w && a.h === b.h &&
+  a.g === b.g && a.v === b.v && a.ex === b.ex
+function cacheKey(instances: unknown, assets: unknown, table: Table, excludeIds?: Set<string>): CacheKey {
+  return {
+    instances, assets, w: table.width, h: table.height, g: table.gridSize, v: footprintVersion,
+    ex: excludeIds?.size ? [...excludeIds].sort().join('|') : '',
+  }
+}
+let topCache: { key: CacheKey; map: Map<string, number> } | null = null
+let occCache: { key: CacheKey; set: Set<string> } | null = null
+
+/** Highest top (in levels) per cell across all surface-raising pieces. */
+function surfaceTopMap(
+  instances: PlacedInstance[],
+  assetsById: Map<string, Asset>,
+  table: Table,
+  excludeIds?: Set<string>,
+): Map<string, number> {
+  const key = cacheKey(instances, assetsById, table, excludeIds)
+  if (topCache && sameKey(topCache.key, key)) return topCache.map
+  const map = new Map<string, number>()
   for (const inst of instances) {
     if (excludeIds?.has((inst as any).id)) continue
     const asset = assetsById.get(inst.assetId)
     if (!asset) continue
     const units = surfaceUnits(asset)
     if (units <= 0) continue
-    const cells = placedCells(inst, asset, table)
-    const covers = cells.some((oc) => targetCells.some((c) => c.c === oc.c && c.r === oc.r))
-    if (!covers) continue
-    top = Math.max(top, (inst.level ?? 0) + units)
+    const top = (inst.level ?? 0) + units
+    for (const cell of placedCells(inst, asset, table)) {
+      const k = key2(cell.c, cell.r)
+      const prev = map.get(k)
+      if (prev == null || top > prev) map.set(k, top)
+    }
   }
-  return top
+  topCache = { key, map }
+  return map
 }
-
-const key3 = (c: number, r: number, l: number) => `${c},${r},${l}`
 
 /** Occupied (cell × level) slabs of all placed pieces. */
 export function buildOccupied3D(
@@ -120,6 +169,8 @@ export function buildOccupied3D(
   table: Table,
   excludeIds?: Set<string>,
 ): Set<string> {
+  const key = cacheKey(instances, assetsById, table, excludeIds)
+  if (occCache && sameKey(occCache.key, key)) return occCache.set
   const occ = new Set<string>()
   for (const inst of instances) {
     if (excludeIds?.has((inst as any).id)) continue
@@ -135,6 +186,7 @@ export function buildOccupied3D(
       for (let l = base; l < base + units; l++) occ.add(key3(cell.c, cell.r, l))
     }
   }
+  occCache = { key, set: occ }
   return occ
 }
 

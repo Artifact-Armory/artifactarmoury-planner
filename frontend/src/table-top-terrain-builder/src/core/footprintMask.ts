@@ -18,8 +18,12 @@ const bitmaps = new Map<string, Uint8Array>()
 // they don't depend on where the piece sits, so we derive them once.
 const offsetCache = new Map<string, Array<{ dc: number; dr: number }>>()
 
+/** Bumped whenever a bitmap lands, so callers caching derived cells know to rebuild. */
+export let footprintVersion = 0
+
 export function setFootprintBitmap(assetId: string, bmp: Uint8Array): void {
   bitmaps.set(assetId, bmp)
+  footprintVersion++
   for (const k of offsetCache.keys()) if (k.startsWith(`${assetId}|`)) offsetCache.delete(k)
 }
 export function hasFootprintBitmap(assetId: string): boolean {

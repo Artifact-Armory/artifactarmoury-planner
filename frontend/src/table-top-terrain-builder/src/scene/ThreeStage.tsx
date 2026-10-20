@@ -15,7 +15,7 @@ import {
 } from '@core/occupancy'
 import { footprintCellsFor } from '@core/footprintMask'
 import {
-  surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY,
+  surfaceTop, buildOccupied3D, collides3D, occupyUnitsAt, levelToY, collisionTable,
 } from '@core/elevation'
 import {
   buildTableMaterial, bakePaintOverlayMaps, makePaintOverlayTextures, preloadGroundTextures, preparePaintSources,
@@ -932,15 +932,16 @@ export function ThreeStage() {
     }
 
     // Grid cells a footprint covers at the cursor.
+    // On the collision grid (≥5mm), not the snap grid; see collisionTable.
     function ghostCells(asset: Asset, x: number, z: number, rotDeg: number, mirrored = false) {
-      const t = store().table
+      const t = collisionTable(store().table)
       const anchor = worldToCell(x, z, t)
       return footprintCellsFor(asset, anchor, snapRotationForFootprint(rotDeg), t.gridSize, mirrored)
     }
 
     // Validity at a specific elevation level (3D occupancy: cell × level slab).
     function validAtLevel(asset: Asset, x: number, z: number, rotDeg: number, base: number, exclude: Set<string>, mirrored = false): boolean {
-      const t = store().table
+      const t = collisionTable(store().table)
       const cells = ghostCells(asset, x, z, rotDeg, mirrored)
       if (!inBounds(cells, t)) return false
       if (!effSnap()) return true // free placement permits overlap
@@ -974,7 +975,7 @@ export function ThreeStage() {
       // the top of any height tiles already there — unless the user pinned a level.
       const t = store().table
       const cells = ghostCells(asset, x, z, eng.ghostRot, eng.ghostMirror)
-      const auto = surfaceTop(store().instances, assetMap(), t, cells)
+      const auto = surfaceTop(store().instances, assetMap(), collisionTable(t), cells)
       eng.lastAutoLevel = auto
       const base = eng.levelOverride != null ? eng.levelOverride : auto
       const y = levelToY(base) + terrainHeightAt(x, z)
@@ -1445,7 +1446,7 @@ export function ThreeStage() {
       const { x, z } = snapWorld(gp.x, gp.z)
       const t = store().table
       const cells = ghostCells(asset, x, z, eng.ghostRot, eng.ghostMirror)
-      const base = eng.levelOverride != null ? eng.levelOverride : surfaceTop(store().instances, assetMap(), t, cells)
+      const base = eng.levelOverride != null ? eng.levelOverride : surfaceTop(store().instances, assetMap(), collisionTable(t), cells)
       if (!validAtLevel(asset, x, z, eng.ghostRot, base, new Set(), eng.ghostMirror)) return
 
       const commit = () => {
