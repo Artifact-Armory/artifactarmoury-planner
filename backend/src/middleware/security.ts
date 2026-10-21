@@ -213,7 +213,9 @@ const rateLimitKeyGenerator = (req: Request) => {
  * General API rate limit, per visitor IP. It runs before any route authenticates, so it
  * can't key by user; it's a flood guard, with the stricter limits on the routes that
  * need them. Planner meshes are skipped here because previewRateLimit counts those —
- * counted twice, one planner table could use up a visitor's whole budget.
+ * counted twice, one planner table could use up a visitor's whole budget. Direct-upload
+ * calls (/api/uploads/*) are skipped for the same reason: presignRateLimit counts them
+ * per artist, and a big set makes several per file, well past 300 in 15 minutes.
  * GENERAL_RATE_LIMIT_MAX: requests per 15 minutes (default 300).
  */
 const PREVIEW_GLB_PATH = /^\/api\/models\/(?:parts\/)?[^/]+\/preview\.glb$/;
@@ -229,7 +231,8 @@ export const generalRateLimit = rateLimit({
     (process.env.NODE_ENV === 'development' && req.ip === '::1') ||
     req.path === '/health' ||
     req.path === '/health/queues' ||
-    PREVIEW_GLB_PATH.test(req.path),
+    PREVIEW_GLB_PATH.test(req.path) ||
+    req.path.startsWith('/api/uploads/'),
   ...storeFor('rl:general:')
 });
 
@@ -273,13 +276,14 @@ export const authRateLimit = rateLimit({
 });
 
 /**
- * Presigned-URL rate limit. A single grouped listing presigns one URL per file
- * (up to ~60 parts) plus thumbnails, so this is far looser than uploadRateLimit;
- * it exists to stop bulk abuse, not to meter normal listings.
+ * Presigned-URL rate limit, per artist per hour. Every file in a listing (each model
+ * file, its preview, its thumbnail, gallery photos) takes one, so a 200-model set can
+ * use 400-600 in one go. Artists bulk-upload whole catalogues, so this only stops
+ * runaway scripts. PRESIGN_RATE_LIMIT_MAX (default 3000).
  */
 export const presignRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 300,
+  max: Number(process.env.PRESIGN_RATE_LIMIT_MAX ?? 3000),
   message: 'Too many upload requests, please try again later',
   handler: rateLimitHandler,
   standardHeaders: true,
@@ -289,14 +293,14 @@ export const presignRateLimit = rateLimit({
 });
 
 /**
- * File upload rate limit
- * 100 uploads per hour per user. Shared by every model upload/edit route
- * (new model, extra parts, new version, previews, images), so a multi-model
- * listing can use dozens in one sitting.
+ * File upload rate limit, per artist per hour. Shared by every model upload/edit route
+ * (new listing, add a model to a listing, new version, previews, images). A new
+ * listing is one request however many models it has, but adding models to an
+ * existing listing is one request each. UPLOAD_RATE_LIMIT_MAX (default 500).
  */
 export const uploadRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 100,
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX ?? 500),
   message: 'Upload limit exceeded, please try again later',
   handler: rateLimitHandler,
   standardHeaders: true,
