@@ -1,8 +1,9 @@
 // backend/src/routes/artistApplications.ts
 // In-app artist applications (migration 068). A signed-in customer submits their
 // details and portfolio images; an admin reviews them in /admin/artist-applications
-// (routes/admin.ts) and either approves (mints + emails an invite code) or rejects
-// (emails the reason). Replaces "email a portfolio to artists@".
+// (routes/admin.ts) and either approves (upgrades the account to artist straight
+// away) or rejects (emails the reason). The applicant accepts the seller terms
+// here, so approval never has to accept them on their behalf. Replaces "email a portfolio to artists@".
 //
 // Images go straight to R2 via a presigned PUT under the `applications/` prefix,
 // the same pattern as the Contact page, so a batch of portfolio shots never ties
@@ -17,7 +18,7 @@ import { authenticate, AuthRequest } from '../middleware/auth'
 import { asyncHandler, ValidationError } from '../middleware/error'
 import { isR2Enabled, presignUpload } from '../services/r2'
 import { uploadRateLimit, emailRateLimit } from '../middleware/security'
-import { validateArtistName } from '../services/artistOnboarding'
+import { validateArtistName, assertTermsAccepted, SELLER_TERMS_VERSION } from '../services/artistOnboarding'
 import { sendApplicationReceived, sendApplicationToSupport } from '../services/email'
 
 const router = Router()
@@ -147,6 +148,7 @@ router.post(
     }
 
     const artistName = validateArtistName(body.artistName)
+    assertTermsAccepted(body.acceptTerms)
     const about = cleanText(body.about, 'About you', 20, 2000)
     const whatYouMake = cleanText(body.whatYouMake, 'What you make', 10, 1000)
     const websiteUrl = body.websiteUrl ? cleanUrl(body.websiteUrl, 'Website') : null
@@ -188,8 +190,8 @@ router.post(
       const inserted = await client.query(
         `INSERT INTO artist_applications
            (user_id, applicant_name, applicant_email, artist_name, about, what_you_make,
-            website_url, social_links, sells_elsewhere)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+            website_url, social_links, sells_elsewhere, terms_accepted_at, terms_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, CURRENT_TIMESTAMP, $10)
          RETURNING id`,
         [
           req.userId,
@@ -201,6 +203,7 @@ router.post(
           websiteUrl,
           JSON.stringify(socialLinks),
           sellsElsewhere,
+          SELLER_TERMS_VERSION,
         ],
       )
       applicationId = inserted.rows[0].id

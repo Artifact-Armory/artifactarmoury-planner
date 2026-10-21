@@ -103,11 +103,6 @@ const CreatorProtection: React.FC = () => {
             than pointing at an innocent buyer.
           </p>
           <p>
-            That is how STL files are marked. If you upload an OBJ or 3MF, buyers also
-            receive your original file, and its mark is a simpler tag that is easier to
-            strip, so treat it as a deterrent for casual leaks rather than proof.
-          </p>
-          <p>
             If your model turns up somewhere it should not, send us the file and we can
             tell you which purchase it came from.
           </p>

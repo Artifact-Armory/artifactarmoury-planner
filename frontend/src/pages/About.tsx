@@ -7,7 +7,7 @@ const About: React.FC = () => {
     <div className="max-w-3xl mx-auto px-4 py-10">
       <Seo
         title="About Us"
-        description="Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Buy print-ready STL models from independent artists, plan your table before you print, and sell your own work with anti-theft protection built in."
+        description="Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Buy print-ready STL models from artists and studios, plan your table before you print, and sell your own work with anti-theft protection built in."
         path="/about"
       />
       <h1 className="text-2xl font-semibold">About Artifact Armoury</h1>
@@ -54,7 +54,7 @@ const About: React.FC = () => {
         <h2 className="text-lg font-semibold">For artists</h2>
         <ul className="mt-3 space-y-2 text-muted-foreground leading-relaxed list-disc pl-5">
           <li>
-            Upload STL, OBJ or 3MF files and we generate the 3D preview
+            Upload STL files and we generate the 3D preview
             automatically.
           </li>
           <li>
@@ -62,7 +62,7 @@ const About: React.FC = () => {
             one price.
           </li>
           <li>
-            Keep 85% of every sale. Track sales and engagement from your artist
+            Keep at least 85% of every sale. Track sales and engagement from your artist
             dashboard.
           </li>
           <li>
@@ -79,11 +79,10 @@ const About: React.FC = () => {
       <section className="mt-8">
         <h2 className="text-lg font-semibold">Becoming an artist here</h2>
         <p className="text-muted-foreground mt-3 leading-relaxed">
-          Artifact Armoury is a curated marketplace, so artists apply before they
-          can sell. Send us your portfolio and our team reviews your catalogue.
-          If it's a good fit, we send you an invite code to open your artist
-          account. It keeps the quality high for buyers and the marketplace fair
-          for the artists already here.{' '}
+          Artists apply before they can sell. Send us your portfolio and we
+          review your catalogue. If it's a good fit, we turn your account into an
+          artist account straight away. Keeping the catalogue small means each
+          artist's work doesn't get buried.{' '}
           <Link to="/apply-artist" className="text-primary hover:underline">
             Apply to sell
           </Link>

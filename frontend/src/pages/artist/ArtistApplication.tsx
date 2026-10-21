@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Clock, XCircle } from 'lucide-react'
@@ -9,10 +9,12 @@ import Spinner from '../../components/ui/Spinner'
 import { SITE_NAME } from '../../config/brand'
 import { useAuthStore } from '../../store/authStore'
 import { artistApplicationsApi } from '../../api/endpoints/artistApplications'
+import { authApi } from '../../api/endpoints/auth'
 
 const ArtistApplication: React.FC = () => {
   const qc = useQueryClient()
   const user = useAuthStore((s) => s.user)
+  const setUser = useAuthStore((s) => s.setUser)
   const isArtist = user?.role === 'artist'
 
   const { data: application, isLoading } = useQuery({
@@ -23,6 +25,15 @@ const ArtistApplication: React.FC = () => {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['my-artist-application'] })
 
+  // Approval upgrades the account on the server, but the role cached here still
+  // says 'customer' until the profile is re-read. Re-read it once we see the
+  // approval, so the page (and the artist menu) switch over without a sign-out.
+  const approvedWithoutCode = application?.status === 'approved' && !application.inviteCode
+  useEffect(() => {
+    if (!approvedWithoutCode || isArtist) return
+    authApi.getProfile().then(setUser).catch(() => { /* non-fatal: next page load re-reads it */ })
+  }, [approvedWithoutCode, isArtist, setUser])
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
       {/* Behind ProtectedRoute (sign-in required), so a crawler can never actually
@@ -31,18 +42,17 @@ const ArtistApplication: React.FC = () => {
       <section className="rounded-3xl bg-card p-8 shadow-sm">
         <h1 className="text-3xl font-semibold text-foreground">Become an {SITE_NAME} artist</h1>
         <p className="mt-3 text-sm text-muted-foreground">
-          We&apos;re building a curated marketplace of model makers. Submit your portfolio and we&apos;ll send an invite code
-          if there&apos;s a good fit. Artists keep 85% of every sale and gain access to advanced analytics and customer
-          messaging.
+          Send us your portfolio and if it&apos;s a good fit we&apos;ll turn your account into an artist account straight
+          away. Artists keep at least 85% of every sale and get sales and engagement stats for every listing.
         </p>
 
         <div className="mt-6 grid gap-6 sm:grid-cols-2">
           <div className="rounded-2xl border border-primary/20 bg-primary/10 p-5">
             <h2 className="text-sm font-semibold text-primary">What we look for</h2>
             <ul className="mt-3 space-y-2 text-sm text-primary/80">
-              <li>• Original or licensed 3D terrain with consistent quality</li>
+              <li>• Original or licensed terrain, vehicles or characters</li>
               <li>• High-resolution renders or photos</li>
-              <li>• Layered STL or resin-friendly meshes</li>
+              <li>• Print-ready STL files</li>
               <li>• Ability to respond to customer messages</li>
             </ul>
           </div>
@@ -52,7 +62,7 @@ const ArtistApplication: React.FC = () => {
             <ol className="mt-3 space-y-2 text-sm text-foreground">
               <li>1. Fill in the form below and add your portfolio images</li>
               <li>2. Our team reviews your application</li>
-              <li>3. We email you our decision and the reasoning. If it&apos;s a yes, your invite code is in the email</li>
+              <li>3. We email you our decision and the reasoning. If it&apos;s a yes, you can start selling straight away</li>
             </ol>
           </div>
         </div>
@@ -83,7 +93,7 @@ const ArtistApplication: React.FC = () => {
                     <p className="mt-2 text-sm text-green-900/80">
                       {application.inviteCode
                         ? 'Your invite code is filled in below. Choose your store name and accept the seller terms to start selling.'
-                        : 'Check your email for your invite code and enter it below.'}
+                        : 'Your account is now an artist account. Refresh the page if your artist tools don\'t appear.'}
                     </p>
                   </div>
                 )}

@@ -248,8 +248,8 @@ const Browse: React.FC = () => {
         title={selectedClassLabel ? `${selectedClassLabel} STLs` : 'Browse Tabletop Terrain STLs'}
         description={
           selectedClassLabel
-            ? `Browse print-ready ${selectedClassLabel.toLowerCase()} STLs from independent artists. Filter by scale, era and print process, then plan them on the free 3D table planner.`
-            : 'Browse print-ready tabletop terrain, vehicles and character STLs from independent artists. Filter by scale, era and print process, then plan your table in 3D before you buy.'
+            ? `Browse print-ready ${selectedClassLabel.toLowerCase()} STLs from artists and studios. Filter by scale, era and print process, then plan them on the free 3D table planner.`
+            : 'Browse print-ready tabletop terrain, vehicles and character STLs from artists and studios. Filter by scale, era and print process, then plan your table in 3D before you buy.'
         }
         path="/browse"
       />

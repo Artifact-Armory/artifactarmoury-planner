@@ -149,7 +149,7 @@ const Header: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search terrains..."
+                placeholder="Search models…"
                 className="py-2 px-4 pr-10 rounded-full border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary w-56"
               />
               <button
@@ -380,7 +380,7 @@ const Header: React.FC = () => {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search terrains..."
+                  placeholder="Search models…"
                   className="w-full py-2 px-4 pr-10 rounded-md border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary"
                 />
                 <button

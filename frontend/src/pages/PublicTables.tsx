@@ -30,7 +30,7 @@ const PublicTables: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
-        title="Shop the Look: Community Tables"
+        title="Explore the Table: Community Tables"
         description="Browse tabletop layouts other builders have shared in the 3D planner. See a full board planned in terrain STLs and open any model straight from the table."
         path="/tables"
       />
@@ -38,11 +38,11 @@ const PublicTables: React.FC = () => {
       <section className="overflow-hidden rounded-3xl bg-primary px-8 py-10 text-primary-foreground shadow-lg">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary-foreground/70">Shop the look</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary-foreground/70">Explore the table</p>
             <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Community tables</h1>
             <p className="mt-3 text-sm text-primary-foreground/80">
-              Real tabletop builds laid out in the planner. Open one to see every piece, add the
-              whole board to your basket, or remix it into your own build.
+              Tables other users have built in the planner. Open one to see every model, add the
+              whole table to your basket, or copy it and make it your own.
             </p>
           </div>
           <Link
@@ -196,7 +196,7 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
             to={`/planner/view/${table.id}`}
             className="inline-flex items-center gap-1 font-medium text-primary group-hover:gap-1.5"
           >
-            Shop the look <ArrowRight size={13} />
+            Explore the table <ArrowRight size={13} />
           </Link>
         </div>
       </div>

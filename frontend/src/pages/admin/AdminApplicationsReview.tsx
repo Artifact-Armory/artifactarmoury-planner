@@ -104,8 +104,8 @@ const DetailPanel: React.FC<{ applicationId: string; onClose: () => void }> = ({
 
   const approve = useMutation({
     mutationFn: () => adminApplicationsApi.approve(applicationId, approveNote.trim() || undefined),
-    onSuccess: () => {
-      toast.success('Approved. Invite code emailed to the applicant.')
+    onSuccess: (res) => {
+      toast.success(res.code ? 'Approved. Invite code emailed to the applicant.' : 'Approved. Their account can now sell.')
       decided()
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not approve'),
@@ -202,7 +202,9 @@ const DetailPanel: React.FC<{ applicationId: string; onClose: () => void }> = ({
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Approve</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Emails them a single-use invite code (valid for 30 days). Add an optional note to go with it.
+                    {app.terms_accepted_at
+                      ? 'Turns their account into an artist account straight away and emails them. Add an optional note to go with it.'
+                      : 'Applied before the seller terms were on the form, so this emails them a single-use invite code (valid for 30 days) to accept the terms with. Add an optional note to go with it.'}
                   </p>
                   <textarea
                     value={approveNote}
@@ -215,12 +217,13 @@ const DetailPanel: React.FC<{ applicationId: string; onClose: () => void }> = ({
                   <button
                     disabled={busy}
                     onClick={() => {
-                      if (window.confirm(`Approve ${app.artist_name} and email them an invite code?`)) approve.mutate()
+                      const what = app.terms_accepted_at ? 'upgrade their account to artist' : 'email them an invite code'
+                      if (window.confirm(`Approve ${app.artist_name} and ${what}?`)) approve.mutate()
                     }}
                     className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
                   >
                     {approve.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                    Approve and send code
+                    {app.terms_accepted_at ? 'Approve' : 'Approve and send code'}
                   </button>
                 </div>
 

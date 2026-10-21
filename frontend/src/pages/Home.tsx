@@ -11,13 +11,13 @@ import { browseApi } from '../api/endpoints/browse'
 import { SITE_NAME, SITE_TAGLINE } from '../config/brand'
 
 const HOME_DESCRIPTION =
-  'Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Browse print-ready terrain STLs from independent artists, lay out your wargaming table before you print, and buy each model once. Print it as many times as your table needs.'
+  'Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Browse print-ready terrain STLs from artists and studios, lay out your wargaming table before you print, and buy each model once. Print it as many times as your table needs.'
 
 const FEATURES = [
   {
     icon: Compass,
     title: 'Plan your table in 3D',
-    body: 'Create unique maps and dioramas by adding terrain to your digital table. No account required.',
+    body: 'Build wargames tables and dioramas from the models in the shop, placing each piece exactly where you want it, down to a single crate or fence post. No account needed.',
   },
   {
     icon: RefreshCcw,
@@ -104,10 +104,10 @@ const Home: React.FC = () => {
             title={SITE_NAME}
             className="h-16 w-auto text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:h-20"
           />
-          <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Print-ready terrain, built for the table.</h1>
+          <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Artist-made STLs you can try in 3D before you buy.</h1>
           <p className="mt-4 text-white/80">
-            {SITE_TAGLINE} Browse artist-made 3D models and add them to your digital table to plan your battlefield
-            before you buy.
+            {SITE_TAGLINE} Place and arrange every model in the planner, see how your scene comes together, then buy
+            only what you need.
           </p>
           <p className="mt-2 text-sm text-white/70">
             Models are digital STL files for 3D printing, delivered as instant downloads. No physical item is shipped.
@@ -117,7 +117,7 @@ const Home: React.FC = () => {
               to="/planner"
               className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 motion-safe:active:scale-[0.98]"
             >
-              Open the table builder
+              Open the planner
             </Link>
             <Link
               to="/browse"

@@ -30,6 +30,7 @@ const ArtistApplicationForm: React.FC<Props> = ({ defaultName = '', onSubmitted 
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [socials, setSocials] = useState<string[]>([''])
   const [sellsElsewhere, setSellsElsewhere] = useState('')
+  const [accepted, setAccepted] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -53,6 +54,7 @@ const ArtistApplicationForm: React.FC<Props> = ({ defaultName = '', onSubmitted 
     if (about.trim().length < 20) return setError('Tell us a little about yourself (at least 20 characters).')
     if (whatYouMake.trim().length < 10) return setError('Tell us what kind of models you make.')
     if (files.length < MIN_IMAGES) return setError(`Add at least ${MIN_IMAGES} portfolio images.`)
+    if (!accepted) return setError('You need to accept the seller terms to apply.')
 
     setError(null)
     setSubmitting(true)
@@ -68,6 +70,7 @@ const ArtistApplicationForm: React.FC<Props> = ({ defaultName = '', onSubmitted 
         socialLinks: socials.map((s) => s.trim()).filter(Boolean),
         sellsElsewhere: sellsElsewhere.trim() || undefined,
         images,
+        acceptTerms: true,
       })
       onSubmitted()
     } catch (err: any) {
@@ -201,6 +204,25 @@ const ArtistApplicationForm: React.FC<Props> = ({ defaultName = '', onSubmitted 
         placeholder="Other marketplaces, Patreon, your own shop"
         maxLength={500}
       />
+
+      {/* Accepted here, by the applicant, so approval can upgrade the account
+          straight away without anyone accepting the terms on their behalf. */}
+      <label className="flex items-start gap-2.5 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={(e) => setAccepted(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-border"
+        />
+        <span>
+          I agree to the{' '}
+          <a href="/seller-terms" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+            seller terms
+          </a>
+          . I understand my listed prices are what I earn commission on before tax, that VAT is added
+          on top for buyers, and that Artifact Armoury takes its commission from each sale.
+        </span>
+      </label>
 
       {error && (
         <p className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">

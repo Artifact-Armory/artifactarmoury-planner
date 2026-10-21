@@ -238,7 +238,7 @@ export async function sendVerificationEmail(
 ): Promise<void> {
   const { to, name, token } = params
   const verifyUrl = `${FRONTEND_URL}/verify-email?token=${encodeURIComponent(token)}`
-  const greeting = name ? `Hi ${name},` : 'Hi,'
+  const greeting = name ? `Hi ${escapeHtml(name)},` : 'Hi,'
 
   const html = `
 <!DOCTYPE html>
@@ -315,7 +315,7 @@ export async function sendPasswordResetEmail(
 ): Promise<void> {
   const { to, name, token } = params
   const resetUrl = `${FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`
-  const greeting = name ? `Hi ${name},` : 'Hi,'
+  const greeting = name ? `Hi ${escapeHtml(name)},` : 'Hi,'
 
   const html = `
 <!DOCTYPE html>
@@ -375,7 +375,7 @@ export async function sendPasswordResetEmail(
  */
 export async function sendPasswordChangedEmail(params: { to: string; name?: string }): Promise<void> {
   const { to, name } = params
-  const greeting = name ? `Hi ${name},` : 'Hi,'
+  const greeting = name ? `Hi ${escapeHtml(name)},` : 'Hi,'
 
   const html = `
 <!DOCTYPE html>
@@ -1207,6 +1207,28 @@ export async function sendApplicationApproved(params: {
   `
 
   await sendEmail({ to, subject: 'Your Artifact Armoury artist application was approved', html })
+}
+
+/**
+ * Approval for an application that recorded the seller terms (079+): the account
+ * is already an artist account by the time this sends, so there is no code.
+ */
+export async function sendApplicationApprovedUpgraded(params: {
+  to: string
+  name: string
+  message?: string
+}): Promise<void> {
+  await sendNoticeEmail({
+    to: params.to,
+    subject: 'Your Artifact Armoury artist application was approved',
+    heading: "You're in, welcome to Artifact Armoury",
+    paragraphs: [
+      `Hi ${params.name}, we've reviewed your portfolio and we'd love to have you selling with us.`,
+      ...(params.message ? [params.message] : []),
+      'Your account is now an artist account. Sign in with the account you applied with to upload your first model.',
+    ],
+    cta: { label: 'Go to My Models', path: '/artist/models' },
+  })
 }
 
 /** Rejection: always carries the reviewer's reason. */

@@ -30,6 +30,7 @@ export interface SubmitApplicationInput {
   socialLinks: string[]
   sellsElsewhere?: string
   images: ApplicationImageInput[]
+  acceptTerms: boolean
 }
 
 function putToR2(uploadUrl: string, file: File, contentType: string): Promise<void> {
@@ -92,6 +93,8 @@ export interface AdminApplicationDetail {
   created_at: string
   invite_code: string | null
   user_role: string | null
+  /** Null on applications made before the terms moved onto the form; those still get a code. */
+  terms_accepted_at: string | null
 }
 
 export interface AdminApplicationImage {
@@ -111,7 +114,7 @@ export const adminApplicationsApi = {
     return res.data
   },
 
-  async approve(id: string, message?: string): Promise<{ code: string }> {
+  async approve(id: string, message?: string): Promise<{ code: string | null }> {
     const res = await apiClient.post(`${ADMIN_URL}/${id}/approve`, { message })
     return res.data
   },

@@ -8,7 +8,7 @@ import AdminApplicationsReview from './AdminApplicationsReview'
 
 /**
  * Artist onboarding: applicants submit through /apply-artist and are reviewed on
- * the "Applications" tab (approving mints and emails an invite code). The "Invite
+ * the "Applications" tab (approving upgrades the account straight away). The "Invite
  * codes" tab is still here for creating a code by hand, e.g. for someone you've
  * invited directly.
  */

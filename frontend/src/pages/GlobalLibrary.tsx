@@ -46,7 +46,7 @@ export const GlobalLibrary: React.FC = () => {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold text-foreground">Asset Library</h1>
         <p className="text-sm text-muted-foreground">
-          Browse curated assets and add them directly to your table layout.
+          Browse models and add them straight to your table.
         </p>
         <p className="text-xs text-muted-foreground">Session: {sessionId ?? 'initialising...'}</p>
       </header>

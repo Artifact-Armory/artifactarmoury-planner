@@ -12,7 +12,9 @@ import { deleteFromStorage } from '../services/storage';
 import { reverseEarningsForModel, reverseEarningsForOrderItem } from '../services/earnings';
 import { createRefund } from '../services/stripe';
 import { createNotification } from '../services/notifications';
-import { sendContactReply, sendRefundNotification, sendApplicationApproved, sendApplicationRejected } from '../services/email';
+import { sendContactReply, sendRefundNotification, sendApplicationApproved, sendApplicationApprovedUpgraded, sendApplicationRejected } from '../services/email';
+import { sendWelcomeToNewArtist } from '../services/artistOnboarding';
+import { sanitizeString } from '../utils/validation';
 import { createBroadcast, sendSupportMessage } from '../services/messaging';
 import { runPayoutCycle } from '../services/payouts';
 import { setIntroOffer, cancelIntroOffer } from '../services/introCommission';
@@ -208,6 +210,11 @@ router.get('/users/:id',
     }
 
     const user = userResult.rows[0];
+    // u.* carries credentials; the admin screen never needs them, and a leaked admin
+    // session shouldn't hand over every user's password hash and 2FA secret.
+    delete user.password_hash;
+    delete user.totp_secret;
+    delete user.totp_backup_codes;
 
     // Recent activity
     const activityResult = await db.query(
@@ -2618,16 +2625,21 @@ router.post('/artist-applications/:id/approve',
 
     const client = await db.connect();
     let application: any;
-    let code: string;
+    // Set only for applications submitted before 079, which never recorded the
+    // applicant accepting the seller terms: those still get an invite code, and
+    // accept the terms themselves when they redeem it.
+    let code: string | null = null;
+    let upgraded = false;
     try {
       await client.query('BEGIN');
 
-      // Claim atomically so two admins clicking at once can't mint two codes.
+      // Claim atomically so two admins clicking at once can't approve twice.
       const claimed = await client.query(
         `UPDATE artist_applications
             SET status = 'approved', decision_reason = $2, reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
           WHERE id = $1 AND status = 'pending'
-          RETURNING id, user_id, applicant_name, applicant_email, artist_name`,
+          RETURNING id, user_id, applicant_name, applicant_email, artist_name,
+                    terms_accepted_at, terms_version`,
         [id, message || null, adminId],
       );
       if (claimed.rows.length === 0) {
@@ -2637,18 +2649,49 @@ router.post('/artist-applications/:id/approve',
       }
       application = claimed.rows[0];
 
-      code = generateInviteCode();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + APPLICATION_INVITE_DAYS);
-      const invite = await client.query(
-        `INSERT INTO invite_codes (code, created_by, max_uses, expires_at)
-         VALUES ($1, $2, 1, $3) RETURNING id`,
-        [code, adminId, expiresAt],
-      );
-      await client.query(
-        `UPDATE artist_applications SET invite_code_id = $2 WHERE id = $1`,
-        [id, invite.rows[0].id],
-      );
+      if (application.terms_accepted_at) {
+        // The applicant accepted the seller terms when they applied, so approval
+        // can upgrade the account directly. Their acceptance time and version are
+        // copied across as-is: the admin approving is not them agreeing.
+        // Only customers are upgraded: role is a single column, so flipping an
+        // admin to 'artist' would silently demote them.
+        const result = await client.query(
+          `UPDATE users
+              SET role = 'artist',
+                  artist_name = $2,
+                  artist_terms_accepted_at = $3,
+                  artist_terms_version = $4,
+                  became_artist_at = COALESCE(became_artist_at, CURRENT_TIMESTAMP),
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND role = 'customer'
+            RETURNING id`,
+          [application.user_id, sanitizeString(application.artist_name),
+           application.terms_accepted_at, application.terms_version],
+        );
+        upgraded = result.rows.length > 0;
+        if (upgraded) {
+          await client.query(
+            `INSERT INTO activity_log (user_id, action, resource_type, resource_id, metadata, ip_address, user_agent)
+             VALUES ($1, 'artist.upgraded', 'user', $2, $3, $4, $5)`,
+            [adminId, application.user_id,
+             JSON.stringify({ applicationId: id, termsVersion: application.terms_version }),
+             req.ip, req.get('user-agent')],
+          );
+        }
+      } else {
+        code = generateInviteCode();
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + APPLICATION_INVITE_DAYS);
+        const invite = await client.query(
+          `INSERT INTO invite_codes (code, created_by, max_uses, expires_at)
+           VALUES ($1, $2, 1, $3) RETURNING id`,
+          [code, adminId, expiresAt],
+        );
+        await client.query(
+          `UPDATE artist_applications SET invite_code_id = $2 WHERE id = $1`,
+          [id, invite.rows[0].id],
+        );
+      }
 
       await client.query('COMMIT');
     } catch (err) {
@@ -2658,27 +2701,41 @@ router.post('/artist-applications/:id/approve',
       client.release();
     }
 
-    // Best-effort: the decision is saved, and the code is also shown to the
-    // applicant on /apply-artist, so a failed email never strands them.
-    await sendApplicationApproved({
-      to: application.applicant_email,
-      name: application.applicant_name,
-      code,
-      expiresInDays: APPLICATION_INVITE_DAYS,
-      message: message || undefined,
-    }).catch((err) => logger.error('Failed to send application approval email', { error: err, applicationId: id }));
+    // Best-effort: the decision is saved either way, and the applicant page
+    // shows the outcome (or the code) too, so a failed email never strands them.
+    if (code) {
+      await sendApplicationApproved({
+        to: application.applicant_email,
+        name: application.applicant_name,
+        code,
+        expiresInDays: APPLICATION_INVITE_DAYS,
+        message: message || undefined,
+      }).catch((err) => logger.error('Failed to send application approval email', { error: err, applicationId: id }));
+    } else {
+      await sendApplicationApprovedUpgraded({
+        to: application.applicant_email,
+        name: application.applicant_name,
+        message: message || undefined,
+      }).catch((err) => logger.error('Failed to send application approval email', { error: err, applicationId: id }));
+      if (upgraded) void sendWelcomeToNewArtist(application.user_id);
+    }
 
     await createNotification({
       userId: application.user_id,
       type: 'artist_application.approved',
       title: 'Your artist application was approved',
-      body: 'Check your email for your invite code, or enter it on the artist page.',
-      link: '/apply-artist',
+      body: code
+        ? 'Check your email for your invite code, or enter it on the artist page.'
+        : 'Your account can now sell models. Upload your first model from My Models.',
+      link: code ? '/apply-artist' : '/artist/models',
       actorId: adminId,
     });
 
-    logger.info('Artist application approved', { applicationId: id, adminId });
-    res.json({ message: 'Application approved and invite code emailed', code });
+    logger.info('Artist application approved', { applicationId: id, adminId, upgraded, inviteCode: !!code });
+    res.json({
+      message: code ? 'Application approved and invite code emailed' : 'Application approved and account upgraded to artist',
+      code,
+    });
   }),
 );
 

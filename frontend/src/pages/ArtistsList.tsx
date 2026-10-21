@@ -108,14 +108,14 @@ const ArtistsList: React.FC = () => {
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
         title="Terrain Artists"
-        description="Discover independent artists making 3D-printable tabletop terrain. Browse their storefronts and follow to stay up to date with new releases."
+        description="Discover artists and studios making 3D-printable tabletop terrain. Browse their storefronts and follow to stay up to date with new releases."
         path="/artists"
       />
       <section className="rounded-3xl bg-primary px-6 py-12 text-primary-foreground shadow-lg sm:px-12">
         <h1 className="text-3xl font-semibold">Artists</h1>
         <p className="mt-2 max-w-2xl text-primary-foreground/80">
-          Discover creators crafting terrain for tabletop adventures. Follow artists to stay up to date with their latest
-          releases.
+          Artists and studios making terrain, vehicles and characters for wargames and dioramas. Follow an artist to see
+          their new releases.
         </p>
       </section>
 
