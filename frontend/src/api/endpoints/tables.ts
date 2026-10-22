@@ -21,6 +21,7 @@ const mapTable = (table: any): TableLayout => ({
   shareToken: table.share_token ?? table.shareCode,
   shareCode: table.share_code ?? table.share_token,
   isPublic: Boolean(table.is_public),
+  isListed: Boolean(table.is_listed),
   viewCount: table.view_count ?? 0,
   cloneCount: table.clone_count ?? 0,
   status: table.status ?? undefined,
@@ -130,10 +131,11 @@ export const tablesApi = {
   async getPublicTables(
     page = 1,
     limit = 20,
-    sort: 'recent' | 'updated' | 'popular' = 'recent'
+    sort: 'recent' | 'updated' | 'popular' = 'recent',
+    kind?: 'artist' | 'community'
   ): Promise<{ tables: PublicTableCard[]; total: number; page: number; totalPages: number }> {
     const response = await apiClient.get<ApiResponse<any>>(`${BASE_URL}/public/list`, {
-      params: { page, limit, sort }
+      params: { page, limit, sort, kind }
     })
     const payload = unwrap(response.data ?? (response as any)) as any
     return {
@@ -172,6 +174,14 @@ export const tablesApi = {
   async toggleVisibility(id: string, payload: { userId?: string; userEmail?: string; isPublic: boolean }) {
     const response = await apiClient.patch<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/visibility`, {
       is_public: payload.isPublic
+    })
+    return mapTable(pickTable(response.data ?? response))
+  },
+
+  /** Put a table on (or take it off) the public Tables page. Owner or admin only. */
+  async setListing(id: string, isListed: boolean) {
+    const response = await apiClient.patch<ApiResponse<TableLayout>>(`${BASE_URL}/${id}/listing`, {
+      is_listed: isListed
     })
     return mapTable(pickTable(response.data ?? response))
   },

@@ -366,6 +366,8 @@ export interface TableLayout {
   shareToken?: string
   shareCode?: string
   isPublic: boolean
+  /** On the public Tables page (080). Public alone only means the share link works. */
+  isListed?: boolean
   viewCount: number
   cloneCount: number
   status?: string

@@ -53,6 +53,27 @@ const MyTables: React.FC = () => {
     }
   }
 
+  // Publishing puts the table under Community tables on /tables (artists' go under
+  // Artist created tables). Unpublishing takes it off the page; the share link keeps working.
+  async function handleListing(t: TableLayout) {
+    setBusyId(t.id)
+    try {
+      const updated = await tablesApi.setListing(t.id, !t.isListed)
+      setTables((list) =>
+        list.map((x) =>
+          x.id === t.id ? { ...x, isListed: updated.isListed, isPublic: updated.isPublic, shareToken: updated.shareToken ?? x.shareToken } : x,
+        ),
+      )
+      toast.success(updated.isListed ? 'Published to the Tables page' : 'Taken off the Tables page')
+    } catch (err: any) {
+      const data = err?.response?.data
+      if (data?.error === 'collaboration_required') toast.error('Other artists on this table need to accept first. See Showcases.')
+      else toast.error(data?.error || 'Could not change this table')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function handleDelete(t: TableLayout) {
     if (!email || !window.confirm(`Delete “${t.name}”? This cannot be undone.`)) return
     setBusyId(t.id)
@@ -71,7 +92,7 @@ const MyTables: React.FC = () => {
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">My Table Layouts</h1>
-          <p className="text-muted-foreground mt-1">Your saved tabletop layouts. Open one to keep editing, or share a link.</p>
+          <p className="text-muted-foreground mt-1">Your saved tabletop layouts. Open one to keep editing, share a link, or publish it to the <Link to="/tables?view=community" className="text-primary hover:underline">Tables page</Link>.</p>
         </div>
         <Link
           to="/planner"
@@ -114,7 +135,11 @@ const MyTables: React.FC = () => {
                       disabled={busy}
                       onRenamed={(name) => setTables((list) => list.map((x) => (x.id === t.id ? { ...x, name } : x)))}
                     />
-                    {t.isPublic && <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">shared</span>}
+                    {t.isListed ? (
+                      <span className="rounded-sm bg-blue-100 px-2 py-0.5 text-xs text-blue-800">published</span>
+                    ) : t.isPublic ? (
+                      <span className="rounded-sm bg-green-100 px-2 py-0.5 text-xs text-green-800">shared</span>
+                    ) : null}
                   </div>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     Updated {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : '—'}
@@ -123,6 +148,7 @@ const MyTables: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button className="rounded-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50" disabled={busy} onClick={() => navigate(`/planner/t/${t.id}`)}>Open</button>
                   <button className="rounded-sm border border-border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => handleShare(t)}>Share link</button>
+                  <button className="rounded-sm border border-border px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy} onClick={() => handleListing(t)}>{t.isListed ? 'Unpublish' : 'Publish'}</button>
                   <button className="rounded-sm border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50" disabled={busy} onClick={() => handleDelete(t)}>Delete</button>
                 </div>
               </li>

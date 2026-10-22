@@ -1288,11 +1288,12 @@ router.get('/:id',
     // Taxonomy tags (facet terms) for the product page + cross-linking.
     const taxonomyTerms = await getModelTerms(id);
 
-    // How many public tables feature this model ("Featured in N tables").
+    // How many listed tables feature this model ("Featured in N tables"). Public but
+    // unlisted tables are just share links, so they don't count.
     const tablesCount = await db.query(
       `SELECT COUNT(*)::int AS c
        FROM table_models tm JOIN user_tables ut ON ut.id = tm.table_id
-       WHERE tm.model_id = $1 AND ut.is_public = true`,
+       WHERE tm.model_id = $1 AND ut.is_public = true AND ut.is_listed = true`,
       [id]
     );
 
@@ -1352,7 +1353,7 @@ router.get('/:id/tables',
               jsonb_array_length(COALESCE(ut.layout_data->'models', '[]'::jsonb)) AS model_count
        FROM table_models tm
        JOIN user_tables ut ON ut.id = tm.table_id
-       WHERE tm.model_id = $1 AND ut.is_public = true
+       WHERE tm.model_id = $1 AND ut.is_public = true AND ut.is_listed = true
        ORDER BY ut.view_count DESC, ut.created_at DESC
        LIMIT $2`,
       [id, limit]

@@ -94,7 +94,12 @@ async function publishItem(type: ReleaseItemType, itemId: string, artistId: stri
     );
     return;
   }
-  await db.query(`UPDATE user_tables SET is_public = true, updated_at = NOW() WHERE id = $1`, [itemId]);
+  // Releases are artist-only, so the table also goes on the Tables page (as a showcase).
+  await db.query(
+    `UPDATE user_tables SET is_public = true, is_listed = true,
+       listed_at = COALESCE(listed_at, NOW()), updated_at = NOW() WHERE id = $1`,
+    [itemId],
+  );
 }
 
 // ============================================================================

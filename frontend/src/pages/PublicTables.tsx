@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { LayoutGrid, Eye, Copy, Layers, ArrowRight } from 'lucide-react'
 import { tablesApi } from '../api/endpoints/tables'
 import type { PublicTableCard } from '../api/endpoints/tables'
+import { useAuthStore } from '../store/authStore'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import Seo from '../components/common/Seo'
@@ -14,15 +16,56 @@ const sortOptions: { value: 'recent' | 'updated' | 'popular'; label: string }[] 
   { value: 'popular', label: 'Most viewed' },
 ]
 
+type Kind = 'artist' | 'community'
+
+const kinds: { value: Kind; label: string; blurb: string; empty: string }[] = [
+  {
+    value: 'artist',
+    label: 'Artist created tables',
+    blurb:
+      'Tables built by the artists who made the models. Open one to see every model, add the whole table to your basket, or copy it and make it your own.',
+    empty: 'Artists will show off their terrain here.',
+  },
+  {
+    value: 'community',
+    label: 'Community tables',
+    blurb:
+      'Tables other players have built in the planner. Open one to see every model, add the whole table to your basket, or copy it and make it your own.',
+    empty: 'Build a layout in the planner, save it, then publish it from My Tables to feature it here.',
+  },
+]
+
 const PublicTables: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const kind: Kind = searchParams.get('view') === 'community' ? 'community' : 'artist'
+  const current = kinds.find((k) => k.value === kind)!
   const [sort, setSort] = useState<'recent' | 'updated' | 'popular'>('recent')
   const [page, setPage] = useState(1)
+  const isAdmin = useAuthStore((s) => s.isAdmin)
+  const queryClient = useQueryClient()
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['public-tables', sort, page],
-    queryFn: () => tablesApi.getPublicTables(page, 24, sort),
+    queryKey: ['public-tables', kind, sort, page],
+    queryFn: () => tablesApi.getPublicTables(page, 24, sort, kind),
     placeholderData: (prev) => prev,
   })
+
+  const selectKind = (k: Kind) => {
+    setPage(1)
+    setSearchParams(k === 'community' ? { view: 'community' } : {}, { replace: true })
+  }
+
+  // Moderation: an admin takes a table off the page. The owner keeps it and its share link.
+  const removeTable = async (t: PublicTableCard) => {
+    if (!window.confirm(`Remove “${t.name || 'Untitled table'}” from the Tables page? The owner keeps the table.`)) return
+    try {
+      await tablesApi.setListing(t.id, false)
+      toast.success('Removed from the Tables page')
+      queryClient.invalidateQueries({ queryKey: ['public-tables'] })
+    } catch {
+      toast.error('Could not remove the table')
+    }
+  }
 
   const tables = data?.tables ?? []
   const totalPages = Math.max(1, data?.totalPages ?? 1)
@@ -30,8 +73,8 @@ const PublicTables: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       <Seo
-        title="Explore the Table: Community Tables"
-        description="Browse tabletop layouts other builders have shared in the 3D planner. See a full board planned in terrain STLs and open any model straight from the table."
+        title="Explore the Table: Artist and Community Tables"
+        description="Browse tabletop layouts artists and other builders have shared in the 3D planner. See a full board planned in terrain STLs and open any model straight from the table."
         path="/tables"
       />
       {/* Hero */}
@@ -39,11 +82,8 @@ const PublicTables: React.FC = () => {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary-foreground/70">Explore the table</p>
-            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Community tables</h1>
-            <p className="mt-3 text-sm text-primary-foreground/80">
-              Tables other users have built in the planner. Open one to see every model, add the
-              whole table to your basket, or copy it and make it your own.
-            </p>
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">{current.label}</h1>
+            <p className="mt-3 text-sm text-primary-foreground/80">{current.blurb}</p>
           </div>
           <Link
             to="/planner"
@@ -54,8 +94,27 @@ const PublicTables: React.FC = () => {
         </div>
       </section>
 
+      {/* Artist / community split */}
+      <div role="tablist" className="mt-8 flex gap-2 border-b border-border">
+        {kinds.map((k) => (
+          <button
+            key={k.value}
+            role="tab"
+            aria-selected={kind === k.value}
+            onClick={() => selectKind(k.value)}
+            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+              kind === k.value
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+
       {/* Toolbar */}
-      <div className="mt-8 flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-4 flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
           {data?.total ?? tables.length} public {(data?.total ?? tables.length) === 1 ? 'table' : 'tables'}
         </p>
@@ -89,18 +148,18 @@ const PublicTables: React.FC = () => {
       ) : tables.length === 0 ? (
         <div className="mt-10 rounded-2xl border border-dashed border-border bg-card py-20 text-center">
           <LayoutGrid className="mx-auto text-muted-foreground" size={40} />
-          <p className="mt-4 text-sm font-medium text-foreground">No public tables yet</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Build a layout in the planner and share it to feature it here.
-          </p>
-          <Link to="/planner" className="mt-6 inline-flex">
-            <Button>Open the planner</Button>
-          </Link>
+          <p className="mt-4 text-sm font-medium text-foreground">No {current.label.toLowerCase()} yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">{current.empty}</p>
+          {kind === 'community' && (
+            <Link to="/dashboard/tables" className="mt-6 inline-flex">
+              <Button>Go to My Tables</Button>
+            </Link>
+          )}
         </div>
       ) : (
         <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {tables.map((t) => (
-            <TableCard key={t.id} table={t} />
+            <TableCard key={t.id} table={t} onRemove={isAdmin ? () => removeTable(t) : undefined} />
           ))}
         </ul>
       )}
@@ -126,7 +185,7 @@ const PublicTables: React.FC = () => {
   )
 }
 
-const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
+const TableCard: React.FC<{ table: PublicTableCard; onRemove?: () => void }> = ({ table, onRemove }) => {
   const thumbs = table.thumbnails.slice(0, 4)
 
   return (
@@ -190,6 +249,11 @@ const TableCard: React.FC<{ table: PublicTableCard }> = ({ table }) => {
               <span className="inline-flex items-center gap-1">
                 <Copy size={13} /> {table.cloneCount}
               </span>
+            )}
+            {onRemove && (
+              <button onClick={onRemove} className="font-medium text-red-600 hover:underline">
+                Remove
+              </button>
             )}
           </span>
           <Link

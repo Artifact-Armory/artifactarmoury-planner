@@ -326,7 +326,7 @@ router.get('/:id/showcases', async (req, res, next) => {
              THEN jsonb_array_length(t.layout_data->'models') ELSE 0 END AS piece_count,
         thumbs.thumbnails
        FROM users u
-       JOIN user_tables t ON t.user_email = u.email AND t.is_public = true
+       JOIN user_tables t ON t.user_email = u.email AND t.is_public = true AND t.is_listed = true
        LEFT JOIN LATERAL (
          SELECT array_agg(m.thumbnail_path ORDER BY m.thumbnail_path) AS thumbnails
          FROM (

@@ -16,6 +16,16 @@ import type { Archiver } from 'archiver'
 const createArchive: (format: string, options?: any) => Archiver = require('archiver')
 
 const router = express.Router()
+
+// Terrain sculpting is switched off in the frontend (config/features.ts terrainSculpt).
+// While it is, its endpoints stay shut too: the download builds a ZIP of STL tiles per
+// request, unauthenticated and un-rate-limited, so leaving it open is a free way to load
+// the API. TERRAIN_EXPORT_ENABLED=true turns them back on with the feature.
+const TERRAIN_EXPORT_ENABLED = process.env.TERRAIN_EXPORT_ENABLED === 'true'
+const requireTerrainExport: express.RequestHandler = (_req, res, next) => {
+  if (!TERRAIN_EXPORT_ENABLED) return res.status(404).json({ error: 'Not found' })
+  next()
+}
 const tablesLogger = logger.child('TABLES')
 
 /**
@@ -226,6 +236,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
         table_config = COALESCE($2, table_config),
         layout_data = COALESCE($3, layout_data),
         is_public = COALESCE($4, is_public),
+        is_listed = CASE WHEN $4::boolean = false THEN false ELSE is_listed END,
         updated_at = NOW()
        WHERE id = $5
        RETURNING *`,
@@ -594,12 +605,19 @@ router.patch('/:id/visibility', authenticate, async (req: AuthRequest, res, next
       }
     }
 
+    // Making a table private also takes it off the Tables page. Artists' public
+    // tables are their showcases, so publishing one lists it (as it always has);
+    // everyone else lists separately via PATCH /:id/listing.
+    const listWithIt = is_public === true && owner.rows[0].owner_role === 'artist'
     const result = await db.query(
       `UPDATE user_tables
-       SET is_public = $1, updated_at = NOW()
+       SET is_public = $1,
+           is_listed = CASE WHEN $1::boolean = false THEN false WHEN $3::boolean THEN true ELSE is_listed END,
+           listed_at = CASE WHEN $3::boolean AND NOT is_listed THEN NOW() ELSE listed_at END,
+           updated_at = NOW()
        WHERE id = $2
        RETURNING *`,
-      [is_public, id]
+      [is_public, id, listWithIt]
     )
 
     if (result.rows.length === 0) {
@@ -614,6 +632,75 @@ router.patch('/:id/visibility', authenticate, async (req: AuthRequest, res, next
     res.json({ table: result.rows[0] })
   } catch (error) {
     tablesLogger.error('Toggle visibility failed', { error, tableId: req.params.id })
+    next(error)
+  }
+})
+
+// ============================================================================
+// LIST / UNLIST ON THE TABLES PAGE
+// ============================================================================
+
+// Listing a table puts it on /tables (artists' under "Artist created tables",
+// everyone else's under "Community tables"). A listed table has to be public so
+// it can be opened, so listing also makes it public. Admins can unlist any table
+// (canModifyTable lets them through); that is the moderation route.
+router.patch('/:id/listing', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params
+    const { is_listed } = req.body
+
+    if (typeof is_listed !== 'boolean') {
+      return res.status(400).json({ error: 'is_listed must be a boolean' })
+    }
+
+    const owner = await db.query(
+      `SELECT ut.user_email, ut.layout_data, u.id AS owner_id, u.role AS owner_role
+       FROM user_tables ut
+       LEFT JOIN users u ON u.email = ut.user_email
+       WHERE ut.id = $1`,
+      [id],
+    )
+    if (owner.rows.length === 0) {
+      return res.status(404).json({ error: 'Table not found' })
+    }
+    if (!canModifyTable(req, owner.rows[0].user_email)) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    if (is_listed === true) {
+      const layout = asObject(owner.rows[0].layout_data)
+      if (!Array.isArray(layout?.models) || layout.models.length === 0) {
+        return res.status(400).json({ error: 'Add some models before publishing this table' })
+      }
+      // Same collaboration rule as publishing an artist's showcase.
+      if (owner.rows[0].owner_role === 'artist' && owner.rows[0].owner_id) {
+        const blockers = await publishBlockers(id, owner.rows[0].owner_id, layout)
+        if (blockers.length > 0) {
+          return res.status(409).json({ error: 'collaboration_required', blockers })
+        }
+      }
+    }
+
+    const result = await db.query(
+      `UPDATE user_tables
+       SET is_listed = $1::boolean,
+           is_public = is_public OR $1::boolean,
+           listed_at = CASE WHEN $1::boolean AND NOT is_listed THEN NOW() ELSE listed_at END,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [is_listed, id]
+    )
+
+    tablesLogger.info('Table listing changed', {
+      tableId: id,
+      isListed: is_listed,
+      byAdmin: req.user!.role === 'admin' && req.user!.email !== owner.rows[0].user_email,
+    })
+
+    res.json({ table: tableForViewer(req, result.rows[0]) })
+  } catch (error) {
+    tablesLogger.error('Change listing failed', { error, tableId: req.params.id })
     next(error)
   }
 })
@@ -693,7 +780,8 @@ router.get('/public/list', async (req, res, next) => {
     const {
       page = '1',
       limit = '20',
-      sort = 'recent'
+      sort = 'recent',
+      kind
     } = req.query as Record<string, string>
 
     const pageNum = parseInt(page) || 1
@@ -701,10 +789,10 @@ router.get('/public/list', async (req, res, next) => {
     const offset = (pageNum - 1) * limitNum
 
     // Build sort clause
-    let orderBy = 't.created_at DESC'
+    let orderBy = 'COALESCE(t.listed_at, t.created_at) DESC'
     switch (sort) {
       case 'recent':
-        orderBy = 't.created_at DESC'
+        orderBy = 'COALESCE(t.listed_at, t.created_at) DESC'
         break
       case 'updated':
         orderBy = 't.updated_at DESC'
@@ -716,9 +804,18 @@ router.get('/public/list', async (req, res, next) => {
         orderBy = 't.created_at DESC'
     }
 
+    // kind=artist -> "Artist created tables", kind=community -> "Community tables",
+    // anything else -> both.
+    let kindFilter = ''
+    if (kind === 'artist') kindFilter = `AND u.role = 'artist'`
+    else if (kind === 'community') kindFilter = `AND u.role IS DISTINCT FROM 'artist'`
+
     // Get total count
     const countResult = await db.query(
-      'SELECT COUNT(*) as total FROM user_tables WHERE is_public = true'
+      `SELECT COUNT(*) as total
+       FROM user_tables t
+       LEFT JOIN users u ON u.email = t.user_email
+       WHERE t.is_public = true AND t.is_listed = true ${kindFilter}`
     )
     const total = parseInt(countResult.rows[0]?.total ?? '0', 10) || 0
 
@@ -758,7 +855,7 @@ router.get('/public/list', async (req, res, next) => {
           AND m.status = 'published'
           AND m.thumbnail_path IS NOT NULL
        ) thumbs ON true
-       WHERE t.is_public = true
+       WHERE t.is_public = true AND t.is_listed = true ${kindFilter}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
       [limitNum, offset]
@@ -836,7 +933,7 @@ router.post('/:id/regenerate-token', authenticate, async (req: AuthRequest, res,
 // ============================================================================
 
 // Price + tile-count quote for a table's sculpted surface (no auth: read-only info).
-router.get('/:id/terrain/quote', async (req, res, next) => {
+router.get('/:id/terrain/quote', requireTerrainExport, async (req, res, next) => {
   try {
     const { id } = req.params
     const result = await db.query('SELECT layout_data, table_config FROM user_tables WHERE id = $1', [id])
@@ -861,7 +958,7 @@ router.get('/:id/terrain/quote', async (req, res, next) => {
 // Generate + stream a ZIP of watermarked, printable terrain tiles.
 // NOTE: currently gated to the table owner (or a public table). The paid-purchase
 // gate for other buyers is Phase 2b.
-router.get('/:id/terrain/download', optionalAuth, async (req: AuthRequest, res, next) => {
+router.get('/:id/terrain/download', requireTerrainExport, optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params
 
