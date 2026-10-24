@@ -41,7 +41,7 @@ import { notifyFollowersOfRelease, notifyAdminsOfMeshOverride } from '../service
 import { maybeStartIntroOffer } from '../services/introCommission';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import { findGeometryDuplicate, safeDeleteObject } from '../services/modelIngest/process';
-import { createListingFromUpload, VALID_CATEGORIES, VALID_LICENSES, VALID_PRINTER_TYPES, MAX_EXTRA_PARTS, MAX_COMPONENTS, MAX_GALLERY_IMAGES, TYPE_FACET_BY_CLASS, parseTags } from '../services/modelIngest/createListing';
+import { createListingFromUpload, VALID_CATEGORIES, VALID_LICENSES, VALID_PRINTER_TYPES, MAX_EXTRA_PARTS, MAX_COMPONENTS, MAX_GALLERY_IMAGES, TYPE_FACET_BY_CLASS, parseTags, partNameFromFilename } from '../services/modelIngest/createListing';
 import { dispatchIngestUpload, dispatchIngestVersionUpdate, dispatchPartPreviewAttach, dispatchNewComponentIngest, dispatchPrimaryPreviewUpdate } from '../services/modelIngest/queue';
 import type { Archiver } from 'archiver';
 import type { Response } from 'express';
@@ -526,7 +526,7 @@ async function acceptComponentFiles(opts: {
       `INSERT INTO model_parts (model_id, name, stl_file_path, display_order, group_index, group_name,
                                 is_presupported, display_stl_path, thumbnail_path, preview_skipped, processing_status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'processing') RETURNING id`,
-      [modelId, p.name || `Part ${nth}`, p.rawKey, displayOrder, groupIndex, cleanGroupName,
+      [modelId, partNameFromFilename(p.filename) || `Part ${nth}`, p.rawKey, displayOrder, groupIndex, cleanGroupName,
        carrier, carrier ? carriedPreview : null, groupIndex > 0 && i === 0 ? carrierThumb : null, skipped],
     )).rows[0];
     insertedIds.push(row.id);
@@ -670,6 +670,55 @@ router.patch('/:id/components/:groupIndex/thumbnail',
     if (!first) throw new NotFoundError('Component');
     await db.query(`UPDATE model_parts SET thumbnail_path = $1 WHERE id = $2`, [thumbnailKey || null, first.id]);
     res.json({ message: 'Thumbnail updated', groupIndex: gi, partId: first.id });
+  })
+);
+
+// Rename one file of a listing ("Tower - Supported"), as shown on the product
+// page, in the planner and as its file name in the buyer's ZIP. partId
+// 'primary' is the listing's own first file, which lives on the models row.
+router.patch('/:id/parts/:partId/name',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id, partId } = req.params;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name) throw new ValidationError('Enter a name');
+    if (name.length > 255) throw new ValidationError('Names can be at most 255 characters');
+    if (partId === 'primary') {
+      await db.query(`UPDATE models SET primary_part_name = $1, updated_at = NOW() WHERE id = $2`, [name, id]);
+    } else {
+      const { rowCount } = await db.query(
+        `UPDATE model_parts SET name = $1 WHERE id = $2 AND model_id = $3`, [name, partId, id],
+      );
+      if (!rowCount) throw new NotFoundError('Part');
+    }
+    res.json({ message: 'Part renamed', partId, name });
+  })
+);
+
+// Rename one named model (every part sharing its group_index). Group 0's name
+// lives on the models row (primary_group_name).
+router.patch('/:id/components/:groupIndex/name',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const gi = Number(req.params.groupIndex);
+    if (!Number.isInteger(gi) || gi < 0 || gi > MAX_COMPONENTS) throw new ValidationError('Invalid component');
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name) throw new ValidationError('Enter a name');
+    if (name.length > 255) throw new ValidationError('Names can be at most 255 characters');
+    if (gi === 0) {
+      await db.query(`UPDATE models SET primary_group_name = $1, updated_at = NOW() WHERE id = $2`, [name, id]);
+    } else {
+      const { rowCount } = await db.query(
+        `UPDATE model_parts SET group_name = $1 WHERE model_id = $2 AND group_index = $3`, [name, id, gi],
+      );
+      if (!rowCount) throw new NotFoundError('Component');
+    }
+    res.json({ message: 'Model renamed', groupIndex: gi, name });
   })
 );
 
@@ -985,7 +1034,7 @@ router.get('/sets',
     const models = (await db.query(
       `SELECT m.id, m.name, m.base_price, m.thumbnail_path, m.primary_thumbnail_path, m.artist_id,
               m.glb_file_path, m.width, m.depth, m.height, m.default_pitch_deg, m.default_roll_deg,
-              m.primary_group_name, m.render_thumbnail_path,
+              m.primary_group_name, m.primary_part_name, m.render_thumbnail_path,
               (SELECT u.sales_disabled FROM users u WHERE u.id = m.artist_id) AS sales_disabled
        FROM models m
        WHERE m.part_count > 1 AND m.status = 'published' AND m.visibility = 'public'
@@ -1043,7 +1092,7 @@ router.get('/sets',
       // safe to expose directly, unlike glb_file_path.
       const rawParts = [
         {
-          id: m.id, name: 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
+          id: m.id, name: m.primary_part_name || 'Part 1', is_primary: true, has_glb: !!m.glb_file_path,
           width: m.width, depth: m.depth, height: m.height,
           group_index: 0, group_name: m.primary_group_name ?? null,
           // Model 1's OWN thumbnail (migration 059) — falls back to the
@@ -2130,7 +2179,7 @@ router.get('/:id/download',
 
     const model = (await db.query(
       `SELECT id, artist_id, name, stl_file_path, source_format, source_file_path,
-              fulfillment_type, processing_status, part_count, status, primary_group_name
+              fulfillment_type, processing_status, part_count, status, primary_group_name, primary_part_name
        FROM models WHERE id = $1`,
       [id]
     )).rows[0];
@@ -2220,7 +2269,7 @@ router.get('/:id/download',
         grouped ? `${slug(groupName || `model-${groupIndex + 1}`)}/` : '';
 
       addDeliverable(
-        `${folderFor(0, model.primary_group_name)}${safeName}-part-1`,
+        `${folderFor(0, model.primary_group_name)}${model.primary_part_name ? slug(model.primary_part_name) : `${safeName}-part-1`}`,
         model.stl_file_path, model.source_format, model.source_file_path,
       );
       parts.forEach((p: any, i: number) => {

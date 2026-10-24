@@ -58,7 +58,7 @@ function partComponents(model: TerrainModel): Array<{ index: number; name: strin
   groups.set(0, {
     index: 0,
     name: model.primaryGroupName ?? null,
-    parts: [{ id: 'primary', name: 'Part 1' }],
+    parts: [{ id: 'primary', name: model.primaryPartName || 'Part 1' }],
   })
   // A part that failed ingest (e.g. too heavy to preview) was excluded from
   // the listing server-side — its file is gone, so it must never appear here

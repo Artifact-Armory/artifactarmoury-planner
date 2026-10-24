@@ -212,6 +212,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     hasPreview: !!(p.has_preview ?? p.hasPreview),
   })),
   primaryGroupName: model.primary_group_name ?? model.primaryGroupName ?? null,
+  primaryPartName: model.primary_part_name ?? model.primaryPartName ?? null,
   featuredInTables:
     (model.featuredInTables ?? model.featured_in_tables) != null
       ? Number(model.featuredInTables ?? model.featured_in_tables)

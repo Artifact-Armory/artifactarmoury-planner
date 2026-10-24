@@ -52,6 +52,18 @@ export function parseTags(tags: unknown): string[] {
   return [];
 }
 
+/**
+ * A part's default name: its uploaded file name without folders or the mesh
+ * extension ("Tower_Supported.stl" -> "Tower_Supported"). Artists label their
+ * files carefully (supported / unsupported / breakdowns), so that beats "Part 3".
+ */
+export function partNameFromFilename(filename: unknown): string | null {
+  if (typeof filename !== 'string') return null;
+  const base = filename.split(/[\\/]/).pop() ?? '';
+  const name = base.replace(/\.(stl|obj|3mf)$/i, '').trim().slice(0, 255);
+  return name || null;
+}
+
 /** The body of POST /api/models/from-upload. Throws ValidationError on bad input. */
 export async function createListingFromUpload(
   userId: string,
@@ -324,10 +336,10 @@ export async function createListingFromUpload(
   const result = await db.query(
     `INSERT INTO models (
       artist_id, name, description, category, tags,
-      stl_file_path, thumbnail_path, primary_thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, is_real_subject, status, processing_status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'stl', $10, $11, $12, $13, $14, $15, $16, 'draft', 'processing')
+      stl_file_path, thumbnail_path, primary_thumbnail_path, base_price, fulfillment_type, part_count, license, printer_type, primary_group_name, show_in_planner, is_presupported, is_real_subject, status, processing_status, primary_part_name
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'stl', $10, $11, $12, $13, $14, $15, $16, 'draft', 'processing', $17)
     RETURNING id, name, created_at`,
-    [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, cleanPrimaryThumbnailKey, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported, realSubject]
+    [userId, name, description || null, storedCategory, parseTags(tags), rawKey, thumbnailKey || null, cleanPrimaryThumbnailKey, price, partCount, modelLicense, modelPrinterType, primaryGroup, modelShowInPlanner, presupported, realSubject, partNameFromFilename(filename)]
   );
   const model = result.rows[0];
   // Seed price history (backs the anti-inflation guard on sales).
@@ -356,7 +368,7 @@ export async function createListingFromUpload(
       // display_stl_path starts as the raw uploaded key — same "starts raw,
       // finalized in place" convention stl_file_path uses — and is turned
       // into a canonical path by processModelParts, same as the print file.
-      [model.id, p.name || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey, p.thumbnailKey, !!p.previewSkipped]
+      [model.id, (typeof p.name === 'string' && p.name.trim().slice(0, 255)) || partNameFromFilename(p.filename) || `Part ${nth}`, p.rawKey, i + 1, p.groupIndex, p.groupName, p.isPresupported, p.displayRawKey, p.thumbnailKey, !!p.previewSkipped]
     );
   }
 

@@ -192,6 +192,8 @@ export interface TerrainModel {
    * Undefined/null = an ungrouped model or flat multi-part set.
    */
   primaryGroupName?: string | null
+  /** Name of the listing's own first file (from its file name); null shows as "Part 1". */
+  primaryPartName?: string | null
   // Default planner tilt (pitch about X, degrees) baked in by the artist so the
   // model stands upright when placed. 0 = no tilt.
   defaultPitchDeg?: number

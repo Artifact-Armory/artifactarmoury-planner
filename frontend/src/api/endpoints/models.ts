@@ -144,6 +144,16 @@ export const modelsApi = {
     return response.data
   },
 
+  /** Rename one file of a listing. partId 'primary' is the listing's own first file. */
+  renamePart: async (modelId: string, partId: string, name: string): Promise<void> => {
+    await apiClient.patch(`${BASE_URL}/${modelId}/parts/${partId}/name`, { name })
+  },
+
+  /** Rename one named model (group) of a listing. */
+  renameComponent: async (modelId: string, groupIndex: number, name: string): Promise<void> => {
+    await apiClient.patch(`${BASE_URL}/${modelId}/components/${groupIndex}/name`, { name })
+  },
+
   /** Add a new named model (one or more files) to an already-published listing. */
   addComponent: async (
     modelId: string,

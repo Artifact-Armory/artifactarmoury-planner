@@ -532,6 +532,60 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// UPDATE OWN PROFILE
+// ============================================================================
+
+// Account-level fields any signed-in user can change. Artist storefront fields
+// (shop name, bio, avatar, banner) live on PUT /api/artists/me. Email changes are
+// not self-serve yet: they go through support so nobody can hijack an account by
+// swapping its email.
+router.put('/me', authenticate, asyncHandler(async (req, res) => {
+  const { displayName } = req.body ?? {};
+
+  if (typeof displayName !== 'string') {
+    throw new ValidationError('Display name is required');
+  }
+  const name = sanitizeString(displayName.trim());
+  if (name.length < 2 || name.length > 100) {
+    throw new ValidationError('Display name must be between 2 and 100 characters');
+  }
+
+  const result = await db.query(
+    `UPDATE users SET display_name = $2, updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, email, display_name, role, account_status,
+               email_verified, is_super_admin, artist_name, artist_bio, artist_url,
+               stripe_onboarding_complete, totp_enabled, created_at, updated_at`,
+    [(req as any).userId, name]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AuthenticationError('User not found');
+  }
+
+  const user = result.rows[0];
+
+  res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      displayName: user.display_name,
+      role: user.role,
+      accountStatus: user.account_status,
+      emailVerified: user.email_verified,
+      isSuperAdmin: user.is_super_admin,
+      artistName: user.artist_name,
+      artistBio: user.artist_bio,
+      artistUrl: user.artist_url,
+      stripeOnboardingComplete: user.stripe_onboarding_complete,
+      twoFactorEnabled: user.totp_enabled ?? false,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at
+    }
+  });
+}));
+
+// ============================================================================
 // REQUEST PASSWORD RESET
 // ============================================================================
 

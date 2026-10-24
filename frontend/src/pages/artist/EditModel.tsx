@@ -8,7 +8,7 @@ import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshSeriousWarning } from '../../utils/printability'
-import { Upload, AlertTriangle, Trash2, Plus, X } from 'lucide-react'
+import { Upload, AlertTriangle, Trash2, Plus, X, Pencil } from 'lucide-react'
 
 // Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
 // EditModel is statically imported by app.tsx (every page is), so a static import here
@@ -32,6 +32,76 @@ const MAX_GALLERY_IMAGES = 40
 function errMessage(err: unknown, fallback: string): string {
   const anyErr = err as any
   return anyErr?.response?.data?.message || anyErr?.message || fallback
+}
+
+/**
+ * A name with a small pencil button that turns it into a text box. Used for
+ * part and named-model names, which default to the uploaded file name.
+ */
+const InlineName: React.FC<{
+  value: string
+  onSave: (name: string) => Promise<void>
+  className?: string
+}> = ({ value, onSave, className = '' }) => {
+  const [editing, setEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState(value)
+  const [busy, setBusy] = React.useState(false)
+  const [err, setErr] = React.useState<string | null>(null)
+
+  async function save() {
+    const next = draft.trim()
+    if (!next || next === value) { setEditing(false); setErr(null); return }
+    setBusy(true)
+    setErr(null)
+    try {
+      await onSave(next)
+      setEditing(false)
+    } catch (e) {
+      setErr(errMessage(e, 'Could not rename'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <span className={`inline-flex min-w-0 items-center gap-1 ${className}`}>
+        <span className="truncate">{value}</span>
+        <button
+          type="button"
+          onClick={() => { setDraft(value); setEditing(true) }}
+          className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Rename"
+          aria-label={`Rename ${value}`}
+        >
+          <Pencil size={12} />
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+      <input
+        autoFocus
+        value={draft}
+        maxLength={255}
+        disabled={busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); save() }
+          if (e.key === 'Escape') { setEditing(false); setErr(null) }
+        }}
+        className="min-w-0 rounded-sm border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
+      />
+      <button type="button" onClick={save} disabled={busy} className="rounded-sm bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground disabled:opacity-50">
+        {busy ? 'Saving…' : 'Save'}
+      </button>
+      <button type="button" onClick={() => { setEditing(false); setErr(null) }} disabled={busy} className="rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground">
+        Cancel
+      </button>
+      {err && <span className="w-full text-xs text-red-700">{err}</span>}
+    </span>
+  )
 }
 
 const EditModel: React.FC = () => {
@@ -244,7 +314,7 @@ const EditModel: React.FC = () => {
       // main store image only if it has none of its own; the store image is
       // often a group shot of every model together, not model 1 specifically.
       thumbnailUrl: model?.primaryThumbnailUrl ?? model?.thumbnailUrl,
-      rows: [{ id: 'primary', name: 'Part 1', processingStatus: model?.processingStatus }],
+      rows: [{ id: 'primary', name: model?.primaryPartName || 'Part 1', processingStatus: model?.processingStatus }],
     })
     for (const p of model?.parts ?? []) {
       const gi = p.groupIndex ?? 0
@@ -256,6 +326,24 @@ const EditModel: React.FC = () => {
     }
     return [...groups.values()].sort((a, b) => a.index - b.index)
   }, [model])
+
+  // Renames save straight away (they're not part of the main form's Save) and
+  // patch the loaded model in place so unsaved edits elsewhere on the page stay.
+  async function handleRenamePart(partId: string, newName: string) {
+    if (!id) return
+    await modelsApi.renamePart(id, partId, newName)
+    setModel((m) => m && (partId === 'primary'
+      ? { ...m, primaryPartName: newName }
+      : { ...m, parts: m.parts?.map((p) => (p.id === partId ? { ...p, name: newName } : p)) }))
+  }
+
+  async function handleRenameComponent(groupIndex: number, newName: string) {
+    if (!id) return
+    await modelsApi.renameComponent(id, groupIndex, newName)
+    setModel((m) => m && (groupIndex === 0
+      ? { ...m, primaryGroupName: newName }
+      : { ...m, parts: m.parts?.map((p) => ((p.groupIndex ?? 0) === groupIndex ? { ...p, groupName: newName } : p)) }))
+  }
 
   async function handleAttachPreview(partId: string, file: File) {
     if (!id) return
@@ -969,6 +1057,7 @@ const EditModel: React.FC = () => {
             {(model.partCount ?? 1) > 1
               ? <>Buy once, {model.partCount} files — every model below is individually placeable in the planner once it has a preview.</>
               : 'Add more named models to sell them together as one buy-once set — each placeable separately in the planner.'}
+            {(model.partCount ?? 1) > 1 && ' Use the pencil to rename a model or file; buyers see these names on the product page, in the planner and in their download.'}
           </p>
 
           {(model.partCount ?? 1) > 1 && (
@@ -985,9 +1074,11 @@ const EditModel: React.FC = () => {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {g.name || (g.index === 0 ? 'Model 1 (primary)' : `Model ${g.index + 1}`)}
-                      </p>
+                      <InlineName
+                        value={g.name || (g.index === 0 ? 'Model 1 (primary)' : `Model ${g.index + 1}`)}
+                        onSave={(n) => handleRenameComponent(g.index, n)}
+                        className="text-sm font-medium text-foreground"
+                      />
                       {g.index === 0 && <span className="shrink-0 text-xs text-muted-foreground">primary</span>}
                     </div>
                     <label className={`mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-primary hover:underline ${thumbBusyGroup === g.index ? 'pointer-events-none opacity-50' : ''}`}>
@@ -1025,7 +1116,7 @@ const EditModel: React.FC = () => {
                         <div className="rounded-sm border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-800">
                           <p className="flex items-center gap-1.5 font-medium">
                             <AlertTriangle size={13} className="shrink-0" />
-                            {r.name}: no planner preview
+                            <InlineName value={r.name} onSave={(n) => handleRenamePart(r.id, n)} />: no planner preview
                           </p>
                           {/* processingError already explains the fix AND which named model it's
                               hiding from the planner (see process.ts's noPreview) — a whole named
@@ -1052,11 +1143,11 @@ const EditModel: React.FC = () => {
                           </label>
                         </div>
                       ) : r.processingStatus === 'failed' ? (
-                        <p className="text-red-700">✕ {r.name}: {r.processingError || 'Failed'}</p>
+                        <p className="text-red-700">✕ <InlineName value={r.name} onSave={(n) => handleRenamePart(r.id, n)} />: {r.processingError || 'Failed'}</p>
                       ) : r.processingStatus === 'processing' ? (
-                        <p className="text-muted-foreground">⋯ {r.name}: processing…</p>
+                        <p className="text-muted-foreground">⋯ <InlineName value={r.name} onSave={(n) => handleRenamePart(r.id, n)} />: processing…</p>
                       ) : (
-                        <p className="text-green-700">✓ {r.name}: ready</p>
+                        <p className="text-green-700">✓ <InlineName value={r.name} onSave={(n) => handleRenamePart(r.id, n)} />: ready</p>
                       )}
                     </div>
                   ))}

@@ -215,6 +215,10 @@ CREATE TABLE models (
     -- its files into several named models (migration 038). NULL = ungrouped.
     primary_group_name VARCHAR(255),
 
+    -- Name of the listing's own first file (on this row, not model_parts), from
+    -- its uploaded file name; NULL shows as "Part 1" (migration 081).
+    primary_part_name VARCHAR(255),
+
     -- Default tilt (pitch about X, degrees) applied to this model when first placed
     -- in the planner. STL has no canonical "up" — terrain tends Z-up, character
     -- sculpts Y-up — so an artist can bake in the orientation that stands the model

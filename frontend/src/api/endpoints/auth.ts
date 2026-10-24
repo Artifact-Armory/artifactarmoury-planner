@@ -142,9 +142,22 @@ export const authApi = {
     return mapApiUserToUser(response.data.user)
   },
 
-  updateProfile: async (data: Partial<ApiUser>): Promise<User> => {
-    const response = await apiClient.put<{ user: ApiUser }>(`/api/users/me`, data)
+  updateProfile: async (data: { displayName: string }): Promise<User> => {
+    const response = await apiClient.put<{ user: ApiUser }>(`${AUTH_BASE}/me`, data)
     return mapApiUserToUser(response.data.user)
+  },
+
+  // The server signs out every other session on a password change and hands this
+  // one a fresh token pair, which the caller must store.
+  changePassword: async (
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ message: string; accessToken?: string; refreshToken?: string }> => {
+    const response = await apiClient.post<{ message: string; accessToken?: string; refreshToken?: string }>(
+      `${AUTH_BASE}/password/change`,
+      { currentPassword, newPassword },
+    )
+    return response.data
   },
 
   requestPasswordReset: async (email: string): Promise<{ message: string }> => {

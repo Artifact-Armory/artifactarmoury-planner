@@ -1,13 +1,25 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { authApi } from '../../api/endpoints/auth'
 import { emailPrefsApi } from '../../api/endpoints/emailPrefs'
 import { useAuthStore } from '../../store/authStore'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 
 const UserProfile: React.FC = () => {
-  const { user } = useAuthStore()
+  const { user, setUser, setTokens } = useAuthStore()
   const [followUpdates, setFollowUpdates] = React.useState<boolean | null>(null)
+  const [displayName, setDisplayName] = React.useState(user?.name ?? '')
+  const [savingName, setSavingName] = React.useState(false)
+  const [currentPassword, setCurrentPassword] = React.useState('')
+  const [newPassword, setNewPassword] = React.useState('')
+  const [confirmPassword, setConfirmPassword] = React.useState('')
+  const [savingPassword, setSavingPassword] = React.useState(false)
+
+  React.useEffect(() => {
+    setDisplayName(user?.name ?? '')
+  }, [user?.name])
 
   React.useEffect(() => {
     if (!user) return
@@ -22,6 +34,46 @@ const UserProfile: React.FC = () => {
     } catch {
       setFollowUpdates(!next)
       toast.error('Could not save your preference')
+    }
+  }
+
+  const saveName = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const next = displayName.trim()
+    if (next.length < 2 || next.length > 100) {
+      toast.error('Display name must be between 2 and 100 characters')
+      return
+    }
+    setSavingName(true)
+    try {
+      setUser(await authApi.updateProfile({ displayName: next }))
+      toast.success('Profile updated')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not update your profile')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  const changePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword !== confirmPassword) {
+      toast.error('New passwords do not match')
+      return
+    }
+    setSavingPassword(true)
+    try {
+      const result = await authApi.changePassword(currentPassword, newPassword)
+      // The server ended every session on the change; keep this one signed in.
+      if (result.accessToken) setTokens(result.accessToken, result.refreshToken)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      toast.success('Password changed. Other devices have been signed out.')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not change your password')
+    } finally {
+      setSavingPassword(false)
     }
   }
 
@@ -41,10 +93,24 @@ const UserProfile: React.FC = () => {
         <p className="mt-2 text-sm text-muted-foreground">Manage your contact details and notification preferences.</p>
       </section>
 
-      <section className="rounded-2xl border border-border bg-card p-6 shadow-xs">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Display name" value={user.name} readOnly />
-          <Input label="Email" type="email" value={user.email} readOnly />
+      <form onSubmit={saveName} className="rounded-2xl border border-border bg-card p-6 shadow-xs">
+        <h2 className="text-lg font-semibold text-foreground">Profile</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Input
+            label="Display name"
+            name="displayName"
+            value={displayName}
+            maxLength={100}
+            onChange={(e) => setDisplayName(e.target.value)}
+          />
+          <Input
+            label="Email"
+            name="email"
+            type="email"
+            value={user.email}
+            readOnly
+            description="Need to change it? Contact us and we'll update it for you."
+          />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
@@ -57,10 +123,64 @@ const UserProfile: React.FC = () => {
           </div>
         </div>
 
-        <Button className="mt-6" variant="outline" disabled>
-          Update profile (coming soon)
+        {user.role === 'artist' && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Your shop name, bio, avatar and banner are in{' '}
+            <Link to="/artist/settings" className="font-medium text-primary hover:underline">
+              Artist settings
+            </Link>
+            .
+          </p>
+        )}
+
+        <Button
+          type="submit"
+          className="mt-6"
+          disabled={savingName || displayName.trim() === user.name}
+        >
+          {savingName ? 'Saving…' : 'Save profile'}
         </Button>
-      </section>
+      </form>
+
+      <form onSubmit={changePassword} className="rounded-2xl border border-border bg-card p-6 shadow-xs">
+        <h2 className="text-lg font-semibold text-foreground">Change password</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2 sm:max-w-sm">
+            <Input
+              label="Current password"
+              name="currentPassword"
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
+          </div>
+          <Input
+            label="New password"
+            name="newPassword"
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <Input
+            label="Confirm new password"
+            name="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+        </div>
+        <Button
+          type="submit"
+          className="mt-6"
+          variant="outline"
+          disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
+        >
+          {savingPassword ? 'Saving…' : 'Change password'}
+        </Button>
+      </form>
 
       <section className="rounded-2xl border border-border bg-card p-6 shadow-xs">
         <h2 className="text-lg font-semibold text-foreground">Email notifications</h2>
