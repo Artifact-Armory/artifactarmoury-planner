@@ -12,8 +12,9 @@ import {
 } from '../services/earnings'
 import { MIN_PAYOUT_GBP } from '../services/payouts'
 import {
-  createConnectAccount, createOnboardingLink, createLoginLink,
+  createConnectAccount, deleteConnectAccount, createOnboardingLink, createLoginLink,
   getAccountStatus, setMockOnboardingState, isStripeMock, isUsableAccountId,
+  CONNECT_COUNTRIES, isConnectCountry,
 } from '../services/stripe'
 
 const router = Router()
@@ -76,6 +77,7 @@ router.get('/me',
         payoutsEnabled: stale ? persisted : !!status?.payoutsEnabled,
         chargesEnabled: stale ? persisted : !!status?.chargesEnabled,
         requirementsDue: status?.requirementsDue ?? [],
+        country: status?.country ?? null,
       },
       config: {
         holdDays: PAYOUT_HOLD_DAYS,
@@ -83,6 +85,7 @@ router.get('/me',
         artistSharePercent: sharePercent,
         // Lets the dashboard offer the mock-complete shortcut only where it exists.
         mockMode: isStripeMock(),
+        connectCountries: CONNECT_COUNTRIES,
       },
     })
   }),
@@ -107,9 +110,42 @@ router.post('/connect/onboard',
       return res.json({ onboardingUrl: url, accountId })
     }
 
-    const result = await createConnectAccount(artistId, email, returnUrl, refreshUrl)
+    // An Express account's country can never change, so the artist must choose it
+    // here rather than it silently defaulting to the UK.
+    const country = req.body?.country
+    if (!isConnectCountry(country)) throw new ValidationError('Choose the country you live in')
+
+    const result = await createConnectAccount(artistId, email, country, returnUrl, refreshUrl)
     logger.info('Connect onboarding started', { artistId, accountId: result.account_id })
     res.json({ onboardingUrl: result.onboarding_url, accountId: result.account_id })
+  }),
+)
+
+// Throw away the artist's connected account so they can start again in the right
+// country. Only allowed before any payout has been made to it: once money has
+// moved, the account holds real history and changing country is Stripe support's job.
+router.post('/connect/reset',
+  authenticate,
+  requireArtist,
+  requireTwoFactor,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const artistId = req.userId!
+    const accountId = req.user?.stripe_account_id
+    if (!accountId) return res.json({ reset: false })
+
+    const paid = await db.query('SELECT 1 FROM payouts WHERE artist_id = $1 LIMIT 1', [artistId])
+    if (paid.rows.length > 0) {
+      throw new ValidationError('Payouts have already been made to this Stripe account. Contact us to change country.')
+    }
+
+    // A stale mock id is not a Stripe account, so there is nothing to delete there.
+    if (isUsableAccountId(accountId)) await deleteConnectAccount(accountId)
+    await db.query(
+      'UPDATE users SET stripe_account_id = NULL, stripe_onboarding_complete = false WHERE id = $1',
+      [artistId],
+    )
+    logger.info('Connect account reset', { artistId, accountId })
+    res.json({ reset: true })
   }),
 )
 

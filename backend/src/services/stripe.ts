@@ -80,6 +80,8 @@ export interface ConnectAccountStatus {
   onboardingComplete: boolean
   /** Stripe's outstanding requirement ids, so the UI can say what is missing. */
   requirementsDue: string[]
+  /** ISO country the account was created in (fixed for the account's life). */
+  country?: string | null
   /**
    * True when Stripe could not be reached, so every flag above is a pessimistic
    * default rather than a fact. Callers that hold a previously-persisted status
@@ -142,6 +144,55 @@ export function setMockOnboardingState(
   return { ...state }
 }
 
+/**
+ * Countries an artist's Connect account can be created in. AA is a UK platform
+ * paying artists with separate charges & transfers, and Stripe only allows those
+ * transfers to accounts in the UK, EEA, Switzerland, US and Canada (cross-border
+ * payouts, full service agreement). Anywhere else Stripe would reject the
+ * transfer, so it is not offered. An Express account's country is fixed once
+ * created, which is why the artist picks it up front instead of it defaulting.
+ */
+export const CONNECT_COUNTRIES: { code: string; name: string }[] = [
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'AT', name: 'Austria' },
+  { code: 'BE', name: 'Belgium' },
+  { code: 'BG', name: 'Bulgaria' },
+  { code: 'HR', name: 'Croatia' },
+  { code: 'CY', name: 'Cyprus' },
+  { code: 'CZ', name: 'Czech Republic' },
+  { code: 'DK', name: 'Denmark' },
+  { code: 'EE', name: 'Estonia' },
+  { code: 'FI', name: 'Finland' },
+  { code: 'FR', name: 'France' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'GR', name: 'Greece' },
+  { code: 'HU', name: 'Hungary' },
+  { code: 'IS', name: 'Iceland' },
+  { code: 'IE', name: 'Ireland' },
+  { code: 'IT', name: 'Italy' },
+  { code: 'LV', name: 'Latvia' },
+  { code: 'LI', name: 'Liechtenstein' },
+  { code: 'LT', name: 'Lithuania' },
+  { code: 'LU', name: 'Luxembourg' },
+  { code: 'MT', name: 'Malta' },
+  { code: 'NL', name: 'Netherlands' },
+  { code: 'NO', name: 'Norway' },
+  { code: 'PL', name: 'Poland' },
+  { code: 'PT', name: 'Portugal' },
+  { code: 'RO', name: 'Romania' },
+  { code: 'SK', name: 'Slovakia' },
+  { code: 'SI', name: 'Slovenia' },
+  { code: 'ES', name: 'Spain' },
+  { code: 'SE', name: 'Sweden' },
+  { code: 'CH', name: 'Switzerland' },
+]
+
+export function isConnectCountry(code: unknown): code is string {
+  return typeof code === 'string' && CONNECT_COUNTRIES.some((c) => c.code === code)
+}
+
 export interface CreateConnectAccountResult {
   account_id: string
   onboarding_url: string
@@ -153,24 +204,26 @@ export interface CreateConnectAccountResult {
 export async function createConnectAccount(
   artistId: string,
   email: string,
+  country: string,
   returnUrl: string,
   refreshUrl: string
 ): Promise<CreateConnectAccountResult> {
+  if (!isConnectCountry(country)) throw new Error(`Unsupported Connect country: ${country}`)
   if (STRIPE_MOCK) {
     const accountId = `acct_mock_${Date.now()}`
-    mockAccount(accountId)
+    mockAccount(accountId).country = country
     // Persist exactly as the live path does, so the artist's half-finished state
     // survives a reload in local dev instead of minting a fresh account each time.
     await db.query('UPDATE users SET stripe_account_id = $1 WHERE id = $2', [accountId, artistId])
     return { account_id: accountId, onboarding_url: returnUrl }
   }
   try {
-    stripeLogger.info('Creating Stripe Connect account', { artistId, email })
+    stripeLogger.info('Creating Stripe Connect account', { artistId, email, country })
     
     // Create connected account
     const account = await stripe.accounts.create({
       type: 'express',
-      country: 'GB',
+      country,
       email,
       capabilities: {
         card_payments: { requested: true },
@@ -212,6 +265,26 @@ export async function createConnectAccount(
 }
 
 /**
+ * Delete an artist's connected account so they can start again in another
+ * country (Stripe won't change an account's country). Platforms may delete
+ * Express accounts once their balance is zero; callers must make sure nothing
+ * has been paid to it first.
+ */
+export async function deleteConnectAccount(accountId: string): Promise<void> {
+  if (STRIPE_MOCK) {
+    mockAccounts.delete(accountId)
+    return
+  }
+  try {
+    await stripe.accounts.del(accountId)
+    stripeLogger.info('Connect account deleted', { accountId })
+  } catch (error) {
+    stripeLogger.error('Failed to delete Connect account', { error, accountId })
+    throw new Error('Failed to delete Stripe Connect account')
+  }
+}
+
+/**
  * Full onboarding state for one connected account (mock-aware).
  */
 export async function getAccountStatus(accountId: string): Promise<ConnectAccountStatus> {
@@ -225,6 +298,7 @@ export async function getAccountStatus(accountId: string): Promise<ConnectAccoun
       detailsSubmitted: !!account.details_submitted,
       onboardingComplete: !!(account.charges_enabled && account.payouts_enabled),
       requirementsDue: account.requirements?.currently_due ?? [],
+      country: account.country ?? null,
     }
   } catch (error) {
     stripeLogger.error('Failed to retrieve Connect account', { error, accountId })
@@ -841,6 +915,7 @@ export async function createRefund(
 export default {
   stripe,
   createConnectAccount,
+  deleteConnectAccount,
   checkOnboardingStatus,
   getAccountStatus,
   setMockOnboardingState,

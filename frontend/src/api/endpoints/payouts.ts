@@ -47,6 +47,8 @@ export interface PayoutsMe {
     artistSharePercent: number
     /** True when the backend is on STRIPE_MOCK, so the dev-only shortcut exists. */
     mockMode: boolean
+    /** Countries a Stripe payout account can be opened in. */
+    connectCountries: { code: string; name: string }[]
   }
 }
 
@@ -60,6 +62,8 @@ export interface ConnectStatus {
   payoutsEnabled: boolean
   chargesEnabled: boolean
   requirementsDue: string[]
+  /** Country the Stripe account was opened in, once one exists. */
+  country?: string | null
 }
 
 export const payoutsApi = {
@@ -69,8 +73,14 @@ export const payoutsApi = {
   },
 
   /** Begin/resume Stripe Connect onboarding; returns a hosted URL to redirect to. */
-  async startOnboarding(): Promise<{ onboardingUrl: string; accountId: string }> {
-    const res = await apiClient.post(`${BASE_URL}/connect/onboard`)
+  async startOnboarding(country?: string): Promise<{ onboardingUrl: string; accountId: string }> {
+    const res = await apiClient.post(`${BASE_URL}/connect/onboard`, { country })
+    return res.data
+  },
+
+  /** Delete the artist's unpaid Stripe account so they can start again in another country. */
+  async resetConnect(): Promise<{ reset: boolean }> {
+    const res = await apiClient.post(`${BASE_URL}/connect/reset`)
     return res.data
   },
 

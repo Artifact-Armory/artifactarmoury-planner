@@ -28,10 +28,25 @@ const ArtistPayouts: React.FC = () => {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Stripe fixes an account's country for good once it is created, so the artist
+  // picks it before the account exists rather than it defaulting to the UK.
+  const [country, setCountry] = React.useState('')
+
   const onboard = useMutation({
-    mutationFn: () => payoutsApi.startOnboarding(),
+    mutationFn: () => payoutsApi.startOnboarding(country || undefined),
     onSuccess: ({ onboardingUrl }) => { window.location.href = onboardingUrl },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not start onboarding'),
+  })
+
+  // Wrong country → delete the unpaid Stripe account so they can start again.
+  const reset = useMutation({
+    mutationFn: () => payoutsApi.resetConnect(),
+    onSuccess: () => {
+      setCountry('')
+      qc.invalidateQueries({ queryKey: ['artist-payouts'] })
+      toast.success('Stripe account removed. Choose your country to start again.')
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Could not reset your Stripe account'),
   })
 
   // Stripe's Express dashboard is where the artist sees their own payout history,
@@ -55,6 +70,7 @@ const ArtistPayouts: React.FC = () => {
   if (isLoading || !data) return <div className="flex justify-center py-24"><Spinner size="lg" /></div>
 
   const { summary, earnings, payouts, connect, config } = data
+  const countryName = config.connectCountries.find((c) => c.code === connect.country)?.name ?? connect.country
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -78,13 +94,44 @@ const ArtistPayouts: React.FC = () => {
                     ? 'Your Stripe account needs a few more details before we can send money.'
                     : 'Stripe is still reviewing your details. Your earnings keep accruing and will pay out once it clears.'}
               </p>
+              {connect.accountId && (
+                <p className="mt-1 text-sm text-amber-700">
+                  {countryName ? `Stripe account country: ${countryName}. ` : ''}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('Remove this Stripe account and start again in a different country? Anything you entered with Stripe will need entering again.')) reset.mutate()
+                    }}
+                    disabled={reset.isPending}
+                    className="font-medium underline hover:text-amber-900 disabled:opacity-50"
+                  >
+                    {reset.isPending ? 'Removing…' : 'Wrong country? Start again'}
+                  </button>
+                </p>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {!connect.accountId && (
+              <>
+                <label htmlFor="connect-country" className="sr-only">Country you live in</label>
+                <select
+                  id="connect-country"
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-foreground"
+                >
+                  <option value="">Your country…</option>
+                  {config.connectCountries.map((c) => (
+                    <option key={c.code} value={c.code}>{c.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
             {!connect.detailsSubmitted && (
               <button
                 onClick={() => onboard.mutate()}
-                disabled={onboard.isPending}
+                disabled={onboard.isPending || (!connect.accountId && !country)}
                 className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
                 {onboard.isPending ? 'Redirecting…' : connect.accountId ? 'Finish setup' : 'Set up payouts'}
