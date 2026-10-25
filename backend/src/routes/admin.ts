@@ -37,6 +37,45 @@ const REVENUE_START_AT = new Date(process.env.REVENUE_START_AT || '2026-10-17T00
 // All admin routes require authentication and admin role
 router.use(authenticate, requireAdmin);
 
+/**
+ * Gross refund for one order line: its net price plus its share of VAT at the rate
+ * the order was charged. VAT was rounded per cart line at checkout (a bundle is one
+ * line; Stripe Tax rounds its own way), so per-item shares can add up to a penny or
+ * two more than was charged, and Stripe refuses a refund above what is left. The last
+ * line to be refunded therefore takes exactly what remains of the order total.
+ */
+async function grossRefundForItem(orderId: string, itemId: string, orderTotal: unknown, itemNet: unknown, taxRate: unknown): Promise<number> {
+  const netPence = Math.round(Number(itemNet) * 100);
+  const grossPence = netPence + vatPenceOn(netPence, Number(taxRate) || 0);
+  const { rows } = await db.query(
+    `SELECT COUNT(*) FILTER (WHERE refunded_at IS NULL AND id <> $2)::int AS others_left,
+            COALESCE(SUM(refund_amount) FILTER (WHERE refunded_at IS NOT NULL), 0) AS refunded
+     FROM order_items WHERE order_id = $1`,
+    [orderId, itemId],
+  );
+  if (rows[0] && Number(rows[0].others_left) === 0) {
+    const remainingPence = Math.round(Number(orderTotal) * 100) - Math.round(Number(rows[0].refunded) * 100);
+    // Only a rounding correction: anything bigger means the figures disagree for
+    // some other reason, and the per-line amount is the safer one to send.
+    if (remainingPence >= 0 && Math.abs(remainingPence - grossPence) <= 5) return remainingPence / 100;
+  }
+  return grossPence / 100;
+}
+
+/**
+ * Only a super admin may act against another admin, and nobody may act against a
+ * super admin from the panel. Without this any admin could ban or delete the owner.
+ */
+async function assertMayManageUser(req: any, targetId: string): Promise<void> {
+  const target = await db.query('SELECT role, is_super_admin FROM users WHERE id = $1', [targetId]);
+  if (target.rows.length === 0) throw new NotFoundError('User');
+  const t = target.rows[0];
+  if (t.is_super_admin) throw new ValidationError('A super admin cannot be changed from the admin panel');
+  if (t.role === 'admin' && !req.user?.is_super_admin) {
+    throw new ValidationError('Only a super admin can change another admin');
+  }
+}
+
 // ============================================================================
 // DASHBOARD STATS
 // ============================================================================
@@ -424,6 +463,12 @@ router.patch('/users/:id/status',
     if (!validStatuses.includes(status)) {
       throw new ValidationError('Invalid status');
     }
+    if (id === (req as any).userId) {
+      throw new ValidationError('You cannot change your own account status');
+    }
+    // Same authority rules as a role change: suspending an admin (or the owner)
+    // locks them out, so a regular admin must not be able to do it.
+    await assertMayManageUser(req, id);
 
     await db.query(
       `UPDATE users SET account_status = $1 WHERE id = $2`,
@@ -546,6 +591,21 @@ router.delete('/users/:id',
 
     if (id === (req as any).userId) {
       throw new ValidationError('Cannot delete your own account');
+    }
+    await assertMayManageUser(req, id);
+
+    // A hard delete cascades through models, artist_earnings and payouts, and nulls
+    // the user on their orders: an artist's sales ledger and payout history, or a
+    // buyer's downloads, would vanish with no record. Ban such accounts instead.
+    const history = await db.query(
+      `SELECT EXISTS (SELECT 1 FROM orders WHERE user_id = $1 AND payment_status IN ('succeeded', 'refunded')) AS bought,
+              EXISTS (SELECT 1 FROM artist_earnings WHERE artist_id = $1) AS earned,
+              EXISTS (SELECT 1 FROM payouts WHERE artist_id = $1) AS paid`,
+      [id]
+    );
+    const h = history.rows[0];
+    if (h?.bought || h?.earned || h?.paid) {
+      throw new ValidationError('This account has purchases, sales or payouts on record, so it cannot be deleted. Ban it instead.');
     }
 
     await db.query('DELETE FROM users WHERE id = $1', [id]);
@@ -1176,7 +1236,7 @@ async function resolveReport(id: string, action: string, summary: string, adminI
           // void artist earnings and archive the model so downloads stop.
           const affected = await db.query(
             `SELECT oi.id AS order_item_id, o.id AS order_id, o.payment_intent_id,
-                    o.user_id, o.tax_rate, oi.total_price, o.customer_email, o.order_number
+                    o.user_id, o.tax_rate, o.total, oi.total_price, o.customer_email, o.order_number
              FROM orders o JOIN order_items oi ON oi.order_id = o.id
              WHERE oi.model_id = $1 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL`,
             [modelId],
@@ -1184,9 +1244,7 @@ async function resolveReport(id: string, action: string, summary: string, adminI
           let refundCount = 0;
           for (const row of affected.rows) {
             if (!row.payment_intent_id) continue;
-            const netPence = Math.round(Number(row.total_price) * 100);
-            const vatPence = vatPenceOn(netPence, Number(row.tax_rate) || 0);
-            const grossAmount = (netPence + vatPence) / 100;
+            const grossAmount = await grossRefundForItem(row.order_id, row.order_item_id, row.total, row.total_price, row.tax_rate);
             try {
               // Claim first, then refund — same reasoning as the single-line refund
               // route: a concurrent refund of the same line must not pay out twice.
@@ -1546,9 +1604,7 @@ router.post('/orders/:orderId/items/:itemId/refund',
     // order's own snapshotted tax_rate (the rate actually charged), via the same
     // rounding function checkout used (vatPenceOn — must stay the single
     // definition of that rounding, see services/vat.ts).
-    const netPence = Math.round(Number(item.total_price) * 100);
-    const vatPence = vatPenceOn(netPence, Number(order.tax_rate) || 0);
-    const grossAmount = (netPence + vatPence) / 100;
+    const grossAmount = await grossRefundForItem(orderId, itemId, order.total, item.total_price, order.tax_rate);
 
     // Claim the line BEFORE asking Stripe for money back. The check above reads and
     // the refund writes separately, so a double-click (or two admins) used to send two

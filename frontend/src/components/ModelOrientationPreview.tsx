@@ -11,7 +11,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { groundOffset, tiltQuaternion } from '@core/orientation'
+import { tiltOffset, tiltQuaternion } from '@core/orientation'
 
 // One decoder shared across previews (matches the planner's /draco/ setup).
 const dracoLoader = new DRACOLoader()
@@ -185,10 +185,10 @@ const ModelOrientationPreview: React.FC<Props> = ({ url, pitchDeg, rollDeg = 0, 
   )
 }
 
-/** Roll (Z) then pitch (X) the pivot and re-ground it so the model rests on y=0 (matches the planner). */
+/** Roll (Z) then pitch (X) the pivot, re-ground and re-centre it so the model rests on y=0 (matches the planner). */
 function applyTilt(pivot: THREE.Group, pitchDeg: number, rollDeg: number, aabb: { x: number; y: number; z: number }) {
   tiltQuaternion(pitchDeg, rollDeg, pivot.quaternion)
-  pivot.position.y = groundOffset(pivot.quaternion, aabb)
+  tiltOffset(pivot.quaternion, aabb, pivot.position)
 }
 
 export default ModelOrientationPreview

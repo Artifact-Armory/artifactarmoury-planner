@@ -39,6 +39,7 @@ import { meshFormatFromName, convertToStl, watermarkOriginal, MAX_MODEL_FILE_BYT
 import { validateAndResolveTerms, writeModelTerms, assertRequiredTermsPresent, getModelTerms } from '../services/modelTerms';
 import { notifyFollowersOfRelease, notifyAdminsOfMeshOverride } from '../services/notifications';
 import { maybeStartIntroOffer } from '../services/introCommission';
+import { isModerationLocked } from '../services/releases';
 import { logProductView, logWishlistAdd } from '../services/analytics';
 import { findGeometryDuplicate, safeDeleteObject } from '../services/modelIngest/process';
 import { createListingFromUpload, VALID_CATEGORIES, VALID_LICENSES, VALID_PRINTER_TYPES, MAX_EXTRA_PARTS, MAX_COMPONENTS, MAX_GALLERY_IMAGES, TYPE_FACET_BY_CLASS, parseTags, partNameFromFilename } from '../services/modelIngest/createListing';
@@ -1042,20 +1043,32 @@ router.get('/sets',
        ORDER BY m.created_at DESC`
     )).rows;
 
-    const sets = await Promise.all(models.map(async (m: any) => {
-      // Fetch every part regardless of status (not just 'ready') so an
-      // unpreviewable sibling can be seen and used to disqualify its whole
-      // named model below — a plain 'ready' filter would silently show the
-      // OTHER parts of that same model, which looks like a piece floating
-      // with no base rather than a model that's simply not on the planner yet.
-      const allParts = (await db.query(
-        `SELECT id, name, glb_file_path, width, depth, height, group_index, group_name,
+    // Fetch every part regardless of status (not just 'ready') so an
+    // unpreviewable sibling can be seen and used to disqualify its whole
+    // named model below — a plain 'ready' filter would silently show the
+    // OTHER parts of that same model, which looks like a piece floating
+    // with no base rather than a model that's simply not on the planner yet.
+    // One query for every set rather than one per set: this runs on every
+    // planner load, and the per-set version grew with the catalogue.
+    const partsByModel = new Map<string, any[]>();
+    if (models.length > 0) {
+      const partRows = (await db.query(
+        `SELECT model_id, id, name, glb_file_path, width, depth, height, group_index, group_name,
                 thumbnail_path, render_thumbnail_path, processing_status
          FROM model_parts
-         WHERE model_id = $1 AND preview_skipped = false
-         ORDER BY group_index ASC, display_order ASC`,
-        [m.id]
+         WHERE model_id = ANY($1::uuid[]) AND preview_skipped = false
+         ORDER BY model_id, group_index ASC, display_order ASC`,
+        [models.map((m: any) => m.id)]
       )).rows;
+      for (const p of partRows) {
+        const list = partsByModel.get(p.model_id);
+        if (list) list.push(p);
+        else partsByModel.set(p.model_id, [p]);
+      }
+    }
+
+    const sets = models.map((m: any) => {
+      const allParts = partsByModel.get(m.id) ?? [];
       // A named model (group_index) only belongs on the planner once EVERY one
       // of its parts has a preview GLB — one oversized/'no_preview' part is
       // enough to disqualify the whole named model, not just that one file
@@ -1138,7 +1151,7 @@ router.get('/sets',
         primary_group_name: m.primary_group_name ?? null,
         parts,
       };
-    }));
+    });
 
     res.json({ sets });
   })
@@ -1364,6 +1377,11 @@ router.get('/:id',
     delete model.full_glb_path;
     delete model.lod_glb_path;
     delete model.display_stl_path;
+    // The dedup corpus: the file hash and geometry fingerprint are what an uploaded
+    // copy is matched against. Handing them out lets a thief test a modified copy
+    // against the check offline. Nothing on the client uses them.
+    delete model.file_hash;
+    delete model.geometry_fingerprint;
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
       processing_status: p.processing_status, processing_error: p.processing_error,
@@ -1639,6 +1657,12 @@ router.post('/:id/publish',
     if (model.deleted_at) {
       throw new ValidationError('This model has been deleted and cannot be published');
     }
+    // A moderation takedown (flagged / archived by an admin) is not the artist's to
+    // undo. Before this check the artist could simply press Publish and the model
+    // went straight back on sale. Admins lift a takedown with reinstate/approve.
+    if (isModerationLocked(model.status) && (req as any).user?.role !== 'admin') {
+      throw new AuthorizationError('This model was taken down by moderation and cannot be republished. Contact us if you think this is a mistake.');
+    }
 
     if (!model.thumbnail_path) {
       throw new ValidationError('Model must have a thumbnail before publishing');
@@ -1746,8 +1770,16 @@ router.post('/:id/unpublish',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
+    // Unpublishing a flagged/archived model would turn the takedown into a plain
+    // draft, which the artist could then publish again. Leave it as it is.
+    const { rows } = await db.query(`SELECT status FROM models WHERE id = $1`, [id]);
+    if (rows.length === 0) throw new NotFoundError('Model');
+    if (isModerationLocked(rows[0].status) && (req as any).user?.role !== 'admin') {
+      throw new AuthorizationError('This model was taken down by moderation. Contact us if you think this is a mistake.');
+    }
+
     await db.query(
-      `UPDATE models 
+      `UPDATE models
        SET status = 'draft', visibility = 'private'
        WHERE id = $1`,
       [id]
@@ -2196,10 +2228,12 @@ router.get('/:id/download',
     if (!model.stl_file_path) throw new NotFoundError('STL file');
     if (!isR2Enabled()) throw new ValidationError('Downloads are not configured (R2 disabled)');
 
-    // Entitlement: the artist, or a buyer with a succeeded, un-refunded order for this model.
+    // Entitlement: the artist, an admin (moderation evidence, as the takedown gate
+    // above says), or a buyer with a succeeded, un-refunded order for this model.
     const isArtist = model.artist_id === userId;
+    const isAdminViewer = (req as any).user?.role === 'admin';
     let orderId = WATERMARK_ZERO_ORDER;
-    if (!isArtist) {
+    if (!isArtist && !isAdminViewer) {
       const ent = (await db.query(
         `SELECT o.id, oi.id AS item_id FROM order_items oi
          JOIN orders o ON oi.order_id = o.id

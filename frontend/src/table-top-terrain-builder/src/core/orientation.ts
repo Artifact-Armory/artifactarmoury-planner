@@ -17,14 +17,20 @@ export function tiltQuaternion(pitchDeg: number, rollDeg: number, out: THREE.Qua
 }
 
 /**
- * How far to lift a tilted model so its lowest point rests on y=0. The model is
- * base-aligned (x,z centred, y ∈ [0, H]) and tilts about its base-centre; yaw
- * about Y doesn't change heights, so it's ignored.
+ * Where to move a tilted model so it rests on y=0 AND stays centred on its spot.
+ * The model is base-aligned (x,z centred, y ∈ [0, H]) and tilts about its
+ * base-centre, so a 90° pitch alone would swing it H/2 to one side of where it
+ * was placed (off its footprint, selection ring and grid square). Returns the
+ * offset in the tilt's parent frame (before yaw): x/z re-centre the tilted box,
+ * y lifts its lowest point to the table.
  */
-export function groundOffset(tilt: THREE.Quaternion, aabb: { x: number; y: number; z: number }): number {
-  let minY = Infinity
+export function tiltOffset(tilt: THREE.Quaternion, aabb: { x: number; y: number; z: number }, out: THREE.Vector3): THREE.Vector3 {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, minZ = Infinity, maxZ = -Infinity
   for (const sx of [-0.5, 0.5]) for (const y of [0, aabb.y]) for (const sz of [-0.5, 0.5]) {
-    minY = Math.min(minY, tmpV.set(sx * aabb.x, y, sz * aabb.z).applyQuaternion(tilt).y)
+    tmpV.set(sx * aabb.x, y, sz * aabb.z).applyQuaternion(tilt)
+    minX = Math.min(minX, tmpV.x); maxX = Math.max(maxX, tmpV.x)
+    minY = Math.min(minY, tmpV.y)
+    minZ = Math.min(minZ, tmpV.z); maxZ = Math.max(maxZ, tmpV.z)
   }
-  return -minY
+  return out.set(-(minX + maxX) / 2, -minY, -(minZ + maxZ) / 2)
 }

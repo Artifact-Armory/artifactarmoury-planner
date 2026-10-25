@@ -6,7 +6,7 @@
 
 import * as THREE from 'three'
 import type { Asset } from '@core/assets'
-import { groundOffset, tiltQuaternion } from '@core/orientation'
+import { tiltOffset, tiltQuaternion } from '@core/orientation'
 import { ensureTemplate, getResolvedTemplate } from './loaders'
 
 const VALID = new THREE.Color(0x44d07a)
@@ -78,7 +78,7 @@ export class Ghost {
         mesh.renderOrder = 5
       }
     })
-    // Preview the artist's baked default tilt (and re-ground it) so the ghost reads
+    // Preview the artist's baked default tilt (re-grounded and re-centred) so the ghost reads
     // the same as the placed piece — matches InstancedScene.composeMatrix. Yaw is
     // applied to the whole group (setTransform); tilt, then mirror, nest inside it
     // as wrappers so the clone keeps its own fit-to-size scale and centring.
@@ -91,7 +91,7 @@ export class Ghost {
     if (pitchDeg || rollDeg) {
       tiltQuaternion(pitchDeg, rollDeg, tilt.quaternion)
       const aabb = this.asset ? getResolvedTemplate(this.asset)?.aabb : null
-      if (aabb) tilt.position.y = groundOffset(tilt.quaternion, aabb)
+      if (aabb) tiltOffset(tilt.quaternion, aabb, tilt.position)
     }
     mirror.scale.x = this.mirrored ? -1 : 1
     this.model = mirror

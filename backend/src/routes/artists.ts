@@ -5,6 +5,8 @@ import logger from '../utils/logger'
 import { authenticate, optionalAuth, requireArtist } from '../middleware/auth'
 import { notifyNewFollower } from '../services/notifications'
 import { annotateModelsWithSales, effectiveModelPriceSql } from '../services/sales'
+import { validateArtistName } from '../services/artistOnboarding'
+import { ValidationError } from '../middleware/error'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
@@ -631,11 +633,57 @@ router.get('/me/sales', authenticate, requireArtist, async (req, res, next) => {
   }
 })
 
+const PROFILE_BIO_MAX = 2000
+
+/** '' clears the link; anything else must be a plain http(s) URL. */
+function cleanProfileUrl(value: unknown): string {
+  if (typeof value !== 'string') throw new ValidationError('Website must be a link')
+  const trimmed = value.trim()
+  if (trimmed === '') return ''
+  if (trimmed.length > 500) throw new ValidationError('Website link is too long')
+  let parsed: URL
+  try {
+    parsed = new URL(/^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`)
+  } catch {
+    throw new ValidationError('Website must be a full link, like https://example.com')
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new ValidationError('Website must be an http(s) link')
+  }
+  return parsed.toString()
+}
+
+/** An uploaded image key (images/... from /api/uploads/presign), '' to clear, or null to keep. */
+function cleanImageRef(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new ValidationError(`${field} must be an uploaded image`)
+  if (value === '') return ''
+  if (!/^(images|thumbnails)\/[A-Za-z0-9._-]+$/.test(value)) {
+    throw new ValidationError(`${field} must be an uploaded image`)
+  }
+  return value
+}
+
 // Update the signed-in artist's own brand (name / bio / link / avatar / banner).
 router.put('/me', authenticate, requireArtist, async (req, res, next) => {
   try {
     const artistId = (req as any).userId
-    const { name, bio, url, avatar, banner, background, accentColor } = req.body ?? {}
+    const { name: rawName, bio: rawBio, url: rawUrl, avatar: rawAvatar, banner: rawBanner, background: rawBackground, accentColor } = req.body ?? {}
+    // Everything here is shown on the public artist page, so it is validated rather
+    // than stored as sent. The website link matters most: it is rendered as a link,
+    // and a `javascript:` URL there ran script in the browser of anyone who clicked
+    // it, with their saved session in reach.
+    const name = rawName === undefined || rawName === null ? null : validateArtistName(rawName)
+    let bio: string | null = null
+    if (rawBio !== undefined && rawBio !== null) {
+      if (typeof rawBio !== 'string') throw new ValidationError('Bio must be text')
+      if (rawBio.length > PROFILE_BIO_MAX) throw new ValidationError(`Bio can be at most ${PROFILE_BIO_MAX} characters`)
+      bio = rawBio
+    }
+    const url = rawUrl === undefined || rawUrl === null ? null : cleanProfileUrl(rawUrl)
+    const avatar = cleanImageRef(rawAvatar, 'Avatar')
+    const banner = cleanImageRef(rawBanner, 'Banner')
+    const background = cleanImageRef(rawBackground, 'Background')
     // Accent is a hex colour like '#4f46e5'. An explicit '' clears it back to the
     // default theme; a valid hex sets it; anything else (or undefined) leaves it
     // unchanged. clearAccent forces NULL past the COALESCE.

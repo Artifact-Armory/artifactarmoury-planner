@@ -11,6 +11,15 @@ const releasesLogger = logger.child('RELEASES');
 
 export type ReleaseItemType = 'model' | 'bundle' | 'table';
 
+/**
+ * A model an admin has taken down ('flagged' pending review, 'archived' removed).
+ * Only an admin may put it back on sale (approve / reinstate); every artist-side
+ * publish path must refuse it, or a takedown lasts until the artist presses Publish.
+ */
+export function isModerationLocked(status: string | null | undefined): boolean {
+  return status === 'flagged' || status === 'archived';
+}
+
 interface ReleaseRow {
   id: string;
   artist_id: string;
@@ -34,10 +43,18 @@ export async function itemPublishBlocker(
 ): Promise<string | null> {
   if (type === 'model') {
     const m = (await db.query(
-      `SELECT name, thumbnail_path, processing_status FROM models WHERE id = $1 AND artist_id = $2`,
+      `SELECT name, thumbnail_path, processing_status, status, deleted_at,
+              mesh_analyzed, mesh_open_edges, mesh_warning_acknowledged
+       FROM models WHERE id = $1 AND artist_id = $2`,
       [itemId, artistId],
     )).rows[0];
     if (!m) return 'A model in this release no longer exists';
+    // Same gates as POST /models/:id/publish, which a release would otherwise bypass.
+    if (m.deleted_at || m.status === 'deleted') return `"${m.name}" has been deleted`;
+    if (isModerationLocked(m.status)) return `"${m.name}" was taken down by moderation`;
+    if (m.mesh_analyzed && (m.mesh_open_edges ?? 0) > 0 && !m.mesh_warning_acknowledged) {
+      return `"${m.name}" has open edges in its mesh. Acknowledge the warning on its Edit page first`;
+    }
     if (m.processing_status && m.processing_status !== 'ready') return `"${m.name}" is still processing`;
     if (!m.thumbnail_path) return `"${m.name}" needs a thumbnail`;
     try {

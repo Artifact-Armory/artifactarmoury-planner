@@ -12,7 +12,7 @@ import logger from '../utils/logger'
 import { optionalAuth, AuthRequest } from '../middleware/auth'
 import { asyncHandler, ValidationError } from '../middleware/error'
 import { isR2Enabled, presignUpload, publicUrl } from '../services/r2'
-import { uploadRateLimit, emailRateLimit } from '../middleware/security'
+import { attachmentRateLimit, emailRateLimit } from '../middleware/security'
 import { sendContactMessageToSupport, sendContactConfirmation } from '../services/email'
 
 const router = Router()
@@ -41,7 +41,7 @@ function attachmentContentType(filename: string): string {
 router.post(
   '/presign-attachment',
   optionalAuth,
-  uploadRateLimit,
+  attachmentRateLimit,
   asyncHandler(async (req: AuthRequest, res) => {
     if (!isR2Enabled()) {
       throw new ValidationError('File uploads are not configured (R2 is disabled)')

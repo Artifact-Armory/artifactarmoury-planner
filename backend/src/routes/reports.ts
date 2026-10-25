@@ -11,6 +11,7 @@ import logger from '../utils/logger'
 import { authenticate, AuthRequest, requireArtist } from '../middleware/auth'
 import { asyncHandler, ValidationError, NotFoundError } from '../middleware/error'
 import { isR2Enabled, presignUpload } from '../services/r2'
+import { attachmentRateLimit } from '../middleware/security'
 import { createNotification } from '../services/notifications'
 
 const router = Router()
@@ -40,6 +41,7 @@ function proofContentType(filename: string): string {
 router.post(
   '/presign-proof',
   authenticate,
+  attachmentRateLimit,
   asyncHandler(async (req: AuthRequest, res) => {
     if (!isR2Enabled()) {
       throw new ValidationError('Proof uploads are not configured (R2 is disabled)')

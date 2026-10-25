@@ -279,14 +279,19 @@ router.post('/register/artist', authRateLimit, asyncHandler(async (req, res) => 
 
     // Update invite code. Record the first redeemer only (COALESCE), so a multi-use
     // code keeps a stable `used_by`/`used_at` while `current_uses` tracks the count.
-    await client.query(
+    // The capacity condition is repeated here so two sign-ups racing for the last
+    // use of a code can't both get it (the check above reads without a lock).
+    const claimed = await client.query(
       `UPDATE invite_codes
        SET used_by = COALESCE(used_by, $1),
            current_uses = current_uses + 1,
            used_at = COALESCE(used_at, CURRENT_TIMESTAMP)
-       WHERE id = $2`,
+       WHERE id = $2 AND (max_uses IS NULL OR current_uses < max_uses)`,
       [user.id, invite.id]
     );
+    if ((claimed.rowCount ?? 0) === 0) {
+      throw new ValidationError('This invite code has already been used');
+    }
 
     // Log activity
     await client.query(
@@ -358,6 +363,15 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
 
   const user = result.rows[0];
 
+  // Verify password FIRST: saying "suspended"/"banned" before it told anyone who
+  // typed an email address that the account exists and what state it is in.
+  const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+  if (!isValidPassword) {
+    logger.warn('Failed login attempt', { email, ip: req.ip });
+    throw new AuthenticationError('Invalid email or password');
+  }
+
   // Check account status
   if (user.account_status === 'suspended') {
     throw new AuthenticationError('Your account has been suspended. Please contact support.');
@@ -365,14 +379,6 @@ router.post('/login', authRateLimit, asyncHandler(async (req, res) => {
 
   if (user.account_status === 'banned') {
     throw new AuthenticationError('Your account has been banned.');
-  }
-
-  // Verify password
-  const isValidPassword = await bcrypt.compare(password, user.password_hash);
-
-  if (!isValidPassword) {
-    logger.warn('Failed login attempt', { email, ip: req.ip });
-    throw new AuthenticationError('Invalid email or password');
   }
 
   // Two-factor gate: if the account has 2FA on, the password alone isn't enough.

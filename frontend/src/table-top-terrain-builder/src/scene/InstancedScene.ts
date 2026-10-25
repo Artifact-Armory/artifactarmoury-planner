@@ -17,7 +17,7 @@
 
 import * as THREE from 'three'
 import { getAssetById, type Asset } from '@core/assets'
-import { groundOffset, tiltQuaternion } from '@core/orientation'
+import { tiltOffset, tiltQuaternion } from '@core/orientation'
 import type { Instance } from '@state/store'
 import { ensureTemplate, getResolvedTemplate, subscribeMeshExtras, type AssetPart, type AssetTemplate } from './loaders'
 import { LOD_MAX_ERROR_PX } from './meshExtras'
@@ -38,6 +38,7 @@ const tmpQuat = new THREE.Quaternion()
 const tmpQuatPitch = new THREE.Quaternion()
 const tmpYAxis = new THREE.Vector3(0, 1, 0)
 const tmpPos = new THREE.Vector3()
+const tmpTiltOffset = new THREE.Vector3()
 const tmpScale = new THREE.Vector3()
 const tmpMat = new THREE.Matrix4()
 const tmpInv = new THREE.Matrix4()
@@ -417,19 +418,20 @@ export class InstancedScene {
     const pitchDeg = inst.pitchDeg ?? 0
     const rollDeg = getAssetById(inst.assetId)?.defaultRollDeg ?? 0
     // When a piece is tilted, its base-aligned geometry (y ∈ [0, H]) rotates about
-    // the base-centre and its lowest point drops below the table — re-ground it so
-    // the tilted model still rests on the surface instead of sinking through the floor.
-    let groundLift = 0
+    // the base-centre: its lowest point drops below the table and it swings off to
+    // one side. Re-ground and re-centre it (offset turned by the yaw) so the tilted
+    // model rests on the surface, centred where it was placed.
+    tmpTiltOffset.set(0, 0, 0)
     if (pitchDeg || rollDeg) {
       tiltQuaternion(pitchDeg, rollDeg, tmpQuatPitch)
+      if (aabb) tiltOffset(tmpQuatPitch, aabb, tmpTiltOffset).applyQuaternion(tmpQuat)
       tmpQuat.multiply(tmpQuatPitch)
-      if (aabb) groundLift = groundOffset(tmpQuatPitch, aabb)
     }
-    tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z) + groundLift, z)
+    tmpPos.set(x, levelToY(inst.level ?? 0) + this.heightAt(x, z), z).add(tmpTiltOffset)
     tmpScale.set(scale, scale, scale)
     out.compose(tmpPos, tmpQuat, tmpScale)
     // Mirror in the piece's own frame (before tilt and yaw). Its bounding box is
-    // centred on x, so the re-grounding above still holds.
+    // centred on x, so the re-grounding and re-centring above still hold.
     if (inst.mirrored) out.multiply(MIRROR_X)
     out.multiply(partMatrix)
   }

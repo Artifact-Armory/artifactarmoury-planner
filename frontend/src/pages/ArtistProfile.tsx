@@ -21,6 +21,18 @@ const sortOptions = [
   { value: 'price_desc', label: 'Price: High to low' },
 ]
 
+// Artists type this link themselves. Only ever render http(s): a `javascript:` link
+// would run script for whoever clicked it (old rows may predate the server check).
+function safeExternalUrl(url?: string | null): string | undefined {
+  if (!url) return undefined
+  try {
+    const parsed = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const ArtistProfile: React.FC = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -224,16 +236,16 @@ const ArtistProfile: React.FC = () => {
               <h1 className="text-3xl font-semibold text-foreground">{artist.name}</h1>
               <p className="mt-2 text-sm text-muted-foreground">Joined {artist.createdAt ? new Date(artist.createdAt).toLocaleDateString() : 'recently'}</p>
               {artist.bio ? <p className="mt-4 whitespace-pre-line text-sm text-foreground">{artist.bio}</p> : null}
-              {artist.artistUrl ? (
+              {safeExternalUrl(artist.artistUrl) ? (
                 <a
-                  href={artist.artistUrl}
+                  href={safeExternalUrl(artist.artistUrl)}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
                   style={{ color: accent ?? '#4f46e5' }}
                 >
                   <ExternalLink size={14} />
-                  {artist.artistUrl.replace(/^https?:\/\//, '')}
+                  {(artist.artistUrl ?? '').replace(/^https?:\/\//, '')}
                 </a>
               ) : null}
               <div className="mt-4 flex flex-wrap items-center gap-3">

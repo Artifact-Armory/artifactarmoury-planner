@@ -2,9 +2,10 @@
 import Stripe from 'stripe'
 import logger from '../utils/logger'
 import { db } from '../db'
-import { accrueEarningsForOrder } from './earnings'
+import { accrueEarningsForOrder, reverseEarningsForOrder } from './earnings'
 import { runOrderPaidSideEffects } from './orderEmails'
 import { recordTaxTransaction } from './stripeTax'
+import { notifyAdminsOfPaymentIssue } from './notifications'
 
 // ============================================================================
 // INITIALIZATION
@@ -722,6 +723,10 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
       })
     } else if ((event.type as string) === 'transfer.failed') {
       await handleTransferFailed(event.data.object as Stripe.Transfer)
+    } else if (event.type === 'charge.refunded') {
+      await handleChargeRefunded(event.data.object as Stripe.Charge)
+    } else if (event.type === 'charge.dispute.created') {
+      await handleDisputeCreated(event.data.object as Stripe.Dispute)
     } else {
       stripeLogger.debug('Unhandled webhook event type', { type: event.type })
     }
@@ -827,10 +832,115 @@ async function handlePaymentIntentFailed(
 async function handleAccountUpdated(account: Stripe.Account): Promise<void> {
   if (STRIPE_MOCK) return
   const artistId = account.metadata.artist_id
-  
-  if (artistId) {
-    await updateOnboardingStatus(artistId, account.id)
+  if (!artistId) return
+
+  // Only for the account the artist is actually using. After "Wrong country? Start
+  // again" a late event about their old (deleted) account would otherwise overwrite
+  // the new account's onboarding state.
+  const current = await db.query('SELECT stripe_account_id FROM users WHERE id = $1', [artistId])
+  if (current.rows[0]?.stripe_account_id !== account.id) {
+    stripeLogger.info('account.updated for an account the artist no longer uses; ignored', { artistId, accountId: account.id })
+    return
   }
+  await updateOnboardingStatus(artistId, account.id)
+}
+
+/**
+ * A refund made OUTSIDE the admin panel (the Stripe dashboard, or Stripe itself).
+ * The panel's own refunds mark the order lines first, so by the time their event
+ * arrives there is nothing left to do here. A full refund from the dashboard used to
+ * leave the order paid: the buyer kept the download and the artist was still paid
+ * for the sale 21 days later. Now it is treated as a refund of every remaining line.
+ * A partial dashboard refund can't be mapped to particular models, so it is flagged
+ * to admins to finish from the panel.
+ */
+async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
+  if (STRIPE_MOCK) return
+  const paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id
+  if (!paymentIntentId) return
+
+  const found = await db.query(
+    `SELECT id, order_number, payment_status FROM orders WHERE payment_intent_id = $1`,
+    [paymentIntentId]
+  )
+  const order = found.rows[0]
+  if (!order || order.payment_status !== 'succeeded') return
+
+  const refundedPence = charge.amount_refunded ?? 0
+  const fullyRefunded = charge.refunded || refundedPence >= charge.amount
+
+  // What the panel has already refunded (and recorded) for this order.
+  const recorded = await db.query(
+    `SELECT COALESCE(SUM(refund_amount), 0) AS refunded,
+            COUNT(*) FILTER (WHERE refunded_at IS NULL)::int AS open_lines
+     FROM order_items WHERE order_id = $1`,
+    [order.id]
+  )
+  const recordedPence = Math.round(Number(recorded.rows[0]?.refunded ?? 0) * 100)
+  const openLines = Number(recorded.rows[0]?.open_lines ?? 0)
+  if (openLines === 0 || refundedPence <= recordedPence) return // nothing new
+
+  if (!fullyRefunded) {
+    stripeLogger.warn('Partial refund made outside the admin panel', { orderId: order.id, refundedPence, recordedPence })
+    await notifyAdminsOfPaymentIssue(
+      `Partial refund on order ${order.order_number} made in Stripe`,
+      'A partial refund was made in the Stripe dashboard. The order is unchanged, so the buyer still has every file and the artist will still be paid. Refund the right item from the admin panel instead, or adjust it by hand.',
+      '/admin/orders'
+    )
+    return
+  }
+
+  await db.query(
+    `UPDATE order_items SET refunded_at = CURRENT_TIMESTAMP,
+            refund_amount = COALESCE(refund_amount, total_price)
+     WHERE order_id = $1 AND refunded_at IS NULL`,
+    [order.id]
+  )
+  await db.query(
+    `UPDATE orders SET payment_status = 'refunded',
+            internal_notes = TRIM(BOTH FROM COALESCE(internal_notes, '') || ' Refunded in Stripe dashboard.')
+     WHERE id = $1 AND payment_status = 'succeeded'`,
+    [order.id]
+  )
+  const { alreadyPaid } = await reverseEarningsForOrder(order.id, 'Refunded in Stripe dashboard')
+  stripeLogger.warn('Order refunded outside the admin panel', { orderId: order.id, alreadyPaidToArtist: alreadyPaid })
+  if (alreadyPaid > 0) {
+    await notifyAdminsOfPaymentIssue(
+      `Order ${order.order_number} refunded after the artist was paid`,
+      'This order was refunded in Stripe after its artist payout had already gone out. That payout was not clawed back.',
+      '/admin/orders'
+    )
+  }
+}
+
+/**
+ * A buyer has disputed (charged back) a payment. Stripe takes the money and the fee
+ * from the platform balance straight away, but nothing here changes on its own: the
+ * artist's share would still be paid out when its hold ends. Admins are told at once
+ * so they can respond to the dispute in Stripe before the deadline.
+ */
+async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
+  if (STRIPE_MOCK) return
+  const paymentIntentId = typeof dispute.payment_intent === 'string' ? dispute.payment_intent : dispute.payment_intent?.id
+  const found = paymentIntentId
+    ? await db.query(`SELECT id, order_number FROM orders WHERE payment_intent_id = $1`, [paymentIntentId])
+    : { rows: [] as any[] }
+  const order = found.rows[0]
+  stripeLogger.warn('Payment disputed', { disputeId: dispute.id, orderId: order?.id, reason: dispute.reason, amount: dispute.amount })
+  if (order) {
+    await db.query(
+      `UPDATE orders SET internal_notes = TRIM(BOTH FROM COALESCE(internal_notes, '') || ' ' || $2) WHERE id = $1`,
+      [order.id, `Disputed in Stripe (${dispute.reason}, ${dispute.id}).`]
+    )
+  }
+  const dueBy = dispute.evidence_details?.due_by
+    ? new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString('en-GB')
+    : 'the deadline shown in Stripe'
+  await notifyAdminsOfPaymentIssue(
+    `Payment disputed${order ? ` on order ${order.order_number}` : ''}`,
+    `A buyer has disputed £${(dispute.amount / 100).toFixed(2)} (reason: ${dispute.reason}). Respond in the Stripe dashboard by ${dueBy}. The artist's share of this sale is still due to be paid out when its hold ends.`,
+    '/admin/orders'
+  )
 }
 
 async function handleTransferFailed(transfer: Stripe.Transfer): Promise<void> {

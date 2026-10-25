@@ -300,8 +300,8 @@ export async function reconcilePendingPayouts(): Promise<number> {
 // Paying out under STRIPE_MOCK would mark earnings `paid` against a fake `tr_mock_`
 // transfer id while no money moved — and `paid` is terminal: refund reversal only
 // touches pending/cleared rows, so the ledger would be permanently wrong about what
-// the artist is owed. This deployment currently runs STRIPE_MOCK=true in production,
-// so the guard is not hypothetical. Clearing is still safe and still runs.
+// the artist is owed. Production has run live payments since 2026-08-31; the guard
+// is for local/dev and any future mock deploy. Clearing is still safe and still runs.
 // PAYOUTS_ALLOW_MOCK_TRANSFERS=true opts back in for a deliberate dry run.
 const ALLOW_MOCK_TRANSFERS = process.env.PAYOUTS_ALLOW_MOCK_TRANSFERS === 'true'
 

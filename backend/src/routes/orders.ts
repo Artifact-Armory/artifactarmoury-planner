@@ -14,10 +14,12 @@ import {
   getPaymentIntent,
   cancelPaymentIntent,
   paymentMethodOf,
+  isStripeMock,
   type OrderPaymentMethod,
 } from '../services/stripe';
 import { accrueEarningsForOrder } from '../services/earnings';
-import { runOrderPaidSideEffects } from '../services/orderEmails';import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
+import { runOrderPaidSideEffects } from '../services/orderEmails';
+import { activeDiscountForModel, activeDiscountForBundle } from '../services/sales';
 import { getDownloadBytesForModels } from '../services/downloadSize';
 import {
   findActiveCode,
@@ -30,6 +32,9 @@ import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../
 import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
 
 const router = Router();
+
+// Stripe's minimum charge in GBP.
+const STRIPE_MIN_CHARGE_GBP = 0.3;
 
 // An artist account with users.sales_disabled (migration 073) lists for display only:
 // the models are on the marketplace and the planner, but nobody can buy them. Used for
@@ -447,6 +452,13 @@ router.post('/',
         total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
       }
 
+      // Stripe won't take a card payment under 30p, so an order below that (a £0 or
+      // very cheap model) would fail at the PaymentIntent with a generic "checkout
+      // failed". Say what is actually wrong instead.
+      if (!isStripeMock() && total < STRIPE_MIN_CHARGE_GBP) {
+        throw new ValidationError(`The order total must be at least £${STRIPE_MIN_CHARGE_GBP.toFixed(2)} to pay by card. Add another item to your cart.`);
+      }
+
       // Create order (no shipping address for digital STLs). terms_accepted_at comes
       // from the terms checkbox; download_consent_at from the separate
       // immediate-supply consent checkbox (both validated above).
@@ -787,6 +799,8 @@ router.get('/library',
       delete model.full_glb_path;
       delete model.lod_glb_path;
       delete model.display_stl_path;
+      delete model.file_hash;
+      delete model.geometry_fingerprint;
       return {
         ...model,
         has_glb: hasGlb,

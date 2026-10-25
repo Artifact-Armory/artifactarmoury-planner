@@ -325,6 +325,23 @@ export const tableThumbnailRateLimit = rateLimit({
 });
 
 /**
+ * Support/report attachment uploads (contact form, report proof). The contact form
+ * works signed out, and each presigned URL lets a file onto the public asset domain,
+ * so without a tight cap of its own it was free anonymous file hosting at the upload
+ * limit's 500 an hour. A real message has at most 5 attachments.
+ */
+export const attachmentRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Number(process.env.ATTACHMENT_RATE_LIMIT_MAX ?? 20),
+  message: 'Too many attachments, please try again later',
+  handler: rateLimitHandler,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyGenerator,
+  ...storeFor('rl:attach:')
+});
+
+/**
  * Payment/checkout rate limit
  * 10 payment attempts per hour per user
  */

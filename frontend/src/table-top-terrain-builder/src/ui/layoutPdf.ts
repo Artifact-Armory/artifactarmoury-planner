@@ -8,7 +8,7 @@
 import * as THREE from 'three'
 import type { Instance, Table } from '@state/store'
 import { getAssetById } from '@core/assets'
-import { tiltQuaternion } from '@core/orientation'
+import { tiltOffset, tiltQuaternion } from '@core/orientation'
 import type { UnitSystem } from '@/store/unitsStore'
 
 type Pt = { x: number; z: number }
@@ -40,13 +40,18 @@ const Y = new THREE.Vector3(0, 1, 0)
  *  onto the table, as a convex polygon. Mirrors InstancedScene.composeMatrix. */
 function footprintHull(inst: Instance, aabb: { x: number; y: number; z: number }, rollDeg: number): Pt[] {
   const q = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(inst.rotationDeg))
+  const offset = new THREE.Vector3()
   const pitch = inst.pitchDeg ?? 0
-  if (pitch || rollDeg) q.multiply(tiltQuaternion(pitch, rollDeg, new THREE.Quaternion()))
+  if (pitch || rollDeg) {
+    const tilt = tiltQuaternion(pitch, rollDeg, new THREE.Quaternion())
+    tiltOffset(tilt, aabb, offset).applyQuaternion(q)
+    q.multiply(tilt)
+  }
   const v = new THREE.Vector3()
   const pts: Pt[] = []
   for (const sx of [-0.5, 0.5]) for (const y of [0, aabb.y]) for (const sz of [-0.5, 0.5]) {
     v.set(sx * aabb.x, y, sz * aabb.z).applyQuaternion(q)
-    pts.push({ x: inst.position.x + v.x, z: inst.position.z + v.z })
+    pts.push({ x: inst.position.x + offset.x + v.x, z: inst.position.z + offset.z + v.z })
   }
   return convexHull(pts)
 }

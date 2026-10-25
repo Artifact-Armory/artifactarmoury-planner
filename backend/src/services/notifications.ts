@@ -230,6 +230,14 @@ export async function notifyAdminsOfGeometryReview(uploadName: string, matchedNa
 }
 
 /**
+ * Something about a payment needs an admin: a dispute, or a refund made in the
+ * Stripe dashboard that the site couldn't fully apply (services/stripe.ts).
+ */
+export async function notifyAdminsOfPaymentIssue(title: string, body: string, link: string): Promise<void> {
+  await notifyAdmins({ type: 'admin.payment_issue', title, body, link })
+}
+
+/**
  * Processing-queue alarm (services/queueAlarm.ts). Goes to the in-app admin bell
  * as well as email, because sendEmail() logs-and-swallows its failures by design
  * — if Resend is misconfigured the email channel fails silently, which is the

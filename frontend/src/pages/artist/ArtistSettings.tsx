@@ -139,8 +139,8 @@ const ArtistSettings: React.FC = () => {
       })
       toast.success('Profile saved')
       await refetch()
-    } catch {
-      toast.error('Could not save profile')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not save profile')
     } finally {
       setSaving(false)
     }
