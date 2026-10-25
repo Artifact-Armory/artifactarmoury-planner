@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Search, X, ExternalLink, Flag, Loader2, ShieldAlert } from 'lucide-react'
+import { Search, X, ExternalLink, Flag, Loader2, ShieldAlert, Download } from 'lucide-react'
 import { adminApi } from '../../api/endpoints/admin'
 import {
   adminModelsApi,
@@ -298,6 +298,21 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Publish failed'),
   })
 
+  // Same per-user download buyers get (admins are entitled on the backend), so
+  // an admin can inspect an artist's actual uploaded files.
+  const [downloading, setDownloading] = useState(false)
+  const handleDownload = async () => {
+    if (!data?.model) return
+    setDownloading(true)
+    try {
+      await modelsApi.downloadModelStl(data.model.id, data.model.name)
+    } catch (e: any) {
+      toast.error(e?.response?.status === 400 ? 'Model is still processing' : 'Download failed')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const model = data?.model
   const reports = data?.reports ?? []
   const openReports = reports.filter((r) => ['open', 'under_review', 'awaiting_info'].includes(r.status))
@@ -317,6 +332,16 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
               >
                 View listing <ExternalLink size={14} />
               </a>
+            )}
+            {model && (
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline disabled:opacity-50"
+              >
+                {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                {downloading ? 'Preparing…' : 'Download files'}
+              </button>
             )}
             <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-accent"><X size={20} /></button>
           </div>

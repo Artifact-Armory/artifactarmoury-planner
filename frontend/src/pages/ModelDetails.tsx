@@ -113,6 +113,7 @@ const ModelDetails: React.FC = () => {
   const inCart = useCartStore((state) => state.hasItem('model', id ?? ''))
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = useAuthStore((state) => state.isAdmin)
   const [reportOpen, setReportOpen] = React.useState(false)
   // Which photo the hero image shows — null means "the thumbnail" (the default).
   // Clicking a gallery strip thumbnail below swaps it; reset on model change so a
@@ -653,7 +654,30 @@ const ModelDetails: React.FC = () => {
                   the file on.
                 </p>
               </>
-            ) : model.salesDisabled ? (
+            ) : null}
+
+            {/* Admins can pull any listing's files (the backend's /:id/download
+                already allows role 'admin') to check an artist's upload. */}
+            {!owned && isAdmin && (
+              <>
+                <Button
+                  className="mt-6 w-full"
+                  variant="outline"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  leftIcon={<Download size={16} />}
+                >
+                  {downloading
+                    ? 'Preparing…'
+                    : model.partCount && model.partCount > 1
+                    ? `Admin: download ZIP (${model.partCount} parts)`
+                    : 'Admin: download STL'}
+                </Button>
+                {downloadError && <p className="mt-2 text-xs text-destructive">{downloadError}</p>}
+              </>
+            )}
+
+            {owned ? null : model.salesDisabled ? (
               <p className="mt-6 rounded-md bg-muted px-3 py-2 text-center text-sm font-medium text-muted-foreground">
                 On display only — not for sale yet
               </p>
