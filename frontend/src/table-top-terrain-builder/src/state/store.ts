@@ -128,6 +128,8 @@ export type Instance = {
   /** Shared id linking pieces "fused" together (e.g. a stack) so they select,
    *  drag, and rotate as one unit. undefined = not fused to anything. */
   groupId?: string
+  /** Paint colour (#rrggbb) for this piece; undefined = the table's piece colour. */
+  color?: string
 }
 
 /** All ids that move together with `id` — its whole fused group, or just itself. */
@@ -171,6 +173,13 @@ interface HistoryState {
   terrainDetail: Heightmap | null
   terrainFeatures: TerrainFeature[]
   paint: PaintMap | null
+  modelColor: string | null
+}
+
+export const BRIGHTNESS_MIN = 0.5
+export const BRIGHTNESS_MAX = 1.6
+export function clampBrightness(b: number): number {
+  return Number.isFinite(b) ? Math.min(BRIGHTNESS_MAX, Math.max(BRIGHTNESS_MIN, b)) : 1
 }
 
 /** Deep-clone a height field for a history snapshot (Float32Array must be copied). */
@@ -228,6 +237,8 @@ interface AppState {
   placementLevel: number       // current elevation level the ghost will place at
   placementManual: boolean     // true when the level is a manual override (PageUp/Down)
   tableMaterial: string        // table surface material id (grass/sand/wood/snow/…)
+  modelColor: string | null    // colour for every piece without its own (#rrggbb); null = original
+  brightness: number           // scene light multiplier, 1 = normal
 
   // Terrain sculpting (deformable table surface → printable tiles later).
   // The sculpt UI is hidden behind FEATURES.terrainSculpt; existing sculpted
@@ -292,6 +303,7 @@ interface AppState {
   setAltMomentary: (v: boolean) => void
   setPlacement: (level: number, manual: boolean) => void
   setTableMaterial: (id: string) => void
+  setBrightness: (b: number) => void
 
   setTerrainTool: (tool: TerrainTool) => void
   setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
@@ -360,6 +372,11 @@ interface AppState {
     /** Tilt the current selection by deltaDeg about X (e.g. ±90 to stand up / lay flat). */
     tiltSelected: (deltaDeg: number) => void
     mirrorSelected: () => void
+    /** Paint the given pieces one colour (null = back to the table's piece colour). One undo step. */
+    colourInstances: (ids: string[], color: string | null) => void
+    /** Paint every piece one colour (null = original): sets the table's piece colour
+     *  and clears per-piece colours. One undo step. */
+    colourAllPieces: (color: string | null) => void
     /** Fuse the current selection (2+ pieces, e.g. a stack) into one group that
      *  selects, drags and rotates as a single piece. Merges any already-fused
      *  groups touched by the selection into one. */
@@ -388,7 +405,7 @@ interface AppState {
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
-    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail?: Heightmap | null; terrainFeatures?: TerrainFeature[]; paint?: PaintMap | null }) => void
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail?: Heightmap | null; terrainFeatures?: TerrainFeature[]; paint?: PaintMap | null; modelColor?: string | null; brightness?: number }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -415,6 +432,7 @@ function saveHistory(state: AppState): Partial<AppState> {
     terrainDetail: cloneHeightmap(state.terrainDetail),
     terrainFeatures: cloneFeatures(state.terrainFeatures),
     paint: clonePaintMap(state.paint),
+    modelColor: state.modelColor,
   })
   
   // Limit history size
@@ -515,6 +533,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   placementLevel: 0,
   placementManual: false,
   tableMaterial: 'grass',
+  modelColor: null,
+  brightness: 1,
 
   heightmap: null,
   terrainDetail: null,
@@ -601,6 +621,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? {}
       : { placementLevel: level, placementManual: manual }),
   setTableMaterial: (id) => set({ tableMaterial: id }),
+  setBrightness: (b) => set({ brightness: clampBrightness(b) }),
 
   setTerrainTool: (tool) => {
     // Entering a sculpt/paint tool clears any pending model placement (mutually
@@ -1011,6 +1032,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.updateInstances(patches)
     },
 
+    colourInstances: (ids, color) => {
+      if (!ids.length) return
+      get().actions.updateInstances(ids.map(id => ({ id, patch: { color: color ?? undefined } })))
+    },
+
+    colourAllPieces: (color) => {
+      set(s => {
+        const instances = s.instances.map(({ color: _old, ...inst }) => inst)
+        return { instances, modelColor: color, ...saveHistory({ ...s, instances, modelColor: color }) }
+      })
+    },
+
     fuseSelected: () => {
       const s = get()
       const ids = s.selectedInstanceIds
@@ -1235,6 +1268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
         ...restoreTerrain(s, state),
         paint: clonePaintMap(state.paint),
+        modelColor: state.modelColor ?? null,
         terrainRev: s.terrainRev + 1,
         paintRev: s.paintRev + 1,
         historyIndex: newIndex
@@ -1255,6 +1289,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedInstanceIds: state.selectedInstanceId ? [state.selectedInstanceId] : [],
         ...restoreTerrain(s, state),
         paint: clonePaintMap(state.paint),
+        modelColor: state.modelColor ?? null,
         terrainRev: s.terrainRev + 1,
         paintRev: s.paintRev + 1,
         historyIndex: newIndex
@@ -1313,15 +1348,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.fitView()
     },
 
-    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint }) => {
+    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
       const detail = terrainDetail ?? null
       const features = cloneFeatures(terrainFeatures ?? [])
       const hm = compositeHeightmap(features, detail, table)
       const pm = paint ?? null
+      const mc = modelColor ?? null
       set((s) => ({
         table: { ...table },
         tableMaterial: tableMaterial ?? s.tableMaterial,
+        modelColor: mc,
+        brightness: clampBrightness(brightness ?? 1),
         instances: clean,
         heightmap: hm,
         terrainDetail: detail,
@@ -1338,7 +1376,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Reset the timeline to this loaded state as the baseline.
         history: [],
         historyIndex: -1,
-        ...saveHistory({ ...s, table, instances: clean, selectedInstanceId: null, terrainDetail: detail, terrainFeatures: features, paint: pm, history: [], historyIndex: -1 }),
+        ...saveHistory({ ...s, table, instances: clean, selectedInstanceId: null, terrainDetail: detail, terrainFeatures: features, paint: pm, modelColor: mc, history: [], historyIndex: -1 }),
       }))
       get().actions.syncBasketWithTable()
       get().actions.fitView()

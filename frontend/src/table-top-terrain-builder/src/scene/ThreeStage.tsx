@@ -128,7 +128,8 @@ export function ThreeStage() {
 
     // Ambient-ish base so no face goes fully black. Lift the ground colour a bit
     // (was near-black 0x202830) so undersides / shadowed faces keep some detail.
-    scene.add(new THREE.HemisphereLight(0xdfeaff, 0x4a5260, 1.0))
+    const hemi = new THREE.HemisphereLight(0xdfeaff, 0x4a5260, 1.0)
+    scene.add(hemi)
     // Key light (main, one corner) …
     const dir = new THREE.DirectionalLight(0xffffff, 0.65)
     dir.position.set(3, 6, 2)
@@ -142,6 +143,12 @@ export function ThreeStage() {
     const top = new THREE.DirectionalLight(0xffffff, 0.2)
     top.position.set(0, 8, 0)
     scene.add(top)
+    // Brightness slider: scales every light from its base intensity above.
+    const lightBase = ([hemi, dir, fill, top] as THREE.Light[]).map((l) => [l, l.intensity] as const)
+    const applyBrightness = (b: number) => {
+      for (const [l, base] of lightBase) l.intensity = base * b
+    }
+    applyBrightness(store().brightness)
 
     // ---- on-demand rendering ----
     let renderRequested = false
@@ -226,6 +233,7 @@ export function ThreeStage() {
       })
     })
     inst.setHeightSampler(terrainHeightAt)
+    inst.setDefaultColor(store().modelColor)
     // NB: placed pieces render un-marked. The on-screen "PREVIEW" watermark that used
     // to be blended over unowned models was removed (2026-08-30) — the protection it
     // duplicated lives in the mesh itself: the bake emboss, the decimation, and the
@@ -1850,6 +1858,14 @@ export function ThreeStage() {
       }
       if (s.selectedInstanceIds !== prev.selectedInstanceIds) {
         inst.setSelection(new Set(s.selectedInstanceIds))
+        requestRender()
+      }
+      if (s.modelColor !== prev.modelColor) {
+        inst.setDefaultColor(s.modelColor)
+        requestRender()
+      }
+      if (s.brightness !== prev.brightness) {
+        applyBrightness(s.brightness)
         requestRender()
       }
       if (s.selectedAssetId !== prev.selectedAssetId) {

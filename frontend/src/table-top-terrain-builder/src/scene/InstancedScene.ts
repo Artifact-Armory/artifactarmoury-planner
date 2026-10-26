@@ -14,6 +14,9 @@
 // warm-blue glow disc pools under them, plus a thin rim of light hugging their
 // actual silhouette (a scaled-up backface shell) — cheap, since only a few are
 // ever selected, and neither occludes or reshapes the piece itself.
+//
+// Piece colours are per-instance colours, which three multiplies into the model's
+// own material: a plain grey proxy takes the colour, the dark watermark stays dark.
 
 import * as THREE from 'three'
 import { getAssetById, type Asset } from '@core/assets'
@@ -47,6 +50,8 @@ const tmpSphere = new THREE.Sphere()
 const tmpHit = new THREE.Vector3()
 const tmpCentre = new THREE.Vector3()
 const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1)
+const WHITE = new THREE.Color(1, 1, 1)
+const tmpColor = new THREE.Color()
 
 // Mirrored pieces are drawn by their own meshes, keyed `<assetId>|mirrored`.
 const MIRROR_BUCKET = '|mirrored'
@@ -114,6 +119,8 @@ export class InstancedScene {
   private hovered: string | null = null
   private popStart = new Map<string, number>()
   private selectChangedAt = 0
+  /** Colour for pieces without their own (#rrggbb), or null for the original. */
+  private defaultColor: string | null = null
 
   private glowGroup = new THREE.Group()
   private selectGlows = new Map<string, THREE.Mesh>()
@@ -161,6 +168,13 @@ export class InstancedScene {
     this.instances = instances
     this.assetsById = assetsById
     this.rebuild()
+  }
+
+  /** Set the colour for every piece that has no colour of its own (null = original). */
+  setDefaultColor(color: string | null) {
+    if (this.defaultColor === color) return
+    this.defaultColor = color
+    this.writeMatrices()
   }
 
   /** Mark ids as newly placed so they pop in on the next frames. */
@@ -470,6 +484,10 @@ export class InstancedScene {
       const template = asset ? getResolvedTemplate(asset) : null
       if (!template) continue
       const order = this.orderByAsset.get(bucket) ?? []
+      // Colours only once something is painted, so an untinted table keeps the
+      // plain shader. A mesh with colours needs one in every slot (a new colour
+      // buffer starts black), so the choice is made for the whole bucket up front.
+      const tinted = !!this.defaultColor || order.some((id) => instById.get(id)?.color)
       perPart.forEach((levels, partIdx) => {
         const part = template.parts[partIdx]
         if (!part) return
@@ -488,12 +506,17 @@ export class InstancedScene {
           this.composeMatrix(inst, part.matrix, tmpMat, template.aabb)
           if (im.userData.mirrored) tmpMat.premultiply(MIRROR_X) // undo the mesh's own flip
           im.setMatrixAt(im.count, tmpMat)
+          if (tinted || im.instanceColor) {
+            const color = inst.color ?? this.defaultColor
+            im.setColorAt(im.count, color ? tmpColor.set(color) : WHITE)
+          }
           ;(im.userData.slots as string[]).push(id)
           im.count++
         }
         for (const im of levels) {
           im.visible = im.count > 0
           im.instanceMatrix.needsUpdate = true
+          if (im.instanceColor) im.instanceColor.needsUpdate = true
           im.computeBoundingSphere()
         }
       })

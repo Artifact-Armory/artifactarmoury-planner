@@ -7,6 +7,7 @@ import {
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
   Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer, Triangle, FlipHorizontal2,
+  Palette,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import {
@@ -14,6 +15,7 @@ import {
 } from '@core/terrainFeatures'
 import { FrameQueue } from '@core/frameQueue'
 import { LandformControls } from './LandformControls'
+import { LookPanel } from './LookPanel'
 import { FEATURES } from '@/config/features'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
@@ -83,6 +85,7 @@ const HEAVY_TABLE_MODELS_UNMEASURED = 30
 const LARGE_TABLE_LOAD_MODELS = 20
 
 const M_PER_FT = 0.3048
+const RIGHT_COLLAPSED_KEY = 'tb_right_collapsed_v1'
 // Common tabletop-wargaming board sizes (feet).
 const TABLE_PRESETS: Array<{ label: string; w: number; h: number }> = [
   { label: '2×2', w: 2, h: 2 },
@@ -287,6 +290,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const setPaintMaterial = useAppStore((s) => s.setPaintMaterial)
   const resetPaint = useAppStore((s) => s.actions.resetPaint)
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
+  const [lookPanelOpen, setLookPanelOpen] = React.useState(false)
   const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
 
   // Landforms (editable hills / plateaus / ridges — see core/terrainFeatures.ts).
@@ -414,6 +418,15 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   // Enlarged browse mode for the model palette (wide panel, multi-column grid).
   const [paletteWide, setPaletteWide] = React.useState(false)
   const [bomOpen, setBomOpen] = React.useState(false)
+  // Desktop: the right-hand panels can fold away to a slim rail of icons.
+  const [rightCollapsed, setRightCollapsedState] = React.useState(() => {
+    try { return localStorage.getItem(RIGHT_COLLAPSED_KEY) === '1' } catch { return false }
+  })
+  const setRightCollapsed = (v: boolean) => {
+    setRightCollapsedState(v)
+    try { localStorage.setItem(RIGHT_COLLAPSED_KEY, v ? '1' : '0') } catch { /* per-viewer nicety only */ }
+  }
+  const railed = rightCollapsed && !compact
   // Only one drawer at a time on a narrow screen — together they'd cover the table.
   const openPalette = (open: boolean) => { setPaletteOpen(open); if (open) setBomOpen(false) }
   const openBom = (open: boolean) => { setBomOpen(open); if (open) setPaletteOpen(false) }
@@ -700,12 +713,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           ? await tablesApi.getSharedTable(shareToken)
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
-        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, paint } = deserializeLayout(t.tableConfig, t.layoutData)
+        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness } = deserializeLayout(t.tableConfig, t.layoutData)
         // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
         // artist's unpublished piece) so every placed model renders, not a grey box.
         await resolveAssetsByIds(instances.map((i) => i.assetId))
         if (cancelled) return
-        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint })
+        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness })
         // Pull every distinct model's geometry BEFORE lifting the loading gate
         // (see tableAssetsReady above). ensureTemplate is the same cache the
         // scene uses, so this is not an extra download — it just lets us wait
@@ -1273,7 +1286,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const s = useAppStore.getState()
     return JSON.stringify(serializeLayout(s.table, s.tableMaterial, s.instances, {
       terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
-    }))
+    }, { modelColor: s.modelColor, brightness: s.brightness }))
   }
 
   // Autosave: every 5 minutes, quietly save a table you own if it changed since
@@ -1301,7 +1314,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const s = useAppStore.getState()
     const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, {
       terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
-    })
+    }, { modelColor: s.modelColor, brightness: s.brightness })
     const email = user.email
     const layoutJson = JSON.stringify({ tableConfig, layoutData })
 
@@ -1412,7 +1425,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   }
 
   return (
-    <div className={`tb-fs${paletteWide && !compact ? ' is-pal-wide' : ''}${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}`}>
+    <div className={`tb-fs${paletteWide && !compact ? ' is-pal-wide' : ''}${compact ? ' is-compact' : ''}${coarse ? ' is-touch' : ''}${railed ? ' is-right-railed' : ''}`}>
       <ThreeStage />
 
       {/* Loading gate — blocks interaction until the table, its textures AND
@@ -1531,11 +1544,21 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 : 'Paint the ground texture (grass, sand, snow…)'}
               onClick={() => {
                 const open = !terrainPanelOpen
-                if (open) { setTerrainPanelOpen(true); setSelectedAsset(null) }
+                if (open) { setTerrainPanelOpen(true); setLookPanelOpen(false); setSelectedAsset(null) }
                 else closeTerrainPanel()
               }}
             >
               {FEATURES.terrainSculpt || FEATURES.terrainLandforms ? <Mountain size={18} /> : <Paintbrush size={18} />}
+            </button>
+            <button
+              className={`tb-icon ${lookPanelOpen ? 'is-active' : ''}`}
+              title="Colours & light: paint pieces and set the brightness"
+              onClick={() => {
+                if (!lookPanelOpen && terrainPanelOpen) closeTerrainPanel()
+                setLookPanelOpen(!lookPanelOpen)
+              }}
+            >
+              <Palette size={18} />
             </button>
             {selectedInstanceIds.length > 0 && (
               <>
@@ -1722,6 +1745,8 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {/* Terrain panel. The sculpt brushes and printable-tile export are gated
               behind FEATURES.terrainSculpt (parked — clunky, to be rebuilt); the
               ground-texture painter below is a separate working feature and stays. */}
+          {lookPanelOpen && !terrainPanelOpen && <LookPanel onClose={() => setLookPanelOpen(false)} />}
+
           {terrainPanelOpen && (
             <div className="tb-terrain">
               <div className="tb-terrain-head">
@@ -2142,8 +2167,36 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               models, so placing one never adds it to a basket — see
               addPlacedModelToShopCart) so they get a single "what's on this
               table" view with a net value instead of a buy flow. */}
+          {!compact && !railed && (
+            <button
+              className="tb-bom-handle"
+              onClick={() => setRightCollapsed(true)}
+              title="Hide the basket panel"
+              aria-label="Hide the basket panel"
+            >
+              <ChevronRight size={16} />
+            </button>
+          )}
+          {railed && (
+            <div className="tb-rail">
+              <button className="tb-rail-btn" title="Show your build & basket" onClick={() => setRightCollapsed(false)}>
+                <ShoppingCart size={18} />
+                {cartItems.length > 0 && <span className="tb-drawer-tab-dot">{cartItems.length}</span>}
+              </button>
+              <button
+                className={`tb-rail-btn ${lookPanelOpen ? 'is-active' : ''}`}
+                title="Colours & light"
+                onClick={() => {
+                  if (!lookPanelOpen && terrainPanelOpen) closeTerrainPanel()
+                  setLookPanelOpen(!lookPanelOpen)
+                }}
+              >
+                <Palette size={18} />
+              </button>
+            </div>
+          )}
           <aside
-            className={`tb-bom${compact && !bomOpen ? ' is-stowed' : ''}`}
+            className={`tb-bom${compact && !bomOpen ? ' is-stowed' : ''}${railed ? ' is-collapsed' : ''}`}
             data-tour="planner-bom"
           >
             {isArtist ? (
@@ -2451,7 +2504,25 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           {/* Docked marketplace basket — the SAME cartStore as the shop, so it
               stays consistent everywhere. Add individual models by tapping them,
               or drop the whole build in at once. */}
-          <aside className={`tb-bom tb-view-basket${compact && !bomOpen ? ' is-stowed' : ''}`}>
+          {!compact && !railed && (
+            <button
+              className="tb-bom-handle"
+              onClick={() => setRightCollapsed(true)}
+              title="Hide your basket"
+              aria-label="Hide your basket"
+            >
+              <ChevronRight size={16} />
+            </button>
+          )}
+          {railed && (
+            <div className="tb-rail">
+              <button className="tb-rail-btn" title="Show your basket" onClick={() => setRightCollapsed(false)}>
+                <ShoppingCart size={18} />
+                {cartItems.length > 0 && <span className="tb-drawer-tab-dot">{cartItems.length}</span>}
+              </button>
+            </div>
+          )}
+          <aside className={`tb-bom tb-view-basket${compact && !bomOpen ? ' is-stowed' : ''}${railed ? ' is-collapsed' : ''}`}>
             <div className="tb-bom-head">
               <strong>Your basket</strong>
               <span className="tb-small">{cartItems.length} item{cartItems.length === 1 ? '' : 's'}</span>

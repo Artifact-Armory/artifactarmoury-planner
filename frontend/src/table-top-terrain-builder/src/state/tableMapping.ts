@@ -32,8 +32,19 @@ export interface LayoutTerrain {
   paint?: PaintMap | null
 }
 
+/** Table-wide look: piece colour and lighting. */
+export interface LayoutLook {
+  modelColor?: string | null
+  brightness?: number
+}
+
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i
+function readColour(v: unknown): string | undefined {
+  return typeof v === 'string' && HEX_COLOUR.test(v) ? v.toLowerCase() : undefined
+}
+
 /** Planner scene → server { tableConfig, layoutData }. */
-export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], terrain: LayoutTerrain = {}) {
+export function serializeLayout(table: Table, tableMaterial: string, instances: Instance[], terrain: LayoutTerrain = {}, look: LayoutLook = {}) {
   const features = terrain.terrainFeatures ?? []
   const detail = terrain.terrainDetail ?? null
   const surface = features.length ? compositeHeightmap(features, detail, table) : detail
@@ -44,6 +55,9 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
       unitDisplay: table.unitDisplay,
       gridSize: table.gridSize,
       material: tableMaterial,
+      // Only written when changed, so untouched tables save as before.
+      ...(look.modelColor ? { modelColor: look.modelColor } : {}),
+      ...(look.brightness != null && look.brightness !== 1 ? { brightness: look.brightness } : {}),
     },
     // Backend requires layout_data.models to be an array.
     layoutData: {
@@ -58,6 +72,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
         groupId: i.groupId ?? null,
         // Only written when set, so tables without mirrored pieces save as before.
         ...(i.mirrored ? { mirrored: true } : {}),
+        ...(i.color ? { color: i.color } : {}),
       })),
       // Sculpted surface (null/omitted when the table is flat).
       heightmap: serializeHeightmap(surface),
@@ -77,7 +92,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
 export function deserializeLayout(
   tableConfig: any,
   layoutData: any,
-): { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail: Heightmap | null; terrainFeatures: TerrainFeature[]; paint: PaintMap | null } {
+): { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail: Heightmap | null; terrainFeatures: TerrainFeature[]; paint: PaintMap | null; modelColor: string | null; brightness: number } {
   const tc = tableConfig ?? {}
   const table: Table = {
     width: Number(tc.width ?? DEFAULT_TABLE.width) || DEFAULT_TABLE.width,
@@ -97,6 +112,7 @@ export function deserializeLayout(
       level: Number(m.level ?? 0),
       groupId: m.groupId ?? undefined,
       ...(m.mirrored === true ? { mirrored: true } : {}),
+      ...(readColour(m.color) ? { color: readColour(m.color) } : {}),
     }))
     .filter((i: Instance) => i.assetId)
 
@@ -107,5 +123,10 @@ export function deserializeLayout(
   const terrainDetail = deserializeHeightmap(layered ? layoutData?.terrainDetail : layoutData?.heightmap, table)
   const paint = deserializePaint(layoutData?.paint, table)
 
-  return { table, tableMaterial: tc.material, instances, terrainDetail, terrainFeatures, paint }
+  const brightness = Number(tc.brightness ?? 1)
+  return {
+    table, tableMaterial: tc.material, instances, terrainDetail, terrainFeatures, paint,
+    modelColor: readColour(tc.modelColor) ?? null,
+    brightness: Number.isFinite(brightness) && brightness > 0 ? brightness : 1,
+  }
 }
