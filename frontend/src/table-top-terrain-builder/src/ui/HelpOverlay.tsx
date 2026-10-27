@@ -75,6 +75,7 @@ const GROUPS: Group[] = [
       ['Rotate freely (any angle)', 'Drag an orange arrow at its base'],
       ['Tilt upright / lay flat', 'T'],
       ['Tilt the other way', 'Shift + T'],
+      ['Tilt sideways (stands up pieces T only rolls over)', 'Y / Shift + Y'],
       ['Fine-nudge (fits pieces inside each other)', 'Alt + Arrow keys'],
       ['Move up / down a level', 'PgUp / PgDn'],
       ['Fine-nudge up / down', 'Alt + PgUp / PgDn'],

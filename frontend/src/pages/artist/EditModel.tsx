@@ -8,7 +8,8 @@ import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET
 import { termToken, MODEL_CLASS_SLUG } from '../../api/endpoints/taxonomy'
 import { LICENSE_OPTIONS, licenseInfo } from '../../utils/licenses'
 import { PRINTER_TYPE_OPTIONS, meshSeriousWarning } from '../../utils/printability'
-import { Upload, AlertTriangle, Trash2, Plus, X, Pencil } from 'lucide-react'
+import { Upload, AlertTriangle, Trash2, Plus, X, Pencil, FileText } from 'lucide-react'
+import { formatBytes } from '../../utils/format'
 
 // Lazy — this pulls in vanilla three + GLTFLoader/DRACOLoader/OrbitControls directly.
 // EditModel is statically imported by app.tsx (every page is), so a static import here
@@ -28,6 +29,8 @@ const CATEGORIES = [
 // Must match backend MAX_GALLERY_IMAGES (routes/models.ts) — fast client-side
 // fail before wasting an upload, same convention as the model-file size cap.
 const MAX_GALLERY_IMAGES = 40
+// Must match backend MAX_DOCUMENT_BYTES (routes/models.ts).
+const MAX_DOCUMENT_MB = 25
 
 function errMessage(err: unknown, fallback: string): string {
   const anyErr = err as any
@@ -163,6 +166,11 @@ const EditModel: React.FC = () => {
   const [galleryErr, setGalleryErr] = React.useState<string | null>(null)
   const [deletingImageId, setDeletingImageId] = React.useState<string | null>(null)
 
+  // Extra PDF (game rules etc.) — like gallery photos, uploads attach immediately.
+  const [docBusy, setDocBusy] = React.useState(false)
+  const [docErr, setDocErr] = React.useState<string | null>(null)
+  const [docPublic, setDocPublic] = React.useState(false)
+
   // Serious mesh warning (real open edges/holes) override.
   const [meshAckChecked, setMeshAckChecked] = React.useState(false)
   const [meshAckBusy, setMeshAckBusy] = React.useState(false)
@@ -280,6 +288,54 @@ const EditModel: React.FC = () => {
       setGalleryErr(errMessage(err, 'Could not upload one or more photos'))
     } finally {
       setGalleryBusy(false)
+    }
+  }
+
+  /** Upload a PDF and attach it to the listing (replaces any existing one). */
+  async function handleAddDocument(file: File | undefined) {
+    if (!id || !file) return
+    setDocErr(null)
+    if (!/\.pdf$/i.test(file.name)) { setDocErr('Please choose a PDF file.'); return }
+    if (file.size > MAX_DOCUMENT_MB * 1024 * 1024) { setDocErr(`PDFs can be up to ${MAX_DOCUMENT_MB}MB.`); return }
+    setDocBusy(true)
+    try {
+      const { key } = await uploadsApi.uploadDirect(file, 'docs')
+      const isPublic = model?.document?.isPublic ?? docPublic
+      await modelsApi.setDocument(id, { key, filename: file.name, isPublic })
+      await load()
+    } catch (err) {
+      setDocErr(errMessage(err, 'Could not upload the PDF'))
+    } finally {
+      setDocBusy(false)
+    }
+  }
+
+  async function handleDocumentPublic(isPublic: boolean) {
+    setDocPublic(isPublic)
+    if (!id || !model?.document) return
+    setDocBusy(true)
+    setDocErr(null)
+    try {
+      await modelsApi.setDocumentPublic(id, isPublic)
+      await load()
+    } catch (err) {
+      setDocErr(errMessage(err, 'Could not save that'))
+    } finally {
+      setDocBusy(false)
+    }
+  }
+
+  async function handleRemoveDocument() {
+    if (!id) return
+    setDocBusy(true)
+    setDocErr(null)
+    try {
+      await modelsApi.removeDocument(id)
+      await load()
+    } catch (err) {
+      setDocErr(errMessage(err, 'Could not remove the PDF'))
+    } finally {
+      setDocBusy(false)
     }
   }
 
@@ -1042,6 +1098,61 @@ const EditModel: React.FC = () => {
           <p className="mt-1 text-xs text-muted-foreground">Maximum reached — remove one to add another.</p>
         )}
         {galleryErr && <p className="mt-2 text-sm text-red-600">{galleryErr}</p>}
+      </div>
+
+      {/* Extra PDF — game rules, painting guide, assembly notes. One per listing. */}
+      <div className="mt-8 rounded-lg border border-border p-4">
+        <h2 className="text-base font-semibold text-foreground">PDF (optional)</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Add game rules, a painting guide or assembly notes. Buyers can download it with the model. Up to {MAX_DOCUMENT_MB}MB.
+        </p>
+
+        {model?.document && (
+          <div className="mt-4 flex items-center gap-3 rounded-sm border border-border px-3 py-2">
+            <FileText size={18} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{model.document.name}</span>
+            <span className="text-xs text-muted-foreground">{formatBytes(model.document.sizeBytes)}</span>
+            <button
+              type="button"
+              onClick={handleRemoveDocument}
+              disabled={docBusy}
+              className="text-red-600 hover:text-red-700 disabled:opacity-50"
+              title="Remove this PDF"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        )}
+
+        <label className="mt-4 flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={model?.document ? model.document.isPublic : docPublic}
+            disabled={docBusy}
+            onChange={(e) => handleDocumentPublic(e.target.checked)}
+          />
+          Free for anyone to download from the listing page (not just buyers)
+        </label>
+
+        <label
+          className={`mt-4 flex w-fit cursor-pointer items-center justify-center gap-2 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent ${
+            docBusy ? 'pointer-events-none opacity-50' : ''
+          }`}
+        >
+          <Upload size={16} />
+          {docBusy ? 'Uploading…' : model?.document ? 'Replace PDF…' : 'Add a PDF…'}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            disabled={docBusy}
+            onChange={(e) => {
+              handleAddDocument(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
+        </label>
+        {docErr && <p className="mt-2 text-sm text-red-600">{docErr}</p>}
       </div>
 
       {/* Models within this listing ("Small Village" — several named models

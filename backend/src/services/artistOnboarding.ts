@@ -18,7 +18,7 @@ import { ValidationError } from '../middleware/error'
  * WHICH agreement each artist actually accepted — a bare timestamp stops being
  * evidence the moment the text is edited.
  */
-export const SELLER_TERMS_VERSION = '2026-10-05-v2'
+export const SELLER_TERMS_VERSION = '2026-10-27-v3'
 
 export interface InviteRow {
   id: string
@@ -102,13 +102,15 @@ export async function sendWelcomeToNewArtist(userId: string): Promise<void> {
     const { db } = await import('../db')
     const { sendArtistWelcome } = await import('./email')
     const { PAYOUT_HOLD_DAYS } = await import('./earnings')
+    const { cardFeePercentFor } = await import('./cardFee')
     const row = (await db.query(
-      `SELECT email, COALESCE(NULLIF(artist_name, ''), display_name) AS name, commission_rate
+      `SELECT email, COALESCE(NULLIF(artist_name, ''), display_name) AS name, commission_rate,
+              card_fee_percent, became_artist_at, created_at
        FROM users WHERE id = $1`,
       [userId],
     )).rows[0]
     if (!row) return
-    await sendArtistWelcome({ email: row.email, name: row.name }, Number(row.commission_rate) || 85, PAYOUT_HOLD_DAYS)
+    await sendArtistWelcome({ email: row.email, name: row.name }, Number(row.commission_rate) || 85, PAYOUT_HOLD_DAYS, cardFeePercentFor(row))
   } catch {
     /* never block onboarding on an email */
   }

@@ -6,11 +6,9 @@ import { Router } from 'express';
 import { db } from '../db';
 import { authenticate, requireArtist, type AuthRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
-import { createNotification } from '../services/notifications';
-import logger from '../utils/logger';
+import { notifyResponse, autoResponseFor } from '../services/collaborations';
 
 const router = Router();
-const log = logger.child('COLLAB');
 
 // Incoming requests for the signed-in artist, each with the requester, the table,
 // and the specific models of theirs on that table (with current approval state).
@@ -50,6 +48,31 @@ router.get(
       [me],
     );
     res.json({ requests: result.rows });
+  }),
+);
+
+// How I answer new requests: 'manual' (the default, each one waits for me),
+// 'accept' (all my models allowed) or 'decline'. Only affects future requests.
+router.get(
+  '/settings',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    res.json({ autoResponse: await autoResponseFor(req.user!.id) });
+  }),
+);
+
+router.put(
+  '/settings',
+  authenticate,
+  requireArtist,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { autoResponse } = req.body as { autoResponse?: string };
+    if (autoResponse !== 'manual' && autoResponse !== 'accept' && autoResponse !== 'decline') {
+      return res.status(400).json({ error: 'autoResponse must be "manual", "accept" or "decline"' });
+    }
+    await db.query('UPDATE users SET collab_auto_response = $2 WHERE id = $1', [req.user!.id, autoResponse]);
+    res.json({ autoResponse });
   }),
 );
 
@@ -114,27 +137,5 @@ router.post(
     res.json({ ok: true, status: 'accepted', approveAll: all });
   }),
 );
-
-/** Tell the requester (A) that B accepted/declined their collaboration request. */
-async function notifyResponse(requesterId: string, responderId: string, tableId: string, accepted: boolean): Promise<void> {
-  try {
-    const [responder, table] = await Promise.all([
-      db.query(`SELECT COALESCE(NULLIF(artist_name, ''), display_name, 'An artist') AS name FROM users WHERE id = $1`, [responderId]),
-      db.query('SELECT name FROM user_tables WHERE id = $1', [tableId]),
-    ]);
-    const who = responder.rows[0]?.name ?? 'An artist';
-    const tbl = table.rows[0]?.name ?? 'your showcase';
-    await createNotification({
-      userId: requesterId,
-      type: accepted ? 'collab_accepted' : 'collab_declined',
-      title: accepted ? `${who} accepted your collaboration` : `${who} declined your collaboration`,
-      body: accepted ? `You can now publish "${tbl}"` : `You'll need to remove their models to publish "${tbl}"`,
-      link: '/artist/showcases',
-      actorId: responderId,
-    });
-  } catch (err) {
-    log.error('notifyResponse failed', { error: err, requesterId, tableId });
-  }
-}
 
 export default router;

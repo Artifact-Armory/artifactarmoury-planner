@@ -59,6 +59,11 @@ CREATE TABLE users (
     shadow_banned BOOLEAN NOT NULL DEFAULT false,
     -- Display-only seller (migration 073): listings show but can't be bought.
     sales_disabled BOOLEAN NOT NULL DEFAULT false,
+    -- Card fee override (migration 082); NULL = standard rule in services/cardFee.ts.
+    card_fee_percent DECIMAL(5,2),
+    -- Collaboration requests: 'manual' | 'accept' | 'decline' (migration 084).
+    collab_auto_response VARCHAR(10) NOT NULL DEFAULT 'manual'
+        CHECK (collab_auto_response IN ('manual', 'accept', 'decline')),
 
     -- Optional TOTP two-factor auth (migration 031). totp_secret is encrypted at
     -- rest (services/totp.ts); backup codes are stored hashed.
@@ -291,6 +296,18 @@ CREATE TABLE model_images (
     display_order INTEGER DEFAULT 0,
     caption TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One extra PDF per listing, e.g. game rules (migration 084). file_path is the
+-- R2 key and never leaves the server; is_public = free to anyone, else buyers only.
+CREATE TABLE model_documents (
+    model_id   UUID PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
+    file_path  TEXT NOT NULL,
+    file_name  VARCHAR(100) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    is_public  BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_model_images_model ON model_images(model_id);
@@ -616,6 +633,7 @@ CREATE TABLE order_items (
     -- Artist commission
     artist_commission_rate DECIMAL(5,2) NOT NULL,
     artist_commission_amount DECIMAL(10,2) NOT NULL,
+    artist_card_fee DECIMAL(10,2) NOT NULL DEFAULT 0, -- migration 082; already taken out of artist_commission_amount
     commission_paid BOOLEAN DEFAULT false,
     commission_paid_at TIMESTAMP,
     
@@ -784,6 +802,11 @@ CREATE TABLE payouts (
     paid_at    TIMESTAMP
 );
 CREATE INDEX idx_payouts_artist ON payouts(artist_id, status);
+-- One row per month whose scheduled payout run has happened (migration 083).
+CREATE TABLE payout_runs (
+    run_month DATE PRIMARY KEY,
+    ran_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 -- Now that payouts exists, wire the earnings→payout FK.
 ALTER TABLE artist_earnings
     ADD CONSTRAINT artist_earnings_payout_fk

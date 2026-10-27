@@ -30,6 +30,7 @@ import {
 } from '../services/promoCodes';
 import { rateFor, vatOnLines, isKnownTaxCountry, DEFAULT_TAX_COUNTRY } from '../services/vat';
 import { calculateOrderTax, recordTaxTransaction } from '../services/stripeTax';
+import { cardFeeOn, cardFeePercentFor } from '../services/cardFee';
 
 const router = Router();
 
@@ -196,7 +197,7 @@ router.post('/',
       const orderItems: Array<{
         modelId: string; artistId: string; modelName: string; modelSnapshot: any;
         unitPrice: number; originalPrice: number; discountAmount: number; promoCodeId: string | null;
-        commissionRate: number; commissionAmount: number;
+        commissionRate: number; commissionAmount: number; cardFee: number;
         bundleId: string | null; bundleName: string | null;
       }> = [];
       let subtotal = 0;
@@ -238,6 +239,11 @@ router.post('/',
           // codes existed.
           commissionAmount = Math.round(originalPrice * commissionRate) / 100;
         }
+        // The artist's card fee (services/cardFee.ts): a percent of what this line
+        // sells for before VAT, out of the artist's share. commissionAmount stays the
+        // artist's take-home, so earnings and payouts need no change.
+        const cardFee = Math.min(cardFeeOn(finalPrice, cardFeePercentFor(model)), commissionAmount);
+        commissionAmount = Math.round((commissionAmount - cardFee) * 100) / 100;
         orderItems.push({
           modelId: model.id,
           artistId: model.artist_id,
@@ -257,6 +263,7 @@ router.post('/',
           promoCodeId,
           commissionRate,
           commissionAmount,
+          cardFee,
           bundleId,
           bundleName,
         });
@@ -277,7 +284,7 @@ router.post('/',
           assertSellable(bundle.sales_disabled, bundle.name);
 
           const modelsResult = await client.query(
-            `SELECT m.*, u.commission_rate, u.sales_disabled
+            `SELECT m.*, u.commission_rate, u.sales_disabled, u.card_fee_percent, COALESCE(u.became_artist_at, u.created_at) AS became_artist_at
              FROM bundle_items bi
              JOIN models m ON bi.model_id = m.id
              JOIN users u ON m.artist_id = u.id
@@ -331,7 +338,7 @@ router.post('/',
         } else if (item?.modelId) {
           // --- Single model -------------------------------------------------
           const modelResult = await client.query(
-            `SELECT m.*, u.commission_rate, u.sales_disabled
+            `SELECT m.*, u.commission_rate, u.sales_disabled, u.card_fee_percent, COALESCE(u.became_artist_at, u.created_at) AS became_artist_at
              FROM models m JOIN users u ON m.artist_id = u.id
              WHERE m.id = $1 AND m.status = 'published'`,
             [item.modelId]
@@ -482,8 +489,8 @@ router.post('/',
             model_name, model_snapshot,
             quantity, unit_price, total_price,
             artist_commission_rate, artist_commission_amount,
-            original_price, discount_amount, promo_code_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9, $10, $11, $12, $13)
+            original_price, discount_amount, promo_code_id, artist_card_fee
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9, $10, $11, $12, $13, $14)
           RETURNING id`,
           [
             order.id,
@@ -499,6 +506,7 @@ router.post('/',
             item.originalPrice,
             item.discountAmount,
             item.promoCodeId,
+            item.cardFee,
           ]
         );
         if (item.discountAmount > 0 && item.promoCodeId) {
@@ -754,6 +762,7 @@ router.get('/library',
       `SELECT m.*,
               u.artist_name, u.artist_bio, u.artist_url,
               MIN(o.created_at) AS purchased_at,
+              (SELECT d.file_name FROM model_documents d WHERE d.model_id = m.id) AS document_name,
               (SELECT COALESCE(AVG(rr.rating), 0) FROM reviews rr
                  WHERE rr.model_id = m.id AND rr.is_visible = true) AS average_rating,
               (SELECT COUNT(*) FROM reviews rr

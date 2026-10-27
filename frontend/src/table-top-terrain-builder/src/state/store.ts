@@ -123,6 +123,7 @@ export type Instance = {
   position: { x: number; z: number }
   rotationDeg: number  // yaw about the vertical (Y) axis
   pitchDeg?: number    // tilt about the X axis (stand a model up / lay it flat); 0 = default
+  rollDeg?: number     // tilt sideways about the model's own Z axis (Y key); undefined = artist default
   mirrored?: boolean   // flipped left-to-right in its own frame (M key); undefined = not mirrored
   level: number        // discrete elevation level of the piece's base (0 = table)
   /** Shared id linking pieces "fused" together (e.g. a stack) so they select,
@@ -369,8 +370,9 @@ interface AppState {
     addInstance: (i: Omit<Instance,'id'>) => string
     updateInstance: (id: string, patch: Partial<Omit<Instance,'id'|'assetId'>>) => void
     updateInstances: (patches: Array<{ id: string; patch: Partial<Omit<Instance,'id'|'assetId'>> }>) => void
-    /** Tilt the current selection by deltaDeg about X (e.g. ±90 to stand up / lay flat). */
-    tiltSelected: (deltaDeg: number) => void
+    /** Tilt the current selection by deltaDeg about X ('pitch', T key) or sideways
+     *  about the model's own Z ('roll', Y key), e.g. ±90 to stand up / lay flat. */
+    tiltSelected: (deltaDeg: number, axis?: 'pitch' | 'roll') => void
     mirrorSelected: () => void
     /** Paint the given pieces one colour (null = back to the table's piece colour). One undo step. */
     colourInstances: (ids: string[], color: string | null) => void
@@ -983,9 +985,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     },
     
-    // Tilt every selected piece by deltaDeg about X, wrapped to [0,360). One
-    // undoable step (updateInstances saves history).
-    tiltSelected: (deltaDeg) => {
+    // Tilt every selected piece by deltaDeg about X (pitch) or sideways about its
+    // own Z (roll), wrapped to [0,360). Pitch alone can't stand up a piece whose
+    // long side runs along X (it just rolls over), hence roll. One undoable step
+    // (updateInstances saves history).
+    tiltSelected: (deltaDeg, axis = 'pitch') => {
       const ids = get().selectedInstanceIds
       if (!ids.length) return
       const byId = new Map(get().instances.map(i => [i.id, i]))
@@ -993,10 +997,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         .map(id => {
           const i = byId.get(id)
           if (!i) return null
-          const next = (((i.pitchDeg ?? 0) + deltaDeg) % 360 + 360) % 360
-          return { id, patch: { pitchDeg: next } }
+          const current = axis === 'roll'
+            ? i.rollDeg ?? getAssetById(i.assetId)?.defaultRollDeg ?? 0
+            : i.pitchDeg ?? 0
+          const next = ((current + deltaDeg) % 360 + 360) % 360
+          const patch: Partial<Instance> = axis === 'roll' ? { rollDeg: next } : { pitchDeg: next }
+          return { id, patch }
         })
-        .filter((p): p is { id: string; patch: { pitchDeg: number } } => p !== null)
+        .filter((p): p is { id: string; patch: Partial<Instance> } => p !== null)
       get().actions.updateInstances(patches)
     },
 

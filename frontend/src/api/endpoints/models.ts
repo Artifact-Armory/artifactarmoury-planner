@@ -539,6 +539,39 @@ export const modelsApi = {
     window.URL.revokeObjectURL(url);
   },
 
+  /** Attach (or replace) the listing's PDF — `key` is a docs/ upload from uploadsApi.uploadDirect. */
+  setDocument: async (modelId: string, payload: { key: string; filename: string; isPublic: boolean }) => {
+    const response = await apiClient.put(`${BASE_URL}/${modelId}/document`, payload);
+    return response.data?.document as { name: string; sizeBytes: number; isPublic: boolean };
+  },
+
+  setDocumentPublic: async (modelId: string, isPublic: boolean) => {
+    const response = await apiClient.patch(`${BASE_URL}/${modelId}/document`, { isPublic });
+    return response.data?.document as { name: string; sizeBytes: number; isPublic: boolean };
+  },
+
+  removeDocument: async (modelId: string): Promise<void> => {
+    await apiClient.delete(`${BASE_URL}/${modelId}/document`);
+  },
+
+  /** Download the listing's PDF (buyers, the artist, or anyone when it's public). */
+  downloadDocument: async (modelId: string, fallbackName = 'document.pdf'): Promise<void> => {
+    const response = await apiClient.get(`${BASE_URL}/${modelId}/document`, {
+      responseType: 'blob',
+      timeout: 120000,
+    });
+    const cd = String(response.headers?.['content-disposition'] ?? '');
+    const match = cd.match(/filename="?([^"]+)"?/i);
+    const url = window.URL.createObjectURL(response.data as Blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = match?.[1] || fallbackName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   /**
    * Public planner tables that feature this model ("shop the look").
    */

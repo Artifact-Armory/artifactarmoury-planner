@@ -1391,10 +1391,17 @@ router.get('/:id',
       preview_skipped: !!p.preview_skipped, has_preview: !!p.has_preview,
     }));
 
+    // Extra PDF (084): name/size/public only — never the R2 key.
+    const doc = (await db.query(
+      'SELECT file_name, size_bytes, is_public FROM model_documents WHERE model_id = $1',
+      [id]
+    )).rows[0];
+
     res.json({
       model: {
         ...model,
         has_glb: hasGlb,
+        document: doc ? { name: doc.file_name, sizeBytes: Number(doc.size_bytes), isPublic: doc.is_public } : null,
         images: imagesResult.rows,
         recentReviews: reviewsResult.rows,
         parts: safeParts,
@@ -1960,6 +1967,150 @@ router.delete('/:id/images/:imageId',
       message: 'Image deleted successfully',
       imageId
     });
+  })
+);
+
+// ============================================================================
+// EXTRA PDF (migration 084): game rules, painting guides etc. One per listing.
+// Buyers get it alongside the model; the artist can also make it free to anyone.
+// The R2 key lives in its own table so the models.* reads never carry it.
+// ============================================================================
+
+const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+const DOCUMENT_KEY = /^docs\/[0-9a-f]{32}\.pdf$/;
+
+/** Clean display name for the PDF, always ending .pdf. */
+function documentFileName(raw: unknown): string {
+  const base = String(raw ?? '').replace(/\.pdf$/i, '').replace(/[^\w .()-]+/g, '_').trim().slice(0, 80);
+  return `${base || 'document'}.pdf`;
+}
+
+router.put('/:id/document',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  uploadRateLimit,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { key, filename, isPublic } = req.body ?? {};
+    if (typeof key !== 'string' || !DOCUMENT_KEY.test(key)) {
+      throw new ValidationError('key must be a docs/ PDF from /api/uploads/presign');
+    }
+    if (!isR2Enabled()) throw new ValidationError('Uploads are not configured (R2 disabled)');
+
+    const size = await objectSize(key);
+    if (size == null) throw new ValidationError('The PDF upload was not found — please try again');
+    if (size > MAX_DOCUMENT_BYTES) {
+      await safeDeleteObject(key);
+      throw new ValidationError(`PDFs can be up to ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB`);
+    }
+    // Check it really is a PDF, not something renamed to .pdf.
+    const { stream } = await getObjectStream(key);
+    let head = Buffer.alloc(0);
+    try {
+      for await (const chunk of stream as AsyncIterable<Buffer>) {
+        head = Buffer.concat([head, chunk]);
+        if (head.length >= 5) break;
+      }
+    } finally {
+      stream.destroy();
+    }
+    if (head.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      await safeDeleteObject(key);
+      throw new ValidationError('That file is not a PDF');
+    }
+
+    const previous = await db.query('SELECT file_path FROM model_documents WHERE model_id = $1', [id]);
+    const result = await db.query(
+      `INSERT INTO model_documents (model_id, file_path, file_name, size_bytes, is_public)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (model_id) DO UPDATE
+         SET file_path = EXCLUDED.file_path, file_name = EXCLUDED.file_name,
+             size_bytes = EXCLUDED.size_bytes, is_public = EXCLUDED.is_public, updated_at = NOW()
+       RETURNING file_name, size_bytes, is_public`,
+      [id, key, documentFileName(filename), size, isPublic === true],
+    );
+    const old = previous.rows[0]?.file_path;
+    if (old && old !== key) await safeDeleteObject(old);
+
+    const d = result.rows[0];
+    res.json({ document: { name: d.file_name, sizeBytes: Number(d.size_bytes), isPublic: d.is_public } });
+  })
+);
+
+router.patch('/:id/document',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { isPublic } = req.body ?? {};
+    if (typeof isPublic !== 'boolean') throw new ValidationError('isPublic must be true or false');
+    const result = await db.query(
+      `UPDATE model_documents SET is_public = $2, updated_at = NOW() WHERE model_id = $1
+       RETURNING file_name, size_bytes, is_public`,
+      [id, isPublic],
+    );
+    if (result.rows.length === 0) throw new NotFoundError('PDF');
+    const d = result.rows[0];
+    res.json({ document: { name: d.file_name, sizeBytes: Number(d.size_bytes), isPublic: d.is_public } });
+  })
+);
+
+router.delete('/:id/document',
+  authenticate,
+  requireArtist,
+  requireModelOwnership,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const result = await db.query('DELETE FROM model_documents WHERE model_id = $1 RETURNING file_path', [id]);
+    if (result.rows[0]?.file_path) await safeDeleteObject(result.rows[0].file_path);
+    res.json({ ok: true });
+  })
+);
+
+router.get('/:id/document',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+    const row = (await db.query(
+      `SELECT d.file_path, d.file_name, d.is_public, m.artist_id, m.status, m.visibility
+       FROM model_documents d JOIN models m ON m.id = d.model_id
+       WHERE d.model_id = $1`,
+      [id]
+    )).rows[0];
+    if (!row) throw new NotFoundError('PDF');
+    const isAdminViewer = (req as any).user?.role === 'admin';
+    // Same takedown rule as the model download.
+    if ((row.status === 'archived' || row.status === 'flagged') && !isAdminViewer) {
+      throw new AuthorizationError('This listing is unavailable');
+    }
+    if (!isR2Enabled()) throw new ValidationError('Downloads are not configured (R2 disabled)');
+
+    const freeToAll = row.is_public && row.status === 'published' && row.visibility === 'public';
+    if (!freeToAll && !isAdminViewer && row.artist_id !== userId) {
+      if (!userId) throw new AuthorizationError('Sign in to download this PDF');
+      const owned = await db.query(
+        `SELECT 1 FROM order_items oi JOIN orders o ON oi.order_id = o.id
+         WHERE oi.model_id = $1 AND o.user_id = $2 AND o.payment_status = 'succeeded' AND oi.refunded_at IS NULL
+         LIMIT 1`,
+        [id, userId]
+      );
+      if (owned.rows.length === 0) throw new AuthorizationError('This PDF comes with the model — buy it to download');
+    }
+
+    const { stream, size } = await getObjectStream(row.file_path);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('Content-Disposition', `attachment; filename="${String(row.file_name).replace(/"/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    stream.on('error', (err) => {
+      logger.error('PDF download stream failed', { error: err, id });
+      res.destroy();
+    });
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
   })
 );
 

@@ -43,7 +43,7 @@ const ArtistApplication: React.FC = () => {
         <h1 className="text-3xl font-semibold text-foreground">Become an {SITE_NAME} artist</h1>
         <p className="mt-3 text-sm text-muted-foreground">
           Send us your portfolio and if it&apos;s a good fit we&apos;ll turn your account into an artist account straight
-          away. Artists keep at least 85% of every sale and get sales and engagement stats for every listing.
+          away. Artists keep 85% of every sale (less a 1.5% card fee) and get sales and engagement stats for every listing.
         </p>
 
         <div className="mt-6 grid gap-6 sm:grid-cols-2">

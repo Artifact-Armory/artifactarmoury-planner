@@ -430,7 +430,7 @@ export class InstancedScene {
     // stood upright / laid flat. Pivot is the base-centre (base sits on the table).
     tmpQuat.setFromAxisAngle(tmpYAxis, THREE.MathUtils.degToRad(rotDeg))
     const pitchDeg = inst.pitchDeg ?? 0
-    const rollDeg = getAssetById(inst.assetId)?.defaultRollDeg ?? 0
+    const rollDeg = inst.rollDeg ?? getAssetById(inst.assetId)?.defaultRollDeg ?? 0
     // When a piece is tilted, its base-aligned geometry (y ∈ [0, H]) rotates about
     // the base-centre: its lowest point drops below the table and it swings off to
     // one side. Re-ground and re-centre it (offset turned by the yaw) so the tilted

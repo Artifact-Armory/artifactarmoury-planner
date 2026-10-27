@@ -1579,6 +1579,13 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
                 </button>
                 <button
                   className="tb-icon"
+                  title="Tilt selection sideways 90° (Y)"
+                  onClick={() => tiltSelected(90, 'roll')}
+                >
+                  <RotateCw size={18} style={{ transform: 'rotate(90deg)' }} />
+                </button>
+                <button
+                  className="tb-icon"
                   title="Mirror selection (M)"
                   onClick={() => mirrorSelected()}
                 >

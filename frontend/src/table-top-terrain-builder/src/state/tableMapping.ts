@@ -68,6 +68,8 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
         z: i.position.z,
         rotationDeg: i.rotationDeg,
         pitchDeg: i.pitchDeg ?? 0,
+        // Only written when tilted sideways, so other tables save as before.
+        ...(i.rollDeg != null ? { rollDeg: i.rollDeg } : {}),
         level: i.level ?? 0,
         groupId: i.groupId ?? null,
         // Only written when set, so tables without mirrored pieces save as before.
@@ -109,6 +111,7 @@ export function deserializeLayout(
       position: { x: Number(m.x ?? m.position?.x ?? 0), z: Number(m.z ?? m.position?.z ?? 0) },
       rotationDeg: Number(m.rotationDeg ?? m.rotation ?? 0),
       pitchDeg: Number(m.pitchDeg ?? 0),
+      ...(m.rollDeg != null && Number.isFinite(Number(m.rollDeg)) ? { rollDeg: Number(m.rollDeg) } : {}),
       level: Number(m.level ?? 0),
       groupId: m.groupId ?? undefined,
       ...(m.mirrored === true ? { mirrored: true } : {}),

@@ -76,8 +76,11 @@ const ArtistPayouts: React.FC = () => {
     <div className="mx-auto max-w-5xl px-4 py-8">
       <h1 className="text-2xl font-semibold text-foreground">Payouts</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        You keep {config.artistSharePercent}% of each sale. Earnings clear after a {config.holdDays}-day
-        hold, then pay out automatically once your balance passes {formatPrice(config.minPayout)}.
+        You keep {config.artistSharePercent}% of each sale
+        {config.cardFeePercent > 0
+          ? `, less a ${config.cardFeePercent}% card fee`
+          : ' and, as a founding artist, pay no card fees'}. Earnings clear after a {config.holdDays}-day
+        hold, then pay out automatically on the 1st of each month once your balance passes {formatPrice(config.minPayout)}.
       </p>
 
       {/* Connect status banner */}

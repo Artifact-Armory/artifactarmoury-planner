@@ -106,6 +106,53 @@ async function notifyRequest(collaboratorId: string, requesterId: string, tableI
   });
 }
 
+export type CollabAutoResponse = 'manual' | 'accept' | 'decline';
+
+/** How an artist answers new collaboration requests (migration 084). */
+export async function autoResponseFor(userId: string): Promise<CollabAutoResponse> {
+  const result = await db.query('SELECT collab_auto_response FROM users WHERE id = $1', [userId]);
+  const v = result.rows[0]?.collab_auto_response;
+  return v === 'accept' || v === 'decline' ? v : 'manual';
+}
+
+/** Tell B their models were featured and their auto-accept setting approved it. */
+async function notifyAutoAccepted(collaboratorId: string, requesterId: string, tableId: string): Promise<void> {
+  const [requester, table] = await Promise.all([
+    db.query(`SELECT COALESCE(NULLIF(artist_name, ''), display_name, 'An artist') AS name FROM users WHERE id = $1`, [requesterId]),
+    db.query('SELECT name FROM user_tables WHERE id = $1', [tableId]),
+  ]);
+  await createNotification({
+    userId: collaboratorId,
+    type: 'collab_auto_accepted',
+    title: `${requester.rows[0]?.name ?? 'An artist'} is featuring your models`,
+    body: `In the showcase "${table.rows[0]?.name ?? 'a table'}" (accepted automatically)`,
+    link: '/artist/collaborations',
+    actorId: requesterId,
+  });
+}
+
+/** Tell the requester (A) that B accepted/declined their collaboration request. */
+export async function notifyResponse(requesterId: string, responderId: string, tableId: string, accepted: boolean): Promise<void> {
+  try {
+    const [responder, table] = await Promise.all([
+      db.query(`SELECT COALESCE(NULLIF(artist_name, ''), display_name, 'An artist') AS name FROM users WHERE id = $1`, [responderId]),
+      db.query('SELECT name FROM user_tables WHERE id = $1', [tableId]),
+    ]);
+    const who = responder.rows[0]?.name ?? 'An artist';
+    const tbl = table.rows[0]?.name ?? 'your showcase';
+    await createNotification({
+      userId: requesterId,
+      type: accepted ? 'collab_accepted' : 'collab_declined',
+      title: accepted ? `${who} accepted your collaboration` : `${who} declined your collaboration`,
+      body: accepted ? `You can now publish "${tbl}"` : `You'll need to remove their models to publish "${tbl}"`,
+      link: '/artist/showcases',
+      actorId: responderId,
+    });
+  } catch (err) {
+    log.error('notifyResponse failed', { error: err, requesterId, tableId });
+  }
+}
+
 /**
  * After a save/update, ensure a collaboration request exists for every foreign
  * artist whose model is on the table and isn't already covered by an acceptance.
@@ -123,21 +170,44 @@ export async function reconcileCollaborations(
 
     for (const fa of foreign) {
       const row = existing.get(fa.collaboratorId);
+      const auto = await autoResponseFor(fa.collaboratorId);
       if (!row) {
-        // Brand-new collaborator → raise a pending request + notify.
-        const inserted = await db.query(
-          `INSERT INTO table_collaborations (table_id, requester_id, collaborator_id, status)
-           VALUES ($1, $2, $3, 'pending')
-           ON CONFLICT (table_id, collaborator_id) DO NOTHING
-           RETURNING id`,
-          [tableId, requesterId, fa.collaboratorId],
-        );
-        if (inserted.rows.length > 0) await notifyRequest(fa.collaboratorId, requesterId, tableId);
+        // Brand-new collaborator → raise a request, unless B has chosen to answer
+        // every request automatically (migration 084).
+        if (auto === 'manual') {
+          const inserted = await db.query(
+            `INSERT INTO table_collaborations (table_id, requester_id, collaborator_id, status)
+             VALUES ($1, $2, $3, 'pending')
+             ON CONFLICT (table_id, collaborator_id) DO NOTHING
+             RETURNING id`,
+            [tableId, requesterId, fa.collaboratorId],
+          );
+          if (inserted.rows.length > 0) await notifyRequest(fa.collaboratorId, requesterId, tableId);
+        } else {
+          const accepted = auto === 'accept';
+          const inserted = await db.query(
+            `INSERT INTO table_collaborations (table_id, requester_id, collaborator_id, status, approve_all, responded_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (table_id, collaborator_id) DO NOTHING
+             RETURNING id`,
+            [tableId, requesterId, fa.collaboratorId, accepted ? 'accepted' : 'declined', accepted],
+          );
+          if (inserted.rows.length > 0) {
+            await notifyResponse(requesterId, fa.collaboratorId, tableId, accepted);
+            if (accepted) await notifyAutoAccepted(fa.collaboratorId, requesterId, tableId);
+          }
+        }
       } else if (row.status === 'accepted' && !row.approve_all) {
         // Subset accepted — a newly-added model may fall outside the approved set.
         const approved = new Set((row.approved || []).map(String));
         const hasUnapproved = fa.models.some((m) => !approved.has(String(m.id)));
-        if (hasUnapproved) {
+        if (hasUnapproved && auto === 'accept') {
+          // B now auto-accepts everything, so widen the old subset to all models.
+          await db.query(
+            `UPDATE table_collaborations SET approve_all = true, responded_at = NOW() WHERE id = $1`,
+            [row.id],
+          );
+        } else if (hasUnapproved) {
           await db.query(
             `UPDATE table_collaborations SET status = 'pending', responded_at = NULL WHERE id = $1`,
             [row.id],

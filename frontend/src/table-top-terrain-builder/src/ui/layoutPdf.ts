@@ -132,7 +132,7 @@ export function buildLayoutPieces(instances: Instance[]): { pieces: Piece[]; ski
   for (const inst of instances) {
     const asset = getAssetById(inst.assetId)
     if (!asset?.aabb) { skipped++; continue }
-    const hull = footprintHull(inst, asset.aabb, asset.defaultRollDeg ?? 0)
+    const hull = footprintHull(inst, asset.aabb, inst.rollDeg ?? asset.defaultRollDeg ?? 0)
     const xs = hull.map(p => p.x), zs = hull.map(p => p.z)
     raw.push({
       name: asset.name,

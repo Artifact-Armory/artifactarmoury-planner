@@ -62,7 +62,7 @@ const About: React.FC = () => {
             one price.
           </li>
           <li>
-            Keep at least 85% of every sale. Track sales and engagement from your artist
+            Keep 85% of every sale, less a 1.5% card fee. Track sales and engagement from your artist
             dashboard.
           </li>
           <li>

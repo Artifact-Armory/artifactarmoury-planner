@@ -121,7 +121,7 @@ const GettingStarted: React.FC = () => {
     {
       key: 'payouts',
       title: 'Tell us where to send your money',
-      body: 'Earnings sit in your account until you connect a payout method. You keep 85% of every sale, paid out after a short holding period.',
+      body: 'Earnings sit in your account until you connect a payout method. You keep 85% of every sale (less a 1.5% card fee, waived for founding artists), paid out monthly after a short holding period.',
       done: !!payouts.data?.connect.onboardingComplete,
       to: '/artist/payouts',
       action: 'Set up payouts',

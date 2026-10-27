@@ -2,7 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Download, Package, Star } from 'lucide-react'
+import { Download, FileText, Package, Star } from 'lucide-react'
 import { ordersApi, type PurchasedModel } from '../../api/endpoints/orders'
 import { modelsApi } from '../../api/endpoints/models'
 import { formatBytes } from '../../utils/format'
@@ -45,6 +45,18 @@ const MyDownloads: React.FC = () => {
     onError: (err: any) =>
       toast.error(err?.response?.data?.message || 'Could not save your review. Please try again.'),
   })
+
+  async function handleDocumentDownload(id: string, name: string) {
+    const k = `${id}:pdf`
+    setBusy((b) => ({ ...b, [k]: true }))
+    try {
+      await modelsApi.downloadDocument(id, name)
+    } catch {
+      toast.error('Download failed — please try again.')
+    } finally {
+      setBusy((b) => ({ ...b, [k]: false }))
+    }
+  }
 
   async function handleDownload(id: string, name: string, parts: number) {
     setBusy((b) => ({ ...b, [id]: true }))
@@ -177,6 +189,17 @@ const MyDownloads: React.FC = () => {
                                 size ? ` · ${size}` : ''
                               }`}
                         </Button>
+                        {model.documentName && (
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => handleDocumentDownload(model.id, model.documentName!)}
+                            disabled={busy[`${model.id}:pdf`]}
+                            leftIcon={<FileText size={16} />}
+                          >
+                            {busy[`${model.id}:pdf`] ? 'Preparing…' : `PDF: ${model.documentName}`}
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           className="w-full"

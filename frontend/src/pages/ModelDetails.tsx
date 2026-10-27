@@ -259,6 +259,24 @@ const ModelDetails: React.FC = () => {
     openCart()
   }
 
+  const [docBusy, setDocBusy] = React.useState(false)
+  const handleDocumentDownload = async () => {
+    if (!model?.document) return
+    setDocBusy(true)
+    try {
+      await modelsApi.downloadDocument(model.id, model.document.name)
+    } catch (err: any) {
+      const status = err?.response?.status
+      toast.error(
+        status === 401 ? 'Please sign in to download.'
+          : status === 403 ? 'This PDF comes with the model. Buy it to download.'
+          : 'Download failed. Please try again.',
+      )
+    } finally {
+      setDocBusy(false)
+    }
+  }
+
   const handleDownload = async () => {
     if (!model) return
     setDownloading(true)
@@ -690,6 +708,26 @@ const ModelDetails: React.FC = () => {
                 Add to cart
               </Button>
             )}
+
+            {/* The artist's extra PDF (game rules etc.): a download for buyers, or for
+                anyone when the artist made it free; otherwise just say it's included. */}
+            {model.document && (owned || isAdmin || model.document.isPublic ? (
+              <Button
+                className="mt-3 w-full"
+                variant="outline"
+                onClick={handleDocumentDownload}
+                disabled={docBusy}
+                leftIcon={<FileText size={16} />}
+              >
+                {docBusy
+                  ? 'Preparing…'
+                  : `${!owned && model.document.isPublic ? 'Free PDF: ' : 'PDF: '}${model.document.name}${formatBytes(model.document.sizeBytes) ? ` · ${formatBytes(model.document.sizeBytes)}` : ''}`}
+              </Button>
+            ) : (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <FileText size={13} /> Includes a PDF: {model.document.name}
+              </p>
+            ))}
 
             {/* Print & Ship reminder — shown when the artist has enabled printing
                 for this model. Lets buyers without a 3D printer order it printed. */}

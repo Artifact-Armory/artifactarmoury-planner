@@ -189,6 +189,8 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   // the UI can tell "not known" apart from "empty".
   downloadSizeBytes:
     model.download_size_bytes ?? model.downloadSizeBytes ?? null,
+  document: model.document ?? null,
+  documentName: model.document_name ?? model.documentName ?? model.document?.name ?? null,
   // My Models list badge (2026-09-07): how many named models within this listing
   // are missing from the planner because their file was too dense to preview.
   // Only present on the /my-models list response — undefined elsewhere.

@@ -1,5 +1,6 @@
 // backend/src/services/payouts.ts
-// The scheduled payout engine (migration 021). Two steps, run on a timer:
+// The scheduled payout engine (migration 021). Two steps; clearing runs hourly and
+// paying out runs once a month, on the 1st (UK time, migration 083):
 //
 //   1. CLEAR   — flip `pending` earnings whose hold window has elapsed to `cleared`.
 //   2. PAY OUT — for each artist with a cleared balance over the minimum threshold and
@@ -30,8 +31,10 @@ type Queryable = { query: (text: string, params?: any[]) => Promise<any> }
 // transfers wasteful, so sub-threshold balances roll into the next run.
 export const MIN_PAYOUT_GBP = Number(process.env.MIN_PAYOUT_GBP || 10)
 
-// How often the payout job runs (weekly by default).
-const PAYOUT_INTERVAL_MS = Number(process.env.PAYOUT_INTERVAL_MS || 7 * 24 * 60 * 60 * 1000)
+// How often the scheduler wakes. Each wake clears matured earnings; the payout itself
+// only happens on the first wake of a new month. (A plain 30-day setInterval won't do:
+// Node caps timers at ~24.8 days, and a redeploy would restart the count.)
+const SCHEDULER_TICK_MS = 60 * 60 * 1000
 
 /** Step 1: clear earnings past their hold window. Returns how many were cleared. */
 export async function clearMaturedEarnings(): Promise<number> {
@@ -322,14 +325,38 @@ export async function runPayoutCycle(): Promise<{ cleared: number; payouts: Arra
   return { cleared, payouts }
 }
 
-/** Kick off the recurring payout job. Runs a catch-up cycle on boot, then on a timer. */
+/**
+ * Claim this month's scheduled payout run (UK time). True for exactly one caller per
+ * month, across restarts and replicas, thanks to payout_runs' primary key.
+ */
+async function claimMonthlyRun(): Promise<boolean> {
+  const result = await db.query(
+    `INSERT INTO payout_runs (run_month)
+     VALUES (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'Europe/London')::date)
+     ON CONFLICT (run_month) DO NOTHING
+     RETURNING run_month`,
+  )
+  return (result.rowCount ?? 0) > 0
+}
+
+/** Kick off the recurring payout job: clear hourly, pay out on the 1st of each month. */
 export function startPayoutScheduler(): void {
   if (process.env.NODE_ENV === 'test') return
-  const tick = () => {
-    runPayoutCycle().catch(err => log.error('Payout cycle failed', { error: err }))
+  const tick = async () => {
+    try {
+      if (await claimMonthlyRun()) {
+        log.info('Monthly payout run starting')
+        await runPayoutCycle()
+      } else {
+        // Keeps the artist's "cleared" figure current between monthly runs.
+        await clearMaturedEarnings()
+      }
+    } catch (err) {
+      log.error('Payout cycle failed', { error: err })
+    }
   }
   // Small delay on boot so the DB/pool is warm.
   setTimeout(tick, 30_000)
-  setInterval(tick, PAYOUT_INTERVAL_MS)
-  log.info('Payout scheduler started', { intervalMs: PAYOUT_INTERVAL_MS, minPayout: MIN_PAYOUT_GBP })
+  setInterval(tick, SCHEDULER_TICK_MS)
+  log.info('Payout scheduler started', { schedule: 'monthly, 1st (UK time)', minPayout: MIN_PAYOUT_GBP })
 }

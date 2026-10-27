@@ -45,6 +45,8 @@ export interface PayoutsMe {
     minPayout: number
     /** The artist's OWN share percent (users.commission_rate), not a global constant. */
     artistSharePercent: number
+    /** Card fee percent taken from each sale's price before VAT (0 for founding artists). */
+    cardFeePercent: number
     /** True when the backend is on STRIPE_MOCK, so the dev-only shortcut exists. */
     mockMode: boolean
     /** Countries a Stripe payout account can be opened in. */

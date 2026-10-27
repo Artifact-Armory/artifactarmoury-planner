@@ -26,6 +26,7 @@ import { parseRange } from './analytics';
 import { getQueueHealth } from '../services/queueHealth';
 import { rebakeModel, rebakeBatch } from '../services/proxyBake/rebake';
 import { invalidateUserTokens } from '../middleware/auth';
+import { estimateStripeFee } from '../services/cardFee';
 
 const router = Router();
 
@@ -1740,6 +1741,7 @@ router.get('/analytics/overview',
       active,
       viewsByHour,
       viewsByDay,
+      paidOrderTotals,
     ] = await Promise.all([
       // Gross revenue + platform's cut (total_price minus the artist's share).
       db.query(`
@@ -1749,6 +1751,7 @@ router.get('/analytics/overview',
           (SELECT COALESCE(SUM(total), 0) FROM orders
             WHERE payment_status = 'succeeded' AND created_at >= $1) AS total_revenue,
           COALESCE(SUM(oi.total_price - oi.artist_commission_amount), 0) AS site_revenue,
+          COALESCE(SUM(oi.artist_card_fee), 0) AS card_fees,
           COUNT(DISTINCT o.id) AS paid_orders
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
@@ -1809,7 +1812,16 @@ router.get('/analytics/overview',
         GROUP BY 1
         ORDER BY 1
       `),
+      // Each paid order's charge + buyer country, to estimate Stripe's fees on it.
+      db.query(`
+        SELECT total, tax_country FROM orders
+        WHERE payment_status = 'succeeded' AND created_at >= $1
+      `, [REVENUE_START_AT]),
     ]);
+
+    const stripeFeesEstimate = Math.round(
+      paidOrderTotals.rows.reduce((sum: number, r: any) => sum + estimateStripeFee(Number(r.total), r.tax_country), 0) * 100
+    ) / 100;
 
     // Fill every hour 0–23 so the chart has no gaps.
     const hourMap = new Map<number, number>(
@@ -1825,6 +1837,9 @@ router.get('/analytics/overview',
       totals: {
         totalRevenue: Number(revenue.rows[0].total_revenue),
         siteRevenue: Number(revenue.rows[0].site_revenue),
+        // Card fees taken from artists' shares (already inside siteRevenue).
+        cardFees: Number(revenue.rows[0].card_fees),
+        stripeFeesEstimate,
         paidOrders: Number(revenue.rows[0].paid_orders),
         totalOrders: Number(counts.rows[0].total_orders),
         totalUsers: Number(counts.rows[0].total_users),

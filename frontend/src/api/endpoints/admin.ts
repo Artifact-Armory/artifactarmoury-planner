@@ -188,6 +188,10 @@ export interface AnalyticsOverview {
   totals: {
     totalRevenue: number
     siteRevenue: number
+    /** Card fees taken from artists' shares (included in siteRevenue). */
+    cardFees: number
+    /** Estimated Stripe fees on paid orders (card type isn't recorded). */
+    stripeFeesEstimate: number
     paidOrders: number
     totalOrders: number
     totalUsers: number

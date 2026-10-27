@@ -13,7 +13,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
  */
 const SellerTerms: React.FC = () => {
   return (
-    <LegalLayout title="Seller Terms" updated="5 October 2026 (v2)">
+    <LegalLayout title="Seller Terms" updated="27 October 2026 (v3)">
       <LegalSection heading="1. Who we are and what you are agreeing to">
         <p>
           Artifact Armoury (“we”, “us”) is operated by Artifact Armoury Ltd, registered at
@@ -89,6 +89,15 @@ const SellerTerms: React.FC = () => {
           does not come out of your share.
         </p>
         <p>
+          <strong>Card fee.</strong> A card fee of <strong>1.5%</strong> of the net price
+          of each sale is taken from your share, towards the cost of taking the buyer’s
+          payment. We pay the rest of that cost, including the fixed fee per order, so a
+          sale is never charged more than 1.5% whatever card or payment method the buyer
+          uses. <strong>Founding artists</strong>, meaning anyone whose artist account was
+          opened before 1 November 2026, pay no card fee. We do not deduct any other
+          payment processing fees from your share.
+        </p>
+        <p>
           <strong>Discounts.</strong> If you run a public sale, the discount is shared
           between you and us in proportion to our shares of the sale price. If you create a
           promo code, <strong>the whole cost of the discount comes out of your share, not
@@ -100,10 +109,11 @@ const SellerTerms: React.FC = () => {
           share): with no discount you earn £8.50 and we keep £1.50. With a £2.00 public
           sale the buyer pays £8.00 before VAT, and you earn 85% of that, £6.80. With a
           £2.00 promo code the buyer also pays £8.00 before VAT, but we still keep our
-          normal £1.50, so you earn £6.50. A promo code is applied after any public sale,
-          and amounts are calculated in pence and rounded to the nearest penny. Our share
-          covers the cost of taking the buyer’s payment; we do not deduct card or PayPal
-          processing fees from your share.
+          normal £1.50, so you earn £6.50. Those figures are for a founding artist. Otherwise
+          the 1.5% card fee also comes off: 15p on the £10.00 sale (you earn £8.35), and 12p
+          on either £8.00 sale (you earn £6.68 or £6.38). A promo code is applied after any
+          public sale, and amounts are calculated in pence and rounded to the nearest
+          penny.
         </p>
       </LegalSection>
 
@@ -112,8 +122,8 @@ const SellerTerms: React.FC = () => {
           Payouts are made through Stripe Connect, so you must complete Stripe’s
           verification to be paid. The holding period, currently <strong>21 days</strong>,
           starts on the day the buyer’s payment is confirmed, and covers refunds and
-          disputes. Once an earning has cleared that period it is paid out in our weekly
-          payout run, provided your eligible balance has reached the minimum, currently{' '}
+          disputes. Once an earning has cleared that period it is paid out in our monthly
+          payout run on the 1st of each month, provided your eligible balance has reached the minimum, currently{' '}
           <strong>£10</strong>; a smaller balance rolls forward to the next run. If your
           account closes with less than £10 owing, we will still pay it to your connected
           Stripe account where we are able to. If we withhold payouts to investigate a
@@ -130,7 +140,7 @@ const SellerTerms: React.FC = () => {
         <p>
           When a buyer is refunded for an item, they get back what they paid, including VAT.
           <strong> You lose only your own share of that item</strong> (in the example above,
-          £8.50 of a £10.00 sale, or whatever you actually earned after any discount). We
+          £8.35 of a £10.00 sale, or £8.50 for a founding artist, or whatever you actually earned after any discount). We
           bear our share, and the VAT is returned from the VAT we collected, so neither
           comes out of your earnings. If your share has not been paid out yet, we do not pay
           it. If it has, we may set it off against your future earnings; we will not ask

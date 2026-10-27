@@ -1,5 +1,5 @@
 import React from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Plus, ShieldCheck, Upload } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
@@ -15,6 +15,7 @@ import {
   facetAppliesTo,
   MODEL_CLASSES,
   MODEL_CLASS_SLUG,
+  termToken,
   type TaxFacet,
 } from '../../api/endpoints/taxonomy'
 
@@ -110,8 +111,12 @@ const CreateModel: React.FC = () => {
   // standard 85% until the real per-artist figure loads, so the "you'll receive"
   // line never sits blank while this fetch is in flight.
   const [artistSharePercent, setArtistSharePercent] = React.useState(85)
+  const [cardFeePercent, setCardFeePercent] = React.useState(0)
   React.useEffect(() => {
-    payoutsApi.getMine().then((res) => setArtistSharePercent(res.config.artistSharePercent)).catch(() => {})
+    payoutsApi.getMine().then((res) => {
+      setArtistSharePercent(res.config.artistSharePercent)
+      setCardFeePercent(res.config.cardFeePercent ?? 0)
+    }).catch(() => {})
   }, [])
 
   // Current class from the selected model-class token (defaults to terrain).
@@ -175,6 +180,38 @@ const CreateModel: React.FC = () => {
   // first file of the first component is the primary — the model row's own STL.
   const [components, setComponents] = React.useState<Component[]>([newComponent()])
 
+  // "Copy" on My Models opens this page with ?copyFrom=<id> to start a new
+  // listing from one of the artist's own: the details are prefilled, but files
+  // and photos never are (each listing needs its own, for fingerprints and
+  // watermarks). Free-text tags have no field here, so they ride along hidden.
+  const [searchParams] = useSearchParams()
+  const copyFrom = searchParams.get('copyFrom')
+  const [copiedFromName, setCopiedFromName] = React.useState<string | null>(null)
+  const [copiedTags, setCopiedTags] = React.useState<string[]>([])
+  React.useEffect(() => {
+    if (!copyFrom) return
+    let cancelled = false
+    modelsApi.getModelById(copyFrom).then((m) => {
+      if (cancelled) return
+      if (m.artistId && user?.id && m.artistId !== user.id) return
+      setCopiedFromName(m.name ?? 'your listing')
+      setName(m.name ? `${m.name} (copy)` : '')
+      setDescription(m.description ?? '')
+      if (CATEGORIES.some((c) => c.value === m.category)) setCategory(m.category)
+      const copiedTerms = (m.taxonomyTerms ?? []).map((t) => termToken(t.facetSlug, t.path))
+      if (copiedTerms.some((t) => t.startsWith(`${MODEL_CLASS_SLUG}:`))) setTerms(copiedTerms)
+      setBasePrice(m.basePrice != null ? String(m.basePrice) : '')
+      setLicense(m.license === 'commercial' ? 'commercial' : 'personal')
+      setPrinterType((m.printerType ?? '') as '' | 'fdm' | 'resin' | 'both')
+      setShowInPlanner(m.showInPlanner !== false)
+      setIsRealSubject(m.isRealSubject === true)
+      setCopiedTags(m.tags ?? [])
+    }).catch(() => {
+      if (!cancelled) setError('Could not load the listing to copy. Fill in the details below instead.')
+    })
+    return () => { cancelled = true }
+  }, [copyFrom, user?.id])
+
   const [phase, setPhase] = React.useState<Phase>('form')
   const [progress, setProgress] = React.useState(0)
   const [uploadLabel, setUploadLabel] = React.useState('')
@@ -189,7 +226,7 @@ const CreateModel: React.FC = () => {
   // never comes out of it, so this figure is the whole story regardless of buyer country.
   const parsedBasePrice = parseFloat(basePrice)
   const youReceive = Number.isFinite(parsedBasePrice) && parsedBasePrice > 0
-    ? (parsedBasePrice * artistSharePercent) / 100
+    ? Math.round(parsedBasePrice * artistSharePercent) / 100 - Math.round(parsedBasePrice * cardFeePercent) / 100
     : null
   const componentLabel = (i: number) =>
     components[i]?.name.trim() || (i === 0 ? 'your first model' : `model ${i + 1}`)
@@ -412,6 +449,7 @@ const CreateModel: React.FC = () => {
         filename: primaryFile.name,
         name: name.trim(),
         description: description.trim() || undefined,
+        tags: copiedTags.length ? copiedTags.join(',') : undefined,
         // Vehicles / characters store their class as the legacy category; terrain
         // keeps the artist-chosen sub-category.
         category: modelClass === 'terrain' ? category : modelClass,
@@ -491,6 +529,13 @@ const CreateModel: React.FC = () => {
         </Link>
       </p>
 
+      {copiedFromName && (
+        <p className="mt-4 rounded-sm border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          Copied the details from “{copiedFromName}”. Check the name, then add the files and photos
+          for this new listing. Print settings and default tilt can be set on the Edit page after upload.
+        </p>
+      )}
+
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
         <div>
           <label className="block text-sm font-medium mb-1">Name</label>
@@ -541,7 +586,7 @@ const CreateModel: React.FC = () => {
             {youReceive !== null && (
               <p className="text-xs text-muted-foreground mt-1">
                 You&apos;ll receive <span className="font-medium text-foreground">£{youReceive.toFixed(2)}</span> per
-                sale ({artistSharePercent}% share).
+                sale ({artistSharePercent}% share{cardFeePercent > 0 ? `, less a ${cardFeePercent}% card fee` : ''}).
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">

@@ -2,6 +2,9 @@ import apiClient from '../client'
 
 export type CollabStatus = 'pending' | 'accepted' | 'declined'
 
+/** How an artist answers new requests: by hand (default), or automatically. */
+export type CollabAutoResponse = 'manual' | 'accept' | 'decline'
+
 /** A collaboration on one of MY tables (owner view). */
 export interface TableCollaboration {
   id: string
@@ -52,6 +55,16 @@ export const collaborationsApi = {
   incoming: async (): Promise<IncomingCollabRequest[]> => {
     const res = await apiClient.get('/api/collaborations/incoming')
     return res.data?.requests ?? []
+  },
+
+  getSettings: async (): Promise<CollabAutoResponse> => {
+    const res = await apiClient.get('/api/collaborations/settings')
+    return res.data?.autoResponse ?? 'manual'
+  },
+
+  setAutoResponse: async (autoResponse: CollabAutoResponse): Promise<CollabAutoResponse> => {
+    const res = await apiClient.put('/api/collaborations/settings', { autoResponse })
+    return res.data?.autoResponse ?? autoResponse
   },
 
   respond: async (

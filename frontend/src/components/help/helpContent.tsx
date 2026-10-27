@@ -58,7 +58,7 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
       sections: [
         { heading: 'Date range', body: 'Every tile compares the selected range against the previous one — the % chip shows the trend.' },
         { heading: 'Drill in', body: 'Click any tile to open a detailed breakdown: sales, product funnels, ratings and the searches buyers are running.' },
-        { heading: 'Earnings', body: 'Your earnings figure is net of the 15% marketplace fee.' },
+        { heading: 'Earnings', body: 'Your earnings figure is net of the 15% marketplace fee and the 1.5% card fee (founding artists pay no card fee).' },
       ],
     },
   },
@@ -114,7 +114,7 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
       intro: 'Your studio’s home: earnings, sales and the data behind what to make next, all on one page.',
       sections: [
         { heading: 'Date range', body: 'Every tile compares the selected range against the previous one — the % chip shows the trend. Click a tile to drill into sales, product funnels, ratings or buyer searches.' },
-        { heading: 'Sales ledger', body: 'The table below the tiles lists every completed sale — item, buyer, order and what you earned (net of the 15% marketplace fee).' },
+        { heading: 'Sales ledger', body: 'The table below the tiles lists every completed sale — item, buyer, order and what you earned (net of the 15% marketplace fee and any card fee).' },
         { heading: 'Upload models', body: 'Use “Upload New Model” to add an STL — we generate the preview automatically.' },
       ],
       showTour: true,

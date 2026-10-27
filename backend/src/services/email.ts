@@ -728,7 +728,7 @@ export async function sendArtistSaleNotification(
       <strong>💰 Payout Information:</strong>
     </p>
     <p style="margin: 0; color: #1e40af; font-size: 14px;">
-      Earnings are held for ${holdDays} days to cover the buyer&rsquo;s cancellation window, then paid out automatically to your connected Stripe account.
+      Earnings are held for ${holdDays} days to cover the buyer&rsquo;s cancellation window, then paid out automatically on the 1st of each month (once you have £10 or more) to your connected Stripe account.
     </p>
   </div>
   
@@ -940,7 +940,12 @@ export async function sendArtistWelcome(
   /** The artist's share of each sale, from users.commission_rate. */
   sharePercent = 85,
   holdDays = 21,
+  /** Card fee percent on each sale's price before VAT; 0 for founding artists. */
+  cardFeePercent = 0,
 ): Promise<void> {
+  const feeNote = cardFeePercent > 0
+    ? `, less a ${cardFeePercent}% card fee,`
+    : ' (as a founding artist you pay no card fees),'
   const html = `
 <!DOCTYPE html>
 <html>
@@ -968,7 +973,7 @@ export async function sendArtistWelcome(
       <li style="margin-bottom: 12px;"><strong>Complete Stripe Setup:</strong> Connect your Stripe account to receive payouts</li>
       <li style="margin-bottom: 12px;"><strong>Upload Models:</strong> Upload your STL files with descriptions and pricing</li>
       <li style="margin-bottom: 12px;"><strong>Create Examples:</strong> Build example tables to showcase your work</li>
-      <li style="margin-bottom: 12px;"><strong>Start Earning:</strong> You keep ${sharePercent}% of every sale (before VAT), paid out after a ${holdDays}-day hold</li>
+      <li style="margin-bottom: 12px;"><strong>Start Earning:</strong> You keep ${sharePercent}% of every sale (before VAT)${feeNote} paid out on the 1st of each month after a ${holdDays}-day hold</li>
     </ol>
   </div>
   

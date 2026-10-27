@@ -2,7 +2,7 @@ import React from 'react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
 import { Users, Check, X, Clock, ImageOff } from 'lucide-react'
-import { collaborationsApi, type IncomingCollabRequest } from '../../api/endpoints/collaborations'
+import { collaborationsApi, type CollabAutoResponse, type IncomingCollabRequest } from '../../api/endpoints/collaborations'
 import { assetUrl } from '../../api/transformers'
 
 /**
@@ -41,6 +41,8 @@ const ArtistCollaborations: React.FC = () => {
           models on a table, pick specific ones, or decline.
         </p>
       </header>
+
+      <AutoResponseSetting />
 
       {loading && <p className="text-muted-foreground">Loading…</p>}
       {error && !loading && (
@@ -88,6 +90,62 @@ const ArtistCollaborations: React.FC = () => {
         </section>
       )}
     </div>
+  )
+}
+
+const AUTO_OPTIONS: Array<{ value: CollabAutoResponse; label: string; hint: string }> = [
+  { value: 'manual', label: 'Ask me each time', hint: 'Every request waits here for you to answer.' },
+  { value: 'accept', label: 'Auto-accept', hint: 'New requests are accepted straight away for all your models.' },
+  { value: 'decline', label: 'Auto-decline', hint: 'New requests are declined straight away.' },
+]
+
+/** Optional: answer new requests automatically. Requests already here are left as they are. */
+const AutoResponseSetting: React.FC = () => {
+  const [value, setValue] = React.useState<CollabAutoResponse | null>(null)
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    collaborationsApi.getSettings().then(setValue).catch(() => setValue('manual'))
+  }, [])
+
+  async function choose(next: CollabAutoResponse) {
+    if (next === value || saving) return
+    const prev = value
+    setValue(next)
+    setSaving(true)
+    try {
+      await collaborationsApi.setAutoResponse(next)
+      toast.success('Saved')
+    } catch {
+      setValue(prev)
+      toast.error('Could not save your choice')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-4">
+      <h2 className="text-sm font-semibold text-foreground">New requests</h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {AUTO_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            disabled={value === null || saving}
+            onClick={() => choose(o.value)}
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:opacity-60 ${
+              value === o.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground hover:bg-accent'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {AUTO_OPTIONS.find((o) => o.value === (value ?? 'manual'))?.hint} Requests already listed below aren't changed.
+      </p>
+    </section>
   )
 }
 

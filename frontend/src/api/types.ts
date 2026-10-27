@@ -164,6 +164,11 @@ export interface TerrainModel {
   // library (My downloads); null if R2 is unavailable or a file's size couldn't
   // be read.
   downloadSizeBytes?: number | null
+  // Extra PDF from the artist (game rules etc.). On the model-details response;
+  // isPublic = anyone can download it, otherwise buyers only.
+  document?: { name: string; sizeBytes: number; isPublic: boolean } | null
+  // Buyer's library (My downloads): the PDF's name when the listing has one.
+  documentName?: string | null
   // My Models list only: how many named models in this listing are missing from
   // the planner (their file was too dense to preview). Undefined everywhere else.
   partsNeedingPreviewCount?: number

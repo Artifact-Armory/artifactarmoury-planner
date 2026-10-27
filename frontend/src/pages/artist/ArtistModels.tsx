@@ -442,6 +442,14 @@ const ArtistModels: React.FC = () => {
                   >
                     Edit
                   </button>
+                  <button
+                    className="px-3 py-1.5 rounded-sm border text-sm"
+                    onClick={() => navigate(`/artist/models/new?copyFrom=${m.id}`)}
+                    disabled={busy}
+                    title="Start a new listing with this one's details (price, licence, tags, description). You add the new files and photos."
+                  >
+                    Copy
+                  </button>
                   {FEATURES.printAndShip && (
                     <button
                       className="px-3 py-1.5 rounded-sm border border-primary/40 text-primary text-sm disabled:opacity-50"

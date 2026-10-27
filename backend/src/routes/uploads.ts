@@ -19,10 +19,11 @@ const router = Router()
 
 // `raw` is the quarantine prefix for un-processed seller uploads (content-hashed,
 // unguessable keys). Everything else is derived/public asset storage.
-const SAFE_PREFIXES = ['raw', 'models', 'thumbnails', 'images', 'textures', 'maps']
+const SAFE_PREFIXES = ['raw', 'models', 'thumbnails', 'images', 'textures', 'maps', 'docs']
 
-// Sellers only ever upload meshes (raw/) and images; anything else would just be
-// free file hosting on the public CDN.
+// Sellers only ever upload meshes (raw/), images and one PDF per listing (docs/,
+// checked and size-capped when attached); anything else would just be free file
+// hosting on the public CDN.
 const MESH_EXTS = ['.stl', '.obj', '.3mf']
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 const ALLOWED_EXTS: Record<string, string[]> = {
@@ -32,6 +33,7 @@ const ALLOWED_EXTS: Record<string, string[]> = {
   images: IMAGE_EXTS,
   textures: IMAGE_EXTS,
   maps: [...IMAGE_EXTS, '.json', '.bin'],
+  docs: ['.pdf'],
 }
 function assertAllowedExtension(prefix: string, filename: string) {
   const ext = path.extname(filename).toLowerCase()

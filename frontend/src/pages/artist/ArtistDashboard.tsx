@@ -91,7 +91,7 @@ const ArtistDashboard: React.FC = () => {
         <div className="flex justify-center py-24"><Spinner size="lg" /></div>
       ) : (
         <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          <Tile label="Your earnings" icon={<PoundSterling size={16} />} to="/artist/analytics/sales" hint="after 15% fee">
+          <Tile label="Your earnings" icon={<PoundSterling size={16} />} to="/artist/analytics/sales" hint="after fees">
             <Big>{formatPrice(t.net)}</Big>
             <Delta cur={t.net} prev={prev.net} />
           </Tile>

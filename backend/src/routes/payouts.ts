@@ -11,6 +11,7 @@ import {
   getArtistEarningsSummary, getArtistEarnings, PAYOUT_HOLD_DAYS,
 } from '../services/earnings'
 import { MIN_PAYOUT_GBP } from '../services/payouts'
+import { ARTIST_CARD_FEE_PERCENT, cardFeePercentFor } from '../services/cardFee'
 import {
   createConnectAccount, deleteConnectAccount, createOnboardingLink, createLoginLink,
   getAccountStatus, setMockOnboardingState, isStripeMock, isUsableAccountId,
@@ -46,7 +47,7 @@ router.get('/me',
       ? req.user!.stripe_account_id!
       : null
 
-    const [summary, earnings, payoutsResult, sharePercent, status] = await Promise.all([
+    const [summary, earnings, payoutsResult, sharePercent, feeRow, status] = await Promise.all([
       getArtistEarningsSummary(artistId),
       getArtistEarnings(artistId, 50),
       db.query(
@@ -55,6 +56,7 @@ router.get('/me',
         [artistId],
       ),
       artistSharePercent(artistId),
+      db.query('SELECT card_fee_percent, became_artist_at, created_at FROM users WHERE id = $1', [artistId]),
       accountId ? getAccountStatus(accountId) : Promise.resolve(null),
     ])
 
@@ -83,6 +85,8 @@ router.get('/me',
         holdDays: PAYOUT_HOLD_DAYS,
         minPayout: MIN_PAYOUT_GBP,
         artistSharePercent: sharePercent,
+        // The card fee taken from each sale's price before VAT (0 for founding artists).
+        cardFeePercent: feeRow.rows[0] ? cardFeePercentFor(feeRow.rows[0]) : ARTIST_CARD_FEE_PERCENT,
         // Lets the dashboard offer the mock-complete shortcut only where it exists.
         mockMode: isStripeMock(),
         connectCountries: CONNECT_COUNTRIES,

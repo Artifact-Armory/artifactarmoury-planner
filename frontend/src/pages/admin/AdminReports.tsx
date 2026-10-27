@@ -10,6 +10,7 @@ import {
   Package,
   Eye,
   Activity,
+  CreditCard,
 } from 'lucide-react'
 import { adminApi } from '../../api/endpoints/admin'
 import { formatPrice } from '../../utils/format'
@@ -50,7 +51,7 @@ const PeakHoursChart: React.FC<{ data: Array<{ hour: number; views: number }> }>
         {data.map((d) => {
           const isPeak = d.views === peak.views && d.views > 0
           return (
-            <div key={d.hour} className="flex-1 flex flex-col items-center justify-end group relative">
+            <div key={d.hour} className="flex-1 h-full flex flex-col items-center justify-end group relative">
               <div
                 className={`w-full rounded-t ${isPeak ? 'bg-primary' : 'bg-primary/40'} transition-colors`}
                 style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views > 0 ? 2 : 0 }}
@@ -144,8 +145,27 @@ const AdminReports: React.FC = () => {
             icon={<PiggyBank size={18} />}
             label="Site revenue (your cut)"
             value={formatPrice(t.siteRevenue)}
-            sub="Platform fee after artist share"
+            sub="Commission + artist card fees, before Stripe"
             accent="text-primary"
+          />
+          <Tile
+            icon={<CreditCard size={18} />}
+            label="Card fees from artists"
+            value={formatPrice(t.cardFees)}
+            sub="Included in site revenue"
+          />
+          <Tile
+            icon={<CreditCard size={18} />}
+            label="Stripe fees (estimate)"
+            value={formatPrice(t.stripeFeesEstimate)}
+            sub="By buyer country: UK 1.5%, EU 2.5%, other 3.25%, + 20p per order"
+          />
+          <Tile
+            icon={<PiggyBank size={18} />}
+            label="Your cut after Stripe (estimate)"
+            value={formatPrice(t.siteRevenue - t.stripeFeesEstimate)}
+            sub="Site revenue minus estimated Stripe fees"
+            accent="text-green-500"
           />
           <Tile
             icon={<ShoppingCart size={18} />}
@@ -236,7 +256,7 @@ const AdminReports: React.FC = () => {
               {data!.viewsByDay.map((d) => (
                 <div
                   key={d.date}
-                  className="flex-1 flex flex-col items-center justify-end group relative"
+                  className="flex-1 h-full flex flex-col items-center justify-end group relative"
                 >
                   <div
                     className="w-full rounded-t bg-primary/50 hover:bg-primary"

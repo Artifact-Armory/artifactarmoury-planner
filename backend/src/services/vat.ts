@@ -87,6 +87,12 @@ const ZERO_RATED: readonly TaxCountry[] = [
   { code: 'MX', name: 'Mexico', rate: 0 },
 ]
 
+/** True for an EU-27 member state (VAT_TABLE minus the UK). */
+export function isEuCountry(code?: string | null): boolean {
+  const c = (code || '').toUpperCase()
+  return c !== 'GB' && VAT_TABLE.some((t) => t.code === c)
+}
+
 /** Fallback when the buyer hasn't told us where they are. */
 export const DEFAULT_TAX_COUNTRY = 'GB'
 
@@ -116,7 +122,10 @@ const BY_CODE = new Map<string, TaxCountry>(
  *     note on why there's no "just add France" step):
  *     `...VAT_TABLE.map((c) => c.code).filter((c) => c !== 'GB')`
  */
-const REGISTERED_COUNTRIES: ReadonlySet<string> = new Set<string>([])
+const REGISTERED_COUNTRIES: ReadonlySet<string> = new Set<string>([
+  // EU non-Union OSS (Ireland), registered 2026-10-27. Still no UK VAT number, so no 'GB'.
+  ...VAT_TABLE.map((c) => c.code).filter((c) => c !== 'GB'),
+])
 
 /** The rate we can *actually* charge for a country — 0 if we hold no registration
  *  there, regardless of what VAT_TABLE says that country's rate nominally is. */

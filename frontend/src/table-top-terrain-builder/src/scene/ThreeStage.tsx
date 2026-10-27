@@ -1802,9 +1802,10 @@ export function ThreeStage() {
         return
       }
 
-      // Tilt the selected piece(s) about X (stand up / lay flat). Shift = opposite.
-      if (k === 't' && s.selectedInstanceIds.length) {
-        s.actions.tiltSelected(rotationStep() * (e.shiftKey ? -1 : 1))
+      // Tilt the selected piece(s) about X (T) or sideways (Y) to stand up / lay
+      // flat. Shift = opposite.
+      if ((k === 't' || k === 'y') && s.selectedInstanceIds.length) {
+        s.actions.tiltSelected(rotationStep() * (e.shiftKey ? -1 : 1), k === 'y' ? 'roll' : 'pitch')
         inst.setSelection(new Set(s.selectedInstanceIds))
         requestRender()
         return
