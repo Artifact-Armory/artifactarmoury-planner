@@ -125,6 +125,8 @@ export interface TerrainModel {
   artistName: string
   artistUrl?: string
   artistId?: string
+  /** Readable artist page link part (/artists/<slug>), when the API sends it. */
+  artistSlug?: string
   artistBio?: string
   width?: number
   height?: number
@@ -300,6 +302,8 @@ export interface CreateReviewRequest {
 
 export interface ArtistSummary {
   id: string
+  /** Readable page link part: /artists/<slug>. Falls back to id when missing. */
+  slug?: string
   name: string
   bio?: string
   profileImageUrl?: string

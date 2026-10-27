@@ -44,7 +44,7 @@ const Following: React.FC = () => {
             {artists.map((a) => (
               <Link
                 key={a.id}
-                to={`/artists/${a.id}`}
+                to={`/artists/${a.slug || a.id}`}
                 className="flex items-center gap-2 rounded-full border border-border bg-card py-1.5 pl-1.5 pr-4 shadow-xs hover:border-primary/40"
               >
                 <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-semibold text-muted-foreground">

@@ -1219,7 +1219,7 @@ router.get('/:id',
     const result = await db.query(
       `SELECT
         m.*,
-        u.artist_name, u.artist_bio, u.artist_url, u.sales_disabled,
+        u.artist_name, u.artist_slug, u.artist_bio, u.artist_url, u.sales_disabled,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
         COUNT(DISTINCT f.id) as favorite_count
@@ -1228,7 +1228,7 @@ router.get('/:id',
        LEFT JOIN reviews r ON m.id = r.model_id AND r.is_visible = true
        LEFT JOIN favorites f ON m.id = f.model_id
        WHERE m.id = $1
-       GROUP BY m.id, u.artist_name, u.artist_bio, u.artist_url, u.sales_disabled`,
+       GROUP BY m.id, u.artist_name, u.artist_slug, u.artist_bio, u.artist_url, u.sales_disabled`,
       [id]
     );
 

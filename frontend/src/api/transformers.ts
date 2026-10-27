@@ -114,6 +114,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
   artistName: model.artist_name || model.artistName || 'Unknown Artist',
   artistUrl: model.artist_url || model.artistUrl,
   artistId: model.artist_id || model.artistId,
+  artistSlug: model.artist_slug || model.artistSlug || undefined,
   artistBio: model.artist_bio || model.artistBio,
   width: model.width ?? undefined,
   height: model.height ?? undefined,
@@ -233,6 +234,7 @@ export const mapModelRecord = (model: any): TerrainModel => ({
 
 export const mapArtistSummary = (artist: any): ArtistSummary => ({
   id: artist.id,
+  slug: artist.slug || artist.artist_slug || undefined,
   name: artist.name,
   bio: artist.bio,
   profileImageUrl:

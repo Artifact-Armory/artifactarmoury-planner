@@ -51,6 +51,18 @@ const RULES: Array<{ test: (path: string) => boolean; entry: HelpEntry }> = [
     },
   },
   {
+    test: (p) => p.startsWith('/artist/collections'),
+    entry: {
+      title: 'Collections',
+      intro: 'Group your listings into named ranges, like “WW2 buildings”, so buyers can browse one range instead of your whole catalogue.',
+      sections: [
+        { heading: 'Not for sale as a set', body: 'Collections are for browsing only. To sell several models together at one price, make a bundle instead.' },
+        { heading: 'Your page', body: 'Collections show on your public page, and each one has its own link you can share. A listing can be in more than one collection.' },
+        { heading: 'Drafts', body: 'You can add drafts. They only appear in the collection once they are published.' },
+      ],
+    },
+  },
+  {
     test: (p) => p.startsWith('/artist/sales') || p.startsWith('/artist/analytics'),
     entry: {
       title: 'Sales & analytics',

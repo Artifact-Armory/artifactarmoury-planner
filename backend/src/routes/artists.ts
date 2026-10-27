@@ -7,9 +7,13 @@ import { notifyNewFollower } from '../services/notifications'
 import { annotateModelsWithSales, effectiveModelPriceSql } from '../services/sales'
 import { validateArtistName } from '../services/artistOnboarding'
 import { ValidationError } from '../middleware/error'
+import { artistIdParam } from '../services/artistSlug'
 
 const router = express.Router()
 const artistLogger = logger.child('ARTISTS')
+
+// /:id accepts the artist's slug (/artists/wargame3d) as well as their user id.
+router.param('id', artistIdParam('id'))
 
 // Artists are users with role='artist'. Display name falls back to display_name.
 const ARTIST_NAME = `COALESCE(NULLIF(u.artist_name, ''), u.display_name)`
@@ -18,6 +22,7 @@ const ARTIST_NAME = `COALESCE(NULLIF(u.artist_name, ''), u.display_name)`
 // the frontend transformer expects (name / bio / profile_image_url / …).
 const ARTIST_FIELDS = `
   u.id,
+  u.artist_slug AS slug,
   ${ARTIST_NAME} AS name,
   u.artist_bio AS bio,
   u.artist_url,
@@ -705,7 +710,7 @@ router.put('/me', authenticate, requireArtist, async (req, res, next) => {
          artist_accent_color = CASE WHEN $9 THEN NULL ELSE COALESCE($8, artist_accent_color) END,
          updated_at = NOW()
        WHERE id = $1
-       RETURNING id,
+       RETURNING id, artist_slug AS slug,
          COALESCE(NULLIF(artist_name, ''), display_name) AS name,
          artist_bio AS bio, artist_url,
          artist_avatar_url AS profile_image_url,

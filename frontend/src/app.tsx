@@ -24,6 +24,7 @@ import Home from './pages/Home';
 import Browse from './pages/Browse';
 import ModelDetails from './pages/ModelDetails';
 import ArtistProfile from './pages/ArtistProfile';
+import ArtistCollection from './pages/ArtistCollection';
 import ArtistsList from './pages/ArtistsList';
 import Category from './pages/Category';
 import Tag from './pages/Tag';
@@ -60,6 +61,7 @@ import ArtistBundles from './pages/artist/ArtistBundles';
 import ArtistReleases from './pages/artist/ArtistReleases';
 import EditRelease from './pages/artist/EditRelease';
 import ArtistShowcases from './pages/artist/ArtistShowcases';
+import ArtistCollections from './pages/artist/ArtistCollections';
 import ArtistCollaborations from './pages/artist/ArtistCollaborations';
 import CreateBundle from './pages/artist/CreateBundle';
 import EditBundle from './pages/artist/EditBundle';
@@ -193,6 +195,7 @@ function App() {
               <Route path="bundles/:id" element={<BundleDetails />} />
               <Route path="artists" element={<ArtistsList />} />
               <Route path="artists/:id" element={<ArtistProfile />} />
+              <Route path="artists/:id/collections/:slug" element={<ArtistCollection />} />
               <Route path="categories/:id" element={<Category />} />
               <Route path="tags/:id" element={<Tag />} />
               <Route path="tables" element={<PublicTables />} />
@@ -271,6 +274,7 @@ function App() {
               <Route path="releases" element={<ArtistReleases />} />
               <Route path="releases/:id" element={<EditRelease />} />
               <Route path="showcases" element={<ArtistShowcases />} />
+              <Route path="collections" element={<ArtistCollections />} />
               <Route path="collaborations" element={<ArtistCollaborations />} />
               {/* Sales & Analytics merged into the Sales Overview (dashboard root). */}
               <Route path="sales" element={<Navigate to="/artist" replace />} />

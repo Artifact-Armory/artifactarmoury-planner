@@ -570,7 +570,7 @@ const ModelDetails: React.FC = () => {
             <p className="mt-2 text-sm text-muted-foreground">
               by{' '}
               {model.artistId ? (
-                <Link to={`/artists/${model.artistId}`} className="text-primary hover:text-primary/80">
+                <Link to={`/artists/${model.artistSlug || model.artistId}`} className="text-primary hover:text-primary/80">
                   {model.artistName}
                 </Link>
               ) : (

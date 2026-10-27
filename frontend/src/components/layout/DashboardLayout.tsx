@@ -31,7 +31,7 @@ import {
   Megaphone,
   Flag,
   Eye,
-  Mail, Activity, Copy} from 'lucide-react';
+  Mail, Activity, Copy, FolderOpen} from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import CartDrawer from '../cart/CartDrawer';
@@ -319,6 +319,18 @@ const DashboardLayout: React.FC = () => {
               >
                 <Grid size={18} className="mr-3" />
                 My Bundles
+              </NavLink>
+              <NavLink
+                to="/artist/collections"
+                data-tour="nav-collections"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  location.pathname.startsWith('/artist/collections')
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
+                }`}
+              >
+                <FolderOpen size={18} className="mr-3" />
+                Collections
               </NavLink>
               <NavLink
                 to="/artist/releases"

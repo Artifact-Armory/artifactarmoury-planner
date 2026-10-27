@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { UserPlus, UserCheck, MessageSquare, ExternalLink, LayoutGrid } from 'lucide-react'
+import { UserPlus, UserCheck, MessageSquare, ExternalLink, LayoutGrid, FolderOpen } from 'lucide-react'
 import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import ModelGrid from '../components/models/ModelGrid'
@@ -10,6 +10,7 @@ import ModelCard from '../components/models/ModelCard'
 import { artistsApi } from '../api/endpoints/artists'
 import { messagesApi } from '../api/endpoints/messages'
 import { emailPrefsApi } from '../api/endpoints/emailPrefs'
+import { collectionsApi, CollectionSummary } from '../api/endpoints/collections'
 import { ArtistShowcase } from '../api/types'
 import { useAuthStore } from '../store/authStore'
 import Seo from '../components/common/Seo'
@@ -74,15 +75,30 @@ const ArtistProfile: React.FC = () => {
     enabled: Boolean(id),
   })
 
+  const collectionsQuery = useQuery({
+    queryKey: ['artist-collections', id],
+    queryFn: () => collectionsApi.getForArtist(id as string),
+    enabled: Boolean(id),
+  })
+
   const artist = artistQuery.data
   const models = modelsQuery.data?.models ?? []
   const featured = featuredQuery.data ?? []
   const showcases = showcasesQuery.data ?? []
+  const collections = collectionsQuery.data ?? []
   const totalPages = modelsQuery.data?.totalPages ?? 1
-  const isOwnProfile = Boolean(user?.id && user.id === id)
+  const isOwnProfile = Boolean(user?.id && user.id === artist?.id)
 
   const accent = artist?.accentColor
   const background = artist?.backgroundImageUrl
+
+  // Old links use the artist's id (or a slug from before a rename): swap the
+  // address bar to their current readable link, /artists/<slug>.
+  useEffect(() => {
+    if (artist?.slug && id !== artist.slug) {
+      navigate(`/artists/${artist.slug}`, { replace: true })
+    }
+  }, [artist?.slug, id, navigate])
 
   useEffect(() => {
     if (artist) {
@@ -199,7 +215,7 @@ const ArtistProfile: React.FC = () => {
             ? `${artist.bio.slice(0, 150)}${artist.bio.length > 150 ? '…' : ''} See ${artist.name}'s 3D-printable terrain STLs on Artifact Armoury.`
             : `Browse 3D-printable tabletop terrain STLs by ${artist.name} on Artifact Armoury.`
         }
-        path={`/artists/${artist.id}`}
+        path={`/artists/${artist.slug || artist.id}`}
         image={artist.profileImageUrl}
       />
       {/* Artist-chosen page background: a fixed image behind a translucent scrim so
@@ -336,6 +352,19 @@ const ArtistProfile: React.FC = () => {
           </section>
         )}
 
+        {/* COLLECTIONS — the artist's named ranges, each with its own page. */}
+        {collections.length > 0 && (
+          <section className="mt-12">
+            <h2 className="text-2xl font-semibold text-foreground">Collections</h2>
+            <p className="text-sm text-muted-foreground">Browse {artist.name}&apos;s models by range.</p>
+            <div className="mt-4 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {collections.map((collection) => (
+                <CollectionCard key={collection.id} artistId={artist.slug || artist.id} collection={collection} accent={accent} />
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* PUBLISHED SHOWCASE TABLES — links to the artist's public planner displays. */}
         {showcases.length > 0 && (
           <section className="mt-12">
@@ -445,6 +474,52 @@ const ShowcaseCard: React.FC<{ table: ArtistShowcase; accent?: string }> = ({ ta
         style={{ color: accent ?? '#4f46e5' }}
       >
         Open
+      </span>
+    </div>
+  </Link>
+)
+
+// A card linking to one of the artist's collections, showing a mosaic of its first
+// few models.
+const CollectionCard: React.FC<{ artistId: string; collection: CollectionSummary; accent?: string }> = ({
+  artistId,
+  collection,
+  accent,
+}) => (
+  <Link
+    to={`/artists/${artistId}/collections/${collection.slug}`}
+    className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:shadow-md"
+  >
+    <div className="relative aspect-video w-full bg-muted">
+      {collection.thumbnails.length >= 4 ? (
+        <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px">
+          {collection.thumbnails.slice(0, 4).map((src, i) => (
+            <img key={i} src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ))}
+        </div>
+      ) : collection.thumbnails.length > 0 ? (
+        <img src={collection.thumbnails[0]} alt="" className="h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+          <FolderOpen size={32} />
+        </div>
+      )}
+      <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
+        {collection.modelCount} {collection.modelCount === 1 ? 'item' : 'items'}
+      </span>
+    </div>
+    <div className="flex items-center justify-between gap-2 p-4">
+      <div className="min-w-0">
+        <p className="truncate font-medium text-foreground">{collection.name}</p>
+        {collection.description ? (
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{collection.description}</p>
+        ) : null}
+      </div>
+      <span
+        className="inline-flex flex-none items-center gap-1 text-sm font-medium group-hover:underline"
+        style={{ color: accent ?? '#4f46e5' }}
+      >
+        Browse
       </span>
     </div>
   </Link>

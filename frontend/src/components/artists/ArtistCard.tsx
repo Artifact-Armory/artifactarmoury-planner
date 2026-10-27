@@ -10,7 +10,7 @@ interface ArtistCardProps {
 const ArtistCard: React.FC<ArtistCardProps> = ({ artist }) => {
   return (
     <Link
-      to={`/artists/${artist.id}`}
+      to={`/artists/${artist.slug || artist.id}`}
       className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xs transition hover:-translate-y-1 hover:shadow-lg"
     >
       <div className="relative h-32 w-full bg-linear-to-br from-primary/30 via-purple-200 to-pink-200">
