@@ -288,6 +288,11 @@ export async function failJob(job: BakeJobRow, error: string): Promise<void> {
  *      processing_status='failed'), a late-arriving completion for an
  *      EARLIER part's bake job must not flip that back to 'ready' — the
  *      listing is genuinely incomplete.
+ *
+ * A failed job only counts while it is the latest word on its mesh: once a
+ * later bake of the same model/part succeeds (a lighter preview attached
+ * after "Source too complex", a requeue), the old failure is history. Without
+ * that, the Schwerer Gustav sat at 'processing' forever on 2026-10-27.
  */
 async function rollUpModelStatus(modelId: string): Promise<void> {
   const modelRow = (
@@ -298,9 +303,15 @@ async function rollUpModelStatus(modelId: string): Promise<void> {
   const { rows } = await db.query(
     `SELECT
         COUNT(*) FILTER (WHERE status IN ('queued','running')) AS open,
-        COUNT(*) FILTER (WHERE status = 'failed')             AS failed,
+        COUNT(*) FILTER (WHERE status = 'failed' AND NOT EXISTS (
+          SELECT 1 FROM proxy_bake_jobs later
+           WHERE later.model_id = j.model_id
+             AND later.part_id IS NOT DISTINCT FROM j.part_id
+             AND later.status = 'succeeded'
+             AND later.created_at > j.created_at
+        ))                                                     AS failed,
         COUNT(*) FILTER (WHERE status = 'succeeded')          AS succeeded
-       FROM proxy_bake_jobs WHERE model_id = $1`,
+       FROM proxy_bake_jobs j WHERE model_id = $1`,
     [modelId],
   )
   const open = Number(rows[0]?.open ?? 0)
