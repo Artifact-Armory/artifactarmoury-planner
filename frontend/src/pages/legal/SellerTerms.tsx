@@ -13,7 +13,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
  */
 const SellerTerms: React.FC = () => {
   return (
-    <LegalLayout title="Seller Terms" updated="27 October 2026 (v3)">
+    <LegalLayout title="Seller Terms" updated="28 October 2026 (v4)">
       <LegalSection heading="1. Who we are and what you are agreeing to">
         <p>
           Artifact Armoury (“we”, “us”) is operated by Artifact Armoury Ltd, registered at
@@ -29,7 +29,7 @@ const SellerTerms: React.FC = () => {
           set the buyer terms, take payment, deliver the files and decide refunds and
           complaints. You supply the design and, through us, grant the buyer the licence
           shown on your listing. Statutory remedies owed to buyers are ours to deal with;
-          section 7 explains how that affects your earnings.
+          section 8 explains how that affects your earnings.
         </p>
         <p>
           Selling is by invitation. An invite code is single use and cannot be transferred.
@@ -62,14 +62,35 @@ const SellerTerms: React.FC = () => {
         <p>
           You grant us a non-exclusive, worldwide licence, for as long as the model is
           listed and for as long as buyers are entitled to download it, to host, process,
-          convert, preview, watermark, display and deliver your files, and to use your store
-          name, images and descriptions to promote the marketplace and your listings. You
-          can ask us to stop using your images for promotion at any time, but we need to
-          keep delivering files to people who have already bought them.
+          convert, preview, watermark, display and deliver your files. We need to keep
+          delivering files to people who have already bought them.
         </p>
       </LegalSection>
 
-      <LegalSection heading="4. Listings and the licence buyers get">
+      <LegalSection heading="4. Promoting Artifact Armoury and your work">
+        <p>
+          While a model is listed, you also grant us a non-exclusive, worldwide, royalty-free
+          licence to use it, along with your store name, logo, images and descriptions, to
+          promote Artifact Armoury and your listings. This includes renders, screenshots,
+          videos, tables built in our planner, social media posts, adverts, emails and
+          physical prints we make to display at events or in our own photos and videos.
+        </p>
+        <p>In return we promise that:</p>
+        <ul className="ml-5 list-disc space-y-1">
+          <li><strong>we will never give your models away.</strong> We will not hand out your files, or prints of them, for free, as prizes or in giveaways, and we will never sell prints of them. Anyone who wants your files has to buy them;</li>
+          <li><strong>we will always credit you</strong> as the creator when we feature your work;</li>
+          <li>where possible, we will <strong>link to your store and your social media accounts</strong> when we feature your work, and tag you on the platform we are posting to;</li>
+          <li><strong>any discount or offer we run comes out of our share, never yours.</strong> Your earnings are worked out as if our discount had not been applied (see section 6).</li>
+        </ul>
+        <p>
+          If you remove a listing, we will stop making new promotional material from it, but
+          we do not have to take down posts, videos or other material already published. If
+          you are unhappy with a particular use of your work, tell us and we will consider
+          it fairly.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="5. Listings and the licence buyers get">
         <p>
           You set your own prices, in pounds and before VAT, and choose the licence on each
           listing: personal use only, or commercial use (the buyer may sell physical prints
@@ -79,7 +100,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="5. Fees and your share of each sale">
+      <LegalSection heading="6. Fees and your share of each sale">
         <p>
           You keep a set share of the <strong>net price</strong> of each sale (the price
           after any discount, before VAT), and we keep the rest. The standard share is
@@ -105,6 +126,11 @@ const SellerTerms: React.FC = () => {
           for it (currently 50p for a promo-code discount).
         </p>
         <p>
+          <strong>Our own discounts.</strong> If we run a discount, offer or promo code
+          ourselves, the whole cost comes out of our share. You earn exactly what you would
+          have earned without it.
+        </p>
+        <p>
           <strong>Worked example</strong> (a £10.00 listing, before VAT, at the standard 85%
           share): with no discount you earn £8.50 and we keep £1.50. With a £2.00 public
           sale the buyer pays £8.00 before VAT, and you earn 85% of that, £6.80. With a
@@ -117,7 +143,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="6. Getting paid">
+      <LegalSection heading="7. Getting paid">
         <p>
           Payouts are made through Stripe Connect, so you must complete Stripe’s
           verification to be paid. The holding period, currently <strong>21 days</strong>,
@@ -127,7 +153,7 @@ const SellerTerms: React.FC = () => {
           <strong>£10</strong>; a smaller balance rolls forward to the next run. If your
           account closes with less than £10 owing, we will still pay it to your connected
           Stripe account where we are able to. If we withhold payouts to investigate a
-          suspected breach (section 12), we will tell you why and aim to finish within 30
+          suspected breach (section 13), we will tell you why and aim to finish within 30
           days, and we will release whatever is not in doubt. We do not charge you a fee to
           pay you. Stripe may charge fees on your own Stripe account or hold funds under
           its own rules; those are between you and Stripe, and we are not responsible for
@@ -136,7 +162,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="7. Refunds and disputes">
+      <LegalSection heading="8. Refunds and disputes">
         <p>
           When a buyer is refunded for an item, they get back what they paid, including VAT.
           <strong> You lose only your own share of that item</strong> (in the example above,
@@ -158,7 +184,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="8. Protection of your files">
+      <LegalSection heading="9. Protection of your files">
         <p>
           We protect your files in the ways described on our{' '}
           <Link to="/creator-protection" className="text-primary underline">Creator Protection</Link>{' '}
@@ -171,7 +197,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="9. Duplicates and your own files">
+      <LegalSection heading="10. Duplicates and your own files">
         <p>
           We check every upload against the whole marketplace. A match against another
           artist’s work is rejected. You can upload your own file as many times as you like,
@@ -180,18 +206,18 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="10. Deleting or unpublishing a listing">
+      <LegalSection heading="11. Deleting or unpublishing a listing">
         <p>
           You can unpublish or delete a listing at any time. Deleting removes it from the
           store, but <strong>people who already bought it keep their access to download
           it</strong>, unless we cannot lawfully keep supplying that file (for example
           because it infringes someone’s rights), in which case we refund those buyers and
-          section 7 applies. We keep the file hash and shape fingerprint of deleted
+          section 8 applies. We keep the file hash and shape fingerprint of deleted
           listings so the design stays protected.
         </p>
       </LegalSection>
 
-      <LegalSection heading="11. Rules for sellers">
+      <LegalSection heading="12. Rules for sellers">
         <p>
           You must not: upload anything unlawful, infringing, hateful or misleading; copy
           another artist’s work; manipulate reviews, sales or analytics; try to take buyers
@@ -201,7 +227,7 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="12. What we can do">
+      <LegalSection heading="13. What we can do">
         <p>
           We may unpublish or remove any listing, refuse or reverse a sale, withhold
           payouts while we investigate, suspend or close an account, and report matters to
@@ -215,20 +241,20 @@ const SellerTerms: React.FC = () => {
         </p>
       </LegalSection>
 
-      <LegalSection heading="13. Ending this agreement">
+      <LegalSection heading="14. Ending this agreement">
         <p>
           You can close your seller account at any time. Buyers keep their downloads. We
           will pay out any earnings you are owed, less anything we are entitled to keep
-          under these terms, once the holding period in section 6 has passed. We can end
+          under these terms, once the holding period in section 7 has passed. We can end
           your seller account by giving you at least 30 days’ notice with our reasons. We
           can end it sooner, or suspend it immediately, only where you have seriously
           breached these terms or the law, where the law requires it, or where we reasonably
           need to protect buyers, other artists or the marketplace; we will then email you
-          the reasons straight away. Buyers’ rights under section 10 are not affected.
+          the reasons straight away. Buyers’ rights under section 11 are not affected.
         </p>
       </LegalSection>
 
-      <LegalSection heading="14. Liability">
+      <LegalSection heading="15. Liability">
         <p>
           We provide the marketplace “as is”. We do not guarantee any level of sales.
           Nothing in these terms limits liability that cannot lawfully be limited, including
@@ -236,11 +262,11 @@ const SellerTerms: React.FC = () => {
           our total liability to you for loss arising from your use of the marketplace is
           limited to the greater of £1,000 and the amount we paid or owed to you in the 12
           months before the claim. This cap never limits our obligation to pay you the
-          earnings you have properly earned under section 6.
+          earnings you have properly earned under section 7.
         </p>
       </LegalSection>
 
-      <LegalSection heading="15. Changes, law and contact">
+      <LegalSection heading="16. Changes, law and contact">
         <p>
           We may update these terms, for example for legal, security or safety reasons, or to
           reflect changes to the marketplace. We will email you the new version at least 15
