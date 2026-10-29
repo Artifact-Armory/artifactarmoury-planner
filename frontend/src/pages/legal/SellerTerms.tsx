@@ -223,7 +223,10 @@ const SellerTerms: React.FC = () => {
           another artist’s work; manipulate reviews, sales or analytics; try to take buyers
           off the platform to avoid our fee; share or resell files you have bought from
           others; or try to defeat our security, watermarking or fingerprinting. You must
-          reply to buyer messages promptly and deal with problems fairly.
+          reply to buyer messages promptly and deal with problems fairly. You must also
+          follow our{' '}
+          <Link to="/acceptable-use" className="text-primary underline">Acceptable Use Policy</Link>,
+          which lists the items and behaviour that are not allowed.
         </p>
       </LegalSection>
 
