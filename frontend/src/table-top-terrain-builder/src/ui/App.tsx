@@ -7,7 +7,7 @@ import {
   Mountain, ArrowUp, ArrowDown, Waves, Square, Download, ArrowLeft, Eye, Check, ExternalLink,
   Paintbrush, RotateCcw as RotateLeftIcon, Layers, PanelLeft, PanelRight, Combine, Ungroup,
   Pencil, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Printer, Triangle, FlipHorizontal2,
-  Palette,
+  Palette, SeparatorHorizontal,
 } from 'lucide-react'
 import type { TerrainTool } from '@core/heightmap'
 import {
@@ -16,6 +16,7 @@ import {
 import { FrameQueue } from '@core/frameQueue'
 import { LandformControls } from './LandformControls'
 import { LookPanel } from './LookPanel'
+import { LevelPanel } from './LevelPanel'
 import { FEATURES } from '@/config/features'
 import hotToast from 'react-hot-toast'
 import { useAppStore } from '@state/store'
@@ -291,6 +292,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const resetPaint = useAppStore((s) => s.actions.resetPaint)
   const [terrainPanelOpen, setTerrainPanelOpen] = React.useState(false)
   const [lookPanelOpen, setLookPanelOpen] = React.useState(false)
+  const levelMarkerArmed = useAppStore((s) => s.levelMarkerArmed)
+  const setLevelMarkerArmed = useAppStore((s) => s.setLevelMarkerArmed)
+  // The marker tool and its panel share the side slot with the other panels.
+  React.useEffect(() => {
+    if (lookPanelOpen || terrainPanelOpen) useAppStore.getState().setLevelMarkerArmed(false)
+  }, [lookPanelOpen, terrainPanelOpen])
   const [terrainQuote, setTerrainQuote] = React.useState<{ tileCount: number; price: number } | null>(null)
 
   // Landforms (editable hills / plateaus / ridges — see core/terrainFeatures.ts).
@@ -713,12 +720,12 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
           ? await tablesApi.getSharedTable(shareToken)
           : await tablesApi.getById(tableId!, { userEmail: user?.email })
         if (cancelled) return
-        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness } = deserializeLayout(t.tableConfig, t.layoutData)
+        const { table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness, levelMarkers } = deserializeLayout(t.tableConfig, t.layoutData)
         // Resolve any referenced models that aren't in the loaded catalogue (e.g. an
         // artist's unpublished piece) so every placed model renders, not a grey box.
         await resolveAssetsByIds(instances.map((i) => i.assetId))
         if (cancelled) return
-        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness })
+        applyLayout({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness, levelMarkers })
         // Pull every distinct model's geometry BEFORE lifting the loading gate
         // (see tableAssetsReady above). ensureTemplate is the same cache the
         // scene uses, so this is not an extra download — it just lets us wait
@@ -1274,7 +1281,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     setPrinting(true)
     try {
       const { exportLayoutPdf } = await import('./layoutPdf')
-      await exportLayoutPdf({ name: savedTableName ?? 'Untitled table', table: s.table, instances: s.instances, system: unitSystem })
+      await exportLayoutPdf({ name: savedTableName ?? 'Untitled table', table: s.table, instances: s.instances, system: unitSystem, levelMarkers: s.levelMarkers })
     } catch {
       hotToast.error('Could not create the layout PDF')
     } finally {
@@ -1286,7 +1293,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const s = useAppStore.getState()
     return JSON.stringify(serializeLayout(s.table, s.tableMaterial, s.instances, {
       terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
-    }, { modelColor: s.modelColor, brightness: s.brightness }))
+    }, { modelColor: s.modelColor, brightness: s.brightness, levelMarkers: s.levelMarkers }))
   }
 
   // Autosave: every 5 minutes, quietly save a table you own if it changed since
@@ -1314,7 +1321,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     const s = useAppStore.getState()
     const { tableConfig, layoutData } = serializeLayout(s.table, s.tableMaterial, s.instances, {
       terrainDetail: s.terrainDetail, terrainFeatures: s.terrainFeatures, paint: s.paint,
-    }, { modelColor: s.modelColor, brightness: s.brightness })
+    }, { modelColor: s.modelColor, brightness: s.brightness, levelMarkers: s.levelMarkers })
     const email = user.email
     const layoutJson = JSON.stringify({ tableConfig, layoutData })
 
@@ -1560,6 +1567,19 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
             >
               <Palette size={18} />
             </button>
+            <button
+              className={`tb-icon ${levelMarkerArmed ? 'is-active' : ''}`}
+              title="Level markers: mark each floor's height so the layout PDF prints one map per floor"
+              onClick={() => {
+                if (!levelMarkerArmed) {
+                  if (terrainPanelOpen) closeTerrainPanel()
+                  setLookPanelOpen(false)
+                }
+                setLevelMarkerArmed(!levelMarkerArmed)
+              }}
+            >
+              <SeparatorHorizontal size={18} />
+            </button>
             {selectedInstanceIds.length > 0 && (
               <>
                 <div className="tb-sep" />
@@ -1753,6 +1773,7 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
               behind FEATURES.terrainSculpt (parked — clunky, to be rebuilt); the
               ground-texture painter below is a separate working feature and stays. */}
           {lookPanelOpen && !terrainPanelOpen && <LookPanel onClose={() => setLookPanelOpen(false)} />}
+          {levelMarkerArmed && !lookPanelOpen && !terrainPanelOpen && <LevelPanel onClose={() => setLevelMarkerArmed(false)} />}
 
           {terrainPanelOpen && (
             <div className="tb-terrain">

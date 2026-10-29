@@ -5,6 +5,8 @@ import { GridHelper } from './helpers'
 import { getAssetById, type Asset } from '@core/assets'
 import { BuilderCamera } from './BuilderCamera'
 import { InstancedScene } from './InstancedScene'
+import { LevelMarkerView } from './levelMarkers'
+import { useUnitsStore } from '@/store/unitsStore'
 import { Ghost } from './ghost'
 import { RotateHandle } from './rotateHandle'
 import { ensureTemplate } from './loaders'
@@ -284,6 +286,11 @@ export function ThreeStage() {
     const landformPreview = new THREE.Group()
     scene.add(landformPreview)
 
+    // Level markers: placed floor outlines + the blue glow while the tool is on.
+    const levelView = new LevelMarkerView()
+    scene.add(levelView.group)
+    levelView.sync(store().levelMarkers, store().table)
+
     // Deformable surface: the flat plane is swapped for a heightmap mesh once the
     // user starts sculpting (see buildTable / syncTerrain). A grid mesh is also used
     // (flat) when the surface is painted, so the overlay has known UVs.
@@ -443,7 +450,7 @@ export function ThreeStage() {
       shot.updateProjectionMatrix()
 
       // Hide everything that is editor chrome rather than the table itself.
-      const hidden = [ghost.group, rotateHandle.group, gridGroup, cellHi, brushRing, featureGroup, landformPreview].filter((o) => o.visible)
+      const hidden = [ghost.group, rotateHandle.group, gridGroup, cellHi, brushRing, featureGroup, landformPreview, levelView.group].filter((o) => o.visible)
       hidden.forEach((o) => { o.visible = false })
       const selection = new Set(s.selectedInstanceIds)
       const hovered = engine.current?.hovered ?? null
@@ -900,6 +907,24 @@ export function ThreeStage() {
       const hit = new THREE.Vector3()
       return raycaster.ray.intersectPlane(ground, hit) ? hit : null
     }
+    /** Height under the cursor for a level marker: the nearest piece surface hit,
+     *  else the table, to the nearest millimetre. */
+    function markerHeight(e: { clientX: number; clientY: number }): number | null {
+      const gp = groundPoint(e)
+      raycaster.setFromCamera(ndc(e, ndcTmp), camera)
+      const hit = inst.pickHit(raycaster)
+      const origin = raycaster.ray.origin
+      const p = hit && (!gp || hit.point.distanceTo(origin) < gp.distanceTo(origin)) ? hit.point : gp
+      return p ? Math.max(0, Math.round(p.y * 1000) / 1000) : null
+    }
+    function updateMarkerPreview(e: { clientX: number; clientY: number }) {
+      const y = markerHeight(e)
+      const metric = useUnitsStore.getState().system !== 'imperial'
+      const text = y == null ? '' : metric ? `${(y * 100).toFixed(1)} cm` : `${(y / 0.0254).toFixed(2)}"`
+      levelView.setPreview(y, store().table, text)
+      requestRender()
+    }
+
     function pickPiece(e: { clientX: number; clientY: number }): string | null {
       raycaster.setFromCamera(ndc(e, ndcTmp), camera)
       return inst.pick(raycaster)
@@ -1064,6 +1089,14 @@ export function ThreeStage() {
       }
       const s = store()
 
+      // Level marker tool: each click adds a marker at the height under the cursor.
+      if (s.levelMarkerArmed) {
+        const y = markerHeight(e)
+        if (y != null && y > 0.001) s.addLevelMarker(y)
+        requestRender()
+        return
+      }
+
       // Terrain sculpt mode owns the left button: drag to sculpt, ignore placement.
       if (s.terrainTool !== 'none') {
         lastPaintPoint = undefined
@@ -1177,6 +1210,15 @@ export function ThreeStage() {
           return
         }
         if (overCanvas && e.buttons === 0) setCursor(pickPiece(e) ? 'pointer' : 'default')
+        return
+      }
+
+      // Level marker tool: the blue plane follows the height under the cursor.
+      if (store().levelMarkerArmed) {
+        if (overCanvas) {
+          const point = { clientX: e.clientX, clientY: e.clientY }
+          cursorQueue.enqueue(() => updateMarkerPreview(point))
+        }
         return
       }
 
@@ -1747,6 +1789,10 @@ export function ThreeStage() {
         return
       }
 
+      if (e.key === 'Escape' && s.levelMarkerArmed) {
+        s.setLevelMarkerArmed(false)
+        return
+      }
       if (e.key === 'Escape') {
         // Cancels a pending landform placement (and any landform selection).
         if (s.landformArmed) s.setLandformArmed(null)
@@ -1905,6 +1951,17 @@ export function ThreeStage() {
       if (s.paintRev !== prev.paintRev || s.paint !== prev.paint) {
         syncPaint()
       }
+      if (s.levelMarkers !== prev.levelMarkers || s.table !== prev.table) {
+        levelView.sync(s.levelMarkers, s.table)
+        requestRender()
+      }
+      if (s.levelMarkerArmed !== prev.levelMarkerArmed) {
+        cursorQueue.clear()
+        levelView.setPreview(null, s.table)
+        if (s.levelMarkerArmed) { cellHi.visible = false; brushRing.visible = false }
+        setCursor(s.levelMarkerArmed ? 'crosshair' : (s.selectedAssetId ? 'cell' : 'default'))
+        requestRender()
+      }
       if (s.terrainTool !== prev.terrainTool) {
         // Entering/leaving sculpt mode: hide the brush ring + set the cursor.
         if (s.terrainTool === 'none') brushRing.visible = false
@@ -1964,6 +2021,7 @@ export function ThreeStage() {
       cursorQueue.clear()
       clearMarkers(featureGroup)
       clearMarkers(landformPreview)
+      levelView.dispose()
       if (paintTex) Object.values(paintTex).forEach((texture) => texture.dispose())
       useAppStore.getState().setStageApi(null)
       useAppStore.getState().setCameraApi(null)

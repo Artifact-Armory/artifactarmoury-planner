@@ -1581,6 +1581,14 @@
 
 /* Colours & light panel (shares the right-hand panel shell with terrain) */
 .tb-look-section { display: flex; flex-direction: column; gap: 6px; }
+.tb-level-row { display: flex; align-items: center; gap: 8px; font-size: 12px; min-height: 26px; }
+.tb-level-row > span:nth-child(2) { flex: 1; font-variant-numeric: tabular-nums; }
+.tb-level-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #2563eb; color: #fff; font-size: 11px; font-weight: 700;
+}
+.tb-level-num.is-ground { background: #334155; }
 .tb-look-bright { display: flex; align-items: center; justify-content: space-between; }
 .tb-look-bright > span { display: inline-flex; align-items: center; gap: 6px; }
 .tb-colour-row { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -36,6 +36,8 @@ export interface LayoutTerrain {
 export interface LayoutLook {
   modelColor?: string | null
   brightness?: number
+  /** Floor heights (metres above the table top) for the layout PDF. */
+  levelMarkers?: number[]
 }
 
 const HEX_COLOUR = /^#[0-9a-f]{6}$/i
@@ -58,6 +60,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
       // Only written when changed, so untouched tables save as before.
       ...(look.modelColor ? { modelColor: look.modelColor } : {}),
       ...(look.brightness != null && look.brightness !== 1 ? { brightness: look.brightness } : {}),
+      ...(look.levelMarkers?.length ? { levelMarkers: look.levelMarkers } : {}),
     },
     // Backend requires layout_data.models to be an array.
     layoutData: {
@@ -94,7 +97,7 @@ export function serializeLayout(table: Table, tableMaterial: string, instances: 
 export function deserializeLayout(
   tableConfig: any,
   layoutData: any,
-): { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail: Heightmap | null; terrainFeatures: TerrainFeature[]; paint: PaintMap | null; modelColor: string | null; brightness: number } {
+): { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail: Heightmap | null; terrainFeatures: TerrainFeature[]; paint: PaintMap | null; modelColor: string | null; brightness: number; levelMarkers: number[] } {
   const tc = tableConfig ?? {}
   const table: Table = {
     width: Number(tc.width ?? DEFAULT_TABLE.width) || DEFAULT_TABLE.width,
@@ -131,5 +134,8 @@ export function deserializeLayout(
     table, tableMaterial: tc.material, instances, terrainDetail, terrainFeatures, paint,
     modelColor: readColour(tc.modelColor) ?? null,
     brightness: Number.isFinite(brightness) && brightness > 0 ? brightness : 1,
+    levelMarkers: Array.isArray(tc.levelMarkers)
+      ? tc.levelMarkers.map(Number).filter((y: number) => Number.isFinite(y) && y > 0).sort((a: number, b: number) => a - b)
+      : [],
   }
 }

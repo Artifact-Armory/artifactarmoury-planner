@@ -216,8 +216,14 @@ export class InstancedScene {
    * to three's brute-force InstancedMesh raycast. The nearest hit of either wins.
    */
   pick(raycaster: THREE.Raycaster): string | null {
+    return this.pickHit(raycaster)?.id ?? null
+  }
+
+  /** Like `pick`, plus the world point where the ray first hits that piece. */
+  pickHit(raycaster: THREE.Raycaster): { id: string; point: THREE.Vector3 } | null {
     let best: string | null = null
     let bestDist = Infinity
+    const bestPoint = new THREE.Vector3()
     const instById = new Map(this.instances.map((i) => [i.id, i]))
     const bruteForce: THREE.InstancedMesh[] = []
 
@@ -248,6 +254,7 @@ export class InstancedScene {
           if (dist < bestDist) {
             bestDist = dist
             best = id
+            bestPoint.copy(tmpHit)
           }
         }
       })
@@ -256,10 +263,11 @@ export class InstancedScene {
     if (bruteForce.length) {
       const h = raycaster.intersectObjects(bruteForce, false)[0]
       if (h && h.distance < bestDist && h.instanceId != null) {
-        best = ((h.object as THREE.InstancedMesh).userData.slots as string[])[h.instanceId] ?? best
+        const id = ((h.object as THREE.InstancedMesh).userData.slots as string[])[h.instanceId]
+        if (id) { best = id; bestPoint.copy(h.point) }
       }
     }
-    return best
+    return best ? { id: best, point: bestPoint } : null
   }
 
   /**

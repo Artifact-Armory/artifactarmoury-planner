@@ -240,6 +240,10 @@ interface AppState {
   tableMaterial: string        // table surface material id (grass/sand/wood/snow/…)
   modelColor: string | null    // colour for every piece without its own (#rrggbb); null = original
   brightness: number           // scene light multiplier, 1 = normal
+  // Level markers: heights (metres above the table top, ascending) the user set to
+  // mark real floors. The layout PDF prints one map per floor between them.
+  levelMarkers: number[]
+  levelMarkerArmed: boolean    // marker tool on: a blue plane follows the cursor, click adds a marker
 
   // Terrain sculpting (deformable table surface → printable tiles later).
   // The sculpt UI is hidden behind FEATURES.terrainSculpt; existing sculpted
@@ -305,6 +309,10 @@ interface AppState {
   setPlacement: (level: number, manual: boolean) => void
   setTableMaterial: (id: string) => void
   setBrightness: (b: number) => void
+  setLevelMarkerArmed: (on: boolean) => void
+  /** Add a marker at this height (ignored if one is already within 3 mm). */
+  addLevelMarker: (y: number) => void
+  removeLevelMarker: (index: number) => void
 
   setTerrainTool: (tool: TerrainTool) => void
   setBrush: (patch: Partial<{ radius: number; strength: number }>) => void
@@ -407,7 +415,7 @@ interface AppState {
     saveLayout: (name: string) => string
     loadLayout: (id: string) => void
     /** Replace the whole scene from an external source (e.g. a server-saved table). */
-    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail?: Heightmap | null; terrainFeatures?: TerrainFeature[]; paint?: PaintMap | null; modelColor?: string | null; brightness?: number }) => void
+    applyLayout: (data: { table: Table; tableMaterial?: string; instances: Instance[]; terrainDetail?: Heightmap | null; terrainFeatures?: TerrainFeature[]; paint?: PaintMap | null; modelColor?: string | null; brightness?: number; levelMarkers?: number[] }) => void
     getSavedLayouts: () => SavedLayout[]
     deleteLayout: (id: string) => void
     exportLayout: () => string
@@ -537,6 +545,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   tableMaterial: 'grass',
   modelColor: null,
   brightness: 1,
+  levelMarkers: [],
+  levelMarkerArmed: false,
 
   heightmap: null,
   terrainDetail: null,
@@ -599,7 +609,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedAsset: (id) => set(s => ({
     selectedAssetId: id,
     terrainTool: id ? 'none' : s.terrainTool,
-    ...(id ? { landformArmed: null, landformDraft: null, selectedFeatureId: null } : {}),
+    ...(id ? { landformArmed: null, landformDraft: null, selectedFeatureId: null, levelMarkerArmed: false } : {}),
   })),
   setSelectedInstance: (id) =>
     set(s => {
@@ -624,6 +634,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       : { placementLevel: level, placementManual: manual }),
   setTableMaterial: (id) => set({ tableMaterial: id }),
   setBrightness: (b) => set({ brightness: clampBrightness(b) }),
+  setLevelMarkerArmed: (on) => set(on
+    ? { levelMarkerArmed: true, selectedAssetId: null, terrainTool: 'none', landformArmed: null, landformDraft: null, selectedFeatureId: null }
+    : { levelMarkerArmed: false }),
+  addLevelMarker: (y) => set(s => {
+    if (!Number.isFinite(y) || y <= 0.001 || s.levelMarkers.some(m => Math.abs(m - y) < 0.003)) return {}
+    return { levelMarkers: [...s.levelMarkers, y].sort((a, b) => a - b) }
+  }),
+  removeLevelMarker: (index) => set(s => ({ levelMarkers: s.levelMarkers.filter((_, i) => i !== index) })),
 
   setTerrainTool: (tool) => {
     // Entering a sculpt/paint tool clears any pending model placement (mutually
@@ -638,7 +656,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Brushes, landform placement and model placement are mutually exclusive.
     set(tool === 'none'
       ? { terrainTool: tool }
-      : { terrainTool: tool, landformArmed: null, landformDraft: null, selectedFeatureId: null })
+      : { terrainTool: tool, landformArmed: null, landformDraft: null, selectedFeatureId: null, levelMarkerArmed: false })
   },
   setBrush: (patch) => set(s => ({
     brushRadius: patch.radius != null ? patch.radius : s.brushRadius,
@@ -657,6 +675,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedAssetId: null,
       selectedInstanceId: null,
       selectedInstanceIds: [],
+      levelMarkerArmed: false,
     }
   }),
   setLandformDraft: (patch) => set(s => ({
@@ -1171,6 +1190,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           selectedFeatureId: null,
           landformArmed: null,
           landformDraft: null,
+          levelMarkers: [],
+          levelMarkerArmed: false,
           paint: pm,
           terrainRev: s.terrainRev + 1,
           paintRev: s.paintRev + 1,
@@ -1356,7 +1377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().actions.fitView()
     },
 
-    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness }) => {
+    applyLayout: ({ table, tableMaterial, instances, terrainDetail, terrainFeatures, paint, modelColor, brightness, levelMarkers }) => {
       const clean: Instance[] = JSON.parse(JSON.stringify(instances))
       const detail = terrainDetail ?? null
       const features = cloneFeatures(terrainFeatures ?? [])
@@ -1368,6 +1389,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tableMaterial: tableMaterial ?? s.tableMaterial,
         modelColor: mc,
         brightness: clampBrightness(brightness ?? 1),
+        levelMarkers: [...(levelMarkers ?? [])].sort((a, b) => a - b),
+        levelMarkerArmed: false,
         instances: clean,
         heightmap: hm,
         terrainDetail: detail,
