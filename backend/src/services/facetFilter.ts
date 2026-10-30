@@ -92,3 +92,53 @@ export function termSearchSql(likePlaceholder: string): string {
         OR EXISTS (SELECT 1 FROM unnest(COALESCE(tt.synonyms, '{}')) syn WHERE syn ILIKE ${likePlaceholder}))
   )`
 }
+
+/**
+ * Split a search box entry into keywords for `keywordSearchSql`. Lower-cased,
+ * deduped, capped at 8 words. Simple plural stemming so "houses" finds "House"
+ * and "batteries" finds "Battery" (the stem is matched as a substring).
+ */
+export function searchKeywords(raw: unknown): string[] {
+  if (typeof raw !== 'string') return []
+  const words = raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/^["'(,.]+|["'),.!?]+$/g, ''))
+    .filter(Boolean)
+    .map((w) => {
+      if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3)
+      if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1)
+      return w
+    })
+  return [...new Set(words)].slice(0, 8)
+}
+
+/**
+ * Keyword search across a model's name, description, legacy tags, taxonomy term
+ * names/synonyms and artist name. Every keyword must match somewhere (in any
+ * order), so "german tank" finds a Panzer whose name says Panzer but whose era
+ * term says German. Returns null when there are no keywords.
+ *
+ * `rank` is an ORDER BY expression: the number of keywords found in the model's
+ * name, so name matches come first. It only reuses the WHERE placeholders.
+ */
+export function keywordSearchSql(
+  keywords: string[],
+  push: (value: unknown) => string,
+): { where: string; rank: string } | null {
+  if (!keywords.length) return null
+  const likes = keywords.map((w) => push(`%${escapeLike(w)}%`))
+  const where = likes
+    .map(
+      (like) => `(
+      m.name ILIKE ${like} OR
+      m.description ILIKE ${like} OR
+      EXISTS (SELECT 1 FROM unnest(m.tags) tag WHERE tag ILIKE ${like}) OR
+      ${termSearchSql(like)} OR
+      EXISTS (SELECT 1 FROM users su WHERE su.id = m.artist_id AND su.artist_name ILIKE ${like})
+    )`,
+    )
+    .join(' AND ')
+  const rank = likes.map((like) => `(CASE WHEN m.name ILIKE ${like} THEN 1 ELSE 0 END)`).join(' + ')
+  return { where: `(${where})`, rank: `(${rank})` }
+}

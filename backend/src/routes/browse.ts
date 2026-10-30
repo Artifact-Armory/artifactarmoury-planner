@@ -8,11 +8,13 @@ import { optionalAuth } from '../middleware/auth';
 import { searchRateLimit } from '../middleware/security';
 import { asyncHandler } from '../middleware/error';
 import { ValidationError } from '../middleware/error';
-import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
+import { parseTermsParam, facetConditions, searchKeywords, keywordSearchSql } from '../services/facetFilter';
 import { logSearch } from '../services/analytics';
 import { annotateModelsWithSales, effectiveModelPriceSql } from '../services/sales';
 
 const router = Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ============================================================================
 // BROWSE MODELS (Main catalog)
@@ -32,7 +34,8 @@ router.get('/',
       page = 1,
       limit = 24,
       search,
-      fulfillment
+      fulfillment,
+      artist
     } = req.query;
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -57,12 +60,18 @@ router.get('/',
       conditions.push(`m.tags && ${push(tagsArray)}::text[]`);
     }
 
-    // Price range
+    // Artist filter (one artist id)
+    if (typeof artist === 'string' && UUID_RE.test(artist)) {
+      conditions.push(`m.artist_id = ${push(artist)}`);
+    }
+
+    // Price range, on the price the buyer actually pays (sale price when on sale),
+    // so it agrees with the price sorts and the card prices.
     if (minPrice) {
-      conditions.push(`m.base_price >= ${push(Number(minPrice))}`);
+      conditions.push(`${effectiveModelPriceSql('m')} >= ${push(Number(minPrice))}`);
     }
     if (maxPrice) {
-      conditions.push(`m.base_price <= ${push(Number(maxPrice))}`);
+      conditions.push(`${effectiveModelPriceSql('m')} <= ${push(Number(maxPrice))}`);
     }
 
     // Fulfillment mode (Browse tabs). 'print' narrows to models the artist has
@@ -72,15 +81,11 @@ router.get('/',
       conditions.push(`m.print_consent = true AND m.print_price IS NOT NULL`);
     }
 
-    // Search query (name, description, legacy tags, AND taxonomy term names/synonyms)
-    if (search && typeof search === 'string' && search.trim()) {
-      const like = push(`%${search.trim()}%`);
-      conditions.push(`(
-        m.name ILIKE ${like} OR
-        m.description ILIKE ${like} OR
-        EXISTS (SELECT 1 FROM unnest(m.tags) tag WHERE tag ILIKE ${like}) OR
-        ${termSearchSql(like)}
-      )`);
+    // Keyword search: every word must match the name, description, legacy tags,
+    // taxonomy term names/synonyms or artist name (see services/facetFilter.ts).
+    const keywordSearch = keywordSearchSql(searchKeywords(search), push);
+    if (keywordSearch) {
+      conditions.push(keywordSearch.where);
     }
 
     // Faceted taxonomy filters: OR within a facet, AND across facets, with
@@ -95,6 +100,12 @@ router.get('/',
     // Determine ORDER BY clause
     let orderBy = 'm.created_at DESC';
     switch (sortBy) {
+      case 'relevance':
+        // Best match: models with more search words in their name first.
+        orderBy = keywordSearch
+          ? `${keywordSearch.rank} DESC, m.sale_count DESC, m.published_at DESC`
+          : 'm.published_at DESC, m.created_at DESC';
+        break;
       case 'recent':
         orderBy = 'm.published_at DESC, m.created_at DESC';
         break;
@@ -182,9 +193,30 @@ router.get('/',
         maxPrice: maxPrice || null,
         search: search || null,
         fulfillment: fulfillment || null,
+        artist: artist || null,
         sortBy
       }
     });
+  })
+);
+
+// ============================================================================
+// ARTISTS WITH LIVE MODELS (Browse "Artist" filter)
+// ============================================================================
+
+router.get('/artists',
+  asyncHandler(async (_req, res) => {
+    const result = await db.query(
+      `SELECT u.id, u.artist_name, COUNT(m.id)::int AS model_count
+       FROM users u
+       JOIN models m ON m.artist_id = u.id
+       WHERE m.status = 'published' AND m.visibility = 'public'
+         AND u.artist_name IS NOT NULL AND u.artist_name <> ''
+       GROUP BY u.id, u.artist_name
+       ORDER BY u.artist_name ASC`
+    );
+
+    res.json({ artists: result.rows });
   })
 );
 

@@ -63,6 +63,7 @@ export interface FacetFilterParams {
   terms?: string // comma-separated facetSlug:path tokens
   search?: string
   category?: string
+  artist?: string // artist user id
   minPrice?: number
   maxPrice?: number
   hideZero?: boolean
@@ -82,6 +83,7 @@ export const taxonomyApi = {
         terms: params.terms || undefined,
         search: params.search || undefined,
         category: params.category || undefined,
+        artist: params.artist || undefined,
         minPrice: params.minPrice,
         maxPrice: params.maxPrice,
         hideZero: params.hideZero ? '1' : undefined,

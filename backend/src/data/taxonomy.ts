@@ -797,6 +797,75 @@ export const TAXONOMY: FacetSeed[] = [
   },
 
   // ==========================================================================
+  // 2b · SIDE & NATION — who the piece belongs to (Axis / Allies, NATO / Warsaw
+  //   Pact, then the nation). Optional and universal: vehicles and crews mostly,
+  //   but also nation-specific terrain (German bunkers). Era-specific sides so a
+  //   WW2 Sherman and a 1980s Abrams don't share a "United States" bucket; search
+  //   still finds both via the synonyms. Existing models were tagged once by
+  //   scripts/seed-taxonomy.ts from src/data/sideNationBackfill.ts.
+  // ==========================================================================
+  {
+    slug: 'side-nation',
+    name: 'Side & Nation',
+    description: 'Which side and nation the piece belongs to, e.g. WW2 Axis > Germany. Leave blank for neutral or civilian pieces.',
+    selectionUi: 'tree',
+    maxTerms: 4,
+    terms: [
+      {
+        name: 'WW2 Allies',
+        slug: 'ww2-allies',
+        synonyms: ['Allies', 'Allied'],
+        children: [
+          { name: 'United Kingdom', synonyms: ['British', 'UK', 'England', 'Scotland'] },
+          { name: 'United States', synonyms: ['US', 'USA', 'American', 'US Army', 'USMC'] },
+          { name: 'Soviet Union', synonyms: ['USSR', 'Soviet', 'Russian', 'Red Army'] },
+          {
+            name: 'Commonwealth',
+            synonyms: ['Canada', 'Canadian', 'Australia', 'Australian', 'New Zealand', 'India', 'South Africa', 'ANZAC'],
+          },
+          { name: 'France', synonyms: ['French', 'Free French'] },
+          { name: 'Poland', synonyms: ['Polish'] },
+          { name: 'Other Allies', synonyms: ['Netherlands', 'Dutch', 'Belgium', 'Belgian', 'Greece', 'Norway', 'China', 'Chinese'] },
+        ],
+      },
+      {
+        name: 'WW2 Axis',
+        slug: 'ww2-axis',
+        synonyms: ['Axis'],
+        children: [
+          { name: 'Germany', synonyms: ['German', 'Wehrmacht', 'Afrika Korps', 'Fallschirmjager', 'Luftwaffe', 'Kriegsmarine'] },
+          { name: 'Italy', synonyms: ['Italian'] },
+          { name: 'Japan', synonyms: ['Japanese', 'IJA'] },
+          { name: 'Other Axis', synonyms: ['Hungary', 'Hungarian', 'Romania', 'Romanian', 'Finland', 'Finnish', 'Bulgaria'] },
+        ],
+      },
+      {
+        name: 'NATO (Cold War & Modern)',
+        slug: 'nato',
+        synonyms: ['NATO', 'Western'],
+        children: [
+          { name: 'United States', synonyms: ['US', 'USA', 'American', 'US Army', 'USMC'] },
+          { name: 'United Kingdom', synonyms: ['British', 'UK'] },
+          { name: 'France', synonyms: ['French'] },
+          { name: 'West Germany', synonyms: ['German', 'Bundeswehr'] },
+          { name: 'Other NATO', synonyms: ['Netherlands', 'Dutch', 'Belgium', 'Belgian', 'Canada', 'Canadian', 'Italy', 'Italian'] },
+        ],
+      },
+      {
+        name: 'Warsaw Pact & Russia (Cold War & Modern)',
+        slug: 'warsaw-pact',
+        synonyms: ['Warsaw Pact', 'Eastern Bloc'],
+        children: [
+          { name: 'Soviet Union / Russia', slug: 'soviet-union-russia', synonyms: ['USSR', 'Soviet', 'Russian'] },
+          { name: 'East Germany', synonyms: ['NVA', 'DDR'] },
+          { name: 'Other Warsaw Pact', synonyms: ['Poland', 'Polish', 'Czechoslovakia', 'Czech', 'Hungary'] },
+        ],
+      },
+      { name: 'Other Sides & Nations', slug: 'other' },
+    ],
+  },
+
+  // ==========================================================================
   // 3 · SCALE — flat, with a ratio attribute per validated scale
   // ==========================================================================
   {

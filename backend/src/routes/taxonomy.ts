@@ -7,7 +7,10 @@ import { Router } from 'express';
 import { db } from '../db';
 import { asyncHandler } from '../middleware/error';
 import { searchRateLimit } from '../middleware/security';
-import { parseTermsParam, facetConditions, termSearchSql } from '../services/facetFilter';
+import { parseTermsParam, facetConditions, searchKeywords, keywordSearchSql } from '../services/facetFilter';
+import { effectiveModelPriceSql } from '../services/sales';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
 
@@ -98,7 +101,7 @@ router.get(
 
 // ============================================================================
 // GET /facets  — the facet tree WITH live per-term counts for a filter context.
-// Query: terms, search, category, minPrice, maxPrice, hideZero.
+// Query: terms, search, category, artist, minPrice, maxPrice, hideZero.
 // Counts are distinct-model, rolled up to ancestors, and exclude the term's own
 // facet from the filter (so multi-select within a facet keeps siblings visible).
 // ============================================================================
@@ -106,10 +109,9 @@ router.get(
   '/facets',
   searchRateLimit,
   asyncHandler(async (req, res) => {
-    const { terms, search, category, minPrice, maxPrice, hideZero } = req.query;
+    const { terms, search, category, artist, minPrice, maxPrice, hideZero } = req.query;
     const groups = parseTermsParam(terms);
-    const searchTrim =
-      typeof search === 'string' && search.trim() ? search.trim() : null;
+    const keywords = searchKeywords(search);
 
     // Fetch (facet, path, model_id) tuples under a filter. `exclude` drops one
     // facet's own selection; `onlyFacet` restricts to a single facet.
@@ -121,15 +123,12 @@ router.get(
       };
       const where = ["m.status = 'published'", "m.visibility = 'public'"];
       if (category) where.push(`m.category = ${push(category)}`);
-      if (minPrice) where.push(`m.base_price >= ${push(Number(minPrice))}`);
-      if (maxPrice) where.push(`m.base_price <= ${push(Number(maxPrice))}`);
-      if (searchTrim) {
-        const like = push(`%${searchTrim}%`);
-        where.push(
-          `(m.name ILIKE ${like} OR m.description ILIKE ${like} OR ` +
-            `EXISTS (SELECT 1 FROM unnest(m.tags) tag WHERE tag ILIKE ${like}) OR ${termSearchSql(like)})`,
-        );
-      }
+      if (typeof artist === 'string' && UUID_RE.test(artist)) where.push(`m.artist_id = ${push(artist)}`);
+      // Same filters as GET /api/browse, so the counts match the results.
+      if (minPrice) where.push(`${effectiveModelPriceSql('m')} >= ${push(Number(minPrice))}`);
+      if (maxPrice) where.push(`${effectiveModelPriceSql('m')} <= ${push(Number(maxPrice))}`);
+      const keywordSearch = keywordSearchSql(keywords, push);
+      if (keywordSearch) where.push(keywordSearch.where);
       for (const c of facetConditions(groups, push, { exclude: opts.exclude })) {
         where.push(c);
       }

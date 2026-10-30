@@ -71,6 +71,16 @@ export const browseApi = {
     }))
   },
 
+  /** Artists with at least one live model, for the Browse artist filter. */
+  getArtists: async (): Promise<{ id: string; name: string; modelCount: number }[]> => {
+    const response = await apiClient.get(`${BASE_URL}/artists`)
+    return (response.data?.artists ?? []).map((a: any) => ({
+      id: a.id,
+      name: a.artist_name,
+      modelCount: Number(a.model_count ?? 0),
+    }))
+  },
+
   getSuggestions: async (query: string, limit = 5): Promise<string[]> => {
     if (!query) return []
     const response = await apiClient.get(`${BASE_URL}/suggestions`, {

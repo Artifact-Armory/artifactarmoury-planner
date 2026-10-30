@@ -161,7 +161,7 @@ export const DEFAULT_GRID_SIZE = 0.3048
 export type CatalogueFilter = {
   terms?: string
   search?: string
-  sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
+  sortBy?: 'relevance' | 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
   minPrice?: number
   maxPrice?: number
 }

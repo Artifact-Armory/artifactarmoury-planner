@@ -252,7 +252,10 @@ export interface SearchFilters {
   terms?: string
   minPrice?: number
   maxPrice?: number
-  sortBy?: 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
+  /** Artist user id. */
+  artist?: string
+  /** 'relevance' = best match for the search words (name matches first). */
+  sortBy?: 'relevance' | 'recent' | 'popular' | 'sales' | 'rating' | 'price_low' | 'price_high' | 'name'
   // Browse fulfillment tab: 'print' narrows to print-and-ship models; otherwise
   // digital downloads (all published models).
   fulfillment?: 'stl' | 'print'

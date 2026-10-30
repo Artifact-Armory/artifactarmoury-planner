@@ -18,6 +18,7 @@
 import 'dotenv/config'
 import pg from 'pg'
 import { TAXONOMY, slugify, type TermSeed } from '../src/data/taxonomy'
+import { SIDE_NATION_BACKFILL } from '../src/data/sideNationBackfill'
 
 interface FlatTerm {
   facetSlug: string
@@ -93,6 +94,8 @@ async function main() {
   const client = await pool.connect()
   let facetCount = 0
   let termCount = 0
+  // Facets this run created (rather than updated), for one-off backfills below.
+  const newFacets = new Set<string>()
   try {
     await client.query('BEGIN')
 
@@ -111,7 +114,7 @@ async function main() {
            display_order = EXCLUDED.display_order,
            is_active = true,
            updated_at = NOW()
-         RETURNING id`,
+         RETURNING id, (xmax = 0) AS inserted`,
         [
           facet.slug,
           facet.name,
@@ -124,6 +127,7 @@ async function main() {
         ],
       )
       const facetId: string = facetRow.rows[0].id
+      if (facetRow.rows[0].inserted) newFacets.add(facet.slug)
       facetCount++
 
       // Upsert terms parent-first (flatten yields parents before children), keeping
@@ -188,6 +192,28 @@ async function main() {
     )
     if (backfill.rowCount) {
       console.log(`  ✓ Backfilled ${backfill.rowCount} model(s) → model-class:terrain`)
+    }
+
+    // Side & Nation was added after launch prep: tag the existing catalogue once,
+    // on the run that creates the facet only, so later artist edits stand. Ids
+    // that don't exist (e.g. a dev DB) are skipped by the JOIN.
+    if (newFacets.has('side-nation')) {
+      let tagged = 0
+      for (const [path, modelIds] of Object.entries(SIDE_NATION_BACKFILL)) {
+        const r = await client.query(
+          `INSERT INTO model_terms (model_id, term_id)
+           SELECT m.id, t.id
+             FROM models m
+             CROSS JOIN terms t
+             JOIN facets f ON f.id = t.facet_id
+            WHERE f.slug = 'side-nation' AND t.path = $1
+              AND m.id = ANY($2::uuid[])
+           ON CONFLICT DO NOTHING`,
+          [path, modelIds],
+        )
+        tagged += r.rowCount ?? 0
+      }
+      console.log(`  ✓ Backfilled ${tagged} model(s) → side-nation`)
     }
 
     await client.query('COMMIT')

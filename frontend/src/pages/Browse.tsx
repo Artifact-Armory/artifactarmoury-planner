@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { X, Search } from 'lucide-react'
+import { X, Search, SlidersHorizontal } from 'lucide-react'
 import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
@@ -21,6 +21,7 @@ import TrademarkDisclaimer, { mentionsTrademark } from '../components/legal/Trad
 import { FEATURES } from '../config/features'
 
 const sortOptions: { value: SearchFilters['sortBy']; label: string }[] = [
+  { value: 'relevance', label: 'Best match' },
   { value: 'recent', label: 'Newest' },
   { value: 'popular', label: 'Most popular' },
   { value: 'sales', label: 'Best sellers' },
@@ -39,7 +40,14 @@ const Browse: React.FC = () => {
   const termsParam = searchParams.get('terms') ?? ''
   const minPriceParam = searchParams.get('minPrice') ?? ''
   const maxPriceParam = searchParams.get('maxPrice') ?? ''
-  const sortByParam = (searchParams.get('sortBy') as SearchFilters['sortBy']) ?? 'recent'
+  const artistParam = searchParams.get('artist') ?? ''
+  // Searching defaults to "Best match"; without a search there is nothing to
+  // match against, so a leftover sortBy=relevance falls back to Newest.
+  const sortByParam: SearchFilters['sortBy'] = (() => {
+    const raw = searchParams.get('sortBy') as SearchFilters['sortBy'] | null
+    if (!searchTermParam) return raw && raw !== 'relevance' ? raw : 'recent'
+    return raw ?? 'relevance'
+  })()
   // With Print & Ship parked, everything is a digital download — force 'stl' so
   // an old ?fulfillment=print bookmark can't strand a buyer in an empty filter
   // with no visible tab to escape it.
@@ -51,6 +59,9 @@ const Browse: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState(searchTermParam)
   const [minPrice, setMinPrice] = useState(minPriceParam)
   const [maxPrice, setMaxPrice] = useState(maxPriceParam)
+  // Phones: the filter panel is folded away behind a "Filters" button so results
+  // show first. Always open on desktop.
+  const [showFilters, setShowFilters] = useState(false)
 
   // Live search: debounce the keyword box into the URL so results filter as you
   // type (no need to hit "Apply" to find a specific model).
@@ -93,12 +104,13 @@ const Browse: React.FC = () => {
       terms: termsParam || undefined,
       minPrice: minPriceParam ? Number(minPriceParam) : undefined,
       maxPrice: maxPriceParam ? Number(maxPriceParam) : undefined,
+      artist: artistParam || undefined,
       sortBy: sortByParam,
       fulfillment: fulfillmentParam,
       page: pageParam,
       limit: DEFAULT_LIMIT,
     }),
-    [searchTermParam, termsParam, minPriceParam, maxPriceParam, sortByParam, fulfillmentParam, pageParam],
+    [searchTermParam, termsParam, minPriceParam, maxPriceParam, artistParam, sortByParam, fulfillmentParam, pageParam],
   )
 
   const { data, isLoading, isFetching } = useQuery({
@@ -109,17 +121,25 @@ const Browse: React.FC = () => {
 
   // The facet rail with live, context-aware counts (zero-count terms pruned).
   const { data: facets, isFetching: facetsFetching } = useQuery({
-    queryKey: ['browse-facets', termsParam, searchTermParam, minPriceParam, maxPriceParam],
+    queryKey: ['browse-facets', termsParam, searchTermParam, minPriceParam, maxPriceParam, artistParam],
     queryFn: () =>
       taxonomyApi.getFacetsWithCounts({
         terms: termsParam || undefined,
         search: searchTermParam || undefined,
+        artist: artistParam || undefined,
         minPrice: minPriceParam ? Number(minPriceParam) : undefined,
         maxPrice: maxPriceParam ? Number(maxPriceParam) : undefined,
         hideZero: true,
       }),
     placeholderData: (prev: any) => prev,
   })
+
+  const { data: artists } = useQuery({
+    queryKey: ['browse-artists'],
+    queryFn: () => browseApi.getArtists(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const artistName = artists?.find((a) => a.id === artistParam)?.name
 
   // Full tree once, purely for labelling selected chips (a selected term can be
   // pruned from the counted rail, so we need a stable name lookup).
@@ -228,7 +248,7 @@ const Browse: React.FC = () => {
     setMinPrice('')
     setMaxPrice('')
     const next = new URLSearchParams()
-    if (sortByParam) next.set('sortBy', sortByParam)
+    if (sortByParam && sortByParam !== 'relevance') next.set('sortBy', sortByParam)
     if (fulfillmentParam === 'print') next.set('fulfillment', 'print')
     setSearchParams(next)
   }
@@ -240,7 +260,24 @@ const Browse: React.FC = () => {
     setSearchParams(next)
   }
 
+  const clearPrice = () => {
+    setMinPrice('')
+    setMaxPrice('')
+    updateParams({ minPrice: undefined, maxPrice: undefined })
+  }
+
   const selectedClassLabel = MODEL_CLASSES.find((c) => c.slug === selectedClass)?.label
+
+  // Everything narrowing the results apart from the class chips, for the phone
+  // "Filters" button badge and the "no results" hint.
+  const termChips = [...selectedTokens].filter((t) => !t.startsWith(`${MODEL_CLASS_SLUG}:`))
+  const activeFilterCount = termChips.length + (artistParam ? 1 : 0) + (minPriceParam || maxPriceParam ? 1 : 0)
+  const priceLabel =
+    minPriceParam && maxPriceParam
+      ? `£${minPriceParam} to £${maxPriceParam}`
+      : minPriceParam
+        ? `£${minPriceParam} and up`
+        : `Up to £${maxPriceParam}`
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
@@ -292,7 +329,7 @@ const Browse: React.FC = () => {
           type="search"
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="Search models by name, tag or keyword…"
+          placeholder="Search by name, artist, era or keyword, e.g. german tank"
           aria-label="Search models"
           className="w-full rounded-xl border border-border bg-background py-3.5 pl-12 pr-11 text-base shadow-xs focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-ring"
         />
@@ -330,7 +367,37 @@ const Browse: React.FC = () => {
       </div>
 
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[300px_1fr]">
-        <aside className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-xs lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+        <button
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          aria-expanded={showFilters}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-foreground shadow-xs lg:hidden"
+        >
+          <SlidersHorizontal size={16} />
+          {showFilters ? 'Hide filters' : 'Filters'}
+          {activeFilterCount > 0 && (
+            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">{activeFilterCount}</span>
+          )}
+        </button>
+
+        <aside className={`${showFilters ? 'block' : 'hidden'} lg:block space-y-6 rounded-2xl border border-border bg-card p-6 shadow-xs lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto`}>
+          {(artists?.length ?? 0) > 1 && (
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Artist</h2>
+              <select
+                value={artistParam}
+                onChange={(event) => updateParams({ artist: event.target.value || undefined })}
+                aria-label="Filter by artist"
+                className="mt-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:border-primary focus:outline-hidden"
+              >
+                <option value="">All artists</option>
+                {artists!.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.modelCount})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div>
             <h2 className="text-lg font-semibold text-foreground">Price</h2>
             <form onSubmit={handleApplyFilters} className="mt-4 space-y-4">
@@ -382,7 +449,7 @@ const Browse: React.FC = () => {
                   onChange={(event) => updateParams({ sortBy: event.target.value })}
                   className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:border-primary focus:outline-hidden"
                 >
-                  {sortOptions.map((option) => (
+                  {sortOptions.filter((o) => searchTermParam || o.value !== 'relevance').map((option) => (
                     <option key={option.value} value={option.value ?? 'recent'}>{option.label}</option>
                   ))}
                 </select>
@@ -397,9 +464,27 @@ const Browse: React.FC = () => {
           )}
 
           {/* Selected filter chips (work even when a term is pruned from the rail). */}
-          {[...selectedTokens].some((t) => !t.startsWith(`${MODEL_CLASS_SLUG}:`)) && (
+          {activeFilterCount > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              {[...selectedTokens].filter((t) => !t.startsWith(`${MODEL_CLASS_SLUG}:`)).map((token) => (
+              {artistParam && (
+                <button
+                  onClick={() => updateParams({ artist: undefined })}
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary hover:bg-primary/20"
+                >
+                  {artistName ?? 'Artist'}
+                  <X size={13} />
+                </button>
+              )}
+              {(minPriceParam || maxPriceParam) && (
+                <button
+                  onClick={clearPrice}
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary hover:bg-primary/20"
+                >
+                  {priceLabel}
+                  <X size={13} />
+                </button>
+              )}
+              {termChips.map((token) => (
                 <button
                   key={token}
                   onClick={() => toggleTerm(token)}
@@ -410,7 +495,15 @@ const Browse: React.FC = () => {
                 </button>
               ))}
               <button
-                onClick={() => setTerms(new Set(selectedClass ? [`${MODEL_CLASS_SLUG}:${selectedClass}`] : []))}
+                onClick={() => {
+                  setMinPrice('')
+                  setMaxPrice('')
+                  const next = new URLSearchParams(searchParams)
+                  for (const key of ['artist', 'minPrice', 'maxPrice', 'page']) next.delete(key)
+                  if (selectedClass) next.set('terms', `${MODEL_CLASS_SLUG}:${selectedClass}`)
+                  else next.delete('terms')
+                  setSearchParams(next)
+                }}
                 className="text-sm text-muted-foreground hover:text-foreground"
               >
                 Clear all
@@ -429,6 +522,20 @@ const Browse: React.FC = () => {
                   print-ready pieces.
                 </p>
                 <Button className="mt-5" onClick={() => setClass('terrain')}>Browse terrain</Button>
+              </div>
+            ) : models.length === 0 && (searchTermParam || activeFilterCount > 0) ? (
+              <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                <h3 className="text-lg font-semibold text-foreground">
+                  {searchTermParam ? `Nothing matches "${searchTermParam}"` : 'No models match these filters'}
+                </h3>
+                <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                  {searchTermParam && activeFilterCount > 0
+                    ? 'Try fewer words, or clear some filters.'
+                    : searchTermParam
+                      ? 'Try fewer or different words, e.g. "panzer" instead of "panzer tank model".'
+                      : 'Try removing a filter.'}
+                </p>
+                <Button className="mt-5" variant="outline" onClick={handleResetFilters}>Clear search and filters</Button>
               </div>
             ) : (
               <ModelGrid models={models} />
