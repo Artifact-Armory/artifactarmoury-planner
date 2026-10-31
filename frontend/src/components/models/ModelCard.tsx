@@ -95,7 +95,12 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
       </div>
 
       <div className="flex flex-1 flex-col px-3 py-4">
-        <h3 className="line-clamp-1 text-lg font-semibold text-foreground">{model.name}</h3>
+        <h3
+          className="line-clamp-2 min-h-[2.75rem] break-words text-base font-semibold leading-snug text-foreground"
+          title={model.name}
+        >
+          {model.name}
+        </h3>
         <p className="line-clamp-1 text-sm text-muted-foreground">by {model.artistName}</p>
 
         <div className="mt-3 flex items-center justify-between">

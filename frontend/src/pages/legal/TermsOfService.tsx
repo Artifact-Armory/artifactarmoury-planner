@@ -167,7 +167,9 @@ const TermsOfService: React.FC = () => {
         <p>
           You may not use the site to infringe intellectual property, upload unlawful or
           infringing content, circumvent our security or watermarking, scrape or bulk-download
-          content, or resell access to the platform.
+          content, or resell access to the platform. Our{' '}
+          <Link to="/acceptable-use" className="text-primary underline">Acceptable Use Policy</Link>{' '}
+          lists what is not allowed in full and forms part of these terms.
         </p>
       </LegalSection>
 

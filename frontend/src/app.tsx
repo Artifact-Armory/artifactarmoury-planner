@@ -36,6 +36,7 @@ import NotFound from './pages/NotFound';
 import PrivacyPolicy from './pages/legal/PrivacyPolicy';
 import TermsOfService from './pages/legal/TermsOfService';
 import SellerTerms from './pages/legal/SellerTerms';
+import AcceptableUse from './pages/legal/AcceptableUse';
 import Checkout from './pages/Checkout';
 import GlobalLibrary from './pages/GlobalLibrary';
 import TableLibrary from './pages/TableLibrary';
@@ -207,6 +208,7 @@ function App() {
               <Route path="privacy-policy" element={<PrivacyPolicy />} />
               <Route path="terms-of-service" element={<TermsOfService />} />
               <Route path="seller-terms" element={<SellerTerms />} />
+              <Route path="acceptable-use" element={<AcceptableUse />} />
               
               {/* Auth Routes */}
               <Route path="login" element={<Login />} />
