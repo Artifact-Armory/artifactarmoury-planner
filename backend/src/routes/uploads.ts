@@ -19,7 +19,8 @@ const router = Router()
 
 // `raw` is the quarantine prefix for un-processed seller uploads (content-hashed,
 // unguessable keys). Everything else is derived/public asset storage.
-const SAFE_PREFIXES = ['raw', 'models', 'thumbnails', 'images', 'textures', 'maps', 'docs']
+// `library` = the artist's own file library (routes/files.ts), meshes only.
+const SAFE_PREFIXES = ['raw', 'library', 'models', 'thumbnails', 'images', 'textures', 'maps', 'docs']
 
 // Sellers only ever upload meshes (raw/), images and one PDF per listing (docs/,
 // checked and size-capped when attached); anything else would just be free file
@@ -28,6 +29,7 @@ const MESH_EXTS = ['.stl', '.obj', '.3mf']
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 const ALLOWED_EXTS: Record<string, string[]> = {
   raw: MESH_EXTS,
+  library: MESH_EXTS,
   models: [...MESH_EXTS, '.glb', '.gltf'],
   thumbnails: IMAGE_EXTS,
   images: IMAGE_EXTS,
@@ -119,7 +121,7 @@ router.post(
     }
     // Reject an oversized model up-front so we never start a multipart upload
     // that from-upload would reject anyway (and that would crash processing).
-    if (prefix === 'raw' && Number(fileSize) > MAX_MODEL_FILE_BYTES) {
+    if ((prefix === 'raw' || prefix === 'library') && Number(fileSize) > MAX_MODEL_FILE_BYTES) {
       throw new ValidationError(
         `Model file is too large (${(Number(fileSize) / (1024 * 1024)).toFixed(0)}MB). The maximum is ${MAX_MODEL_FILE_MB}MB — please reduce the model's detail (e.g. decimate it in Blender) and upload again.`,
       )

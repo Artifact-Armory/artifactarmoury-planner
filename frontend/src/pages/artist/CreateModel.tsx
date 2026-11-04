@@ -3,6 +3,7 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Plus, ShieldCheck, Upload } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { uploadsApi } from '../../api/endpoints/uploads'
+import LibraryPicker from '../../components/artist/LibraryPicker'
 import { modelsApi } from '../../api/endpoints/models'
 import { payoutsApi } from '../../api/endpoints/payouts'
 import TermPicker from '../../components/taxonomy/TermPicker'
@@ -792,6 +793,7 @@ const CreateModel: React.FC = () => {
                     }}
                   />
                 </label>
+                <LibraryPicker disabled={busy} onPick={(files) => addFiles(ci, files)} />
 
                 {comp.files.length > 1 && (
                   <p className="mt-1 text-xs text-muted-foreground">

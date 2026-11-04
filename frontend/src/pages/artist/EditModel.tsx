@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { modelsApi } from '../../api/endpoints/models'
 import { uploadsApi } from '../../api/endpoints/uploads'
+import LibraryPicker from '../../components/artist/LibraryPicker'
 import { TerrainModel } from '../../api/types'
 import TermPicker from '../../components/taxonomy/TermPicker'
 import { withPrinterTypeTerm, withLicenceTerm, PRINT_PROCESS_PATH, LICENCE_FACET } from '../../utils/derivedTerms'
@@ -1299,6 +1300,7 @@ const EditModel: React.FC = () => {
                             <input type="file" accept=".stl,.obj,.3mf" multiple className="hidden" disabled={updBusy}
                               onChange={(e) => setUpdFiles(Array.from(e.target.files ?? []))} />
                           </label>
+                          <LibraryPicker disabled={updBusy} onPick={setUpdFiles} />
                         </div>
                       )}
                       <div>
@@ -1398,6 +1400,7 @@ const EditModel: React.FC = () => {
                       onChange={(e) => setNewComponentFiles(Array.from(e.target.files ?? []))}
                     />
                   </label>
+                  <LibraryPicker disabled={addingComponent} onPick={setNewComponentFiles} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1">

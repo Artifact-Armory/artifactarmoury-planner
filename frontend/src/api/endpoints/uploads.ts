@@ -1,4 +1,5 @@
 import apiClient from '../client'
+import { filesApi, libraryFileId } from './files'
 
 export interface PresignResponse {
   uploadUrl: string
@@ -252,6 +253,15 @@ export const uploadsApi = {
     prefix = 'raw',
     onProgress?: (pct: number) => void,
   ): Promise<{ key: string; publicUrl: string }> => {
+    // A file picked from the artist's library (My files) is already in storage:
+    // the server copies it to a fresh key, nothing is uploaded from here.
+    const libId = libraryFileId(file)
+    if (libId) {
+      if (prefix !== 'raw') throw new Error(`"${file.name}" from your library can only be used as a model file`)
+      const { key } = await filesApi.use(libId)
+      onProgress?.(100)
+      return { key, publicUrl: '' }
+    }
     if (file.size >= MULTIPART_THRESHOLD) {
       return uploadMultipart(file, prefix, onProgress)
     }

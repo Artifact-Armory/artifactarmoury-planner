@@ -53,6 +53,8 @@ import artistApplicationRoutes from './routes/artistApplications';
 import promoCodesRoutes from './routes/promoCodes';
 import cartRoutes from './routes/cart';
 import emailPrefsRoutes from './routes/emailPrefs';
+import catalogueRoutes from './routes/catalogue';
+import filesRoutes from './routes/files';
 import { startReleaseScheduler } from './services/releases';
 import { startPayoutScheduler } from './services/payouts';
 import { startIntroCommissionScheduler } from './services/introCommission';
@@ -199,6 +201,8 @@ app.use(`${API_PREFIX}/artist-applications`, artistApplicationRoutes);
 app.use(`${API_PREFIX}/promo-codes`, promoCodesRoutes);
 app.use(`${API_PREFIX}/cart`, cartRoutes);
 app.use(`${API_PREFIX}/email`, emailPrefsRoutes);
+app.use(`${API_PREFIX}/catalogue`, catalogueRoutes);
+app.use(`${API_PREFIX}/files`, filesRoutes);
 
 // API root
 app.get(API_PREFIX, (req, res) => {

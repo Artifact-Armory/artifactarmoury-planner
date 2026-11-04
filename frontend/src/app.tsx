@@ -63,6 +63,8 @@ import ArtistReleases from './pages/artist/ArtistReleases';
 import EditRelease from './pages/artist/EditRelease';
 import ArtistShowcases from './pages/artist/ArtistShowcases';
 import ArtistCollections from './pages/artist/ArtistCollections';
+import BulkEditCatalogue from './pages/artist/BulkEditCatalogue';
+import ArtistFiles from './pages/artist/ArtistFiles';
 import ArtistCollaborations from './pages/artist/ArtistCollaborations';
 import CreateBundle from './pages/artist/CreateBundle';
 import EditBundle from './pages/artist/EditBundle';
@@ -269,6 +271,7 @@ function App() {
               <Route index element={<ArtistDashboard />} />
               <Route path="models" element={<ArtistModels />} />
               <Route path="models/new" element={<CreateModel />} />
+              <Route path="models/bulk-edit" element={<BulkEditCatalogue />} />
               <Route path="models/:id/edit" element={<EditModel />} />
               <Route path="bundles" element={<ArtistBundles />} />
               <Route path="bundles/new" element={<CreateBundle />} />
@@ -277,6 +280,7 @@ function App() {
               <Route path="releases/:id" element={<EditRelease />} />
               <Route path="showcases" element={<ArtistShowcases />} />
               <Route path="collections" element={<ArtistCollections />} />
+              <Route path="files" element={<ArtistFiles />} />
               <Route path="collaborations" element={<ArtistCollaborations />} />
               {/* Sales & Analytics merged into the Sales Overview (dashboard root). */}
               <Route path="sales" element={<Navigate to="/artist" replace />} />

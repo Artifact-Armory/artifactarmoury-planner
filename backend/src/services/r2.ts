@@ -15,7 +15,7 @@
 import {
   S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand,
   CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,
-  AbortMultipartUploadCommand,
+  AbortMultipartUploadCommand, CopyObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Readable } from 'stream'
@@ -100,6 +100,19 @@ export async function downloadObject(key: string): Promise<Buffer> {
 /** Delete an object (e.g. clearing a rejected/quarantined raw upload). */
 export async function deleteObject(key: string): Promise<void> {
   await client().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+}
+
+/**
+ * Server-side copy inside the bucket (no bytes pass through Railway). Used by the
+ * artist file library: picking a library file copies it to a fresh raw/ key.
+ */
+export async function copyObject(sourceKey: string, destKey: string): Promise<void> {
+  const src = normalizeKey(sourceKey)
+  await client().send(new CopyObjectCommand({
+    Bucket: BUCKET,
+    Key: normalizeKey(destKey),
+    CopySource: `${BUCKET}/${src.split('/').map(encodeURIComponent).join('/')}`,
+  }))
 }
 
 /** Does an object already exist? (used by the migration script to skip re-uploads) */

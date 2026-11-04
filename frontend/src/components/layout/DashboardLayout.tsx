@@ -31,7 +31,7 @@ import {
   Megaphone,
   Flag,
   Eye,
-  Mail, Activity, Copy, FolderOpen} from 'lucide-react';
+  Mail, Activity, Copy, FolderOpen, FolderUp} from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import CartDrawer from '../cart/CartDrawer';
@@ -331,6 +331,17 @@ const DashboardLayout: React.FC = () => {
               >
                 <FolderOpen size={18} className="mr-3" />
                 Collections
+              </NavLink>
+              <NavLink
+                to="/artist/files"
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                  location.pathname.startsWith('/artist/files')
+                    ? 'text-primary bg-primary/10'
+                    : 'text-foreground hover:text-primary hover:bg-primary/10'
+                }`}
+              >
+                <FolderUp size={18} className="mr-3" />
+                My Files
               </NavLink>
               <NavLink
                 to="/artist/releases"

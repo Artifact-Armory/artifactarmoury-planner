@@ -265,9 +265,14 @@ const ArtistModels: React.FC = () => {
             </p>
           )}
         </div>
-        <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground whitespace-nowrap">
-          + New model
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Link to="/artist/models/bulk-edit" className="px-4 py-2 rounded-sm border whitespace-nowrap text-center">
+            Bulk edit (CSV)
+          </Link>
+          <Link to="/artist/models/new" className="px-4 py-2 rounded-sm bg-primary text-primary-foreground whitespace-nowrap text-center">
+            + New model
+          </Link>
+        </div>
       </div>
 
       {justUploadedId && (() => {
