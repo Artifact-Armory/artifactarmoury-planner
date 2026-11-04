@@ -20,4 +20,8 @@ export const analyticsApi = {
   placement: (modelId: string): void => {
     apiClient.post('/api/analytics/placement', { modelId, sessionId: sessionId() }).catch(() => {})
   },
+  /** Fire-and-forget: the planner was opened (admin visit counts, no personal data). */
+  plannerOpen: (mode: 'new' | 'saved' | 'shared' | 'view'): void => {
+    apiClient.post('/api/analytics/planner-open', { mode, sessionId: sessionId() }).catch(() => {})
+  },
 }

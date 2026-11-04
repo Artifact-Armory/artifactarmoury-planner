@@ -24,6 +24,7 @@ import { useCartStore, cartKey } from '@/store/cartStore'
 import { TABLE_MATERIALS } from '@core/tableMaterials'
 import { useAuthStore } from '@/store/authStore'
 import { tablesApi } from '@/api/endpoints/tables'
+import { analyticsApi } from '@/api/endpoints/analytics'
 import { captureTableImage, uploadTableSnapshot } from './tableSnapshot'
 import { assetUrl } from '@/api/transformers'
 import { collaborationsApi, type TableCollaboration } from '@/api/endpoints/collaborations'
@@ -238,6 +239,16 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
   const [collabs, setCollabs] = React.useState<TableCollaboration[]>([])
   // Multi-artist credit shown when browsing a published showcase (read-only).
   const [contributors, setContributors] = React.useState<Array<{ id: string; name: string; profileImageUrl?: string; modelCount: number }>>([])
+
+  // Admin dashboard visit count: one anonymous "planner opened" ping per table
+  // opened in this tab (no cookies, no personal data; see analyticsApi).
+  const openPinged = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const key = `${readOnly ? 'view' : shareToken ? 'shared' : tableId ? 'saved' : 'new'}:${tableId ?? shareToken ?? ''}`
+    if (openPinged.current === key) return
+    openPinged.current = key
+    analyticsApi.plannerOpen(readOnly ? 'view' : shareToken ? 'shared' : tableId ? 'saved' : 'new')
+  }, [readOnly, shareToken, tableId])
 
   React.useEffect(() => {
     if (!readOnly || !tableId) { setContributors([]); return }

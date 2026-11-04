@@ -7,7 +7,7 @@ import logger from '../utils/logger';
 
 const log = logger.child('ANALYTICS');
 
-export type EventType = 'product_view' | 'search_query' | 'planner_placement' | 'wishlist_add';
+export type EventType = 'product_view' | 'search_query' | 'planner_placement' | 'planner_open' | 'wishlist_add';
 
 export interface AnalyticsEvent {
   type: EventType;
@@ -58,6 +58,12 @@ export const logPlannerPlacement = (
   artistId: string | null,
   opts: { userId?: string | null; sessionId?: string | null } = {},
 ) => logEvent({ type: 'planner_placement', modelId, artistId, source: 'planner', ...opts });
+
+/** Someone opened the planner. mode = new | saved | shared | view. */
+export const logPlannerOpen = (
+  mode: string,
+  opts: { userId?: string | null; sessionId?: string | null } = {},
+) => logEvent({ type: 'planner_open', source: 'planner', metadata: { mode }, ...opts });
 
 export const logWishlistAdd = (
   modelId: string,

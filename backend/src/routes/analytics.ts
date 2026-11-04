@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { db } from '../db';
 import { optionalAuth, authenticate, requireArtist } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
-import { logPlannerPlacement } from '../services/analytics';
+import { logPlannerPlacement, logPlannerOpen } from '../services/analytics';
 import { ensureRollupsFresh } from '../services/analyticsRollup';
 import { getSummary, getTimeseries, getProducts, siteSearches, getModelFunnel, type Range } from '../services/artistAnalytics';
 
@@ -46,6 +46,23 @@ router.post(
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId.slice(0, 64) : null,
       });
     }
+    res.status(204).end();
+  }),
+);
+
+// POST /api/analytics/planner-open { sessionId, mode }
+// Counts a planner visit for the admin dashboard. Same anonymous per-tab id as
+// placements; nothing personal is stored (user_id only if already signed in).
+const PLANNER_MODES = new Set(['new', 'saved', 'shared', 'view']);
+router.post(
+  '/planner-open',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const mode = typeof req.body?.mode === 'string' && PLANNER_MODES.has(req.body.mode) ? req.body.mode : 'new';
+    logPlannerOpen(mode, {
+      userId: (req as any).userId ?? null,
+      sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId.slice(0, 64) : null,
+    });
     res.status(204).end();
   }),
 );

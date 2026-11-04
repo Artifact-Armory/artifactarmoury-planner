@@ -16,6 +16,34 @@ export interface AdminPagination {
   pages: number
 }
 
+export interface AdminPlannerStats {
+  periodDays: number
+  visits: {
+    guestOpens: number
+    guestVisitors: number
+    memberOpens: number
+    memberVisitors: number
+    trackedSince: string | null
+  }
+  building: {
+    guestPlacements: number
+    guestBuilders: number
+    memberPlacements: number
+    memberBuilders: number
+    trackedSince: string | null
+  }
+  savedTables: {
+    total: number
+    newInPeriod: number
+    byArtists: number
+    byCustomers: number
+    listed: number
+    owners: number
+  }
+  topPlaced: Array<{ id: string; name: string; artistName: string | null; placements: number; people: number; guestPlacements: number }>
+  topOnSavedTables: Array<{ id: string; name: string; artistName: string | null; tables: number }>
+}
+
 export interface AdminDashboard {
   stats: {
     customer_count: string
@@ -215,6 +243,11 @@ export const adminApi = {
   // -- Dashboard ------------------------------------------------------------
   getDashboard: async (): Promise<AdminDashboard> => {
     const { data } = await apiClient.get<AdminDashboard>(`${BASE}/dashboard`)
+    return data
+  },
+
+  getPlannerStats: async (days = 30): Promise<AdminPlannerStats> => {
+    const { data } = await apiClient.get<AdminPlannerStats>(`${BASE}/planner-stats`, { params: { days } })
     return data
   },
 

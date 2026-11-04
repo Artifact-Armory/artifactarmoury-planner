@@ -151,6 +151,143 @@ router.get('/dashboard',
 );
 
 // ============================================================================
+// PLANNER STATS (admin dashboard "Planner" section)
+// ============================================================================
+// Built from data the site already keeps:
+//   analytics_events  planner_open (one per planner visit) and planner_placement
+//                     (one per piece dropped on a table). session_id is a random
+//                     per-browser-tab id (sessionStorage, gone when the tab closes),
+//                     user_id is NULL for guests. No IPs, no names, no cookies.
+//   user_tables       saved tables (saving needs an account, owner by email).
+//   table_models      which models are on which saved table.
+// Admin accounts are left out of the signed-in figures so testing doesn't skew them.
+router.get('/planner-stats',
+  asyncHandler(async (req, res) => {
+    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    const since = `NOW() - INTERVAL '${days} days'`;
+
+    const [visits, building, saved, topPlaced, topSaved, tracking] = await Promise.all([
+      // Planner visits (opens), split guest vs signed-in.
+      db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE e.user_id IS NULL) AS guest_opens,
+          COUNT(DISTINCT e.session_id) FILTER (WHERE e.user_id IS NULL) AS guest_visitors,
+          COUNT(*) FILTER (WHERE e.user_id IS NOT NULL) AS member_opens,
+          COUNT(DISTINCT e.user_id) AS member_visitors
+        FROM analytics_events e
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.type = 'planner_open' AND e.created_at > ${since}
+          AND (u.role IS NULL OR u.role <> 'admin')
+      `),
+      // People who actually built something (placed at least one piece).
+      db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE e.user_id IS NULL) AS guest_placements,
+          COUNT(DISTINCT e.session_id) FILTER (WHERE e.user_id IS NULL) AS guest_builders,
+          COUNT(*) FILTER (WHERE e.user_id IS NOT NULL) AS member_placements,
+          COUNT(DISTINCT e.user_id) AS member_builders
+        FROM analytics_events e
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.type = 'planner_placement' AND e.created_at > ${since}
+          AND (u.role IS NULL OR u.role <> 'admin')
+      `),
+      // Saved tables (all need an account).
+      db.query(`
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE ut.created_at > ${since}) AS new_in_period,
+          COUNT(*) FILTER (WHERE u.role = 'artist') AS by_artists,
+          COUNT(*) FILTER (WHERE u.role IS DISTINCT FROM 'artist' AND u.role IS DISTINCT FROM 'admin') AS by_customers,
+          COUNT(*) FILTER (WHERE ut.is_listed) AS listed,
+          COUNT(DISTINCT LOWER(ut.user_email)) AS owners
+        FROM user_tables ut
+        LEFT JOIN users u ON LOWER(u.email) = LOWER(ut.user_email)
+      `),
+      // Most placed models in the period (guests + members, admins excluded).
+      db.query(`
+        SELECT m.id, m.name, a.artist_name,
+               COUNT(*) AS placements,
+               COUNT(DISTINCT COALESCE(e.user_id::text, e.session_id)) AS people,
+               COUNT(*) FILTER (WHERE e.user_id IS NULL) AS guest_placements
+        FROM analytics_events e
+        JOIN models m ON m.id = e.model_id
+        LEFT JOIN users a ON a.id = m.artist_id
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.type = 'planner_placement' AND e.created_at > ${since}
+          AND (u.role IS NULL OR u.role <> 'admin')
+        GROUP BY m.id, m.name, a.artist_name
+        ORDER BY placements DESC
+        LIMIT 10
+      `),
+      // Models on the most saved tables (all time).
+      db.query(`
+        SELECT m.id, m.name, a.artist_name, COUNT(*) AS tables
+        FROM table_models tm
+        JOIN models m ON m.id = tm.model_id
+        LEFT JOIN users a ON a.id = m.artist_id
+        GROUP BY m.id, m.name, a.artist_name
+        ORDER BY tables DESC
+        LIMIT 10
+      `),
+      // When each event started being recorded, so the page can say "since ...".
+      db.query(`
+        SELECT
+          MIN(created_at) FILTER (WHERE type = 'planner_open') AS opens_since,
+          MIN(created_at) FILTER (WHERE type = 'planner_placement') AS placements_since
+        FROM analytics_events
+        WHERE type IN ('planner_open', 'planner_placement')
+      `),
+    ]);
+
+    const v = visits.rows[0] || {};
+    const b = building.rows[0] || {};
+    const s = saved.rows[0] || {};
+    const t = tracking.rows[0] || {};
+    const n = (x: any) => Number(x || 0);
+
+    res.json({
+      periodDays: days,
+      visits: {
+        guestOpens: n(v.guest_opens),
+        guestVisitors: n(v.guest_visitors),
+        memberOpens: n(v.member_opens),
+        memberVisitors: n(v.member_visitors),
+        trackedSince: t.opens_since ?? null,
+      },
+      building: {
+        guestPlacements: n(b.guest_placements),
+        guestBuilders: n(b.guest_builders),
+        memberPlacements: n(b.member_placements),
+        memberBuilders: n(b.member_builders),
+        trackedSince: t.placements_since ?? null,
+      },
+      savedTables: {
+        total: n(s.total),
+        newInPeriod: n(s.new_in_period),
+        byArtists: n(s.by_artists),
+        byCustomers: n(s.by_customers),
+        listed: n(s.listed),
+        owners: n(s.owners),
+      },
+      topPlaced: topPlaced.rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        artistName: r.artist_name ?? null,
+        placements: n(r.placements),
+        people: n(r.people),
+        guestPlacements: n(r.guest_placements),
+      })),
+      topOnSavedTables: topSaved.rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        artistName: r.artist_name ?? null,
+        tables: n(r.tables),
+      })),
+    });
+  })
+);
+
+// ============================================================================
 // USER MANAGEMENT
 // ============================================================================
 
