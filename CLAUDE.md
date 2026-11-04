@@ -511,6 +511,15 @@ roof, ring mount and gunner off "Bunker Tobruk Regelbau 58c" (26% of the proxy) 
 deletion alone keeps the proxy unprintable. Only affects new bakes — re-bake damaged models
 (`/admin/queues` → Rebake). Spot misfires: `proxy_report.deletedInteriorFaces / proxyTriangles`.
 
+## Debris cleanup was deleting real bodies — turrets lost from public previews (2026-11-04)
+`remove_boolean_debris` (`bake_proxy.py`) separates the proxy into loose islands and keeps the largest.
+When Blender left a SMALLER island on the original object (it depends on vertex order), the code swapped
+the largest island's mesh in and threw the original island away unclassified. TCR Designs' assembled
+tanks (turret first in the file) lost the whole turret from the public proxy (Tiger I H1, Panther G, Easy
+Eight, Panzer I, Panzer II); owner GLBs were fine. The displaced island is now classified like any other
+piece (kept if above the debris floor). Debris removal, emboss and poison pills are unchanged. Only
+affects new bakes: re-bake affected models from `/admin/queues` → Re-bake a model.
+
 ## Proxy normal maps were blank — UV margin fix (2026-10-15)
 Every decimated proxy's UVs had collapsed to ~0 area, so the baked normal map carried nothing and
 decimation loss was never baked back in (live Tiger: 348k tris covering 0.00% of its map; same on the

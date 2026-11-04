@@ -3655,17 +3655,30 @@ def remove_boolean_debris(proxy, diag):
         # object gets classified or deleted — see the FIXED note above. This
         # guarantees `proxy` can never appear in the debris-candidate list
         # below and can never be the thing accidentally deleted.
+        # The island separate() left on `proxy` must survive that swap as a
+        # candidate of its own. It used to be discarded outright (old_data
+        # removed), so whenever Blender left a smaller REAL body on the original
+        # object, that body vanished without being classified at all. Which island
+        # stays on the object depends on vertex order, so it hit some uploads and
+        # not others: TCR Designs' assembled tanks (turret first in the file) lost
+        # their whole turret from the public preview (fixed 2026-11-04).
+        displaced = None
         if main is not proxy:
             old_data = proxy.data
             proxy.data = main.data
             bpy.data.objects.remove(main, do_unlink=True)
-            if old_data.users == 0:
-                bpy.data.meshes.remove(old_data)
+            displaced = bpy.data.objects.new(proxy.name + "_island", old_data)
+            displaced.matrix_world = proxy.matrix_world.copy()
+            for coll in proxy.users_collection:
+                coll.objects.link(displaced)
 
         # Every remaining piece is now a genuinely separate, expendable
         # object — `proxy` and `main` are both already accounted for above
-        # and can never appear here, whichever one `main` was.
+        # and can never appear here, whichever one `main` was. `displaced`
+        # (the proxy's own former island) is classified like any other piece.
         candidates = [o for o in pieces if o is not proxy and o is not main]
+        if displaced is not None:
+            candidates.append(displaced)
 
         threshold = diag * min_diag_frac
         keep, debris = [], []
