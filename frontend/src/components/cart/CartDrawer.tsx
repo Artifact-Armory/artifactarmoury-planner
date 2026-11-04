@@ -63,13 +63,13 @@ const CartDrawer: React.FC = () => {
         onClick={() => closeCart()}
       />
       <aside
-        className={`absolute right-0 top-0 h-full w-full max-w-md border-l border-border bg-background shadow-xl transition-transform duration-300 ease-out ${
+        className={`absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-xl transition-transform duration-300 ease-out ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
         role="dialog"
         aria-modal="true"
       >
-        <header className="flex items-center justify-between border-b border-border px-6 py-4">
+        <header className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Shopping Cart</h2>
             <p className="text-sm text-muted-foreground">
@@ -85,7 +85,7 @@ const CartDrawer: React.FC = () => {
           </button>
         </header>
 
-        <div className="flex h-[calc(100%-200px)] flex-col overflow-y-auto px-6 py-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-4">
           {items.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <p className="text-base font-medium text-foreground">Your cart is empty</p>
@@ -143,7 +143,7 @@ const CartDrawer: React.FC = () => {
           )}
         </div>
 
-        <footer className="border-t border-border px-6 py-4">
+        <footer className="shrink-0 border-t border-border px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-muted-foreground">Total</span>
             <span className="text-lg font-semibold text-foreground">
