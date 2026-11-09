@@ -230,6 +230,32 @@ export async function notifyAdminsOfGeometryReview(uploadName: string, matchedNa
 }
 
 /**
+ * Someone sent a message from the public Contact page (routes/contact.ts).
+ */
+export async function notifyAdminsOfContactMessage(name: string, subject: string): Promise<void> {
+  await notifyAdmins({
+    type: 'admin.contact_message',
+    title: 'New contact message',
+    body: `${name}: ${subject}`.slice(0, 300),
+    link: '/admin/contact',
+  })
+}
+
+/**
+ * Email addresses of every admin account, so admin alerts reach a real inbox
+ * even if nobody is reading support@.
+ */
+export async function getAdminEmails(): Promise<string[]> {
+  try {
+    const r = await db.query(`SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL`);
+    return r.rows.map((row: { email: string }) => row.email);
+  } catch (err) {
+    log.error('getAdminEmails failed', { error: err });
+    return [];
+  }
+}
+
+/**
  * Something about a payment needs an admin: a dispute, or a refund made in the
  * Stripe dashboard that the site couldn't fully apply (services/stripe.ts).
  */

@@ -2651,6 +2651,16 @@ router.get('/contact',
   }),
 );
 
+// Unread count for the red badge on the admin "Contact Messages" nav link.
+router.get('/contact/unread-count',
+  asyncHandler(async (_req, res) => {
+    const r = await db.query(
+      `SELECT COUNT(*) FROM contact_messages WHERE is_read = false AND status = 'open'`,
+    );
+    res.json({ unreadCount: parseInt(r.rows[0].count) });
+  }),
+);
+
 // Detail. Marks the message read on first open (like model_reports' open -> under_review).
 router.get('/contact/:id',
   asyncHandler(async (req, res) => {

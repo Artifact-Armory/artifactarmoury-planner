@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Paperclip, Mail, Send, CheckCircle2, RotateCcw, Loader2, User as UserIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -92,6 +92,13 @@ const DetailPanel: React.FC<{ messageId: string; onClose: () => void }> = ({ mes
     queryKey: ['admin-contact-message', messageId],
     queryFn: () => adminContactApi.get(messageId),
   })
+
+  // Opening a message marks it read on the server, so refresh the list and nav badge.
+  useEffect(() => {
+    if (!data) return
+    qc.invalidateQueries({ queryKey: ['admin-contact-unread'] })
+    qc.invalidateQueries({ queryKey: ['admin-contact'] })
+  }, [data?.message?.id])
 
   const setStatus = useMutation({
     mutationFn: (status: ContactStatus) => adminContactApi.setStatus(messageId, status),

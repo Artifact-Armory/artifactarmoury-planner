@@ -45,6 +45,7 @@ import Seo from '../common/Seo';
 import { SITE_NAME } from '../../config/brand';
 import { notificationsApi } from '../../api/endpoints/notifications';
 import { adminModerationApi } from '../../api/endpoints/adminModeration';
+import { adminContactApi } from '../../api/endpoints/adminContact';
 
 const DashboardLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -68,6 +69,14 @@ const DashboardLayout: React.FC = () => {
   const { data: moderationCounts } = useQuery({
     queryKey: ['admin-moderation-counts'],
     queryFn: () => adminModerationApi.getCounts(),
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+  });
+
+  // Badge on the admin "Contact Messages" nav link: unread open messages.
+  const { data: unreadContactCount } = useQuery({
+    queryKey: ['admin-contact-unread'],
+    queryFn: () => adminContactApi.unreadCount(),
     enabled: isAdmin,
     refetchInterval: 60_000,
   });
@@ -594,7 +603,12 @@ const DashboardLayout: React.FC = () => {
                 }`}
               >
                 <Mail size={18} className="mr-3" />
-                Contact Messages
+                <span className="flex-1">Contact Messages</span>
+                {!!unreadContactCount && (
+                  <span className="ml-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-semibold text-white">
+                    {unreadContactCount > 99 ? '99+' : unreadContactCount}
+                  </span>
+                )}
               </NavLink>
               <NavLink
                 to="/admin/similar-models"

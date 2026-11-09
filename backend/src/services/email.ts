@@ -766,6 +766,8 @@ export interface ContactMessageParams {
   userId?: string
   /** Public CDN URLs for any files the sender attached, for support to review. */
   attachmentUrls?: string[]
+  /** Extra inboxes to copy in (the admins' own addresses). */
+  alsoTo?: string[]
 }
 
 /**
@@ -773,7 +775,8 @@ export interface ContactMessageParams {
  * sender's own address, so support can just hit Reply in their inbox.
  */
 export async function sendContactMessageToSupport(params: ContactMessageParams): Promise<void> {
-  const { name, email, subject, message, userId, attachmentUrls = [] } = params
+  const { name, email, subject, message, userId, attachmentUrls = [], alsoTo = [] } = params
+  const recipients = Array.from(new Set([SUPPORT_EMAIL, ...alsoTo].map((a) => a.trim().toLowerCase()).filter(Boolean)))
 
   const attachmentsHtml = attachmentUrls.length
     ? `<div style="margin-top: 16px;">
@@ -823,7 +826,7 @@ export async function sendContactMessageToSupport(params: ContactMessageParams):
   `
 
   await sendEmail({
-    to: SUPPORT_EMAIL,
+    to: recipients,
     subject: `[Contact] ${subject}`,
     html,
     replyTo: email,

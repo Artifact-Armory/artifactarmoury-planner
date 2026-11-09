@@ -14,6 +14,7 @@ import { asyncHandler, ValidationError } from '../middleware/error'
 import { isR2Enabled, presignUpload, publicUrl } from '../services/r2'
 import { attachmentRateLimit, emailRateLimit } from '../middleware/security'
 import { sendContactMessageToSupport, sendContactConfirmation } from '../services/email'
+import { notifyAdminsOfContactMessage, getAdminEmails } from '../services/notifications'
 
 const router = Router()
 
@@ -134,14 +135,20 @@ router.post(
 
     // Best-effort notifications — a failure here must not fail the request, the
     // message is already saved.
-    sendContactMessageToSupport({
-      name: trimmedName,
-      email: trimmedEmail,
-      subject: trimmedSubject,
-      message: trimmedMessage,
-      userId: userId ?? undefined,
-      attachmentUrls,
-    }).catch((err) => logger.error('Failed to email support about contact message', { error: err, messageId }))
+    notifyAdminsOfContactMessage(trimmedName, trimmedSubject)
+      .catch((err) => logger.error('Failed to notify admins about contact message', { error: err, messageId }))
+
+    getAdminEmails()
+      .then((alsoTo) => sendContactMessageToSupport({
+        name: trimmedName,
+        email: trimmedEmail,
+        subject: trimmedSubject,
+        message: trimmedMessage,
+        userId: userId ?? undefined,
+        attachmentUrls,
+        alsoTo,
+      }))
+      .catch((err) => logger.error('Failed to email support about contact message', { error: err, messageId }))
 
     sendContactConfirmation({ name: trimmedName, email: trimmedEmail, subject: trimmedSubject })
       .catch((err) => logger.error('Failed to send contact confirmation', { error: err, messageId }))

@@ -48,6 +48,12 @@ export const adminContactApi = {
     return res.data
   },
 
+  /** Count for the red badge on the admin nav link. */
+  async unreadCount(): Promise<number> {
+    const res = await apiClient.get(`${BASE_URL}/unread-count`)
+    return res.data?.unreadCount ?? 0
+  },
+
   async get(id: string): Promise<{ message: ContactMessageDetail; attachments: ContactAttachment[]; replies: ContactReply[] }> {
     const res = await apiClient.get(`${BASE_URL}/${id}`)
     return res.data
