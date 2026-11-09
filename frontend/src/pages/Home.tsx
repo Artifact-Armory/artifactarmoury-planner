@@ -125,6 +125,12 @@ const Home: React.FC = () => {
             >
               Browse the marketplace
             </Link>
+            <Link
+              to="/become-an-artist"
+              className="inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20"
+            >
+              Apply to be an artist
+            </Link>
           </div>
         </div>
       </section>

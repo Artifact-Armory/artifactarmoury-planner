@@ -23,6 +23,9 @@ const Footer: React.FC = () => {
           <Link to="/contact" className="hover:text-foreground">
             Contact
           </Link>
+          <Link to="/become-an-artist" className="hover:text-foreground">
+            Become an artist
+          </Link>
           <Link to="/creator-protection" className="hover:text-foreground">
             Creator protection
           </Link>

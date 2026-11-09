@@ -38,6 +38,18 @@ export interface StuckModel {
   waitingSec: number
 }
 
+export interface FailedJob {
+  jobId: string
+  queue: QueueName
+  modelId: string
+  modelName: string | null
+  partName: string | null
+  artistName: string | null
+  error: string | null
+  attempts: number
+  failedAt: string
+}
+
 export interface QueueHealth {
   healthy: boolean
   checkedAt: string
@@ -47,6 +59,7 @@ export interface QueueHealth {
   liveWorkers: number
   problems: QueueProblem[]
   stuckModels: StuckModel[]
+  failedJobs: FailedJob[]
 }
 
 export interface RebakeBatchResult {

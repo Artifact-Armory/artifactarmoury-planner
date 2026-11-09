@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Search, X, ExternalLink, Flag, Loader2, ShieldAlert, Download } from 'lucide-react'
+import { Search, X, ExternalLink, Flag, Loader2, ShieldAlert, Download, Copy, RefreshCw } from 'lucide-react'
 import { adminApi } from '../../api/endpoints/admin'
 import {
   adminModelsApi,
@@ -11,6 +11,7 @@ import {
   ReportedModelRow,
 } from '../../api/endpoints/adminModels'
 import { modelsApi } from '../../api/endpoints/models'
+import { adminQueuesApi } from '../../api/endpoints/adminQueues'
 import { assetUrl } from '../../api/transformers'
 import { formatPrice } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
@@ -298,6 +299,29 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Publish failed'),
   })
 
+  // Queues a fresh preview bake for the model and its set parts with the worker's
+  // current settings (same as Re-bake on the Processing queues page).
+  const rebake = useMutation({
+    mutationFn: () => adminQueuesApi.rebakeModel(modelId),
+    onSuccess: (r) => {
+      if (r.queued.length > 0) {
+        toast.success(`Queued ${r.queued.length} bake${r.queued.length === 1 ? '' : 's'}`)
+      } else if (r.skippedOpen > 0) {
+        toast('Already queued or baking')
+      } else {
+        toast.error('Nothing to bake (no source file)')
+      }
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error?.message || e?.response?.data?.message || 'Re-bake failed'),
+  })
+
+  const copyId = () => {
+    navigator.clipboard?.writeText(modelId).then(
+      () => toast.success('Model ID copied'),
+      () => toast.error('Could not copy'),
+    )
+  }
+
   // Same per-user download buyers get (admins are entitled on the backend), so
   // an admin can inspect an artist's actual uploaded files.
   const [downloading, setDownloading] = useState(false)
@@ -373,6 +397,12 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
                     <span className="ml-1 rounded-sm bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">{model.artist_account_status}</span>
                   )}
                 </p>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  ID <span className="select-all font-mono text-foreground">{model.id}</span>
+                  <button onClick={copyId} title="Copy model ID" className="rounded-sm p-0.5 hover:bg-accent hover:text-foreground">
+                    <Copy size={12} />
+                  </button>
+                </p>
               </div>
             </div>
 
@@ -418,8 +448,15 @@ const AdminModelPanel: React.FC<{ modelId: string; onClose: () => void }> = ({ m
             {/* Fast actions */}
             <div className="border-t border-border pt-5">
               <p className="text-sm font-medium text-foreground">Fast actions</p>
-              <p className="text-xs text-muted-foreground">Each action requires a message — it's sent to the artist explaining what you did and why.</p>
+              <p className="text-xs text-muted-foreground">Re-bake runs straight away and tells nobody. Every other action requires a message, sent to the artist explaining what you did and why.</p>
               <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => rebake.mutate()}
+                  disabled={rebake.isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {rebake.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Re-bake
+                </button>
                 {ACTION_ORDER.filter((a) => !ACTION_META[a].showWhen || ACTION_META[a].showWhen!(model.status)).map((a) => (
                   <button
                     key={a}

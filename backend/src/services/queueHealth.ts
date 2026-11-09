@@ -77,6 +77,19 @@ export interface StuckModel {
   waitingSec: number
 }
 
+/** A failed job with the model it belongs to, so a failed bake can be found and re-run. */
+export interface FailedJob {
+  jobId: string
+  queue: QueueName
+  modelId: string
+  modelName: string | null
+  partName: string | null
+  artistName: string | null
+  error: string | null
+  attempts: number
+  failedAt: string
+}
+
 export interface QueueHealth {
   healthy: boolean
   checkedAt: string
@@ -87,6 +100,8 @@ export interface QueueHealth {
   problems: QueueProblem[]
   /** Models left mid-flight — what an artist actually experiences as "stuck". */
   stuckModels: StuckModel[]
+  /** Latest failed jobs that have not since been retried (newest first). */
+  failedJobs: FailedJob[]
 }
 
 /**
@@ -219,6 +234,53 @@ export async function getQueueHealth(): Promise<QueueHealth> {
     waitingSec: Math.round(Number(r.waiting_sec ?? 0)),
   }))
 
+  // Failed jobs, newest first. A failure is hidden once a newer job exists for
+  // the same model and part in the same queue (it was re-baked or re-uploaded),
+  // so this list is only what is still broken. Table names come from the fixed
+  // list here, never user input.
+  const failedSources: Array<{ queue: QueueName; table: string; hasPart: boolean }> = [
+    { queue: 'ingest', table: 'model_ingest_jobs', hasPart: false },
+    { queue: 'bake', table: 'proxy_bake_jobs', hasPart: true },
+    { queue: 'full_glb', table: 'full_glb_jobs', hasPart: true },
+  ]
+  const failedRows = await Promise.all(
+    failedSources.map(async ({ queue, table, hasPart }) => {
+      const { rows } = await db.query(
+        `SELECT j.id, j.model_id, j.error, j.attempts, j.updated_at,
+                m.name AS model_name, u.artist_name,
+                ${hasPart ? 'p.name' : 'NULL'} AS part_name
+           FROM ${table} j
+           LEFT JOIN models m ON m.id = j.model_id
+           LEFT JOIN users u ON u.id = m.artist_id
+           ${hasPart ? 'LEFT JOIN model_parts p ON p.id = j.part_id' : ''}
+          WHERE j.status = 'failed'
+            AND NOT EXISTS (
+              SELECT 1 FROM ${table} n
+               WHERE n.model_id = j.model_id
+                 ${hasPart ? 'AND n.part_id IS NOT DISTINCT FROM j.part_id' : ''}
+                 AND n.created_at > j.created_at
+            )
+          ORDER BY j.updated_at DESC
+          LIMIT 50`,
+      )
+      return rows.map((r: any): FailedJob => ({
+        jobId: r.id,
+        queue,
+        modelId: r.model_id,
+        modelName: r.model_name ?? null,
+        partName: r.part_name ?? null,
+        artistName: r.artist_name ?? null,
+        error: r.error ?? null,
+        attempts: Number(r.attempts ?? 0),
+        failedAt: new Date(r.updated_at).toISOString(),
+      }))
+    }),
+  )
+  const failedJobs = failedRows
+    .flat()
+    .sort((a, b) => b.failedAt.localeCompare(a.failedAt))
+    .slice(0, 50)
+
   const problems: QueueProblem[] = []
   const mins = (ms: number) => Math.round(ms / 60_000)
 
@@ -290,5 +352,6 @@ export async function getQueueHealth(): Promise<QueueHealth> {
     liveWorkers,
     problems,
     stuckModels,
+    failedJobs,
   }
 }

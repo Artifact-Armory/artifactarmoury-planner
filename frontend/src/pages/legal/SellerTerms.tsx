@@ -13,7 +13,7 @@ import LegalLayout, { LegalSection } from './LegalLayout'
  */
 const SellerTerms: React.FC = () => {
   return (
-    <LegalLayout title="Seller Terms" updated="28 October 2026 (v4)">
+    <LegalLayout title="Seller Terms" updated="9 November 2026 (v5)">
       <LegalSection heading="1. Who we are and what you are agreeing to">
         <p>
           Artifact Armoury (“we”, “us”) is operated by Artifact Armoury Ltd, registered at
@@ -77,10 +77,10 @@ const SellerTerms: React.FC = () => {
         </p>
         <p>In return we promise that:</p>
         <ul className="ml-5 list-disc space-y-1">
-          <li><strong>we will never give your models away.</strong> We will not hand out your files, or prints of them, for free, as prizes or in giveaways, and we will never sell prints of them. Anyone who wants your files has to buy them;</li>
+          <li><strong>we will never give your models away.</strong> We will not hand out your files, or prints of them, for free, as prizes or in giveaways, and we will never sell prints of them. Anyone who wants your files has to buy them. The only exception is where you have given us your consent;</li>
           <li><strong>we will always credit you</strong> as the creator when we feature your work;</li>
           <li>where possible, we will <strong>link to your store and your social media accounts</strong> when we feature your work, and tag you on the platform we are posting to;</li>
-          <li><strong>any discount or offer we run comes out of our share, never yours.</strong> Your earnings are worked out as if our discount had not been applied (see section 6).</li>
+          <li><strong>any discount or offer Artifact Armoury runs across the marketplace comes out of our share, never yours.</strong> Your earnings are worked out as if our discount had not been applied (see section 6).</li>
         </ul>
         <p>
           If you remove a listing, we will stop making new promotional material from it, but
@@ -126,8 +126,8 @@ const SellerTerms: React.FC = () => {
           for it (currently 50p for a promo-code discount).
         </p>
         <p>
-          <strong>Our own discounts.</strong> If we run a discount, offer or promo code
-          ourselves, the whole cost comes out of our share. You earn exactly what you would
+          <strong>Marketplace discounts.</strong> If Artifact Armoury runs a discount, offer
+          or promo code across the marketplace, the whole cost comes out of our share. You earn exactly what you would
           have earned without it.
         </p>
         <p>
@@ -176,8 +176,8 @@ const SellerTerms: React.FC = () => {
         <p>
           We decide refunds. We must give buyers the remedies consumer law requires where a
           file is faulty, corrupt or not as described, and your share is reduced as above
-          when we do. We may also refund as goodwill; where we do that on a sale that was
-          not your fault, we will bear the cost ourselves rather than reduce your earnings.
+          when we do. We may also refund as goodwill, and your share is reduced in the same way. We
+          cover the card fee on any refunded item.
           A payment dispute or chargeback is treated like a refund of that item, and any
           dispute fee charged to us is ours unless the dispute arose from your breach. We
           will tell you when we refund one of your sales.

@@ -1,8 +1,8 @@
 import React from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Cpu, Clock, RefreshCw } from 'lucide-react'
-import { adminQueuesApi, QueueStats, WorkerInfo } from '../../api/endpoints/adminQueues'
+import { adminQueuesApi, FailedJob, QueueStats, WorkerInfo } from '../../api/endpoints/adminQueues'
 import Spinner from '../../components/ui/Spinner'
 
 /** Seconds as a short human duration — "4m", "2h 10m", "3d". */
@@ -156,6 +156,74 @@ const RebakeCard: React.FC = () => {
   )
 }
 
+/** Failed jobs with the model they belong to, so a failed bake can be found and retried. */
+const FailedJobsCard: React.FC<{ jobs: FailedJob[] }> = ({ jobs }) => {
+  const qc = useQueryClient()
+  const retry = useMutation({
+    mutationFn: (j: FailedJob) => adminQueuesApi.requeue(j.queue, j.jobId),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['admin-queues'] }),
+  })
+  if (jobs.length === 0) return null
+  return (
+    <>
+      <h2 className="mt-8 flex items-center gap-2 text-lg font-semibold text-foreground">
+        <AlertTriangle size={18} className="text-amber-600" /> Failed jobs
+        <span className="text-sm font-normal text-muted-foreground">{jobs.length}</span>
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Jobs that failed and have not been retried since. Retry puts the same job back in its queue.
+      </p>
+      <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2 font-medium">Model</th>
+              <th className="px-4 py-2 font-medium">Model ID</th>
+              <th className="px-4 py-2 font-medium">Queue</th>
+              <th className="px-4 py-2 font-medium">Failed</th>
+              <th className="px-4 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={`${j.queue}-${j.jobId}`} className="border-t border-border align-top">
+                <td className="px-4 py-2">
+                  <Link to={`/models/${j.modelId}`} className="text-primary hover:underline">
+                    {j.modelName ?? 'Deleted model'}
+                  </Link>
+                  {j.partName && <span className="text-muted-foreground"> · {j.partName}</span>}
+                  {j.artistName && <div className="text-xs text-muted-foreground">{j.artistName}</div>}
+                  {j.error && (
+                    <div className="mt-1 max-w-md break-words text-xs text-red-600" title={j.error}>
+                      {j.error.length > 200 ? `${j.error.slice(0, 200)}…` : j.error}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <span className="select-all font-mono text-xs">{j.modelId}</span>
+                </td>
+                <td className="px-4 py-2 text-muted-foreground">{QUEUE_LABEL[j.queue] ?? j.queue}</td>
+                <td className="px-4 py-2 text-muted-foreground">
+                  {since((Date.now() - new Date(j.failedAt).getTime()) / 1000)} ago
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <button
+                    onClick={() => retry.mutate(j)}
+                    disabled={retry.isPending}
+                    className="rounded-lg border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                  >
+                    Retry
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
 const AdminQueues: React.FC = () => {
   // Auto-refresh: this page is what you stare at during an incident, and a stale
   // reading is worse than none.
@@ -172,6 +240,9 @@ const AdminQueues: React.FC = () => {
     return <div className="mx-auto max-w-5xl px-4 py-8 text-muted-foreground">Could not load queue health.</div>
   }
 
+  // Only live workers are listed. Old replicas linger in the heartbeat table for
+  // up to 7 days after a redeploy, which just buries the ones that matter.
+  const liveWorkerRows = data.workers.filter((w) => w.alive)
   const critical = data.problems.filter((p) => p.severity === 'critical')
   const warnings = data.problems.filter((p) => p.severity === 'warning')
 
@@ -233,12 +304,12 @@ const AdminQueues: React.FC = () => {
       <h2 className="mt-8 flex items-center gap-2 text-lg font-semibold text-foreground">
         <Cpu size={18} /> Workers
         <span className="text-sm font-normal text-muted-foreground">
-          {data.liveWorkers} live{data.workers.length !== data.liveWorkers && ` of ${data.workers.length} seen`}
+          {data.liveWorkers} live
         </span>
       </h2>
-      {data.workers.length === 0 ? (
+      {liveWorkerRows.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
-          No worker has ever checked in. If <code>MODEL_INGEST_WORKER_ENABLED</code> is true, uploads are not
+          No worker is live right now. If <code>MODEL_INGEST_WORKER_ENABLED</code> is true, uploads are not
           being processed at all.
         </div>
       ) : (
@@ -253,7 +324,7 @@ const AdminQueues: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {data.workers.map((w: WorkerInfo) => (
+              {liveWorkerRows.map((w: WorkerInfo) => (
                 <tr key={w.workerId} className="border-t border-border">
                   <td className="px-4 py-2">
                     <span
@@ -272,6 +343,8 @@ const AdminQueues: React.FC = () => {
           </table>
         </div>
       )}
+
+      <FailedJobsCard jobs={data.failedJobs ?? []} />
 
       <RebakeBatchCard />
       <RebakeCard />
