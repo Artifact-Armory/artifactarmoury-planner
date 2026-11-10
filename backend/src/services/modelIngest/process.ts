@@ -316,7 +316,9 @@ export async function processUploadedModel(
         meshQA.watertight,
         meshQA.manifold,
         meshQA.triangleCount || null,
-        meshQA.openEdges,
+        // Only significant holes drive the artist warning (pinholes/cracks are
+        // repaired by every slicer); the full breakdown stays in mesh_report.
+        meshQA.significantOpenEdges ?? meshQA.openEdges,
         JSON.stringify(meshQA),
         // The bake worker keeps the model 'processing' until every bake finishes;
         // the pure-Node path is ready now (unless it still has parts to convert).
@@ -523,7 +525,7 @@ export async function processModelVersionUpdate(
         sourceFilePath,
         newStlPath,
         meshQA.analyzed, meshQA.watertight, meshQA.manifold,
-        meshQA.triangleCount || null, meshQA.openEdges, JSON.stringify(meshQA),
+        meshQA.triangleCount || null, meshQA.significantOpenEdges ?? meshQA.openEdges, JSON.stringify(meshQA),
         notes,
         modelId,
         // Baking keeps the model 'processing' until the new proxy is ready; the

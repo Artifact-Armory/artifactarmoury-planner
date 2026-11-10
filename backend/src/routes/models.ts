@@ -796,7 +796,7 @@ router.get('/my-models',
         m.print_provider_cost, m.print_price, m.print_provider, m.print_quoted_at,
         m.print_consent,
         m.mesh_analyzed, m.mesh_is_watertight, m.mesh_is_manifold, m.mesh_open_edges,
-        m.mesh_warning_acknowledged, m.mesh_warning_acknowledged_at,
+        m.mesh_warning_acknowledged, m.mesh_warning_acknowledged_at, m.primary_part_name,
         m.created_at, m.updated_at, m.published_at,
         COUNT(DISTINCT r.id) as review_count,
         COALESCE(AVG(r.rating), 0) as average_rating,
@@ -1382,6 +1382,24 @@ router.get('/:id',
     // against the check offline. Nothing on the client uses them.
     delete model.file_hash;
     delete model.geometry_fingerprint;
+    // Bake/mesh reports describe how the preview is protected (smoothing on/off,
+    // logo watermark sides + size, poison pills, triangle budgets). Handing them
+    // out tells a ripper which previews are weakest and where to cut the logo.
+    // Nothing on the product page uses them; owners/admins see them elsewhere.
+    delete model.proxy_report;
+    delete model.proxy_bake_config;
+    delete model.mesh_report;
+    // Moderation, print-cost and internal error fields: owner/admin only.
+    const viewerIsOwnerOrAdmin = !!viewerId &&
+      (viewerId === model.artist_id || (req as any).user?.role === 'admin');
+    if (!viewerIsOwnerOrAdmin) {
+      for (const k of [
+        'flagged_reason', 'moderated_by', 'moderated_at',
+        'print_provider', 'print_provider_cost', 'print_quoted_at', 'print_consent_at',
+        'mesh_warning_acknowledged_by', 'mesh_warning_acknowledged_at',
+        'deleted_by', 'processing_error', 'full_glb_error', 'render_failed_at',
+      ]) delete model[k];
+    }
     const safeParts = parts.map((p: any) => ({
       id: p.id, name: p.name, width: p.width, depth: p.depth, height: p.height,
       processing_status: p.processing_status, processing_error: p.processing_error,
@@ -1675,15 +1693,9 @@ router.post('/:id/publish',
       throw new ValidationError('Model must have a thumbnail before publishing');
     }
 
-    // A SERIOUS mesh warning (real open edges/holes — the shell isn't closed) has
-    // to be acknowledged before it can go live. Non-manifold-only / degenerate-only
-    // issues never block publish — see meshQA.ts / notifications.ts for the reasoning.
-    if (model.mesh_analyzed && (model.mesh_open_edges ?? 0) > 0 && !model.mesh_warning_acknowledged) {
-      throw new ValidationError(
-        'This model has open edges detected in the mesh, which can cause real print failures. ' +
-        'Review it on the Edit page and acknowledge the warning before publishing.'
-      );
-    }
+    // Mesh QA is advisory only (10 Nov 2026): a hole warning shows on the Edit
+    // page but no longer blocks publishing. Artists know their files print; our
+    // check is a heuristic. See services/meshQA.ts.
 
     // Required-facet guardrail: can't publish until the mandatory facets are tagged.
     await assertRequiredTermsPresent(id);

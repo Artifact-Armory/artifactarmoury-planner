@@ -172,11 +172,6 @@ const EditModel: React.FC = () => {
   const [docErr, setDocErr] = React.useState<string | null>(null)
   const [docPublic, setDocPublic] = React.useState(false)
 
-  // Serious mesh warning (real open edges/holes) override.
-  const [meshAckChecked, setMeshAckChecked] = React.useState(false)
-  const [meshAckBusy, setMeshAckBusy] = React.useState(false)
-  const [meshAckErr, setMeshAckErr] = React.useState<string | null>(null)
-
   // Models within a grouped/multi-part listing: attach a decimated preview to
   // a 'no_preview' part, add a new named model, remove one, or set a
   // component's own planner thumbnail. See EditModel's "Models in this
@@ -570,26 +565,6 @@ const EditModel: React.FC = () => {
     }
   }
 
-  /**
-   * Override a serious mesh warning (real open edges/holes) so the model can
-   * publish despite it. Requires the checkbox above the button — enforced here
-   * too, not just via `disabled`, in case of a stale render.
-   */
-  async function handleAcknowledgeMeshWarning() {
-    if (!id || !meshAckChecked) return
-    setMeshAckBusy(true)
-    setMeshAckErr(null)
-    try {
-      await modelsApi.acknowledgeMeshWarning(id)
-      await load()
-      setMeshAckChecked(false)
-    } catch (err) {
-      setMeshAckErr(errMessage(err, 'Could not acknowledge the warning'))
-    } finally {
-      setMeshAckBusy(false)
-    }
-  }
-
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     if (!id) return
@@ -796,50 +771,14 @@ const EditModel: React.FC = () => {
         <div className="rounded-lg border border-border p-3 space-y-3">
           <p className="text-sm font-medium">Printability</p>
 
-          {/* Serious mesh QA warning (real open edges/holes) — artist-only. Minor
-              findings (non-manifold-only, degenerate-only) aren't surfaced anywhere;
-              see utils/printability.ts. Blocks publish until acknowledged. */}
+          {/* Mesh QA hole warning: advisory only, never blocks publishing (10 Nov
+              2026). Names the file it ran on; see utils/printability.ts. */}
           {model && (() => {
             const warning = meshSeriousWarning(model)
             if (!warning) return null
-            if (warning.acknowledged) {
-              return (
-                <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <p>
-                    <span className="font-medium">⚠ Mesh warning acknowledged.</span> {warning.detail}
-                  </p>
-                  {warning.acknowledgedAt && (
-                    <p className="mt-1 text-amber-700">
-                      Acknowledged {new Date(warning.acknowledgedAt).toLocaleDateString()} — you can publish.
-                    </p>
-                  )}
-                </div>
-              )
-            }
             return (
-              <div className="rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-2">
-                <p>
-                  <span className="font-medium">⚠ This model can't publish yet.</span> {warning.detail}
-                </p>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={meshAckChecked}
-                    onChange={(e) => setMeshAckChecked(e.target.checked)}
-                    disabled={meshAckBusy}
-                  />
-                  <span>I understand this may affect printability. Publish anyway (this notifies our team).</span>
-                </label>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded-sm border border-red-300 text-red-800 text-xs font-medium disabled:opacity-50"
-                  onClick={handleAcknowledgeMeshWarning}
-                  disabled={!meshAckChecked || meshAckBusy}
-                >
-                  {meshAckBusy ? 'Acknowledging…' : 'Acknowledge & allow publishing'}
-                </button>
-                {meshAckErr && <p className="text-red-700">{meshAckErr}</p>}
+              <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <span className="font-medium">Heads up:</span> {warning.detail}
               </div>
             )
           })()}

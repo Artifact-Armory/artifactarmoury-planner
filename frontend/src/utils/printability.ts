@@ -45,30 +45,35 @@ export const meshQualitySummary = (model: TerrainModel): MeshQualitySummary | nu
 export interface MeshSeriousWarning {
   /** How many boundary (open/hole) edges were detected. Always > 0. */
   openEdges: number
+  /** The file the check ran on (the listing's first/main file), or null if unknown. */
+  fileName: string | null
   detail: string
   acknowledged: boolean
   acknowledgedAt: string | null
 }
 
 /**
- * Artist-facing only. The one mesh QA finding treated as "product breaking":
- * real open edges (the shell has an actual hole, so a slicer's inside/outside
- * test can fail outright). Non-manifold-only or degenerate-only results are
- * NOT surfaced anywhere — see meshQualitySummary's doc comment for why. Returns
- * null when there's no serious issue (nothing to acknowledge / no warning to show).
+ * Artist-facing only, and ADVISORY: it never blocks publishing (10 Nov 2026).
+ * Only a significant hole counts (backend meshQA.ts ignores hairline cracks and
+ * pinholes that slicers repair). Non-manifold-only or degenerate-only results
+ * are NOT surfaced anywhere — see meshQualitySummary's doc comment for why. The
+ * check only runs on the listing's main (first) file, so the warning names it.
+ * Returns null when there's no significant hole.
  */
 export const meshSeriousWarning = (model: TerrainModel): MeshSeriousWarning | null => {
   if (!model.meshAnalyzed) return null
   const openEdges = model.meshOpenEdges ?? 0
   if (openEdges <= 0) return null
 
+  const fileName = model.primaryPartName?.trim() || null
+  const where = fileName ? `"${fileName}"` : 'The main file of this listing'
   return {
     openEdges,
+    fileName,
     detail:
-      `Detected ${openEdges.toLocaleString()} open edge${openEdges === 1 ? '' : 's'} — the mesh has ` +
-      `an actual hole in it, not just a modelling quirk. This can cause real print failures ` +
-      `(leaks, missing walls, a slicer that can't tell inside from outside). Check it in your ` +
-      `slicer before publishing.`,
+      `${where} may have a hole in its mesh (${openEdges.toLocaleString()} open ` +
+      `edge${openEdges === 1 ? '' : 's'}). If it slices and prints fine you can ignore this. ` +
+      `It doesn't stop you publishing.`,
     acknowledged: !!model.meshWarningAcknowledged,
     acknowledgedAt: model.meshWarningAcknowledgedAt ?? null,
   }

@@ -52,9 +52,6 @@ export async function itemPublishBlocker(
     // Same gates as POST /models/:id/publish, which a release would otherwise bypass.
     if (m.deleted_at || m.status === 'deleted') return `"${m.name}" has been deleted`;
     if (isModerationLocked(m.status)) return `"${m.name}" was taken down by moderation`;
-    if (m.mesh_analyzed && (m.mesh_open_edges ?? 0) > 0 && !m.mesh_warning_acknowledged) {
-      return `"${m.name}" has open edges in its mesh. Acknowledge the warning on its Edit page first`;
-    }
     if (m.processing_status && m.processing_status !== 'ready') return `"${m.name}" is still processing`;
     if (!m.thumbnail_path) return `"${m.name}" needs a thumbnail`;
     try {

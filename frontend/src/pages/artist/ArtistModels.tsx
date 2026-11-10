@@ -46,8 +46,6 @@ function publishBlocker(m: TerrainModel): string | null {
     return m.processingError || 'Processing failed'
   }
   if (!m.thumbnailUrl) return 'Add a thumbnail before publishing'
-  const warning = meshSeriousWarning(m)
-  if (warning && !warning.acknowledged) return 'Acknowledge the mesh warning (Edit) before publishing'
   return null
 }
 
@@ -389,12 +387,10 @@ const ArtistModels: React.FC = () => {
                       if (!warning) return null
                       return (
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            warning.acknowledged ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
-                          }`}
+                          className="rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800"
                           title={warning.detail}
                         >
-                          {warning.acknowledged ? 'Mesh warning acknowledged' : 'Mesh warning — review in Edit'}
+                          {warning.fileName ? `Possible hole: ${warning.fileName}` : 'Possible mesh hole'}
                         </span>
                       )
                     })()}
