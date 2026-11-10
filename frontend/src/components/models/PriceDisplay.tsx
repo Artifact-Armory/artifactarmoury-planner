@@ -2,7 +2,7 @@ import React from 'react'
 import { formatPrice } from '../../utils/format'
 import { Badge } from '../shadcn/badge'
 import { cn } from '../../utils/cn'
-import { useGrossPrice, useTaxStore } from '../../store/taxStore'
+import { useGrossPrice, useTaxStore, useLocalPrice } from '../../store/taxStore'
 
 interface PriceDisplayProps {
   /** NET price as the artist set it. VAT for the buyer's country is added here. */
@@ -42,11 +42,15 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
 }) => {
   const gross = useGrossPrice()
   const rate = useTaxStore((s) => s.rate())
+  const localPrice = useLocalPrice()
 
   const onSale = originalPrice != null && originalPrice > price
   // Both figures are grossed up, so the struck-through original stays comparable.
   const shownPrice = gross(price)
   const shownOriginal = originalPrice != null ? gross(originalPrice) : undefined
+  // Guide only: buyers are always charged the pound figure above.
+  const local = localPrice(shownPrice)
+  const taxNote = showTaxNote && rate > 0 ? `incl. ${rate}% VAT` : null
 
   return (
     <span className={cn('inline-flex flex-col', className)}>
@@ -73,8 +77,10 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
           <Badge className="bg-rose-600/90 text-white dark:bg-rose-500/90">-{salePercent}%</Badge>
         )}
       </span>
-      {showTaxNote && rate > 0 && (
-        <span className="text-xs text-muted-foreground">incl. {rate}% VAT</span>
+      {(taxNote || local) && (
+        <span className="text-xs text-muted-foreground">
+          {[taxNote, local && `about ${local}`].filter(Boolean).join(' · ')}
+        </span>
       )}
     </span>
   )

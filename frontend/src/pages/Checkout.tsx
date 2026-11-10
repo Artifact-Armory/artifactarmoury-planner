@@ -13,6 +13,7 @@ import {
 } from '../api/endpoints/orders'
 import { promoCodesApi, PromoValidationResult } from '../api/endpoints/promoCodes'
 import { formatPrice } from '../utils/format'
+import LocalPriceNote from '../components/common/LocalPriceNote'
 import Button from '../components/ui/Button'
 import CountrySelect from '../components/common/CountrySelect'
 import Seo from '../components/common/Seo'
@@ -478,6 +479,7 @@ const Checkout: React.FC = () => {
                 </>
               )
             })()}
+            <LocalPriceNote gbp={!testMode && order ? order.total : grossTotal} />
             {!user && (
               <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
             )}

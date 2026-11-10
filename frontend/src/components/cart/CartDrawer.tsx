@@ -7,6 +7,7 @@ import { useCartStore, cartKey } from '../../store/cartStore'
 import PriceDisplay from '../models/PriceDisplay'
 import { useTaxStore, grossFromLines } from '../../store/taxStore'
 import { formatPrice } from '../../utils/format'
+import LocalPriceNote from '../common/LocalPriceNote'
 import { useAuthStore } from '../../store/authStore'
 import { Badge } from '../shadcn/badge'
 
@@ -160,6 +161,7 @@ const CartDrawer: React.FC = () => {
               ? `Includes ${taxRate}% VAT. This is the total you'll pay.`
               : "No VAT applies where you are. This is the total you'll pay."}
           </p>
+          <LocalPriceNote gbp={grossSubtotal} />
           <p className="mt-2 text-xs text-muted-foreground">
             Digital STL downloads. Files unlock in your account straight after payment; nothing is shipped.
             {!isAuthenticated && ' You\'ll be asked to sign in or create a free account at checkout.'}

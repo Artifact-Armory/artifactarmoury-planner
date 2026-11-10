@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { taxApi, type TaxCountry } from '../api/endpoints/tax'
+import { taxApi, type TaxCountry, type FxRates } from '../api/endpoints/tax'
 
 /**
  * The buyer's country and the VAT rate that follows from it.
@@ -17,6 +17,8 @@ interface TaxState {
   chosen: boolean
   countries: TaxCountry[]
   loaded: boolean
+  /** Exchange rates for the guide price in the buyer's currency (display only). */
+  fx: FxRates | null
 
   setCountry: (code: string) => void
   loadCountries: () => Promise<void>
@@ -99,11 +101,14 @@ export const useTaxStore = create<TaxState>()(
       chosen: false,
       countries: [],
       loaded: false,
+      fx: null,
 
       setCountry: (code) => set({ country: code.toUpperCase(), chosen: true }),
 
       loadCountries: async () => {
         if (get().loaded) return
+        // Guide-price rates load alongside, but never hold up or break real prices.
+        taxApi.getFx().then((fx) => set({ fx })).catch(() => {})
         try {
           const { countries, defaultCountry } = await taxApi.getCountries()
           set((state) => ({
@@ -146,4 +151,38 @@ export const useTaxStore = create<TaxState>()(
 export function useGrossPrice(): (net: number) => number {
   const rate = useTaxStore((s) => s.rate())
   return (net: number) => grossFromNet(net, rate)
+}
+
+/**
+ * The buyer's currency for the guide price, or null when they think in pounds
+ * (UK, a country with no mapping, or rates not loaded).
+ */
+export function useLocalCurrency(): { code: string; perPound: number } | null {
+  const country = useTaxStore((s) => s.country)
+  const fx = useTaxStore((s) => s.fx)
+  if (!country || !fx) return null
+  const code = fx.countryCurrency[country]
+  const perPound = code ? fx.rates[code] : undefined
+  if (!code || code === 'GBP' || !perPound) return null
+  return { code, perPound }
+}
+
+/**
+ * "about €8.90" for a GBP amount, or null when no conversion applies. DISPLAY ONLY:
+ * the buyer is always charged the GBP figure and their bank converts at its own rate.
+ */
+export function useLocalPrice(): (gbp: number) => string | null {
+  const local = useLocalCurrency()
+  return (gbp: number) => {
+    if (!local || !Number.isFinite(gbp)) return null
+    const amount = gbp * local.perPound
+    // Whole units for currencies where pennies look silly (¥, Ft, ₹).
+    const whole = ['JPY', 'HUF', 'INR', 'CZK'].includes(local.code)
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: local.code,
+      minimumFractionDigits: whole ? 0 : 2,
+      maximumFractionDigits: whole ? 0 : 2,
+    }).format(whole ? Math.round(amount) : amount)
+  }
 }

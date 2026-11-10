@@ -12,6 +12,7 @@ import Spinner from '../components/ui/Spinner'
 import Button from '../components/ui/Button'
 import PriceDisplay from '../components/models/PriceDisplay'
 import { useCartStore } from '../store/cartStore'
+import { useGrossPrice } from '../store/taxStore'
 import { useAuthStore } from '../store/authStore'
 import { formatPrice, formatRating, formatBytes } from '../utils/format'
 
@@ -75,6 +76,8 @@ function partComponents(model: TerrainModel): Array<{ index: number; name: strin
 
 /** Horizontal, scrollable strip of model tiles used for the discovery carousels. */
 const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ title, models }) => {
+  // Buyer-facing, so show the VAT-inclusive price for the buyer's country, like every other price on the page.
+  const gross = useGrossPrice()
   if (!models.length) return null
   return (
     <section className="mt-10">
@@ -94,7 +97,7 @@ const ModelCarousel: React.FC<{ title: string; models: TerrainModel[] }> = ({ ti
               )}
             </div>
             <p className="mt-2 truncate text-sm font-medium text-foreground">{m.name}</p>
-            <p className="text-xs text-muted-foreground">{formatPrice(m.basePrice)}</p>
+            <p className="text-xs text-muted-foreground">{formatPrice(gross(m.onSale && m.salePrice != null ? m.salePrice : m.basePrice))}</p>
             <p className="truncate text-xs text-muted-foreground">{m.artistName}</p>
           </Link>
         ))}

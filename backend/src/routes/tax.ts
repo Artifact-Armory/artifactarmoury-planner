@@ -4,6 +4,7 @@
 import { Router } from 'express'
 import { asyncHandler } from '../middleware/error'
 import { taxCountries, DEFAULT_TAX_COUNTRY } from '../services/vat'
+import { getFxRates, COUNTRY_CURRENCY } from '../services/fx'
 
 const router = Router()
 
@@ -23,6 +24,21 @@ router.get(
       defaultCountry: DEFAULT_TAX_COUNTRY,
       countries: taxCountries(),
     })
+  })
+)
+
+/**
+ * GET /api/tax/fx
+ *
+ * Exchange rates from GBP plus each country's currency, for the "about €8.90" guide
+ * shown under prices. Display only: orders are always charged in GBP.
+ */
+router.get(
+  '/fx',
+  asyncHandler(async (_req, res) => {
+    const { date, rates } = await getFxRates()
+    res.set('Cache-Control', 'public, max-age=3600')
+    res.json({ base: 'GBP', date, rates, countryCurrency: COUNTRY_CURRENCY })
   })
 )
 
