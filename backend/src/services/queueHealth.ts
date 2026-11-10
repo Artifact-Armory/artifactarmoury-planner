@@ -118,19 +118,30 @@ export function isIngestWorkerRequired(): boolean {
  * locked_at / created_at), so one query serves all of them — `table` is from a
  * fixed internal allowlist below, never user input.
  */
-async function statsFor(queue: QueueName, table: string, enabled: boolean): Promise<QueueStats> {
+async function statsFor(
+  queue: QueueName,
+  table: string,
+  enabled: boolean,
+  hasPart: boolean,
+): Promise<QueueStats> {
+  // "failed" counts only failures that are still the latest job for their model
+  // (and part), so it matches the Failed jobs list instead of every failure ever.
   const { rows } = await db.query(
     `SELECT
-       COUNT(*) FILTER (WHERE status = 'queued')  AS queued,
-       COUNT(*) FILTER (WHERE status = 'running') AS running,
-       COUNT(*) FILTER (WHERE status = 'failed')  AS failed,
-       COUNT(*) FILTER (WHERE status = 'running'
-                          AND (locked_at IS NULL
-                               OR locked_at < NOW() - ($1::bigint * INTERVAL '1 millisecond')))
+       COUNT(*) FILTER (WHERE j.status = 'queued')  AS queued,
+       COUNT(*) FILTER (WHERE j.status = 'running') AS running,
+       COUNT(*) FILTER (WHERE j.status = 'failed' AND NOT EXISTS (
+         SELECT 1 FROM ${table} n
+          WHERE n.model_id = j.model_id
+            ${hasPart ? 'AND n.part_id IS NOT DISTINCT FROM j.part_id' : ''}
+            AND n.created_at > j.created_at))         AS failed,
+       COUNT(*) FILTER (WHERE j.status = 'running'
+                          AND (j.locked_at IS NULL
+                               OR j.locked_at < NOW() - ($1::bigint * INTERVAL '1 millisecond')))
                                                   AS stalled_running,
-       EXTRACT(EPOCH FROM (NOW() - MIN(created_at) FILTER (WHERE status = 'queued')))
+       EXTRACT(EPOCH FROM (NOW() - MIN(j.created_at) FILTER (WHERE j.status = 'queued')))
                                                   AS oldest_queued_age
-     FROM ${table}`,
+     FROM ${table} j`,
     [RUNNING_STALE_MS],
   )
   const r = rows[0] ?? {}
@@ -187,9 +198,9 @@ export async function getQueueHealth(): Promise<QueueHealth> {
   const ingestRequired = isIngestWorkerRequired()
 
   const [ingest, bake, fullGlb] = await Promise.all([
-    statsFor('ingest', 'model_ingest_jobs', ingestRequired),
-    statsFor('bake', 'proxy_bake_jobs', isBakeWorkerEnabled()),
-    statsFor('full_glb', 'full_glb_jobs', isFullGlbEnabled()),
+    statsFor('ingest', 'model_ingest_jobs', ingestRequired, false),
+    statsFor('bake', 'proxy_bake_jobs', isBakeWorkerEnabled(), true),
+    statsFor('full_glb', 'full_glb_jobs', isFullGlbEnabled(), true),
   ])
   const queues = [ingest, bake, fullGlb]
 

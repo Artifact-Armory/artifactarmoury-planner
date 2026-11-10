@@ -88,6 +88,10 @@ def write_report_and_exit(code):
     sys.exit(code)
 
 
+# Threshold for dissolve_degenerate; preprocess() lowers it for tiny models.
+DEGENERATE_DIST = 1e-4
+
+
 def fail(msg):
     REPORT["status"] = "failed"
     REPORT["error"] = str(msg)
@@ -230,6 +234,20 @@ def preprocess():
     # (2026-08-15) while the single-shell bottom part baked fine. Welding first fuses
     # touching shells into one connected manifold so decimate/smooth see a normal mesh.
     weld_dist = float(CFG.get("weldMergeDistanceMm", 0.05))
+    # Both merge distances are in model units and assume mm. A file exported in
+    # metres (a 30 mm figure is 0.03 units across) is smaller than the 0.05 weld,
+    # so the weld fused every vertex into a point and the proxy reached the UV
+    # step with no faces ("uv.smart_project.poll() failed", 10 Nov 2026). Cap
+    # both at a tiny fraction of the model's own size so small files survive;
+    # normal mm models (diagonal 50 mm and up) keep exactly the old values.
+    global DEGENERATE_DIST
+    pre_diag, _pre_dims, _pre_z = bbox_diagonal(src)
+    if pre_diag > 0:
+        if weld_dist > pre_diag * 1e-3:
+            warn("Weld distance %.4f capped to %.6f for a small model (diagonal %.4f)."
+                 % (weld_dist, pre_diag * 1e-3, pre_diag))
+            weld_dist = pre_diag * 1e-3
+        DEGENERATE_DIST = min(1e-4, pre_diag * 1e-6)
     verts_before = len(src.data.vertices)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
@@ -243,7 +261,7 @@ def preprocess():
         # which catches whatever this one misses). Cheap to do here too since it
         # stops the slivers from ever reaching decimate/smooth in the first place.
         try:
-            bpy.ops.mesh.dissolve_degenerate(threshold=1e-4)
+            bpy.ops.mesh.dissolve_degenerate(threshold=DEGENERATE_DIST)
         except Exception as e:
             warn("Post-weld dissolve_degenerate failed (continuing): " + str(e))
         bpy.ops.mesh.select_all(action="SELECT")
@@ -262,6 +280,8 @@ def preprocess():
 
     src_tris = triangle_count(src)
     REPORT["sourceTriangles"] = src_tris
+    if src_tris == 0:
+        fail("Source mesh has no faces left after cleanup (file may be empty or far too small)")
     cap = int(CFG.get("sourceTriangleCap", 5000000))
     if src_tris > cap:
         fail("Source too complex: %d triangles > cap %d" % (src_tris, cap))
@@ -511,7 +531,7 @@ def finish_proxy(proxy, strategy):
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     try:
-        bpy.ops.mesh.dissolve_degenerate(threshold=1e-4)
+        bpy.ops.mesh.dissolve_degenerate(threshold=DEGENERATE_DIST)
     except Exception as e:
         warn("Post-smooth dissolve_degenerate failed (continuing): " + str(e))
     try:
@@ -599,6 +619,11 @@ def unwrap(proxy):
     # normal map, so nothing the decimation removed was ever baked back in.
     res = int(CFG.get("normalMapRes", 2048))
     margin = float(CFG.get("uvIslandMarginPx", 2.0)) / max(1, res)
+    # smart_project refuses to run on a mesh with no faces, with an unhelpful
+    # "context is incorrect" error. Say what actually went wrong instead.
+    if len(proxy.data.polygons) == 0:
+        fail("Preview mesh has no faces left before UV unwrap (source %s, strategy %s)"
+             % (REPORT.get("boundingBoxMm"), REPORT.get("remeshStrategy")))
     deselect_all()
     proxy.select_set(True)
     set_active(proxy)

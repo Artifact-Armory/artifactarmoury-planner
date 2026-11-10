@@ -203,16 +203,24 @@ const AdminDashboard: React.FC = () => {
           sub={`+${Number(s.orders_last_7_days)} in last 7 days`}
         />
         {/* Preview bake queue depth (the proxy-bake worker). */}
+        {/* Clicks through to Processing queues, where failed bakes can be retried. */}
         {data!.previewQueue && (
-          <StatCard
-            icon={<Layers size={18} />}
-            label="Preview queue"
-            value={Number(data!.previewQueue.queued).toLocaleString()}
-            sub={
-              `${data!.previewQueue.running} baking now` +
-              (data!.previewQueue.failed ? ` · ${data!.previewQueue.failed} failed` : '')
-            }
-          />
+          <Link to="/admin/queues" className="block rounded-lg hover:ring-1 hover:ring-primary/40">
+            <StatCard
+              icon={<Layers size={18} />}
+              label="Preview queue"
+              value={Number(data!.previewQueue.queued).toLocaleString()}
+              sub={
+                `${data!.previewQueue.running} baking now` +
+                (data!.previewQueue.failed ? ` · ${data!.previewQueue.failed} failed` : '')
+              }
+            />
+            {(data!.previewQueue.failedModels?.length ?? 0) > 0 && (
+              <div className="-mt-3 px-5 pb-4 text-xs text-red-600">
+                Failed: {data!.previewQueue.failedModels!.map((m) => m.name ?? 'Deleted model').join(', ')}
+              </div>
+            )}
+          </Link>
         )}
         {/* Revenue is owner-only; the backend omits it for regular admins. */}
         {s.total_revenue != null && (

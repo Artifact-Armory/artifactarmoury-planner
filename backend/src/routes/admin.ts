@@ -116,20 +116,43 @@ router.get('/dashboard',
 
     // Preview bake queue depth (the proxy-bake worker). Guarded so the dashboard
     // still loads if the bake pipeline/table isn't present in this environment.
-    let previewQueue = { queued: 0, running: 0, failed: 0 };
+    // "failed" counts only bakes that are still broken: a failed job is ignored
+    // once a newer job exists for the same model and part (re-baked or
+    // re-uploaded), matching the Failed jobs list on the Processing queues page.
+    let previewQueue: {
+      queued: number;
+      running: number;
+      failed: number;
+      failedModels: Array<{ id: string; name: string | null }>;
+    } = { queued: 0, running: 0, failed: 0, failedModels: [] };
     try {
+      const stillFailed = `j.status = 'failed' AND NOT EXISTS (
+          SELECT 1 FROM proxy_bake_jobs n
+           WHERE n.model_id = j.model_id
+             AND n.part_id IS NOT DISTINCT FROM j.part_id
+             AND n.created_at > j.created_at)`;
       const bake = await db.query(`
         SELECT
-          COUNT(*) FILTER (WHERE status = 'queued')  AS queued,
-          COUNT(*) FILTER (WHERE status = 'running') AS running,
-          COUNT(*) FILTER (WHERE status = 'failed')  AS failed
-        FROM proxy_bake_jobs
+          COUNT(*) FILTER (WHERE j.status = 'queued')  AS queued,
+          COUNT(*) FILTER (WHERE j.status = 'running') AS running,
+          COUNT(*) FILTER (WHERE ${stillFailed})       AS failed
+        FROM proxy_bake_jobs j
+      `);
+      const names = await db.query(`
+        SELECT m.id, m.name, MAX(j.updated_at) AS failed_at
+          FROM proxy_bake_jobs j
+          LEFT JOIN models m ON m.id = j.model_id
+         WHERE ${stillFailed}
+         GROUP BY m.id, m.name
+         ORDER BY failed_at DESC
+         LIMIT 5
       `);
       const r = bake.rows[0] || {};
       previewQueue = {
         queued: Number(r.queued || 0),
         running: Number(r.running || 0),
         failed: Number(r.failed || 0),
+        failedModels: names.rows.map((m: any) => ({ id: m.id, name: m.name ?? null })),
       };
     } catch {
       /* proxy_bake_jobs missing (pipeline off) — leave zeros */

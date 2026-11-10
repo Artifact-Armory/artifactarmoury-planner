@@ -57,7 +57,10 @@ export interface AdminDashboard {
   previewQueue?: {
     queued: number
     running: number
+    /** Bakes still broken (not re-baked since). */
     failed: number
+    /** Up to 5 models with a still-broken bake, newest first. */
+    failedModels?: Array<{ id: string; name: string | null }>
   }
   recentActivity: Array<{
     action: string

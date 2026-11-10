@@ -13,7 +13,9 @@
 // Or pass a connection string explicitly (bypasses Railway entirely):
 //   DATABASE_PUBLIC_URL="postgresql://…" npm run db:query -- "SELECT …"
 
-import 'dotenv/config'
+// script-env loads .env and fixes up DATABASE_URL (public URL swap + SSL) the
+// same way the other ops scripts do, which is known to work from a laptop.
+import './script-env'
 import pg from 'pg'
 
 async function main() {
@@ -23,7 +25,7 @@ async function main() {
     process.exit(1)
   }
 
-  const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL
+  const connectionString = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL
   if (!connectionString) {
     console.error('No DATABASE_PUBLIC_URL / DATABASE_URL in env.')
     console.error('Run via `railway run` linked to the Postgres service, or set DATABASE_PUBLIC_URL.')
@@ -38,7 +40,7 @@ async function main() {
   const pool = new pg.Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 30000,
     statement_timeout: 30000,
   })
 

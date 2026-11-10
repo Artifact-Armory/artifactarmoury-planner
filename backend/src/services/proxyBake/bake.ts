@@ -92,6 +92,68 @@ function sourceExt(format: string): string {
 }
 
 /**
+ * Repair a binary STL whose size does not match its triangle count.
+ *
+ * Seen 10 Nov 2026 on Milice française "Darnan": 125 MB for a header declaring
+ * 500,190 triangles. The file is five complete figures whose triangle blocks were
+ * glued together without fixing the header, i.e. [80-byte header][count][tris]
+ * [count][tris]... Our Node readers only use the first declared block, but
+ * Blender's importer rejects a binary STL whose size does not match the count and
+ * imports an empty mesh, so the bake died at UV unwrap ("smart_project.poll()
+ * failed").
+ *
+ * - If the extra data parses exactly as further [count][triangles] blocks to the
+ *   end of the file, merge them into one valid STL (the whole file the artist
+ *   meant).
+ * - Otherwise cut back to the declared triangles.
+ * ASCII STLs, correctly sized files and files that are too short are returned
+ * untouched.
+ */
+export function trimBinaryStlTail(buf: Buffer, jobId?: string): Buffer {
+  if (buf.length < 84) return buf
+  const head = buf.subarray(0, 1024).toString('latin1')
+  if (/^\s*solid/i.test(head) && /facet\s+normal/i.test(head)) return buf
+  const first = buf.readUInt32LE(80)
+  const expected = 84 + first * 50
+  if (first === 0 || expected >= buf.length) return buf
+
+  // Try to read the rest as chained [count][triangles] blocks ending exactly at EOF.
+  const blocks: Array<[number, number]> = [[84, first]]
+  let pos = expected
+  while (pos + 4 <= buf.length) {
+    const n = buf.readUInt32LE(pos)
+    const start = pos + 4
+    if (n === 0 || start + n * 50 > buf.length) break
+    blocks.push([start, n])
+    pos = start + n * 50
+  }
+  if (pos === buf.length && blocks.length > 1) {
+    const total = blocks.reduce((sum, [, n]) => sum + n, 0)
+    const out = Buffer.alloc(84 + total * 50)
+    buf.copy(out, 0, 0, 80)
+    out.writeUInt32LE(total, 80)
+    let o = 84
+    for (const [start, n] of blocks) {
+      buf.copy(out, o, start, start + n * 50)
+      o += n * 50
+    }
+    logger.warn('proxyBake: binary STL had chained triangle blocks; merged into one', {
+      jobId,
+      blocks: blocks.length,
+      triangles: total,
+    })
+    return out
+  }
+
+  logger.warn('proxyBake: binary STL has trailing data; trimming to declared triangles', {
+    jobId,
+    bytes: buf.length,
+    declaredBytes: expected,
+  })
+  return buf.subarray(0, expected)
+}
+
+/**
  * Run Blender headless with a hard timeout. Resolves with {code, stdout, stderr};
  * on timeout it kills the whole process tree and resolves with code = 'timeout'.
  */
@@ -251,7 +313,7 @@ export async function runProxyBake(input: BakeJobInput): Promise<BakeResult> {
   try {
     // 1. Source + config to disk for Blender.
     const srcPath = path.join(work, `source${sourceExt(input.sourceFormat)}`)
-    const srcBuf = await downloadObject(input.sourceKey)
+    const srcBuf = trimBinaryStlTail(await downloadObject(input.sourceKey), input.jobId)
     await fsp.writeFile(srcPath, srcBuf)
 
     // embossSeed is per-JOB identity (model + part), not a tunable knob, so it's
