@@ -32,3 +32,9 @@ export const formatBytes = (bytes?: number | string | null): string | null => {
   return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`
 }
 
+// Admin label for an order's payment status. An order is written as "pending"
+// as soon as the buyer opens the payment step, before any money moves, so it
+// shows as "At checkout" until Stripe reports a result.
+export function paymentStatusLabel(status: string): string {
+  return status === 'pending' ? 'At checkout' : status
+}

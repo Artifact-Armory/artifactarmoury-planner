@@ -5,7 +5,7 @@ import { Search, X, ExternalLink, PoundSterling, ShoppingBag, Eye, Target, Trend
 import { adminApi, AdminUserRow } from '../../api/endpoints/admin'
 import { useAuthStore } from '../../store/authStore'
 import { assetUrl } from '../../api/transformers'
-import { formatPrice } from '../../utils/format'
+import { formatPrice, paymentStatusLabel } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
 
 const roleBadge: Record<string, string> = {
@@ -591,7 +591,7 @@ const UserDetailPanel: React.FC<{ userId: string; onClose: () => void }> = ({ us
                             payBadge[o.payment_status] || 'bg-muted text-foreground'
                           }`}
                         >
-                          {o.payment_status}
+                          {paymentStatusLabel(o.payment_status)}
                         </span>
                       </div>
                     </div>

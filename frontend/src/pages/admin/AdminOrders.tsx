@@ -4,7 +4,7 @@ import { X, Undo2, Loader2, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminApi, AdminOrderRow } from '../../api/endpoints/admin'
 import { assetUrl } from '../../api/transformers'
-import { formatPrice } from '../../utils/format'
+import { formatPrice, paymentStatusLabel } from '../../utils/format'
 import Spinner from '../../components/ui/Spinner'
 
 const FULFILLMENT = ['pending', 'processing', 'printing', 'shipped', 'delivered', 'cancelled']
@@ -123,7 +123,7 @@ const AdminOrders: React.FC = () => {
                         payBadge[o.payment_status] || 'bg-muted text-foreground'
                       }`}
                     >
-                      {o.payment_status}
+                      {paymentStatusLabel(o.payment_status)}
                     </span>
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -250,7 +250,7 @@ const OrderDetailPanel: React.FC<{ orderId: string; onClose: () => void }> = ({ 
                     payBadge[order.payment_status] || 'bg-muted text-foreground'
                   }`}
                 >
-                  {order.payment_status}
+                  {paymentStatusLabel(order.payment_status)}
                 </span>
               </div>
             </div>
