@@ -136,6 +136,20 @@ export async function objectSize(key: string): Promise<number | null> {
 }
 
 /**
+ * The object's own ETag (R2's content hash), or null if it can't be read. Changes
+ * whenever the stored bytes change, even when the key stays the same — which the
+ * proxy GLB's key does across re-bakes (`previews/<id>/proxy.glb`).
+ */
+export async function objectEtag(key: string): Promise<string | null> {
+  try {
+    const res = await client().send(new HeadObjectCommand({ Bucket: BUCKET, Key: normalizeKey(key) }))
+    return res.ETag ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Presigned PUT URL so the browser uploads bytes directly to R2 (never through
  * Railway). Returns the upload URL, the final public URL, and the object key.
  */
