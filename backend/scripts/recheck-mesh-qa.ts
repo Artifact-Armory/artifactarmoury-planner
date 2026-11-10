@@ -58,7 +58,10 @@ async function main() {
     for (const [i, r] of todo.entries()) {
       const tmp = path.join(tmpDir, 'mesh.stl')
       try {
+        console.log(`  [${i + 1}/${todo.length}] downloading ${r.name} ...`)
         await fs.writeFile(tmp, await downloadObject(r.key))
+        console.log(`  [${i + 1}/${todo.length}] analysing ...`)
+        const t0 = Date.now()
         const qa = await analyzeMeshQuality(tmp)
         if (!qa.analyzed) throw new Error(qa.note || 'analysis skipped')
         await db.query(
@@ -70,7 +73,7 @@ async function main() {
         if (qa.significantOpenEdges > 0) still++
         else cleared++
         console.log(`  [${i + 1}/${todo.length}] ${qa.significantOpenEdges > 0 ? '!' : '✓'} ${r.name}: ` +
-          `${r.mesh_open_edges} -> ${qa.significantOpenEdges} (holes ${qa.holes}, largest ${qa.largestHolePerimeter} mm round)`)
+          `${r.mesh_open_edges} -> ${qa.significantOpenEdges} (holes ${qa.holes}, largest ${qa.largestHolePerimeter} mm round, ${Date.now() - t0} ms)`)
       } catch (err: any) {
         failed++
         console.log(`  [${i + 1}/${todo.length}] ✗ ${r.name}: ${err?.message || err}`)

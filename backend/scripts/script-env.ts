@@ -55,6 +55,21 @@ if (tunnelPort && INTERNAL_HOST.test(process.env.DATABASE_URL ?? '')) {
   }
 }
 
+// Any other remote URL (e.g. the backend service's own DATABASE_URL already
+// pointing at Railway's public proxy) needs SSL too, for the same reason as
+// above: NODE_ENV comes from the local .env as 'development', src/db leaves SSL
+// off, and the proxy times the plain connection out (10 Nov 2026).
+if (
+  process.env.DATABASE_URL &&
+  !tunnelPort &&
+  !INTERNAL_HOST.test(process.env.DATABASE_URL) &&
+  !/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL) &&
+  !/[?&]sslmode=/.test(process.env.DATABASE_URL)
+) {
+  const sep = process.env.DATABASE_URL.includes('?') ? '&' : '?'
+  process.env.DATABASE_URL += `${sep}sslmode=no-verify`
+}
+
 if (process.env.DATABASE_URL && process.env.DB_MOCK === 'true') {
   delete process.env.DB_MOCK
   console.warn(

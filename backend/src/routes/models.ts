@@ -29,7 +29,7 @@ import { readFile as fsReadFile } from 'fs/promises';
 import { estimatePrintCost } from '../services/printEstimator';
 import { getPrintProvider, buildPrintPrice } from '../services/printProvider';
 import { uploadToStorage, deleteFromStorage } from '../services/storage';
-import { isR2Enabled, objectSize, downloadObject, getObjectStream } from '../services/r2';
+import { isR2Enabled, objectSize, objectEtag, downloadObject, getObjectStream } from '../services/r2';
 import { computeGeometryFingerprint } from '../services/fingerprint';
 // Shared with GET /orders/library so 'My downloads' shows the same size (2026-09-08).
 import { getEstimatedDownloadBytes } from '../services/downloadSize';
@@ -948,9 +948,13 @@ async function servePreviewGlb(
 
   // The ETag hashes the key rather than exposing it: full_glb_path is deliberately
   // unguessable (the bucket is public through the CDN) and must not leak in a header.
-  // It still changes whenever the served object does — a rebuild mints a new key —
-  // so a stale cached copy revalidates into a 304 or the new bytes.
-  const etag = `W/"${crypto.createHash('sha256').update(key).digest('hex').slice(0, 24)}"`;
+  // It also folds in R2's own ETag for the object, because the PROXY's key is stable
+  // (`previews/<id>/proxy.glb`) and a re-bake overwrites it in place. Hashing the key
+  // alone meant a re-bake never changed this ETag, so a browser holding the old proxy
+  // got 304 forever and kept drawing it (TCR tanks kept their turretless pre-fix proxy
+  // after the 2026-11-04 debris fix and re-bake).
+  const objectVersion = (await objectEtag(key)) ?? '';
+  const etag = `W/"${crypto.createHash('sha256').update(key).update('\n').update(objectVersion).digest('hex').slice(0, 24)}"`;
   res.set('ETag', etag);
   // Short, not the hour this used to hold. The URL is now viewer-dependent, so a
   // long cache would keep serving the proxy to someone who has just bought the
