@@ -131,7 +131,10 @@ async function releaseFileCache(): Promise<string> {
     if (err?.code === 'EAGAIN') return 'memory.reclaim (partial)'
   }
   const blenderDir = path.dirname(process.env.BLENDER_PATH || '/opt/blender/blender')
-  const dirs = [blenderDir, path.join(process.cwd(), 'node_modules'), os.tmpdir()].filter(
+  // node_modules is left out on purpose: walking its ~tens of thousands of small
+  // files filled the kernel's file-name cache (kernelMB 7 -> 60-70 per replica,
+  // 10 Nov 2026), which then took hours to fade from the memory graph.
+  const dirs = [blenderDir, os.tmpdir()].filter(
     (d) => d !== '.' && fs.existsSync(d),
   )
   if (!dirs.length) return 'no dirs'

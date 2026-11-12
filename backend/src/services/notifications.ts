@@ -182,10 +182,10 @@ export async function notifyOwnersOfModelUpdate(
 
     const result = await db.query(
       `INSERT INTO notifications (user_id, type, title, body, link, model_id)
-       SELECT DISTINCT o.user_id, 'model_updated', $2, $3, $4, $1
+       SELECT DISTINCT o.user_id, 'model_updated', $2, $3, $4, $1::uuid
        FROM order_items oi
        JOIN orders o ON oi.order_id = o.id
-       WHERE oi.model_id = $1
+       WHERE oi.model_id = $1::uuid
          AND o.payment_status = 'succeeded'
          AND o.user_id IS NOT NULL`,
       [modelId, `“${modelName}” has an updated file`, body, `/models/${modelId}`],
