@@ -41,6 +41,15 @@ function client(): S3Client {
       region: 'auto',
       endpoint: `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: { accessKeyId: ACCESS_KEY_ID!, secretAccessKey: SECRET_ACCESS_KEY! },
+      // The SDK's default is 50 shared sockets and no timeouts. A preview stream the
+      // browser walked away from used to keep its socket for ever; once 50 leaked,
+      // every R2 call (planner models, product pages) queued behind them and hung.
+      // Timeouts free a stuck socket, and the bigger pool gives a planner load headroom.
+      requestHandler: {
+        connectionTimeout: 5_000,
+        requestTimeout: 60_000,
+        httpsAgent: { keepAlive: true, maxSockets: 200 },
+      },
     })
   }
   return _client

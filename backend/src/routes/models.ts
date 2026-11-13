@@ -989,6 +989,10 @@ async function servePreviewGlb(
   res.set('Content-Type', 'model/gltf-binary');
   if (size) res.set('Content-Length', String(size));
   stream.on('error', () => { if (!res.headersSent) res.status(502).end(); else res.destroy(); });
+  // If the browser goes away mid-download (tab closed, planner left), pipe() does not
+  // close the R2 stream, so its socket stayed held for ever. Enough of those used up
+  // the R2 socket pool and every model on every table stopped loading (13 Nov 2026).
+  res.on('close', () => stream.destroy());
   stream.pipe(res);
 }
 
