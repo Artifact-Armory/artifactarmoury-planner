@@ -284,7 +284,8 @@ export async function processUploadedModel(
          glb_file_path = COALESCE($1, glb_file_path),
          width = $2, depth = $3, height = $4,
          estimated_print_time = $5, estimated_material_cost = $6, supports_required = $7,
-         recommended_layer_height = 0.2, recommended_infill = 20,
+         -- layer height / infill are left for the artist to fill in: a made-up
+         -- 0.2 mm / 20% (filament values) looked wrong on resin listings.
          file_hash = $8,
          geometry_fingerprint = $9,
          source_format = $10,

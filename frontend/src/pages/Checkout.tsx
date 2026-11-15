@@ -17,6 +17,8 @@ import LocalPriceNote from '../components/common/LocalPriceNote'
 import Button from '../components/ui/Button'
 import CountrySelect from '../components/common/CountrySelect'
 import Seo from '../components/common/Seo'
+import CheckoutAccountNote from '../components/auth/CheckoutAccountNote'
+import { authPath } from '../utils/authRedirect'
 import { useTaxStore, grossFromLines, vatFromLines } from '../store/taxStore'
 
 // Load Stripe.js once, only if a publishable key is configured. When it's absent
@@ -212,7 +214,7 @@ const Checkout: React.FC = () => {
   // Step 1: create the order (and its PaymentIntent). In mock mode we can confirm
   // immediately; in live mode we move to the card-entry step.
   async function handleContinue() {
-    if (!user) { navigate('/login'); return }
+    if (!user) { navigate(authPath('register', '/checkout')); return }
     if (items.length === 0) return
     if (!termsAccepted) { setError('Please agree to the Terms of Service before purchasing.'); return }
     if (!downloadConsent) { setError('Please confirm the immediate-download consent before purchasing.'); return }
@@ -481,7 +483,13 @@ const Checkout: React.FC = () => {
             })()}
             <LocalPriceNote gbp={!testMode && order ? order.total : grossTotal} />
             {!user && (
-              <p className="mt-3 text-xs text-amber-700">You'll be asked to sign in to complete your purchase.</p>
+              <>
+                <CheckoutAccountNote />
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button onClick={() => navigate(authPath('register', '/checkout'))}>Create account</Button>
+                  <Button variant="outline" onClick={() => navigate(authPath('login', '/checkout'))}>Sign in</Button>
+                </div>
+              </>
             )}
 
             {phase === 'review' ? (

@@ -14,6 +14,7 @@ import { collectionsApi, CollectionSummary } from '../api/endpoints/collections'
 import { ArtistShowcase } from '../api/types'
 import { useAuthStore } from '../store/authStore'
 import Seo from '../components/common/Seo'
+import { authPath } from '../utils/authRedirect'
 
 const sortOptions = [
   { value: 'recent', label: 'Newest' },
@@ -140,7 +141,7 @@ const ArtistProfile: React.FC = () => {
   const toggleFollow = async () => {
     if (!id) return
     if (!isAuthenticated) {
-      navigate('/login')
+      navigate(authPath('login', window.location.pathname))
       return
     }
     setFollowBusy(true)
@@ -166,7 +167,7 @@ const ArtistProfile: React.FC = () => {
   const startConversation = async () => {
     if (!id) return
     if (!isAuthenticated) {
-      navigate('/login')
+      navigate(authPath('login', window.location.pathname))
       return
     }
     setMessageBusy(true)

@@ -152,11 +152,10 @@ router.post('/',
     const userId = (req as any).userId;
     if (!userId) { throw new ValidationError('Please sign in to complete your purchase'); }
 
-    // Soft gate: a purchase requires a verified email (download entitlement is
-    // tied to the account, so we want a confirmed address before selling).
-    if (!(req as any).user?.email_verified) {
-      throw new ValidationError('Please verify your email address before purchasing. Check your inbox for the verification link.');
-    }
+    // No email-verification gate here (removed 15 Nov 2026): a new buyer can pay
+    // straight after signing up. Downloads and the watermark are tied to the
+    // account and order, not to the verified flag, and the verification email
+    // still goes out at sign-up. Artist actions (uploads, payouts) still need it.
 
     const email = customerEmail || (req as any).user?.email;
     if (!email) { throw new ValidationError('Valid email address is required'); }

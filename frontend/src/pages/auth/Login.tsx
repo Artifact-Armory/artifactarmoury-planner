@@ -1,6 +1,6 @@
 import React from 'react'
 import { useForm } from 'react-hook-form'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { authApi } from '../../api/endpoints/auth'
 import { useAuthStore } from '../../store/authStore'
@@ -10,11 +10,16 @@ import { Card, CardContent } from '../../components/shadcn/card'
 import Logo from '../../components/common/Logo'
 import Seo from '../../components/common/Seo'
 import { SITE_NAME } from '../../config/brand'
+import { authPath, nextFromLocation } from '../../utils/authRedirect'
+import CheckoutAccountNote from '../../components/auth/CheckoutAccountNote'
 
 type FormValues = { email: string; password: string }
 
 const Login: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  // Where to go once signed in (e.g. back to checkout); home if nothing asked.
+  const next = nextFromLocation(location)
   const { register, handleSubmit, formState } = useForm<FormValues>()
   const { setAuth, setLoading } = useAuthStore()
 
@@ -27,7 +32,7 @@ const Login: React.FC = () => {
   const finishLogin = (user: any, token: string, refreshToken: string) => {
     setAuth({ user, token, refreshToken })
     toast.success('Logged in successfully', { duration: 3000 })
-    navigate('/')
+    navigate(next ?? '/', { replace: true })
   }
 
   const onSubmit = async (values: FormValues) => {
@@ -121,7 +126,11 @@ const Login: React.FC = () => {
       <Card>
         <CardContent>
           <h1 className="text-2xl font-semibold text-foreground">Sign in</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Welcome back! Please enter your details.</p>
+          {next?.startsWith('/checkout') ? (
+            <CheckoutAccountNote />
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">Welcome back! Please enter your details.</p>
+          )}
           <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
             <Input
               label="Email"
@@ -148,7 +157,7 @@ const Login: React.FC = () => {
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{' '}
-            <Link to="/register" className="font-medium text-primary hover:underline">
+            <Link to={authPath('register', next)} className="font-medium text-primary hover:underline">
               Create account
             </Link>
           </p>

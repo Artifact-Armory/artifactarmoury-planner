@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ShoppingCart, Download, Heart, Share2, Flag, MessageSquare, Printer, FileText, ShieldCheck, AlertTriangle, ChevronLeft, ChevronRight, Box, LayoutGrid, Image as ImageIcon } from 'lucide-react'
 import { modelsApi } from '../api/endpoints/models'
 import { ordersApi } from '../api/endpoints/orders'
 import { artistsApi } from '../api/endpoints/artists'
@@ -28,8 +28,15 @@ import { printerTypeLabel, meshQualitySummary } from '../utils/printability'
 import { TRADEMARK_DISCLAIMER } from '../components/legal/TrademarkDisclaimer'
 import ReportModelModal from '../components/reports/ReportModelModal'
 import Seo from '../components/common/Seo'
+import { authPath } from '../utils/authRedirect'
+import { categoryLabel } from '../utils/categories'
 import { FEATURES } from '../config/features'
 import { SITE_NAME } from '../config/brand'
+
+// three.js only loads when someone opens the 3D view.
+const Model3DViewer = React.lazy(() => import('../components/models/Model3DViewer'))
+// The planner needs a tablet or bigger (see pages/Planner.tsx PLANNER_MIN_WIDTH).
+const PLANNER_MIN_WIDTH = 640
 
 /**
  * SEO title/description PATTERN for a product page. Every visible model on
@@ -122,7 +129,17 @@ const ModelDetails: React.FC = () => {
   // Clicking a gallery strip thumbnail below swaps it; reset on model change so a
   // stale selection from the previous product page doesn't carry over.
   const [activeImage, setActiveImage] = React.useState<string | null>(null)
-  React.useEffect(() => { setActiveImage(null) }, [id])
+  // Hero shows the spinning 3D model instead of a photo. Reset per product.
+  const [show3d, setShow3d] = React.useState(false)
+  React.useEffect(() => { setActiveImage(null); setShow3d(false) }, [id])
+  const [plannerFits, setPlannerFits] = React.useState(
+    () => typeof window === 'undefined' || window.innerWidth >= PLANNER_MIN_WIDTH,
+  )
+  React.useEffect(() => {
+    const onResize = () => setPlannerFits(window.innerWidth >= PLANNER_MIN_WIDTH)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const modelQuery = useQuery({
     queryKey: ['model', id],
@@ -182,7 +199,7 @@ const ModelDetails: React.FC = () => {
     if (!id) return
     if (!isAuthenticated) {
       toast.error('Sign in to like this model')
-      navigate('/login')
+      navigate(authPath('login', window.location.pathname))
       return
     }
     if (likeBusy) return
@@ -227,7 +244,7 @@ const ModelDetails: React.FC = () => {
   const messageArtist = async () => {
     if (!model?.artistId) return
     if (!isAuthenticated) {
-      navigate('/login')
+      navigate(authPath('login', window.location.pathname))
       return
     }
     setMessageBusy(true)
@@ -334,7 +351,11 @@ const ModelDetails: React.FC = () => {
         <div className="min-w-0 space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
             <div className="relative h-80 w-full bg-muted sm:h-[28rem]">
-              {heroSrc ? (
+              {show3d && model.glbUrl ? (
+                <React.Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">Loading 3D view…</div>}>
+                  <Model3DViewer url={model.glbUrl} name={model.name} />
+                </React.Suspense>
+              ) : heroSrc ? (
                 <img src={heroSrc} alt={model.name} className="h-full w-full object-contain" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-muted-foreground">No thumbnail available</div>
@@ -347,7 +368,7 @@ const ModelDetails: React.FC = () => {
                     .map((image) => image.imageUrl ?? image.imagePath)
                     .filter((src): src is string => !!src),
                 ]
-                if (gallery.length < 2) return null
+                if (show3d || gallery.length < 2) return null
                 const current = Math.max(0, gallery.indexOf(model.thumbnailUrl ? activeImage : heroSrc))
                 const step = (delta: number) =>
                   setActiveImage(gallery[(current + delta + gallery.length) % gallery.length])
@@ -368,6 +389,32 @@ const ModelDetails: React.FC = () => {
                 )
               })()}
             </div>
+            {(model.glbUrl || model.showInPlanner !== false) && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+                {model.glbUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={show3d ? <ImageIcon size={16} /> : <Box size={16} />}
+                    onClick={() => setShow3d((v) => !v)}
+                  >
+                    {show3d ? 'Show photos' : 'View in 3D'}
+                  </Button>
+                )}
+                {model.glbUrl && model.showInPlanner !== false && (plannerFits ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<LayoutGrid size={16} />}
+                    onClick={() => navigate(`/planner?place=${encodeURIComponent(model.id)}`)}
+                  >
+                    Try it on a table
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Try it on a 3D table in the planner on a computer or tablet.</span>
+                ))}
+              </div>
+            )}
             {model.images && model.images.length > 0 && (
               <div className="flex gap-3 overflow-x-auto p-4">
                 {/* The thumbnail itself is the first "photo" in the strip, so it's
@@ -375,7 +422,7 @@ const ModelDetails: React.FC = () => {
                 {model.thumbnailUrl && (
                   <button
                     type="button"
-                    onClick={() => setActiveImage(null)}
+                    onClick={() => { setActiveImage(null); setShow3d(false) }}
                     className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 ${
                       !activeImage ? 'border-primary' : 'border-transparent'
                     }`}
@@ -389,7 +436,7 @@ const ModelDetails: React.FC = () => {
                     <button
                       key={image.id}
                       type="button"
-                      onClick={() => src && setActiveImage(src)}
+                      onClick={() => { if (src) { setActiveImage(src); setShow3d(false) } }}
                       className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 ${
                         (model.thumbnailUrl ? activeImage : heroSrc) === src ? 'border-primary' : 'border-transparent'
                       }`}
@@ -605,7 +652,7 @@ const ModelDetails: React.FC = () => {
               <span className="text-sm text-muted-foreground">
                 {(model.reviewCount ?? 0) > 0
                   ? `Rating ${formatRating(model.averageRating)} · ${model.reviewCount} ${model.reviewCount === 1 ? 'review' : 'reviews'}`
-                  : 'Not yet reviewed'}
+                  : ''}
               </span>
             </div>
 
@@ -780,6 +827,7 @@ const ModelDetails: React.FC = () => {
             {(() => {
               const mq = meshQualitySummary(model)
               const printer = printerTypeLabel(model.printerType)
+              const isResin = /resin/i.test(model.printerType ?? '')
               if (!mq && !printer && model.supportsRequired === undefined) return null
               return (
                 <div className="mt-6 rounded-xl border border-border p-4">
@@ -799,10 +847,14 @@ const ModelDetails: React.FC = () => {
                     {model.supportsRequired !== undefined && (
                       <li>Supports: {model.supportsRequired ? 'required' : 'not required'}</li>
                     )}
-                    {model.recommendedLayerHeight != null && (
+                    {/* Older listings got a stock 0.2 mm / 20% (filament values) at upload.
+                        On resin they're wrong (and infill doesn't apply), so only a real
+                        resin layer height is shown. */}
+                    {model.recommendedLayerHeight != null &&
+                      (!isResin || Number(model.recommendedLayerHeight) <= 0.1) && (
                       <li>Recommended layer height: {model.recommendedLayerHeight} mm</li>
                     )}
-                    {model.recommendedInfill != null && (
+                    {model.recommendedInfill != null && !isResin && (
                       <li>Recommended infill: {model.recommendedInfill}%</li>
                     )}
                   </ul>
@@ -811,7 +863,7 @@ const ModelDetails: React.FC = () => {
             })()}
 
             <ul className="mt-6 space-y-2 text-sm text-muted-foreground">
-              <li>Category: {model.category}</li>
+              <li>Category: {categoryLabel(model.category)}</li>
               {model.width && model.depth && model.height && (
                 <li>
                   Dimensions: {model.width} × {model.depth} × {model.height} mm
@@ -826,7 +878,7 @@ const ModelDetails: React.FC = () => {
             {/* Report — hidden on the artist's own listing */}
             {currentUser?.id !== model.artistId && (
               <button
-                onClick={() => (isAuthenticated ? setReportOpen(true) : navigate('/login'))}
+                onClick={() => (isAuthenticated ? setReportOpen(true) : navigate(authPath('login', window.location.pathname)))}
                 className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive"
               >
                 <Flag size={13} /> Report this model

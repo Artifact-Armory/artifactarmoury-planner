@@ -9,9 +9,14 @@ import Logo from '../components/common/Logo'
 import Seo from '../components/common/Seo'
 import { browseApi } from '../api/endpoints/browse'
 import { SITE_NAME, SITE_TAGLINE } from '../config/brand'
+import { categoryLabel } from '../utils/categories'
+import { TOPICS, topicPath } from '../seo/topics'
 
+// Brand first (so a search for the name shows it), then what the site is.
+// Must match the <title> in index.html.
+const HOME_TITLE = `${SITE_NAME} | 3D Printable Wargaming Terrain & STL Files`
 const HOME_DESCRIPTION =
-  'Artifact Armoury is a marketplace and free 3D planner for tabletop terrain. Browse print-ready terrain STLs from artists and studios, lay out your wargaming table before you print, and buy each model once. Print it as many times as your table needs.'
+  'Artifact Armoury is a marketplace for 3D printable wargaming terrain, tanks and miniatures, with a free 3D table planner. Buy STL files from independent artists, plan your table before you print, and print each model as many times as you need.'
 
 const FEATURES = [
   {
@@ -64,7 +69,28 @@ const FeaturedRow: React.FC<{ modelClass: ModelClass; title: string }> = ({ mode
   )
 }
 
+const HERO_PRIMARY =
+  'inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 motion-safe:active:scale-[0.98]'
+const HERO_SECONDARY =
+  'inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20'
+// Below this width the planner refuses to open (pages/Planner.tsx PLANNER_MIN_WIDTH).
+const PHONE_QUERY = '(max-width: 639px)'
+
+function useIsPhone(): boolean {
+  const [isPhone, setIsPhone] = React.useState(
+    () => typeof window !== 'undefined' && window.matchMedia(PHONE_QUERY).matches,
+  )
+  React.useEffect(() => {
+    const mq = window.matchMedia(PHONE_QUERY)
+    const onChange = () => setIsPhone(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return isPhone
+}
+
 const Home: React.FC = () => {
+  const isPhone = useIsPhone()
   const { data: trendingModels, isLoading: loadingTrending } = useQuery({
     queryKey: ['trending-models'],
     queryFn: () => browseApi.getTrendingModels(8),
@@ -82,19 +108,30 @@ const Home: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
-      <Seo title={SITE_NAME} description={HOME_DESCRIPTION} path="/" />
+      <Seo title={HOME_TITLE} description={HOME_DESCRIPTION} path="/" />
       <section className="relative isolate overflow-hidden rounded-3xl border border-border px-6 py-20 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-24px_rgba(15,23,42,0.12)] sm:px-12 sm:py-28">
-        <video
-          className="absolute inset-0 -z-10 h-full w-full object-cover"
-          src="/videos/hero-loop.mp4"
-          poster="/videos/hero-poster.jpg"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          aria-hidden="true"
-        />
+        {/* Phones get the still frame only: the video is decoration, and most phone
+            visitors arrive on mobile data from social posts. */}
+        {isPhone ? (
+          <img
+            className="absolute inset-0 -z-10 h-full w-full object-cover"
+            src="/videos/hero-poster.jpg"
+            alt=""
+            aria-hidden="true"
+          />
+        ) : (
+          <video
+            className="absolute inset-0 -z-10 h-full w-full object-cover"
+            src="/videos/hero-loop.mp4"
+            poster="/videos/hero-poster.jpg"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            aria-hidden="true"
+          />
+        )}
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
         <div className="max-w-3xl">
           {/* The hero's overlay gradient is lightest at the top, so the lockup gets
@@ -113,24 +150,26 @@ const Home: React.FC = () => {
             Models are digital STL files for 3D printing, delivered as instant downloads. No physical item is shipped.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link
-              to="/planner"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 motion-safe:active:scale-[0.98]"
-            >
-              Open the planner
-            </Link>
-            <Link
-              to="/browse"
-              className="inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20"
-            >
-              Browse the marketplace
-            </Link>
-            <Link
-              to="/become-an-artist"
-              className="inline-flex items-center justify-center rounded-md border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors duration-150 ease-[var(--ease-out)] hover:bg-white/20"
-            >
-              Apply to be an artist
-            </Link>
+            {/* The planner needs a tablet or bigger, so on a phone browsing leads. */}
+            {isPhone ? (
+              <>
+                <Link to="/browse" className={HERO_PRIMARY}>
+                  Browse the models
+                </Link>
+                <p className="w-full text-xs text-white/70">
+                  Open the 3D table planner on a computer or tablet.
+                </p>
+              </>
+            ) : (
+              <>
+                <Link to="/planner" className={HERO_PRIMARY}>
+                  Open the planner
+                </Link>
+                <Link to="/browse" className={HERO_SECONDARY}>
+                  Browse the marketplace
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -154,13 +193,18 @@ const Home: React.FC = () => {
         <section className="mt-12">
           <h2 className="text-lg font-semibold text-foreground">Popular categories</h2>
           <div className="mt-4 flex flex-wrap gap-3">
-            {categories.slice(0, 8).map((category) => (
+            {/* Hide near-empty categories ("nature · 1") — they make the shop look thin. */}
+            {categories
+              .filter((c) => Number(c.modelCount) >= 3)
+              .sort((a, b) => Number(b.modelCount) - Number(a.modelCount))
+              .slice(0, 8)
+              .map((category) => (
               <Link
                 key={category.category}
                 to={`/browse?category=${encodeURIComponent(category.category ?? '')}`}
                 className="rounded-full border border-border bg-muted px-4 py-2 text-sm text-muted-foreground transition-colors duration-150 ease-[var(--ease-out)] hover:bg-accent hover:text-accent-foreground"
               >
-                {category.category} · {category.modelCount}
+                {categoryLabel(category.category)} · {category.modelCount}
               </Link>
             ))}
           </div>
@@ -193,6 +237,21 @@ const Home: React.FC = () => {
         </div>
       </section>
       )}
+
+      <section className="mt-16">
+        <h2 className="text-lg font-semibold text-foreground">Browse by era and type</h2>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {TOPICS.map((t) => (
+            <Link
+              key={t.slug}
+              to={topicPath(t)}
+              className="rounded-full border border-border bg-muted px-4 py-2 text-sm text-muted-foreground transition-colors duration-150 ease-[var(--ease-out)] hover:bg-accent hover:text-accent-foreground"
+            >
+              {t.label}
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section className="mt-16">
         <div className="flex items-center justify-between">

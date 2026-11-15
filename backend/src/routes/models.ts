@@ -204,8 +204,8 @@ router.post('/',
           Math.round(printEstimate.estimated_time_hours * 60),
           Number(printEstimate.total_cost.toFixed(2)),
           stlData.needsSupports,
-          0.2,
-          20,
+          null, // recommended layer height: artist fills it in (no made-up default)
+          null, // recommended infill: likewise
           fileHash,
           // Digital STL sales only for now — ignore any client-supplied fulfilment.
           'stl',

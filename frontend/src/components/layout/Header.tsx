@@ -11,7 +11,7 @@ import Logo from '../common/Logo';
 import { SITE_NAME } from '../../config/brand';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-base font-medium transition-colors ${
+  `whitespace-nowrap text-base font-medium transition-colors ${
     isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
   }`;
 
@@ -113,7 +113,7 @@ const Header: React.FC = () => {
 
           {/* Desktop Navigation — keep it shallow: Browse · Tables · Artists · Planner.
               The planner is the differentiator, so it's always visible (never gated). */}
-          <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
+          <nav className="hidden lg:flex items-center space-x-4 xl:space-x-7">
             <NavLink to="/browse" className={navLinkClass}>
               Browse
             </NavLink>
@@ -136,13 +136,18 @@ const Header: React.FC = () => {
             <NavLink to="/bundles" className={navLinkClass}>
               Bundles
             </NavLink>
+            {/* Only where there's room: on narrower screens the bar overflowed and pushed Sign up
+                off screen. Phones/tablets have it in the menu, everyone in the footer. */}
+            <NavLink to="/become-an-artist" className={(a) => `hidden min-[1400px]:inline ${navLinkClass(a)}`}>
+              Become an artist
+            </NavLink>
             <NavLink to="/about" className={navLinkClass}>
               About
             </NavLink>
           </nav>
 
           {/* Desktop Search & User Controls */}
-          <div className="hidden md:flex items-center space-x-3">
+          <div className="hidden lg:flex items-center space-x-3">
             {/* Search Form */}
             <form onSubmit={handleSearch} className="relative">
               <input
@@ -150,7 +155,7 @@ const Header: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search models…"
-                className="py-2 px-4 pr-10 rounded-full border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary w-56"
+                className="py-2 px-4 pr-10 rounded-full border border-input bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-primary w-36 xl:w-56"
               />
               <button
                 type="submit"
@@ -338,7 +343,7 @@ const Header: React.FC = () => {
           </div>
 
           {/* Mobile menu button */}
-          <div className="flex md:hidden items-center">
+          <div className="flex lg:hidden items-center">
             <button
               onClick={() => toggleCart()}
               className="relative p-2 mr-2 rounded-full hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring"
@@ -371,7 +376,7 @@ const Header: React.FC = () => {
 
       {/* Mobile menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden" id="mobile-menu">
+        <div className="lg:hidden" id="mobile-menu">
           <div className="px-4 pt-2 pb-3 space-y-1 border-t border-border bg-background shadow-lg">
             {/* Mobile Search */}
             <form onSubmit={handleSearch} className="mb-4 mt-2">
@@ -411,6 +416,9 @@ const Header: React.FC = () => {
             </NavLink>
             <NavLink to="/bundles" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               Bundles
+            </NavLink>
+            <NavLink to="/become-an-artist" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
+              Become an artist
             </NavLink>
             <NavLink to="/about" onClick={() => setMobileMenuOpen(false)} className={mobileNavLinkClass}>
               About

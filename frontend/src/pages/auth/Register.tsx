@@ -1,6 +1,6 @@
 import React from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
@@ -10,6 +10,8 @@ import { SITE_NAME } from '../../config/brand'
 import { Card, CardContent } from '../../components/shadcn/card'
 import Logo from '../../components/common/Logo'
 import Seo from '../../components/common/Seo'
+import { authPath, nextFromLocation } from '../../utils/authRedirect'
+import CheckoutAccountNote from '../../components/auth/CheckoutAccountNote'
 
 type FormValues = {
   displayName: string
@@ -25,6 +27,9 @@ const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/
 
 const Register: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  // Where to go once the account exists (e.g. back to checkout); home otherwise.
+  const next = nextFromLocation(location)
   const {
     register,
     handleSubmit,
@@ -43,8 +48,8 @@ const Register: React.FC = () => {
         marketingEmails: !!values.marketingEmails,
       })
       setAuth({ user: res.user, token: res.accessToken, refreshToken: res.refreshToken })
-      toast.success('Account created — check your email to verify your address.')
-      navigate('/')
+      toast.success('Account created. We\'ve emailed you a link to verify your address.')
+      navigate(next ?? '/', { replace: true })
     } catch (e: any) {
       const message = e?.response?.data?.message || e?.response?.data?.error || 'Registration failed'
       toast.error(message)
@@ -58,7 +63,11 @@ const Register: React.FC = () => {
       <Card>
         <CardContent>
           <h1 className="text-2xl font-semibold text-foreground">Create an account</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Join {SITE_NAME} to access premium 3D terrain.</p>
+          {next?.startsWith('/checkout') ? (
+            <CheckoutAccountNote />
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">Join {SITE_NAME} to access premium 3D terrain.</p>
+          )}
           <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
             <Input
               label="Display name"
@@ -116,7 +125,7 @@ const Register: React.FC = () => {
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Already have an account?{' '}
-            <Link to="/login" className="font-medium text-primary hover:underline">
+            <Link to={authPath('login', next)} className="font-medium text-primary hover:underline">
               Sign in
             </Link>
           </p>

@@ -10,6 +10,7 @@ import { formatPrice } from '../../utils/format'
 import LocalPriceNote from '../common/LocalPriceNote'
 import { useAuthStore } from '../../store/authStore'
 import { Badge } from '../shadcn/badge'
+import { authPath } from '../../utils/authRedirect'
 
 const CartDrawer: React.FC = () => {
   const {
@@ -171,7 +172,8 @@ const CartDrawer: React.FC = () => {
             disabled={items.length === 0}
             onClick={() => {
               closeCart()
-              navigate('/checkout')
+              // Signed out: straight to sign-up (with a sign-in link), then back to checkout.
+              navigate(isAuthenticated ? '/checkout' : authPath('register', '/checkout'))
             }}
           >
             Go to checkout

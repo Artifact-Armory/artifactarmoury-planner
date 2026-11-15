@@ -1,5 +1,5 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Heart, ShoppingCart, Star } from 'lucide-react'
 import { TerrainModel } from '../../api/types'
 import Button from '../ui/Button'
@@ -7,6 +7,7 @@ import PriceDisplay from './PriceDisplay'
 import { useCartStore } from '../../store/cartStore'
 import { formatPrice, formatRating } from '../../utils/format'
 import { FEATURES } from '../../config/features'
+import { categoryLabel } from '../../utils/categories'
 
 interface ModelCardProps {
   model: TerrainModel
@@ -64,6 +65,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
           <img
             src={model.thumbnailUrl}
             alt={model.name}
+            loading="lazy"
             className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
           />
         ) : (
@@ -99,7 +101,11 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
           className="line-clamp-2 min-h-[2.75rem] break-words text-base font-semibold leading-snug text-foreground"
           title={model.name}
         >
-          {model.name}
+          {/* A real link (not just the card's click handler) so search engines can
+              follow it to the model page, and people can open it in a new tab. */}
+          <Link to={`/models/${model.id}`} onClick={(e) => e.stopPropagation()} className="hover:text-primary">
+            {model.name}
+          </Link>
         </h3>
         <p className="line-clamp-1 text-sm text-muted-foreground">by {model.artistName}</p>
 
@@ -116,13 +122,11 @@ const ModelCard: React.FC<ModelCardProps> = ({ model, onAddToCart, onToggleFavor
               <Star size={16} className="mr-1 fill-amber-400" />
               <span className="text-muted-foreground">{formatRating(model.averageRating)}</span>
             </div>
-          ) : (
-            <span className="text-xs text-muted-foreground">Not yet reviewed</span>
-          )}
+          ) : null /* no reviews yet: say nothing rather than "Not yet reviewed" on every card */}
         </div>
 
         <div className="mt-4 flex justify-between text-xs text-muted-foreground">
-          <span>{model.category}</span>
+          <span>{categoryLabel(model.category)}</span>
           {(model.reviewCount ?? 0) > 0 && (
             <span>{model.reviewCount} {model.reviewCount === 1 ? 'review' : 'reviews'}</span>
           )}

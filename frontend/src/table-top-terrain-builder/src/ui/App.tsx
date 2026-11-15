@@ -704,6 +704,38 @@ export default function App({ tableId, shareToken, readOnly = false }: { tableId
     }
   }, [assets.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Try in planner" from a product page: /planner?place=<modelId>. Once the
+  // table is up (and any first-visit help/tour is closed), arm that model so it
+  // follows the cursor and one click places it. Scratch tables only, once per visit.
+  const placeParamRef = React.useRef<string | null>(
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('place') : null,
+  )
+  React.useEffect(() => {
+    const id = placeParamRef.current
+    if (!id || readOnly || tableId || shareToken || !showTable || tourActive || showHelp) return
+    placeParamRef.current = null
+    let cancelled = false
+    ;(async () => {
+      // Single models resolve straight away; a multi-part set's first part is
+      // registered by the sets loader, so give that a moment to land.
+      await resolveAssetsByIds([id]).catch(() => {})
+      for (let i = 0; i < 40 && !getAssetById(id) && !cancelled; i++) {
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (cancelled) return
+      const asset = getAssetById(id)
+      if (!asset) { hotToast.error('That model is not available in the planner yet'); return }
+      // Start on a small 2x2 ft board so one piece isn't a speck on a 6x4 table
+      // (the size buttons are right there to make it bigger).
+      const ft = 0.3048
+      useAppStore.getState().setTable({ width: 2 * ft, height: 2 * ft })
+      setTimeout(() => fitView(), 50)
+      setSelectedAsset(id)
+      hotToast(`Move over the table and click to place ${asset.name}`, { duration: 8000 })
+    })()
+    return () => { cancelled = true }
+  }, [readOnly, tableId, shareToken, showTable, tourActive, showHelp, setSelectedAsset, fitView])
+
   // Load a server-saved table (own id or a shared token) into the planner.
   // Re-runs when the signed-in user changes so swapping accounts never leaves the
   // previous user's layout on the table.
