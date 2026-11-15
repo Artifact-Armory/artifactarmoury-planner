@@ -28,6 +28,7 @@ import ArtistCollection from './pages/ArtistCollection';
 import ArtistsList from './pages/ArtistsList';
 import Category from './pages/Category';
 import Tag from './pages/Tag';
+import Topic from './pages/Topic';
 import PublicTables from './pages/PublicTables';
 import Contact from './pages/Contact';
 import About from './pages/About';
@@ -202,6 +203,7 @@ function App() {
               <Route path="artists/:id/collections/:slug" element={<ArtistCollection />} />
               <Route path="categories/:id" element={<Category />} />
               <Route path="tags/:id" element={<Tag />} />
+              <Route path="stl/:slug" element={<Topic />} />
               <Route path="tables" element={<PublicTables />} />
               {/* Old showcase URL now opens the read-only 3D table view. */}
               <Route path="tables/:id" element={<TableRedirect />} />

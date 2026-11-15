@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": [
+    "/assets/*",
+    "/draco/*",
+    "/textures/*",
+    "/videos/*",
+    "/email/*",
+    "/favicon.svg",
+    "/apple-touch-icon.png",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/logo.svg",
+    "/logo-white.svg",
+    "/logo-mark.svg",
+    "/logo-mark-white.svg",
+    "/og-image.png",
+    "/site.webmanifest",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/sitemap-pages.xml"
+  ]
+}

@@ -62,7 +62,8 @@ function upsertLink(rel: string, href: string) {
 
 const Seo: React.FC<SeoProps> = ({ title, description, path, noindex, image }) => {
   useEffect(() => {
-    const fullTitle = title === SITE_NAME ? title : `${title} | ${SITE_NAME}`
+    // A title that already carries the brand (the homepage) is used as it is.
+    const fullTitle = title.includes(SITE_NAME) ? title : `${title} | ${SITE_NAME}`
     const desc = description ?? DEFAULT_DESCRIPTION
     const origin = SITE_URL
     const canonicalPath = path ?? window.location.pathname
