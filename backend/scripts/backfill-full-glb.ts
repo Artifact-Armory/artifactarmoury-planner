@@ -49,7 +49,12 @@ async function main() {
   // Only models that finished processing: an in-flight upload will enqueue its own
   // job when it completes, and a failed one has no canonical STL worth converting.
   const { rows: models } = await db.query(
-    `SELECT id AS model_id, NULL::uuid AS part_id, stl_file_path AS source_key,
+    // A listing with a preview file (pre-supported, or an assembled model standing
+    // in for its split print files) builds its owner GLB from that file, exactly as
+    // upload does (previewSourceKey in modelIngest/process.ts). Building from the
+    // print file instead would bring supports back, or show one loose part, in the
+    // planner and the product page spin view.
+    `SELECT id AS model_id, NULL::uuid AS part_id, COALESCE(display_stl_path, stl_file_path) AS source_key,
             name AS label, full_glb_status AS status
        FROM models
       WHERE processing_status = 'ready'
@@ -58,7 +63,7 @@ async function main() {
       ORDER BY sale_count DESC NULLS LAST, created_at DESC`,
   )
   const { rows: parts } = await db.query(
-    `SELECT p.model_id, p.id AS part_id, p.stl_file_path AS source_key,
+    `SELECT p.model_id, p.id AS part_id, COALESCE(p.display_stl_path, p.stl_file_path) AS source_key,
             COALESCE(m.name, '') || ' / ' || COALESCE(p.name, 'part') AS label,
             p.full_glb_status AS status
        FROM model_parts p

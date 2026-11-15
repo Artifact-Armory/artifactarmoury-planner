@@ -41,6 +41,7 @@ import { notifyFollowersOfRelease, notifyAdminsOfMeshOverride } from '../service
 import { maybeStartIntroOffer } from '../services/introCommission';
 import { isModerationLocked } from '../services/releases';
 import { logProductView, logWishlistAdd } from '../services/analytics';
+import { TURNTABLE_FRAMES, TURNTABLE_COLS } from '../services/pieceRender';
 import { findGeometryDuplicate, safeDeleteObject } from '../services/modelIngest/process';
 import { createListingFromUpload, VALID_CATEGORIES, VALID_LICENSES, VALID_PRINTER_TYPES, MAX_EXTRA_PARTS, MAX_COMPONENTS, MAX_GALLERY_IMAGES, TYPE_FACET_BY_CLASS, parseTags, partNameFromFilename } from '../services/modelIngest/createListing';
 import { dispatchIngestUpload, dispatchIngestVersionUpdate, dispatchPartPreviewAttach, dispatchNewComponentIngest, dispatchPrimaryPreviewUpdate } from '../services/modelIngest/queue';
@@ -1334,7 +1335,7 @@ router.get('/:id',
       parts = (await db.query(
         `SELECT id, name, glb_file_path, width, depth, height, processing_status, processing_error, display_order,
                 group_index, group_name, thumbnail_path, stl_file_path, source_format, source_file_path,
-                preview_skipped, (display_stl_path IS NOT NULL) AS has_preview
+                preview_skipped, (display_stl_path IS NOT NULL) AS has_preview, turntable_path
          FROM model_parts WHERE model_id = $1 ORDER BY group_index ASC, display_order ASC`,
         [id]
       )).rows;
@@ -1405,7 +1406,7 @@ router.get('/:id',
         'flagged_reason', 'moderated_by', 'moderated_at',
         'print_provider', 'print_provider_cost', 'print_quoted_at', 'print_consent_at',
         'mesh_warning_acknowledged_by', 'mesh_warning_acknowledged_at',
-        'deleted_by', 'processing_error', 'full_glb_error', 'render_failed_at',
+        'deleted_by', 'processing_error', 'full_glb_error', 'render_failed_at', 'turntable_failed_at',
       ]) delete model[k];
     }
     const safeParts = parts.map((p: any) => ({
@@ -1415,7 +1416,10 @@ router.get('/:id',
       group_index: p.group_index ?? 0, group_name: p.group_name ?? null,
       has_glb: !!p.glb_file_path,
       preview_skipped: !!p.preview_skipped, has_preview: !!p.has_preview,
+      // Spin-around sheet (088): a public picture, like a thumbnail.
+      turntable_path: p.turntable_path ?? null,
     }));
+    delete model.turntable_key;
 
     // Extra PDF (084): name/size/public only — never the R2 key.
     const doc = (await db.query(
@@ -1427,6 +1431,9 @@ router.get('/:id',
       model: {
         ...model,
         has_glb: hasGlb,
+        // How the spin-around sheets are laid out (services/pieceRender.ts).
+        turntable_frames: TURNTABLE_FRAMES,
+        turntable_cols: TURNTABLE_COLS,
         document: doc ? { name: doc.file_name, sizeBytes: Number(doc.size_bytes), isPublic: doc.is_public } : null,
         images: imagesResult.rows,
         recentReviews: reviewsResult.rows,

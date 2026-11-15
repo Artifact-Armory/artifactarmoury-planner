@@ -163,6 +163,10 @@ CREATE TABLE models (
     -- Site-generated render of the primary piece (076, services/pieceRender.ts).
     render_thumbnail_path VARCHAR(500),
     render_failed_at TIMESTAMPTZ,
+    -- Spin-around view sheet for the product page (migration 088).
+    turntable_path VARCHAR(500),
+    turntable_key VARCHAR(64),
+    turntable_failed_at TIMESTAMPTZ,
     -- Original upload format: 'stl' | 'obj' | '3mf'. For non-STL, source_file_path
     -- is the artist's original file (delivered to the buyer alongside the STL).
     source_format VARCHAR(10) NOT NULL DEFAULT 'stl',
@@ -368,6 +372,10 @@ CREATE TABLE model_parts (
     -- Site-generated render of this piece (076, services/pieceRender.ts).
     render_thumbnail_path VARCHAR(500),
     render_failed_at TIMESTAMPTZ,
+    -- Spin-around view sheet for the product page (migration 088).
+    turntable_path VARCHAR(500),
+    turntable_key VARCHAR(64),
+    turntable_failed_at TIMESTAMPTZ,
     -- Download-only part (migration 067): a sibling preview file stands in for its
     -- whole named model on the planner, so no GLB/bake is built for this one.
     preview_skipped BOOLEAN NOT NULL DEFAULT false,

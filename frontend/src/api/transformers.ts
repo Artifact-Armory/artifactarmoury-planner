@@ -199,9 +199,16 @@ export const mapModelRecord = (model: any): TerrainModel => ({
     model.parts_needing_preview != null || model.partsNeedingPreviewCount != null
       ? Number(model.parts_needing_preview ?? model.partsNeedingPreviewCount ?? 0)
       : undefined,
+  turntable: (() => {
+    const url = assetUrl(model.turntable_path ?? model.turntablePath ?? undefined)
+    const frames = Number(model.turntable_frames ?? model.turntableFrames ?? 0)
+    const cols = Number(model.turntable_cols ?? model.turntableCols ?? 0)
+    return url && frames > 1 && cols > 0 ? { url, frames, cols } : undefined
+  })(),
   parts: model.parts?.map((p: any) => ({
     id: p.id,
     name: p.name,
+    turntableUrl: assetUrl(p.turntable_path ?? p.turntablePath ?? undefined),
     thumbnailUrl: p.thumbnail_url || p.thumbnailUrl || assetUrl(p.thumbnail_path),
     glbUrl: (p.has_glb ?? p.glb_file_path) ? previewPartGlbUrl(p.id) : undefined,
     width: p.width ?? undefined,

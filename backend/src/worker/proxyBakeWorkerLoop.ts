@@ -46,6 +46,7 @@ import { isFullGlbEnabled } from '../services/fullGlb/queue'
 import { runOneIngestJob, releaseInFlightIngestJob } from '../services/modelIngest/runner'
 import { upgradeOneStaleFingerprint, isFingerprintUpgradeEnabled } from '../services/fingerprintUpgrade'
 import { renderOneMissingPiece, isPieceRenderEnabled } from '../services/pieceRenderBackfill'
+import { renderOneMissingTurntable, isTurntableEnabled } from '../services/turntableBackfill'
 import { isLargeJobLockHeld } from '../services/modelIngest/queue'
 import { recordWorkerHeartbeat } from '../services/queueHealth'
 import { closeDatabase } from '../db'
@@ -173,6 +174,11 @@ async function main(): Promise<void> {
       // (services/pieceRenderBackfill.ts).
       if (!didWork && !stopping && !largeJobInProgress && isPieceRenderEnabled()) {
         didWork = await renderOneMissingPiece()
+      }
+      // Last of all: a spin-around view for a product page that has none yet
+      // (services/turntableBackfill.ts).
+      if (!didWork && !stopping && !largeJobInProgress && isTurntableEnabled()) {
+        didWork = await renderOneMissingTurntable()
       }
     } catch (err) {
       logger.error('Worker loop error (continuing)', { err })

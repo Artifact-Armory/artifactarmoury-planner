@@ -117,12 +117,30 @@ const norm = (v: number[]) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; ret
 const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
-/**
- * Render a preview GLB (Y-up, Draco or not) to a square WebP. Throws when the
- * file has no drawable triangles.
- */
-export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_SIZE): Promise<Buffer> {
+interface Scene {
+  meshes: Mesh[]
+  min: number[]
+  max: number[]
+}
+
+/** Rotate every position and normal in place: roll about Z first, then pitch about X (core/orientation.ts in the planner). */
+function tiltMeshes(meshes: Mesh[], pitchDeg: number, rollDeg: number): void {
+  const p = (pitchDeg * Math.PI) / 180, r = (rollDeg * Math.PI) / 180
+  const cp = Math.cos(p), sp = Math.sin(p), cr = Math.cos(r), sr = Math.sin(r)
+  const turn = (a: Float32Array) => {
+    for (let i = 0; i < a.length; i += 3) {
+      const x = a[i] * cr - a[i + 1] * sr, y0 = a[i] * sr + a[i + 1] * cr, z0 = a[i + 2]
+      a[i] = x; a[i + 1] = y0 * cp - z0 * sp; a[i + 2] = y0 * sp + z0 * cp
+    }
+  }
+  for (const m of meshes) { turn(m.pos); turn(m.nrm) }
+}
+
+async function loadScene(glb: Uint8Array, tilt?: { pitchDeg?: number; rollDeg?: number }): Promise<Scene> {
   const meshes = await loadMeshes(glb)
+  if (tilt && ((tilt.pitchDeg ?? 0) % 360 !== 0 || (tilt.rollDeg ?? 0) % 360 !== 0)) {
+    tiltMeshes(meshes, tilt.pitchDeg ?? 0, tilt.rollDeg ?? 0)
+  }
   let tris = 0
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
   for (const m of meshes) {
@@ -136,12 +154,30 @@ export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_
     }
   }
   if (tris === 0 || !Number.isFinite(min[0])) throw new Error('GLB has no triangles to render')
+  return { meshes, min, max }
+}
 
-  const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
-  const radius = Math.max(1e-6, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2)
+interface View {
+  azimuthDeg: number
+  /** Point the camera looks at (and, for a spin, turns about). */
+  center: number[]
+  /** Radius of the sphere about `center` the camera must stay outside. */
+  radius: number
+  /**
+   * Extra world-space points that the framing must also contain. A spin passes the
+   * model's bounding cylinder so every frame shares one framing and the model
+   * turns in place instead of growing and shrinking as its outline changes.
+   */
+  frame?: number[][]
+}
+
+/** Draw one view at S x S (already supersampled); returns raw RGB. */
+function renderView(scene: Scene, view: View, S: number): Buffer {
+  const { meshes } = scene
+  const { center, radius } = view
 
   // Camera basis. Looks at the centre from AZIMUTH/POLAR (polar measured from +Y).
-  const az = (AZIMUTH_DEG * Math.PI) / 180, pol = (POLAR_DEG * Math.PI) / 180
+  const az = (view.azimuthDeg * Math.PI) / 180, pol = (POLAR_DEG * Math.PI) / 180
   const back = [Math.sin(pol) * Math.sin(az), Math.cos(pol), Math.sin(pol) * Math.cos(az)] // camera → its own +Z
   const dist = radius / Math.sin((FOV_DEG * Math.PI) / 360) * 1.1
   const eye = [center[0] + back[0] * dist, center[1] + back[1] * dist, center[2] + back[2] * dist]
@@ -150,7 +186,6 @@ export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_
 
   // Project every vertex; screen coords are fitted to the frame afterwards so the
   // piece fills the picture whatever its proportions.
-  const S = size * 2
   const projected = meshes.map((m) => {
     const n = m.pos.length / 3
     const sx = new Float32Array(n), sy = new Float32Array(n), iz = new Float32Array(n)
@@ -165,10 +200,21 @@ export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_
     return { sx, sy, iz }
   })
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
-  for (const p of projected) {
-    for (let i = 0; i < p.sx.length; i++) {
-      if (p.sx[i] < x0) x0 = p.sx[i]; if (p.sx[i] > x1) x1 = p.sx[i]
-      if (p.sy[i] < y0) y0 = p.sy[i]; if (p.sy[i] > y1) y1 = p.sy[i]
+  if (view.frame) {
+    for (const q of view.frame) {
+      const dx = q[0] - eye[0], dy = q[1] - eye[1], dz = q[2] - eye[2]
+      const d = Math.max(-(dx * back[0] + dy * back[1] + dz * back[2]), 1e-6)
+      const x = (dx * right[0] + dy * right[1] + dz * right[2]) / d
+      const y = (dx * up[0] + dy * up[1] + dz * up[2]) / d
+      if (x < x0) x0 = x; if (x > x1) x1 = x
+      if (y < y0) y0 = y; if (y > y1) y1 = y
+    }
+  } else {
+    for (const p of projected) {
+      for (let i = 0; i < p.sx.length; i++) {
+        if (p.sx[i] < x0) x0 = p.sx[i]; if (p.sx[i] > x1) x1 = p.sx[i]
+        if (p.sy[i] < y0) y0 = p.sy[i]; if (p.sy[i] > y1) y1 = p.sy[i]
+      }
     }
   }
   const usable = S * (1 - 2 * PADDING)
@@ -287,9 +333,90 @@ export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_
     }
   }
 
+  return edge
+}
+
+/**
+ * Render a preview GLB (Y-up, Draco or not) to a square WebP. Throws when the
+ * file has no drawable triangles.
+ */
+export async function renderPieceThumbnail(glb: Uint8Array, size = PIECE_RENDER_SIZE): Promise<Buffer> {
+  const scene = await loadScene(glb)
+  const { min, max } = scene
+  const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
+  const radius = Math.max(1e-6, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2)
+  const S = size * 2
+  const raw = renderView(scene, { azimuthDeg: AZIMUTH_DEG, center, radius }, S)
   const sharp = (await import('sharp')).default
-  return sharp(edge, { raw: { width: S, height: S, channels: 3 } })
+  return sharp(raw, { raw: { width: S, height: S, channels: 3 } })
     .resize(size, size, { kernel: 'lanczos3' })
     .webp({ quality: 88 })
     .toBuffer()
+}
+
+// ---------------------------------------------------------------------------
+// Spin-around view ("turntable") for the product page
+// ---------------------------------------------------------------------------
+
+/** Pictures in one spin, and how they are laid out in the sheet. The product page reads these from the API. */
+export const TURNTABLE_FRAMES = 36
+export const TURNTABLE_COLS = 6
+/** Edge of one picture in the sheet, in pixels. */
+export const TURNTABLE_FRAME_SIZE = Number(process.env.TURNTABLE_FRAME_SIZE ?? 512)
+
+/**
+ * Render a full turn of the model as ONE WebP sheet: TURNTABLE_FRAMES square
+ * pictures, TURNTABLE_COLS per row, left to right then top to bottom, each turned
+ * 360/TURNTABLE_FRAMES degrees on from the last. The product page shows one
+ * picture at a time and swaps as the buyer drags, so it looks like a 3D view but
+ * no 3D data ever reaches the browser.
+ */
+export async function renderTurntable(
+  glb: Uint8Array,
+  opts: { size?: number; pitchDeg?: number; rollDeg?: number } = {},
+): Promise<Buffer> {
+  const size = opts.size ?? TURNTABLE_FRAME_SIZE
+  // Stand the model the way the artist set it for the planner (default tilt), so a
+  // file saved in print orientation doesn't spin lying on its back.
+  const scene = await loadScene(glb, opts)
+  const { min, max } = scene
+  const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
+  // Bounding cylinder about the vertical axis through the centre: whatever the
+  // model's outline does as it turns, it stays inside this.
+  let rh = 0
+  for (const m of scene.meshes) {
+    for (let i = 0; i < m.pos.length; i += 3) {
+      const d = Math.hypot(m.pos[i] - center[0], m.pos[i + 2] - center[2])
+      if (d > rh) rh = d
+    }
+  }
+  rh = Math.max(rh, 1e-6)
+  const radius = Math.hypot(rh, (max[1] - min[1]) / 2)
+  const frame: number[][] = []
+  for (let i = 0; i < 48; i++) {
+    const t = (i / 48) * Math.PI * 2
+    const x = center[0] + rh * Math.cos(t), z = center[2] + rh * Math.sin(t)
+    frame.push([x, min[1], z], [x, max[1], z])
+  }
+
+  const sharp = (await import('sharp')).default
+  const S = size * 2
+  const rows = Math.ceil(TURNTABLE_FRAMES / TURNTABLE_COLS)
+  const W = size * TURNTABLE_COLS, H = size * rows
+  const sheet = Buffer.alloc(W * H * 3)
+  for (let f = 0; f < TURNTABLE_FRAMES; f++) {
+    const azimuthDeg = AZIMUTH_DEG + (f * 360) / TURNTABLE_FRAMES
+    const raw = renderView(scene, { azimuthDeg, center, radius, frame }, S)
+    const small = await sharp(raw, { raw: { width: S, height: S, channels: 3 } })
+      .resize(size, size, { kernel: 'lanczos3' })
+      .raw()
+      .toBuffer()
+    const ox = (f % TURNTABLE_COLS) * size, oy = Math.floor(f / TURNTABLE_COLS) * size
+    for (let y = 0; y < size; y++) {
+      small.copy(sheet, ((oy + y) * W + ox) * 3, y * size * 3, (y + 1) * size * 3)
+    }
+    // Let the worker's heartbeat and signal handlers run between frames.
+    await new Promise((r) => setImmediate(r))
+  }
+  return sharp(sheet, { raw: { width: W, height: H, channels: 3 } }).webp({ quality: 80 }).toBuffer()
 }

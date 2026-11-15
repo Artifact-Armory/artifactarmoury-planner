@@ -40,6 +40,11 @@ const PART_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_a
 const MODEL_NEEDS_RENDER_SQL = `render_thumbnail_path IS NULL AND render_failed_at IS NULL
   AND primary_thumbnail_path IS NULL AND part_count > 1 AND deleted_at IS NULL
   AND processing_status = 'ready' AND full_glb_status = 'ready' AND full_glb_path IS NOT NULL`
+// Mirrors services/turntableBackfill.ts (MODEL_/PART_NEEDS_TURNTABLE_SQL).
+const isTurntableEnabled = () => process.env.TURNTABLE_ENABLED !== 'false'
+const TURNTABLE_NEEDS_SQL = `x.processing_status = 'ready' AND x.full_glb_status = 'ready' AND x.full_glb_path IS NOT NULL
+  AND m.deleted_at IS NULL
+  AND x.turntable_key IS DISTINCT FROM md5(x.full_glb_path || ':' || m.default_pitch_deg || ':' || m.default_roll_deg)`
 
 /** Same upsert as queueHealth.recordWorkerHeartbeat (which the child uses). */
 async function beat(): Promise<void> {
@@ -164,6 +169,11 @@ async function hasClaimableWork(): Promise<boolean> {
   if (isPieceRenderEnabled()) {
     queries.push(`SELECT 1 FROM models WHERE ${MODEL_NEEDS_RENDER_SQL}`)
     queries.push(`SELECT 1 FROM model_parts WHERE ${PART_NEEDS_RENDER_SQL}`)
+  }
+  if (isTurntableEnabled()) {
+    queries.push(`SELECT 1 FROM models x JOIN models m ON m.id = x.id WHERE ${TURNTABLE_NEEDS_SQL}`)
+    queries.push(`SELECT 1 FROM model_parts x JOIN models m ON m.id = x.model_id
+      WHERE ${TURNTABLE_NEEDS_SQL} AND x.preview_skipped = false`)
   }
   const sql = queries.join(' UNION ALL ')
   const { rows } = await db.query(`SELECT EXISTS (${sql}) AS work`, [STALE_LOCK_MS])

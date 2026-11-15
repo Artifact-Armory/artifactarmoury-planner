@@ -35,6 +35,7 @@ import { SITE_NAME } from '../config/brand'
 
 // three.js only loads when someone opens the 3D view.
 const Model3DViewer = React.lazy(() => import('../components/models/Model3DViewer'))
+import SpinViewer from '../components/models/SpinViewer'
 // The planner needs a tablet or bigger (see pages/Planner.tsx PLANNER_MIN_WIDTH).
 const PLANNER_MIN_WIDTH = 640
 
@@ -131,6 +132,8 @@ const ModelDetails: React.FC = () => {
   const [activeImage, setActiveImage] = React.useState<string | null>(null)
   // Hero shows the spinning 3D model instead of a photo. Reset per product.
   const [show3d, setShow3d] = React.useState(false)
+  // Which piece the spin-around view is showing (index into `spins` below).
+  const [spinIndex, setSpinIndex] = React.useState(0)
   React.useEffect(() => { setActiveImage(null); setShow3d(false) }, [id])
   const [plannerFits, setPlannerFits] = React.useState(
     () => typeof window === 'undefined' || window.innerWidth >= PLANNER_MIN_WIDTH,
@@ -339,6 +342,20 @@ const ModelDetails: React.FC = () => {
     (model.images ?? []).map((image) => image.imageUrl ?? image.imagePath).find((src) => !!src) ?? null
   const heroSrc = activeImage || model.thumbnailUrl || firstImageSrc
 
+  // Spin-around pictures the worker has drawn: the listing's own model first, then
+  // each piece of a set that has one. Shown instead of the 3D preview mesh when
+  // there are any, because they are full detail and carry no logo.
+  const spins: Array<{ id: string; name: string; url: string }> = model.turntable
+    ? [
+        { id: 'primary', name: model.primaryPartName || model.primaryGroupName || model.name, url: model.turntable.url },
+        ...(model.parts ?? [])
+          .filter((p) => !!p.turntableUrl)
+          .map((p, i) => ({ id: p.id, name: p.name || `Part ${i + 2}`, url: p.turntableUrl as string })),
+      ]
+    : []
+  const spin = spins[Math.min(spinIndex, spins.length - 1)]
+  const has3d = spins.length > 0 || !!model.glbUrl
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <Seo
@@ -351,7 +368,9 @@ const ModelDetails: React.FC = () => {
         <div className="min-w-0 space-y-6">
           <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
             <div className="relative h-80 w-full bg-muted sm:h-[28rem]">
-              {show3d && model.glbUrl ? (
+              {show3d && spin && model.turntable ? (
+                <SpinViewer url={spin.url} frames={model.turntable.frames} cols={model.turntable.cols} name={spin.name} />
+              ) : show3d && model.glbUrl ? (
                 <React.Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">Loading 3D view…</div>}>
                   <Model3DViewer url={model.glbUrl} name={model.name} />
                 </React.Suspense>
@@ -389,9 +408,27 @@ const ModelDetails: React.FC = () => {
                 )
               })()}
             </div>
-            {(model.glbUrl || model.showInPlanner !== false) && (
+            {show3d && spins.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto border-b border-border px-4 py-2" aria-label="Pieces in this listing">
+                {spins.map((sp, i) => (
+                  <button
+                    key={sp.id}
+                    type="button"
+                    onClick={() => setSpinIndex(i)}
+                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      spin?.id === sp.id
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-background text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {sp.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(has3d || model.showInPlanner !== false) && (
               <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
-                {model.glbUrl && (
+                {has3d && (
                   <Button
                     variant="outline"
                     size="sm"

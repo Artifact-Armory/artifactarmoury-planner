@@ -133,9 +133,17 @@ export default function Model3DViewer({ url, name }: { url: string; name: string
         </div>
       )}
       {status === 'ready' && (
-        <span className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-black/45 px-2.5 py-0.5 text-xs font-medium text-white">
-          Drag to turn, pinch or scroll to zoom
-        </span>
+        <>
+          <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/45 px-2.5 py-0.5 text-xs font-medium text-white">
+            Drag to turn, pinch or scroll to zoom
+          </span>
+          {/* The preview mesh is reduced and carries our logo; say so, or it reads
+              as "the model is low quality / comes with a logo cut into it". */}
+          <p className="pointer-events-none absolute inset-x-3 bottom-3 rounded-md bg-black/55 px-3 py-1.5 text-xs text-white">
+            Preview only. This view is lower detail and carries our logo to protect the artist. The STL files you
+            download are full detail, with no logo on the model.
+          </p>
+        </>
       )}
     </div>
   )

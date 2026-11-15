@@ -174,11 +174,19 @@ export interface TerrainModel {
   // My Models list only: how many named models in this listing are missing from
   // the planner (their file was too dense to preview). Undefined everywhere else.
   partsNeedingPreviewCount?: number
+  /**
+   * Spin-around view: one image holding `frames` square pictures of the model,
+   * `cols` per row, each turned a step further round. Undefined until the worker
+   * has drawn it.
+   */
+  turntable?: { url: string; frames: number; cols: number }
   parts?: Array<{
     id: string
     name?: string
     thumbnailUrl?: string
     glbUrl?: string
+    /** This piece's own spin-around sheet (same layout as the listing's `turntable`). */
+    turntableUrl?: string
     width?: number
     depth?: number
     height?: number
